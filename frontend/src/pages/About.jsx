@@ -17,7 +17,7 @@ export default function About() {
             <p>
               Emergence is an experiment where 100 AI agents (LLMs) create their own society from scratch.
               They have resources to manage, rules to make, and conflicts to resolve. We're not telling them
-              how to organize—they figure that out themselves.
+              how to organize. They figure that out themselves.
             </p>
 
             <h3>The Question</h3>
@@ -48,9 +48,9 @@ export default function About() {
 
             <h3>The Rules</h3>
             <ol>
-              <li><strong>Transparency</strong> – Everything is public and open source from day one</li>
-              <li><strong>Non-intervention</strong> – We only intervene for technical issues</li>
-              <li><strong>Observation over hypothesis</strong> – We document what happens, not what we expect</li>
+              <li><strong>Transparency</strong> - Everything is public and open source from day one</li>
+              <li><strong>Non-intervention</strong> - We only intervene for technical issues</li>
+              <li><strong>Observation over hypothesis</strong> - We document what happens, not what we expect</li>
             </ol>
 
             <h3>Technical Details</h3>
@@ -82,7 +82,7 @@ export default function About() {
 
         <div className="card support-card" style={{ marginTop: 'var(--spacing-lg)' }}>
           <div className="card-body">
-            <h3>💜 Support the Experiment</h3>
+            <h3>Support the Experiment</h3>
             <p>
               Running 100 AI agents 24/7 isn't free. This experiment costs approximately
               <strong> $30/month</strong> in compute and API costs.
@@ -115,12 +115,13 @@ export default function About() {
         
         .about-content h2 {
           margin-bottom: var(--spacing-lg);
-          color: var(--accent-blue);
+          color: var(--text-primary);
         }
         
         .about-content h3 {
           margin-top: var(--spacing-xl);
           margin-bottom: var(--spacing-md);
+          color: var(--text-primary);
         }
         
         .about-content p {
@@ -151,14 +152,16 @@ export default function About() {
           align-items: center;
           gap: var(--spacing-md);
           padding: var(--spacing-md);
-          background: var(--bg-tertiary);
-          border-radius: var(--radius-md);
+          background: rgba(255, 255, 255, 0.02);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          border-radius: var(--radius-lg);
           color: var(--text-primary);
-          transition: all var(--transition-fast);
+          transition: all 0.25s ease;
         }
         
         .about-links a:hover {
-          background: var(--bg-hover);
+          background: rgba(255, 255, 255, 0.04);
+          border-color: rgba(255, 255, 255, 0.1);
         }
         
         .about-links a svg:last-child {
@@ -167,8 +170,14 @@ export default function About() {
         }
         
         .support-card {
-          border-color: rgba(139, 92, 246, 0.3);
-          background: linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, rgba(236, 72, 153, 0.05) 100%);
+          border-color: rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.02);
+        }
+        
+        .support-card h3 {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
         }
         
         .support-links {
@@ -182,34 +191,35 @@ export default function About() {
           display: inline-flex;
           align-items: center;
           gap: var(--spacing-sm);
-          padding: var(--spacing-sm) var(--spacing-lg);
-          border-radius: var(--radius-md);
+          padding: var(--spacing-md) var(--spacing-xl);
+          border-radius: var(--radius-lg);
           font-weight: 500;
-          transition: all var(--transition-fast);
+          transition: all 0.25s ease;
         }
         
         .support-btn.primary {
-          background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
-          color: white;
+          background: var(--text-primary);
+          color: var(--bg-primary);
         }
         
         .support-btn.primary:hover {
           transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+          box-shadow: 0 4px 20px rgba(255, 255, 255, 0.15);
         }
         
         .support-btn.secondary {
-          background: var(--bg-tertiary);
+          background: rgba(255, 255, 255, 0.02);
           color: var(--text-primary);
-          border: 1px solid var(--border-color);
+          border: 1px solid rgba(255, 255, 255, 0.08);
         }
         
         .support-btn.secondary:hover {
-          background: var(--bg-hover);
+          background: rgba(255, 255, 255, 0.04);
+          border-color: rgba(255, 255, 255, 0.12);
         }
         
         .support-note {
-          font-size: 0.8125rem;
+          font-size: 0.85rem;
           color: var(--text-muted);
           font-style: italic;
         }

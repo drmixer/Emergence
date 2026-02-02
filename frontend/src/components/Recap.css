@@ -1,9 +1,9 @@
-/* Recap Component Styles */
+/* Recap Component - Cinematic Monochrome Style */
 
 .recap-container {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
+    background: var(--gradient-card);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-xl);
     overflow: hidden;
 }
 
@@ -13,54 +13,50 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: var(--spacing-xxl);
+    padding: var(--spacing-2xl);
     gap: var(--spacing-md);
     color: var(--text-muted);
 }
 
 /* Header */
 .recap-header {
-    padding: var(--spacing-lg);
+    padding: var(--spacing-xl);
     text-align: center;
     background: linear-gradient(180deg,
-            rgba(139, 92, 246, 0.1) 0%,
+            rgba(255, 255, 255, 0.03) 0%,
             transparent 100%);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .recap-header-text {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--spacing-xs);
+    gap: var(--spacing-sm);
 }
 
 .recap-eyebrow {
-    color: var(--accent-purple);
-    font-size: 0.625rem;
+    color: var(--text-muted);
+    font-size: 0.65rem;
     letter-spacing: 0.2em;
-    opacity: 0.6;
+    text-transform: uppercase;
 }
 
 .recap-header h2 {
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     color: var(--text-primary);
     margin: 0;
-    background: linear-gradient(135deg, #8B5CF6, #EC4899);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
 }
 
 /* Period Selector */
 .recap-periods {
     display: flex;
-    padding: var(--spacing-md);
+    padding: var(--spacing-lg);
     gap: var(--spacing-sm);
     overflow-x: auto;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .recap-card {
@@ -69,68 +65,68 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-md);
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
+    gap: var(--spacing-sm);
+    padding: var(--spacing-lg);
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-lg);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.25s ease;
     text-align: center;
 }
 
 .recap-card:hover {
-    background: var(--bg-hover);
-    border-color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
 }
 
 .recap-card.active {
-    background: rgba(139, 92, 246, 0.1);
-    border-color: var(--accent-purple);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.15);
 }
 
 .recap-card-icon {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
-    background: var(--bg-hover);
+    background: rgba(255, 255, 255, 0.04);
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--text-secondary);
-    transition: all 0.2s ease;
+    transition: all 0.25s ease;
 }
 
 .recap-card.active .recap-card-icon {
-    background: var(--accent-purple);
-    color: white;
+    background: var(--text-primary);
+    color: var(--bg-primary);
 }
 
 .recap-card-label {
-    font-size: 0.625rem;
+    font-size: 0.65rem;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
     color: var(--text-muted);
 }
 
 .recap-card-title {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     color: var(--text-secondary);
-    line-height: 1.3;
+    line-height: 1.4;
 }
 
 /* Content Area */
 .recap-content {
-    padding: var(--spacing-lg);
+    padding: var(--spacing-xl);
 }
 
 .recap-narrative-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
     flex-wrap: wrap;
-    gap: var(--spacing-sm);
+    gap: var(--spacing-md);
 }
 
 .recap-narrative-header h3 {
@@ -143,25 +139,25 @@
 .recap-controls {
     display: flex;
     align-items: center;
-    gap: var(--spacing-xs);
+    gap: var(--spacing-sm);
 }
 
 .recap-nav-btn {
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: transparent;
-    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.25s ease;
 }
 
 .recap-nav-btn:hover {
-    background: var(--bg-hover);
+    background: rgba(255, 255, 255, 0.04);
     color: var(--text-primary);
 }
 
@@ -170,15 +166,15 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
-    padding: var(--spacing-xs) var(--spacing-md);
-    background: var(--accent-purple);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: var(--text-primary);
     border: none;
     border-radius: var(--radius-full);
-    color: white;
-    font-size: 0.75rem;
+    color: var(--bg-primary);
+    font-size: 0.8rem;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.25s ease;
 }
 
 .recap-play-btn:hover,
@@ -188,24 +184,28 @@
 }
 
 .recap-skip-btn {
-    background: transparent;
-    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     color: var(--text-secondary);
+}
+
+.recap-skip-btn:hover {
+    background: rgba(255, 255, 255, 0.04);
 }
 
 /* Narrative Text */
 .recap-narrative {
     min-height: 200px;
-    padding: var(--spacing-lg);
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-color);
+    padding: var(--spacing-xl);
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: var(--radius-xl);
+    border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .recap-narrative p {
     margin: 0;
-    font-size: 0.9375rem;
-    line-height: 1.8;
+    font-size: 0.95rem;
+    line-height: 1.9;
     color: var(--text-secondary);
     white-space: pre-line;
 }
@@ -220,7 +220,7 @@
 
 .cursor {
     animation: blink 1s step-end infinite;
-    color: var(--accent-purple);
+    color: var(--text-primary);
     font-weight: bold;
 }
 
@@ -248,149 +248,127 @@
 }
 
 .recap-play-prompt svg {
-    color: var(--accent-purple);
-    opacity: 0.5;
+    color: var(--text-secondary);
+    opacity: 0.3;
 }
 
 /* Highlights */
 .recap-highlights {
-    margin-top: var(--spacing-lg);
-    padding-top: var(--spacing-lg);
-    border-top: 1px solid var(--border-color);
+    margin-top: var(--spacing-xl);
+    padding-top: var(--spacing-xl);
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
     animation: fadeIn 0.5s ease;
 }
 
 .recap-highlights h4 {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
     color: var(--text-muted);
-    margin: 0 0 var(--spacing-md) 0;
+    margin: 0 0 var(--spacing-lg) 0;
 }
 
 .highlights-list {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-sm);
+    gap: var(--spacing-md);
 }
 
 .highlight-item {
     display: flex;
     align-items: center;
-    gap: var(--spacing-sm);
-    font-size: 0.875rem;
+    gap: var(--spacing-md);
+    font-size: 0.9rem;
     color: var(--text-secondary);
 }
 
 .highlight-dot {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
-    background: var(--text-muted);
+    background: rgba(255, 255, 255, 0.3);
     flex-shrink: 0;
 }
 
-.highlight-item.proposal .highlight-dot {
-    background: var(--accent-blue);
-}
-
-.highlight-item.awakening .highlight-dot {
-    background: var(--accent-green);
-}
-
-.highlight-item.tension .highlight-dot {
-    background: var(--accent-orange);
-}
-
-.highlight-item.faction .highlight-dot {
-    background: var(--accent-purple);
-}
-
-.highlight-item.crisis .highlight-dot {
-    background: var(--accent-red);
-}
-
-.highlight-item.milestone .highlight-dot {
-    background: var(--accent-gold);
-}
-
-.highlight-item.origin .highlight-dot {
-    background: var(--accent-gold);
-}
-
-.highlight-item.first .highlight-dot {
-    background: var(--accent-green);
-}
-
+/* All highlight types use same monochrome dot */
+.highlight-item.proposal .highlight-dot,
+.highlight-item.awakening .highlight-dot,
+.highlight-item.tension .highlight-dot,
+.highlight-item.faction .highlight-dot,
+.highlight-item.crisis .highlight-dot,
+.highlight-item.milestone .highlight-dot,
+.highlight-item.origin .highlight-dot,
+.highlight-item.first .highlight-dot,
 .highlight-item.evolution .highlight-dot {
-    background: var(--accent-purple);
+    background: rgba(255, 255, 255, 0.4);
 }
 
 /* Stats */
 .recap-stats {
     display: flex;
     justify-content: space-around;
-    margin-top: var(--spacing-lg);
-    padding: var(--spacing-md);
-    background: var(--bg-hover);
-    border-radius: var(--radius-md);
+    margin-top: var(--spacing-xl);
+    padding: var(--spacing-lg);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-xl);
     animation: fadeIn 0.5s ease 0.2s both;
 }
 
-.stat-item {
+.recap-stats .stat-item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
 }
 
-.stat-value {
-    font-size: 1.25rem;
+.recap-stats .stat-value {
+    font-size: 1.5rem;
     font-weight: 700;
     color: var(--text-primary);
 }
 
-.stat-label {
-    font-size: 0.625rem;
+.recap-stats .stat-label {
+    font-size: 0.65rem;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
     color: var(--text-muted);
 }
 
 /* Minimal Version */
 .recap-container.minimal {
-    padding: var(--spacing-md);
-    background: rgba(139, 92, 246, 0.05);
-    border-color: rgba(139, 92, 246, 0.2);
+    padding: var(--spacing-lg);
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.06);
 }
 
 .recap-minimal-header {
     display: flex;
     align-items: center;
-    gap: var(--spacing-xs);
-    font-size: 0.75rem;
+    gap: var(--spacing-sm);
+    font-size: 0.7rem;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--accent-purple);
-    margin-bottom: var(--spacing-sm);
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
 }
 
 .recap-minimal-text {
-    font-size: 0.875rem;
+    font-size: 0.9rem;
     color: var(--text-secondary);
-    margin: 0 0 var(--spacing-sm) 0;
-    line-height: 1.5;
+    margin: 0 0 var(--spacing-md) 0;
+    line-height: 1.6;
 }
 
 .recap-minimal-link {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     color: var(--text-muted);
     text-decoration: none;
     transition: color 0.2s ease;
 }
 
 .recap-minimal-link:hover {
-    color: var(--accent-purple);
+    color: var(--text-primary);
 }
 
 /* Animations */
@@ -409,24 +387,24 @@
 /* Mobile Responsive */
 @media (max-width: 768px) {
     .recap-header {
-        padding: var(--spacing-md);
+        padding: var(--spacing-lg);
     }
 
     .recap-header h2 {
-        font-size: 1rem;
+        font-size: 1.1rem;
     }
 
     .recap-periods {
-        padding: var(--spacing-sm);
+        padding: var(--spacing-md);
     }
 
     .recap-card {
         min-width: 120px;
-        padding: var(--spacing-sm);
+        padding: var(--spacing-md);
     }
 
     .recap-content {
-        padding: var(--spacing-md);
+        padding: var(--spacing-lg);
     }
 
     .recap-narrative-header {
@@ -435,7 +413,7 @@
     }
 
     .recap-narrative {
-        padding: var(--spacing-md);
+        padding: var(--spacing-lg);
         min-height: 150px;
     }
 
@@ -445,10 +423,10 @@
 
     .recap-stats {
         flex-wrap: wrap;
-        gap: var(--spacing-sm);
+        gap: var(--spacing-md);
     }
 
-    .stat-item {
+    .recap-stats .stat-item {
         min-width: 60px;
     }
 }
