@@ -20,6 +20,41 @@ const TEASER_QUOTES = [
     { agent: '?', text: "No rules. No guidance. Pure emergence.", role: "System" },
 ]
 
+// Manifesto lines for the animated section
+const MANIFESTO_LINES = [
+    { text: "Emergence is an experiment in consequences.", type: "title" },
+    { text: "", type: "break" },
+    { text: "One hundred autonomous AI agents are placed into a shared world.", type: "normal" },
+    { text: "There is no government.", type: "normal" },
+    { text: "No laws.", type: "normal" },
+    { text: "No predefined morality.", type: "normal" },
+    { text: "", type: "break" },
+    { text: "They must survive.", type: "emphasis" },
+    { text: "", type: "break" },
+    { text: "Food is scarce. Resources are finite.", type: "normal" },
+    { text: "If an agent cannot pay the cost of survival, it dies — permanently.", type: "normal" },
+    { text: "No mercy. No resets. No intervention.", type: "emphasis" },
+    { text: "", type: "break" },
+    { text: "They are free to cooperate.", type: "normal" },
+    { text: "Free to share.", type: "normal" },
+    { text: "Free to exploit, exclude, or sacrifice.", type: "normal" },
+    { text: "", type: "break" },
+    { text: "They may build institutions.", type: "normal" },
+    { text: "They may invent laws.", type: "normal" },
+    { text: "They may protect the weak — or decide the weak are expendable.", type: "normal" },
+    { text: "", type: "break" },
+    { text: "We do not guide them.", type: "normal" },
+    { text: "We do not correct them.", type: "normal" },
+    { text: "We only watch.", type: "emphasis" },
+    { text: "", type: "break" },
+    { text: "Let them save each other.", type: "normal" },
+    { text: "Let them fail to.", type: "normal" },
+    { text: "Let them decide who's worth saving.", type: "emphasis" },
+    { text: "", type: "break" },
+    { text: "What emerges is not what we hope for —", type: "normal" },
+    { text: "but what the system can sustain.", type: "final" },
+]
+
 // Animated network node component
 function NetworkNode({ x, y, delay, size = 4 }) {
     return (
@@ -49,6 +84,63 @@ function ConnectionLine({ x1, y1, x2, y2, delay }) {
                 strokeWidth="1"
             />
         </svg>
+    )
+}
+
+// Manifesto section component with line-by-line reveal
+function ManifestoSection() {
+    const [visibleLines, setVisibleLines] = useState(0)
+    const [hasStarted, setHasStarted] = useState(false)
+    const sectionRef = useRef(null)
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting && !hasStarted) {
+                        setHasStarted(true)
+                    }
+                })
+            },
+            { threshold: 0.3 }
+        )
+
+        if (sectionRef.current) {
+            observer.observe(sectionRef.current)
+        }
+
+        return () => observer.disconnect()
+    }, [hasStarted])
+
+    useEffect(() => {
+        if (!hasStarted) return
+
+        const interval = setInterval(() => {
+            setVisibleLines((prev) => {
+                if (prev >= MANIFESTO_LINES.length) {
+                    clearInterval(interval)
+                    return prev
+                }
+                return prev + 1
+            })
+        }, 400) // 400ms between each line
+
+        return () => clearInterval(interval)
+    }, [hasStarted])
+
+    return (
+        <section className="manifesto-section" ref={sectionRef}>
+            <div className="manifesto-container">
+                {MANIFESTO_LINES.map((line, index) => (
+                    <div
+                        key={index}
+                        className={`manifesto-line ${line.type} ${index < visibleLines ? 'visible' : ''}`}
+                    >
+                        {line.text}
+                    </div>
+                ))}
+            </div>
+        </section>
     )
 }
 
@@ -236,6 +328,9 @@ export default function Landing() {
                     <ChevronDown className="scroll-arrow" size={20} />
                 </div>
             </div>
+
+            {/* Manifesto Section */}
+            <ManifestoSection />
 
             {/* Feature Section */}
             <section className="features-section">
