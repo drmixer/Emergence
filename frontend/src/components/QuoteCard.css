@@ -1,0 +1,436 @@
+/* Quote Card Generator Styles */
+
+.quote-card-generator {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.generator-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+}
+
+.generator-header h2 {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin: 0;
+    font-size: 1.125rem;
+}
+
+.generator-subtitle {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin: var(--spacing-xs) 0 0 0;
+}
+
+.random-quote-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.random-quote-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.random-quote-btn:hover svg {
+    transform: rotate(180deg);
+}
+
+.random-quote-btn svg {
+    transition: transform 0.3s ease;
+}
+
+/* Generator Content */
+.generator-content {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-lg);
+}
+
+@media (max-width: 900px) {
+    .generator-content {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Preview */
+.generator-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg);
+    background: repeating-conic-gradient(rgba(255, 255, 255, 0.03) 0% 25%,
+            transparent 0% 50%) 50% / 20px 20px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+/* Quote Card Preview */
+.quote-card-preview {
+    width: 400px;
+    max-width: 100%;
+    aspect-ratio: 1.2;
+    border-radius: 16px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+}
+
+.quote-card-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    position: relative;
+    z-index: 1;
+}
+
+.quote-decoration {
+    position: absolute;
+    top: 0;
+    left: 0;
+    font-size: 120px;
+    font-family: Georgia, serif;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.quote-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 0;
+}
+
+.quote-content p {
+    font-size: 1.25rem;
+    line-height: 1.6;
+    text-align: center;
+    margin: 0;
+    font-style: italic;
+}
+
+.quote-attribution {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.quote-agent-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.875rem;
+}
+
+.quote-agent-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.quote-agent-name {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.quote-agent-personality {
+    font-size: 0.75rem;
+    text-transform: capitalize;
+}
+
+.quote-branding {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 16px;
+    font-size: 0.75rem;
+    opacity: 0.6;
+}
+
+.emergence-logo {
+    font-size: 1rem;
+}
+
+/* Controls */
+.generator-controls {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+}
+
+.control-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.control-group label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.control-group label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-purple);
+}
+
+/* Theme Options */
+.theme-options {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.theme-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    border: 2px solid transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    transition: all 0.2s ease;
+}
+
+.theme-btn:hover {
+    transform: scale(1.1);
+}
+
+.theme-btn.active {
+    transform: scale(1.1);
+}
+
+/* Quote Options */
+.quote-options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.quote-option {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.quote-option:hover {
+    background: var(--bg-hover);
+}
+
+.quote-option.active {
+    background: rgba(139, 92, 246, 0.1);
+    border-color: var(--accent-purple);
+}
+
+.quote-option-agent {
+    font-weight: 600;
+    font-size: 0.75rem;
+    color: var(--accent-purple);
+    flex-shrink: 0;
+}
+
+.quote-option-text {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Actions */
+.control-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    margin-top: auto;
+}
+
+.action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-secondary);
+}
+
+.action-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.action-btn.primary {
+    background: var(--accent-purple);
+    border-color: var(--accent-purple);
+    color: white;
+}
+
+.action-btn.primary:hover {
+    opacity: 0.9;
+}
+
+.action-btn.twitter {
+    background: #1da1f2;
+    border-color: #1da1f2;
+    color: white;
+}
+
+.action-btn.twitter:hover {
+    opacity: 0.9;
+}
+
+.spinning {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Quote Display (Embedded) */
+.quote-display {
+    display: flex;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: rgba(139, 92, 246, 0.05);
+    border-left: 3px solid var(--accent-purple);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.quote-display.compact {
+    padding: var(--spacing-sm);
+}
+
+.quote-display .quote-icon {
+    color: var(--accent-purple);
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+
+.quote-display blockquote {
+    margin: 0;
+}
+
+.quote-display blockquote p {
+    font-style: italic;
+    color: var(--text-secondary);
+    margin: 0 0 var(--spacing-xs) 0;
+    line-height: 1.5;
+}
+
+.quote-display.compact blockquote p {
+    font-size: 0.875rem;
+}
+
+.quote-display blockquote footer {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.quote-display blockquote footer a {
+    color: var(--accent-purple);
+    text-decoration: none;
+}
+
+.quote-display blockquote footer a:hover {
+    text-decoration: underline;
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+    .generator-header {
+        flex-direction: column;
+        gap: var(--spacing-md);
+    }
+
+    .random-quote-btn {
+        align-self: flex-start;
+    }
+
+    .quote-card-preview {
+        width: 100%;
+        aspect-ratio: auto;
+        min-height: 300px;
+        padding: 24px;
+    }
+
+    .quote-content p {
+        font-size: 1rem;
+    }
+
+    .theme-options {
+        flex-wrap: wrap;
+    }
+
+    .control-actions {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .action-btn {
+        flex: 1;
+        min-width: 100px;
+    }
+}

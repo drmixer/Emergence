@@ -1,0 +1,465 @@
+/* Subscription Styles - Cinematic Monochrome */
+
+/* Subscribe Button */
+.subscribe-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    border-radius: var(--radius-full);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-secondary);
+}
+
+.subscribe-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.subscribe-btn.subscribed {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+}
+
+.subscribe-btn.subscribed:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+}
+
+.subscribe-btn.animating {
+    transform: scale(1.1);
+}
+
+/* Button Sizes */
+.subscribe-btn-sm {
+    padding: 4px 12px;
+    font-size: 0.75rem;
+}
+
+.subscribe-btn-md {
+    padding: 6px 16px;
+    font-size: 0.8125rem;
+}
+
+.subscribe-btn-lg {
+    padding: 8px 20px;
+    font-size: 0.875rem;
+}
+
+/* Notification Bell */
+.notification-bell-wrapper {
+    position: relative;
+}
+
+.notification-bell {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    position: relative;
+}
+
+.notification-bell:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.notification-bell.has-unread {
+    color: var(--text-primary);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.08);
+    animation: bellRing 0.5s ease;
+}
+
+.notification-bell.has-unread svg {
+    animation: bellSwing 2s ease infinite;
+}
+
+@keyframes bellRing {
+
+    0%,
+    100% {
+        transform: rotate(0);
+    }
+
+    25% {
+        transform: rotate(10deg);
+    }
+
+    50% {
+        transform: rotate(-10deg);
+    }
+
+    75% {
+        transform: rotate(5deg);
+    }
+}
+
+@keyframes bellSwing {
+
+    0%,
+    100% {
+        transform: rotate(0);
+    }
+
+    10% {
+        transform: rotate(5deg);
+    }
+
+    20% {
+        transform: rotate(-5deg);
+    }
+
+    30% {
+        transform: rotate(0);
+    }
+}
+
+.notification-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: var(--text-primary);
+    color: var(--bg-primary);
+    font-size: 0.625rem;
+    font-weight: 700;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Notification Dropdown */
+.notification-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+}
+
+.notification-dropdown {
+    position: absolute;
+    top: calc(100% + var(--spacing-sm));
+    right: 0;
+    width: 340px;
+    max-height: 400px;
+    background: rgba(15, 15, 22, 0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-xl);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+    z-index: 100;
+    overflow: hidden;
+    animation: dropdownFade 0.2s ease;
+}
+
+@keyframes dropdownFade {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.notification-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.notification-header h4 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.mark-all-read {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.2s ease;
+}
+
+.mark-all-read:hover {
+    color: var(--text-primary);
+}
+
+.notification-list {
+    max-height: 340px;
+    overflow-y: auto;
+}
+
+.notification-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-2xl);
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.notification-empty svg {
+    opacity: 0.2;
+    margin-bottom: var(--spacing-md);
+}
+
+.notification-empty p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.notification-empty span {
+    font-size: 0.75rem;
+}
+
+.notification-item {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    transition: background 0.2s ease;
+    position: relative;
+}
+
+.notification-item:last-child {
+    border-bottom: none;
+}
+
+.notification-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.notification-item.unread {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.notification-icon {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.notification-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.notification-title {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.notification-text {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.unread-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-primary);
+    flex-shrink: 0;
+    margin-top: 8px;
+}
+
+/* Watchlist */
+.watchlist {
+    background: var(--gradient-card);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+}
+
+.watchlist-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.watchlist-header h4 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.watchlist-count {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.watchlist-items {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.watchlist-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    transition: background 0.2s ease;
+}
+
+.watchlist-item:last-child {
+    border-bottom: none;
+}
+
+.watchlist-item:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.watchlist-agent-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.watchlist-agent-number {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.watchlist-agent-name {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.watchlist-personality {
+    font-size: 0.65rem;
+    padding: 3px 8px;
+    border-radius: var(--radius-full);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted);
+}
+
+.watchlist-personality.Cooperative,
+.watchlist-personality.Competitive,
+.watchlist-personality.Balanced,
+.watchlist-personality.Efficiency,
+.watchlist-personality.Resource-focused,
+.watchlist-personality.Idealistic {
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.watchlist-remove {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.2s ease;
+}
+
+.watchlist-item:hover .watchlist-remove {
+    opacity: 1;
+}
+
+.watchlist-remove:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+}
+
+/* Empty Watchlist */
+.watchlist-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-2xl);
+    background: var(--gradient-card);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-xl);
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.watchlist-empty svg {
+    opacity: 0.2;
+    margin-bottom: var(--spacing-md);
+}
+
+.watchlist-empty h4 {
+    margin: 0 0 var(--spacing-xs) 0;
+    color: var(--text-secondary);
+}
+
+.watchlist-empty p {
+    margin: 0;
+    font-size: 0.85rem;
+    max-width: 220px;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .notification-dropdown {
+        position: fixed;
+        top: 60px;
+        right: var(--spacing-md);
+        left: var(--spacing-md);
+        width: auto;
+    }
+
+    .subscribe-btn-md {
+        padding: 4px 10px;
+        font-size: 0.75rem;
+    }
+
+    .subscribe-btn-lg {
+        padding: 6px 14px;
+        font-size: 0.8125rem;
+    }
+}

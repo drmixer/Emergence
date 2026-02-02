@@ -1,0 +1,62 @@
+# Docker Compose for local development
+# Provides PostgreSQL and Redis
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: emergence-postgres
+    environment:
+      POSTGRES_USER: emergence
+      POSTGRES_PASSWORD: emergence_dev
+      POSTGRES_DB: emergence
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U emergence"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: emergence-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Optional: pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: emergence-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@emergence.quest
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+  redis_data:
+
+# Usage:
+# Start core services:     docker-compose up -d
+# Start with pgAdmin:      docker-compose --profile tools up -d
+# View logs:               docker-compose logs -f
+# Stop all:                docker-compose down
+# Reset data:              docker-compose down -v

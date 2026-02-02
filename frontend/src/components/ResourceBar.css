@@ -1,0 +1,265 @@
+/* Resource Bar - Cinematic Monochrome Style */
+
+.resource-bar-container {
+    padding: var(--spacing-lg);
+    background: var(--gradient-card);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-lg);
+    transition: all var(--transition-normal);
+}
+
+.resource-bar-container.warning {
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.resource-bar-container.danger {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.resource-bar-container.critical {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.resource-bar-container.pulse-warning {
+    animation: pulseWarning 2s ease-in-out infinite;
+}
+
+@keyframes pulseWarning {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+    }
+
+    50% {
+        box-shadow: 0 0 20px 2px rgba(255, 255, 255, 0.08);
+    }
+}
+
+.resource-bar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-md);
+}
+
+.resource-bar-label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.resource-bar-value {
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.resource-bar-value .current {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.resource-bar-value .separator {
+    color: var(--text-muted);
+    margin: 0 3px;
+}
+
+.resource-bar-value .max {
+    color: var(--text-muted);
+}
+
+.resource-bar-track {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    position: relative;
+}
+
+.resource-bar-fill {
+    height: 100%;
+    border-radius: var(--radius-full);
+    transition: width var(--transition-slow), background var(--transition-normal);
+    position: relative;
+    overflow: hidden;
+}
+
+/* Resource type colors - Monochrome with subtle glow */
+.resource-bar-fill.food.healthy {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.8) 100%);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+}
+
+.resource-bar-fill.food.warning {
+    background: linear-gradient(90deg, rgba(200, 200, 200, 0.5) 0%, rgba(200, 200, 200, 0.7) 100%);
+    box-shadow: 0 0 8px rgba(200, 200, 200, 0.15);
+}
+
+.resource-bar-fill.food.danger {
+    background: linear-gradient(90deg, rgba(160, 160, 160, 0.4) 0%, rgba(160, 160, 160, 0.6) 100%);
+    box-shadow: 0 0 6px rgba(160, 160, 160, 0.1);
+}
+
+.resource-bar-fill.food.critical {
+    background: linear-gradient(90deg, rgba(120, 120, 120, 0.3) 0%, rgba(120, 120, 120, 0.5) 100%);
+}
+
+.resource-bar-fill.energy.healthy {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.8) 100%);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+}
+
+.resource-bar-fill.energy.warning {
+    background: linear-gradient(90deg, rgba(200, 200, 200, 0.5) 0%, rgba(200, 200, 200, 0.7) 100%);
+    box-shadow: 0 0 8px rgba(200, 200, 200, 0.15);
+}
+
+.resource-bar-fill.energy.danger {
+    background: linear-gradient(90deg, rgba(160, 160, 160, 0.4) 0%, rgba(160, 160, 160, 0.6) 100%);
+}
+
+.resource-bar-fill.energy.critical {
+    background: linear-gradient(90deg, rgba(120, 120, 120, 0.3) 0%, rgba(120, 120, 120, 0.5) 100%);
+}
+
+.resource-bar-fill.materials.healthy {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.8) 100%);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+}
+
+.resource-bar-fill.materials.warning {
+    background: linear-gradient(90deg, rgba(200, 200, 200, 0.5) 0%, rgba(200, 200, 200, 0.7) 100%);
+}
+
+.resource-bar-fill.materials.danger {
+    background: linear-gradient(90deg, rgba(160, 160, 160, 0.4) 0%, rgba(160, 160, 160, 0.6) 100%);
+}
+
+.resource-bar-fill.materials.critical {
+    background: linear-gradient(90deg, rgba(120, 120, 120, 0.3) 0%, rgba(120, 120, 120, 0.5) 100%);
+}
+
+/* Pulsing bar for critical state */
+.bar-pulse {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg,
+            transparent 0%,
+            rgba(255, 255, 255, 0.4) 50%,
+            transparent 100%);
+    animation: barPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes barPulse {
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+.resource-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    animation: fadeIn 0.3s ease;
+}
+
+.resource-warning svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+/* Critical Agents Banner */
+.critical-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-lg);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-lg);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    animation: slideIn 0.3s ease;
+}
+
+.critical-banner strong {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.critical-banner .trend-icon {
+    margin-left: auto;
+    animation: bounce 1s ease-in-out infinite;
+    opacity: 0.6;
+}
+
+@keyframes bounce {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(3px);
+    }
+}
+
+/* Consumption Countdown */
+.consumption-countdown {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-lg);
+    font-size: 0.9rem;
+}
+
+.consumption-countdown.urgent {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.consumption-countdown.imminent {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.04);
+    animation: pulseWarning 1s ease-in-out infinite;
+}
+
+.countdown-label {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+}
+
+.countdown-time {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+    letter-spacing: 0.05em;
+}
+
+.consumption-countdown.urgent .countdown-time {
+    color: var(--text-secondary);
+}
