@@ -88,6 +88,10 @@ logs/
 *.key
 secrets/
 
+# Playwright artifacts
+output/
+test-results/
+
 # Jupyter
 .ipynb_checkpoints/
 
