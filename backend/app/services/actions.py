@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.config import settings
-from app.core.time import now_utc
+from app.core.time import ensure_utc, now_utc
 from app.models.models import (
     Agent, AgentInventory, Message, Proposal, Vote, 
     Law, Event, Transaction, AgentAction
@@ -58,7 +58,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
     
     # Check if agent is sanctioned (Phase 3: Teeth)
     # Sanctioned agents have severely reduced action rate (1 per hour instead of normal limit)
-    sanctioned = agent.sanctioned_until and agent.sanctioned_until > now
+    sanctioned_until = ensure_utc(agent.sanctioned_until)
+    sanctioned = sanctioned_until and sanctioned_until > now
     sanction_rate_limit = 1 if sanctioned else settings.MAX_ACTIONS_PER_HOUR
     
     # Check rate limiting
@@ -143,7 +144,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Proposal not found"}
         if proposal.status != "active":
             return {"valid": False, "reason": "Proposal is not active"}
-        if proposal.voting_closes_at < now:
+        voting_closes_at = ensure_utc(proposal.voting_closes_at)
+        if voting_closes_at and voting_closes_at < now:
             return {"valid": False, "reason": "Voting period has ended"}
         
         # Check if already voted

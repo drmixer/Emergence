@@ -5,7 +5,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from app.core.time import now_utc
+from app.core.time import ensure_utc, now_utc
 from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote
 
 
@@ -103,8 +103,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append("")
         context_parts.append("🚫 YOU ARE EXILED - You cannot vote or create proposals")
     
-    if agent.sanctioned_until and agent.sanctioned_until > now:
-        hours_left = (agent.sanctioned_until - now).total_seconds() / 3600
+    sanctioned_until = ensure_utc(agent.sanctioned_until)
+    if sanctioned_until and sanctioned_until > now:
+        hours_left = (sanctioned_until - now).total_seconds() / 3600
         context_parts.append("")
         context_parts.append(f"🔒 YOU ARE SANCTIONED - Limited to 1 action per hour ({hours_left:.1f} hours remaining)")
     
@@ -140,7 +141,8 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         for prop in active_proposals[:10]:  # Limit to 10
             author_name = f"Agent #{prop.author_agent_id}"
             votes_summary = f"Yes: {prop.votes_for}, No: {prop.votes_against}, Abstain: {prop.votes_abstain}"
-            time_left = prop.voting_closes_at - now
+            closes_at = ensure_utc(prop.voting_closes_at) or now
+            time_left = closes_at - now
             hours_left = max(0, int(time_left.total_seconds() / 3600))
             
             # Check if this agent has voted
