@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import AsyncGenerator
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -137,6 +138,18 @@ async def broadcast_agent_status(agent_id: int, status: str):
 async def event_polling_task():
     """Poll database for new events and broadcast them."""
     last_id = 0
+
+    # On (re)start, avoid replaying the entire event history over SSE.
+    db: Session | None = None
+    try:
+        db = SessionLocal()
+        last_id = int(db.query(func.max(Event.id)).scalar() or 0)
+    except Exception as e:
+        logger.error(f"Error initializing event polling cursor: {e}")
+        last_id = 0
+    finally:
+        if db is not None:
+            db.close()
     
     while True:
         db: Session | None = None
