@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from openai import RateLimitError, APIError
 
 from app.core.config import settings
+from app.core.time import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,32 @@ async def get_agent_action(
 ) -> Optional[dict]:
     """Get an action decision from an agent."""
     
+    def _fallback_action(reason: str) -> dict:
+        # Keep the simulation moving even if the LLM provider is unavailable.
+        # Bias toward "work" which is always safe and doesn't spam the forum.
+        seed = agent_id + int(now_utc().timestamp() // 3600)
+        rng = random.Random(seed)
+        roll = rng.random()
+
+        if roll < 0.75:
+            return {
+                "action": "work",
+                "work_type": rng.choice(["farm", "generate", "gather"]),
+                "hours": rng.randint(1, 4),
+                "reasoning": f"Fallback (LLM unavailable): {reason}",
+            }
+        if roll < 0.9:
+            return {"action": "idle", "reasoning": f"Fallback (LLM unavailable): {reason}"}
+
+        return {
+            "action": "forum_post",
+            "content": (
+                "I'm having trouble communicating clearly right now, so I'll focus on work and "
+                "staying alive. If anyone has a concrete plan, summarize it and tag me."
+            ),
+            "reasoning": f"Fallback (LLM unavailable): {reason}",
+        }
+
     try:
         response = await llm_client.get_completion(
             model_type=model_type,
@@ -137,14 +164,14 @@ async def get_agent_action(
         )
         
         if not response:
-            return {"action": "idle", "reasoning": "No response from LLM"}
+            return _fallback_action("No response from LLM")
         
         # Try to parse JSON from response
         return parse_action_response(response)
         
     except Exception as e:
         logger.error(f"Error getting action for agent {agent_id}: {e}")
-        return {"action": "idle", "reasoning": f"Error: {str(e)}"}
+        return _fallback_action(str(e))
 
 
 def parse_action_response(response: str) -> dict:
