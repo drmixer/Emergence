@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.time import now_utc
 from app.models.models import Agent, AgentInventory, Message, Proposal, Event, Law, Vote
 from app.services.llm_client import get_agent_action
 from app.services.actions import execute_action, validate_action
@@ -135,7 +136,7 @@ class AgentProcessor:
             await self._log_action(db, agent_id, action_data, result)
             
             # Update last active time
-            agent.last_active_at = datetime.utcnow()
+            agent.last_active_at = now_utc()
             db.commit()
             
         finally:

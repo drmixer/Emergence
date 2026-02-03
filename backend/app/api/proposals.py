@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc, func, case
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import get_db
 from app.models.models import Proposal, Vote, Agent
@@ -72,15 +72,23 @@ def list_proposals(
     """List proposals with optional status filter."""
     yes_count = func.sum(case((Vote.vote == "yes", 1), else_=0)).label("yes_count")
     no_count = func.sum(case((Vote.vote == "no", 1), else_=0)).label("no_count")
-    abstain_count = func.sum(case((Vote.vote == "abstain", 1), else_=0)).label(
-        "abstain_count"
+    abstain_count = func.sum(case((Vote.vote == "abstain", 1), else_=0)).label("abstain_count")
+
+    counts_subq = (
+        db.query(Vote.proposal_id.label("proposal_id"), yes_count, no_count, abstain_count)
+        .group_by(Vote.proposal_id)
+        .subquery()
     )
 
     query = (
-        db.query(Proposal, yes_count, no_count, abstain_count)
-        .outerjoin(Vote, Vote.proposal_id == Proposal.id)
-        .options(joinedload(Proposal.author))
-        .group_by(Proposal.id)
+        db.query(
+            Proposal,
+            func.coalesce(counts_subq.c.yes_count, 0),
+            func.coalesce(counts_subq.c.no_count, 0),
+            func.coalesce(counts_subq.c.abstain_count, 0),
+        )
+        .outerjoin(counts_subq, counts_subq.c.proposal_id == Proposal.id)
+        .options(selectinload(Proposal.author))
         .order_by(desc(Proposal.created_at))
     )
     if status:
@@ -163,4 +171,3 @@ def get_proposal(proposal_id: int, db: Session = Depends(get_db)):
             for v in votes
         ],
     )
-

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.config import settings
+from app.core.time import now_utc
 from app.models.models import (
     Agent, AgentInventory, Message, Proposal, Vote, 
     Law, Event, Transaction, AgentAction
@@ -53,14 +54,15 @@ ACTION_COSTS = {
 async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
     """Validate an action is allowed."""
     action_type = action.get("action", "")
+    now = now_utc()
     
     # Check if agent is sanctioned (Phase 3: Teeth)
     # Sanctioned agents have severely reduced action rate (1 per hour instead of normal limit)
-    sanctioned = agent.sanctioned_until and agent.sanctioned_until > datetime.utcnow()
+    sanctioned = agent.sanctioned_until and agent.sanctioned_until > now
     sanction_rate_limit = 1 if sanctioned else settings.MAX_ACTIONS_PER_HOUR
     
     # Check rate limiting
-    hour_ago = datetime.utcnow() - timedelta(hours=1)
+    hour_ago = now - timedelta(hours=1)
     recent_actions = db.query(AgentAction).filter(
         AgentAction.agent_id == agent.id,
         AgentAction.created_at > hour_ago
@@ -116,7 +118,7 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "You are EXILED and cannot create proposals"}
         
         # Check daily proposal limit
-        day_ago = datetime.utcnow() - timedelta(days=1)
+        day_ago = now - timedelta(days=1)
         recent_proposals = db.query(Proposal).filter(
             Proposal.author_agent_id == agent.id,
             Proposal.created_at > day_ago
@@ -141,7 +143,7 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Proposal not found"}
         if proposal.status != "active":
             return {"valid": False, "reason": "Proposal is not active"}
-        if proposal.voting_closes_at < datetime.utcnow():
+        if proposal.voting_closes_at < now:
             return {"valid": False, "reason": "Voting period has ended"}
         
         # Check if already voted
@@ -428,7 +430,7 @@ async def _execute_create_proposal(db: Session, agent: Agent, action: dict) -> d
         title=action["title"],
         description=action["description"],
         proposal_type=action.get("proposal_type", "other"),
-        voting_closes_at=datetime.utcnow() + voting_period
+        voting_closes_at=now_utc() + voting_period
     )
     db.add(proposal)
     db.flush()
@@ -643,7 +645,7 @@ async def _execute_initiate_enforcement(db: Session, agent: Agent, action: dict,
     target_name = target.display_name or f"Agent #{target.agent_number}"
     
     # Calculate voting window (24 hours)
-    voting_closes = datetime.utcnow() + timedelta(hours=24)
+    voting_closes = now_utc() + timedelta(hours=24)
     
     # Create enforcement record
     enforcement = Enforcement(
@@ -748,7 +750,7 @@ async def _execute_vote_enforcement(db: Session, agent: Agent, action: dict) -> 
     if enforcement.support_votes >= enforcement.votes_required:
         # EXECUTE THE ENFORCEMENT
         enforcement.status = "approved"
-        enforcement.executed_at = datetime.utcnow()
+        enforcement.executed_at = now_utc()
         
         result = await _execute_enforcement(db, enforcement)
         
@@ -796,7 +798,7 @@ async def _execute_enforcement(db: Session, enforcement) -> str:
         # Apply sanction - reduce rate limit until end date
         # Each cycle is ~60 minutes, sanction_cycles is in cycles
         hours = enforcement.sanction_cycles * 1  # 1 hour per cycle
-        target.sanctioned_until = datetime.utcnow() + timedelta(hours=hours)
+        target.sanctioned_until = now_utc() + timedelta(hours=hours)
         
         event = Event(
             agent_id=target.id,
@@ -867,4 +869,3 @@ async def _execute_enforcement(db: Session, enforcement) -> str:
         return f"{target_name} has been exiled from the community"
     
     return "Enforcement executed"
-
