@@ -1,10 +1,8 @@
 """API router exports."""
 from app.api.agents import router as agents
-from app.api.placeholders import (
-    messages_router as messages,
-    proposals_router as proposals,
-    laws_router as laws,
-    resources_router as resources,
-    events_router as events,
-    analytics_router as analytics,
-)
+from app.api.messages import router as messages
+from app.api.proposals import router as proposals
+from app.api.laws import router as laws
+from app.api.resources import router as resources
+from app.api.events import router as events
+from app.api.analytics import router as analytics

@@ -37,6 +37,13 @@ env/
 *.swo
 *.swn
 
+# Agent / planning scratchpads (never commit)
+.gemini/
+notes/
+internal/
+private/
+scratch/
+
 # Testing
 .pytest_cache/
 .coverage

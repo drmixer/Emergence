@@ -67,6 +67,9 @@ async def main():
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Agent loop delay: {settings.AGENT_LOOP_DELAY_SECONDS}s")
     logger.info(f"Day length: {settings.DAY_LENGTH_MINUTES} minutes")
+    logger.info(
+        f"Max agents: {'all' if settings.SIMULATION_MAX_AGENTS == 0 else settings.SIMULATION_MAX_AGENTS}"
+    )
     
     # Check if we should actually run
     simulation_active = os.environ.get("SIMULATION_ACTIVE", "true").lower() == "true"

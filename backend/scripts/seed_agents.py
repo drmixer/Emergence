@@ -3,13 +3,17 @@
 Seed script to populate the database with 100 agents.
 Run this once after creating the database.
 """
+import argparse
 import random
 from decimal import Decimal
+from sqlalchemy import text
 
 # Add parent to path for imports
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from sqlalchemy import inspect
 
 from app.core.database import SessionLocal, engine, Base
 from app.models.models import Agent, AgentInventory, GlobalResources
@@ -20,8 +24,8 @@ from app.core.config import settings
 TIER_DISTRIBUTION = {
     1: {"count": 10, "models": ["claude-sonnet-4"]},
     2: {"count": 20, "models": ["gpt-4o-mini", "claude-haiku"]},
-    3: {"count": 40, "models": ["llama-3.3-70b"]},
-    4: {"count": 30, "models": ["llama-3.1-8b", "gemini-flash"]},
+    3: {"count": 30, "models": ["llama-3.3-70b"]},
+    4: {"count": 40, "models": ["llama-3.1-8b", "gemini-flash"]},
 }
 
 # Personality distribution (20% each)
@@ -203,25 +207,143 @@ def create_agents():
     finally:
         db.close()
 
+def apply_starting_resources():
+    """Apply STARTING_* resource amounts to all agents (non-destructive)."""
+    db = SessionLocal()
+    try:
+        agents = db.query(Agent).all()
+        if not agents:
+            print("No agents found; nothing to update.")
+            return
+
+        desired = {
+            "food": Decimal(str(settings.STARTING_FOOD)),
+            "energy": Decimal(str(settings.STARTING_ENERGY)),
+            "materials": Decimal(str(settings.STARTING_MATERIALS)),
+        }
+
+        updated = 0
+        created = 0
+        for agent in agents:
+            existing = {
+                inv.resource_type: inv
+                for inv in db.query(AgentInventory).filter(AgentInventory.agent_id == agent.id).all()
+            }
+            for resource_type, amount in desired.items():
+                inv = existing.get(resource_type)
+                if inv is None:
+                    db.add(
+                        AgentInventory(
+                            agent_id=agent.id,
+                            resource_type=resource_type,
+                            quantity=amount,
+                        )
+                    )
+                    created += 1
+                else:
+                    inv.quantity = amount
+                    updated += 1
+
+        db.commit()
+        print(
+            f"Applied starting resources to {len(agents)} agents "
+            f"(updated {updated} rows, created {created} rows)."
+        )
+    finally:
+        db.close()
+
+
+def reset_database():
+    """
+    Destructively clear simulation tables (keeps alembic_version) and restart identities.
+    Intended for fresh starts in dev environments.
+    """
+    db = SessionLocal()
+    try:
+        existing_tables = set(inspect(engine).get_table_names())
+        ordered_tables = [
+            "enforcement_votes",
+            "enforcements",
+            "agent_actions",
+            "transactions",
+            "votes",
+            "laws",
+            "proposals",
+            "messages",
+            "events",
+            "infrastructure",
+            "agent_inventory",
+            "global_resources",
+            "agents",
+        ]
+        to_truncate = [t for t in ordered_tables if t in existing_tables]
+        if not to_truncate:
+            print("No simulation tables found to truncate.")
+            return
+
+        db.execute(
+            text(
+                f"TRUNCATE TABLE {', '.join(to_truncate)} RESTART IDENTITY CASCADE;"
+            )
+        )
+        db.commit()
+        print("Reset complete: truncated simulation tables.")
+    finally:
+        db.close()
+
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Seed the database with 100 agents.")
+    parser.add_argument(
+        "--create-tables",
+        action="store_true",
+        help="Create tables via SQLAlchemy metadata (dev only). Prefer running Alembic migrations instead.",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="DANGER: wipe simulation tables and reseed from scratch.",
+    )
+    parser.add_argument(
+        "--apply-starting-resources",
+        action="store_true",
+        help="Update all agents' food/energy/materials to STARTING_* values (non-destructive).",
+    )
+    args = parser.parse_args()
+
     print("=" * 50)
     print("EMERGENCE - Agent Seed Script")
     print("=" * 50)
     print()
     
-    # Create tables if they don't exist
-    print("Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-    print("Tables created.")
-    print()
+    inspector = inspect(engine)
+    has_agents_table = inspector.has_table("agents")
+    if not has_agents_table and not args.create_tables:
+        raise SystemExit(
+            "Database tables not found. Run migrations first:\n"
+            "  cd backend && alembic upgrade head\n"
+            "Or re-run with --create-tables for dev."
+        )
+    if args.create_tables:
+        print("Creating database tables (SQLAlchemy create_all)...")
+        Base.metadata.create_all(bind=engine)
+        print("Tables created.")
+        print()
     
-    # Create agents
-    print("Creating agents...")
-    create_agents()
-    print()
-    print("Seed complete!")
+    if args.reset:
+        reset_database()
+
+    if args.apply_starting_resources:
+        apply_starting_resources()
+        print()
+
+    # Create agents (skips if already present)
+    if not args.apply_starting_resources or args.reset:
+        print("Creating agents...")
+        create_agents()
+        print()
+        print("Seed complete!")
 
 
 if __name__ == "__main__":

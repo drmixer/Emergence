@@ -2,6 +2,7 @@
 Emergence - AI Civilization Experiment
 Main FastAPI Application
 """
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,15 +10,13 @@ import logging
 
 from app.core.config import settings
 from app.api.agents import router as agents_router
+from app.api.events import router as events_router
+from app.api.laws import router as laws_router
+from app.api.messages import router as messages_router
+from app.api.proposals import router as proposals_router
+from app.api.resources import router as resources_router
 from app.api.analytics import router as analytics_router
-from app.api.placeholders import (
-    messages_router,
-    proposals_router,
-    laws_router,
-    resources_router,
-    events_router,
-)
-from app.services.sse import router as sse_router
+from app.services.sse import router as sse_router, event_polling_task
 from app.api.twitter import router as twitter_router
 from app.api.predictions import router as predictions_router
 
@@ -30,7 +29,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting Emergence API...")
+    poller = asyncio.create_task(event_polling_task())
     yield
+    poller.cancel()
     logger.info("Shutting down Emergence API...")
 
 

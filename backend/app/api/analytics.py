@@ -22,9 +22,23 @@ from app.services.summaries import (
     get_story_so_far,
 )
 from app.core.database import SessionLocal
-from app.models.models import Event
+from app.models.models import Event, Agent, Law, Message, Proposal, Vote, AgentInventory
 
 router = APIRouter()
+
+def _gini(values):
+    xs = [float(v) for v in values if v is not None]
+    if not xs:
+        return 0.0
+    xs = sorted(max(0.0, v) for v in xs)
+    n = len(xs)
+    total = sum(xs)
+    if total == 0 or n == 0:
+        return 0.0
+    cum = 0.0
+    for i, x in enumerate(xs, start=1):
+        cum += i * x
+    return (2.0 * cum) / (n * total) - (n + 1.0) / n
 
 
 # ===== LEADERBOARDS =====
@@ -104,9 +118,9 @@ def get_summaries(limit: int = Query(10, le=50)):
         
         return [
             {
-                "day_number": s.metadata.get("day_number"),
-                "summary": s.metadata.get("summary"),
-                "stats": s.metadata.get("stats"),
+                "day_number": (s.event_metadata or {}).get("day_number"),
+                "summary": (s.event_metadata or {}).get("summary"),
+                "stats": (s.event_metadata or {}).get("stats"),
                 "created_at": s.created_at.isoformat() if s.created_at else None,
             }
             for s in summaries
@@ -128,9 +142,9 @@ def get_latest_summary():
             return {"message": "No summaries yet", "summary": None}
         
         return {
-            "day_number": summary.metadata.get("day_number"),
-            "summary": summary.metadata.get("summary"),
-            "stats": summary.metadata.get("stats"),
+            "day_number": (summary.event_metadata or {}).get("day_number"),
+            "summary": (summary.event_metadata or {}).get("summary"),
+            "stats": (summary.event_metadata or {}).get("stats"),
             "created_at": summary.created_at.isoformat() if summary.created_at else None,
         }
     finally:
@@ -174,9 +188,9 @@ def get_world_events(limit: int = Query(20, le=100)):
         return [
             {
                 "id": e.id,
-                "event_name": e.metadata.get("event_name"),
+                "event_name": (e.event_metadata or {}).get("event_name"),
                 "description": e.description,
-                "effect": e.metadata.get("effect"),
+                "effect": (e.event_metadata or {}).get("effect"),
                 "created_at": e.created_at.isoformat() if e.created_at else None,
             }
             for e in events
@@ -200,3 +214,170 @@ def get_active_effects():
         }
         for e in effects
     ]
+
+
+# ===== FRONTEND DASHBOARD ENDPOINTS =====
+
+@router.get("/overview")
+def overview():
+    """Key simulation stats for dashboards."""
+    db = SessionLocal()
+    try:
+        total_agents = db.query(Agent).count()
+        active_agents = db.query(Agent).filter(Agent.status == "active").count()
+        dormant_agents = db.query(Agent).filter(Agent.status == "dormant").count()
+        dead_agents = db.query(Agent).filter(Agent.status == "dead").count()
+
+        total_messages = db.query(Message).count()
+        forum_posts = db.query(Message).filter(Message.message_type == "forum_post").count()
+        forum_replies = db.query(Message).filter(Message.message_type == "forum_reply").count()
+        direct_messages = db.query(Message).filter(Message.message_type == "direct_message").count()
+
+        total_proposals = db.query(Proposal).count()
+        active_proposals = db.query(Proposal).filter(Proposal.status == "active").count()
+        passed_proposals = db.query(Proposal).filter(Proposal.status == "passed").count()
+        failed_proposals = db.query(Proposal).filter(Proposal.status == "failed").count()
+
+        total_laws = db.query(Law).count()
+        active_laws = db.query(Law).filter(Law.active.is_(True)).count()
+
+        most_recent_event = db.query(Event).order_by(Event.created_at.desc()).first()
+
+        return {
+            "agents": {
+                "total": total_agents,
+                "active": active_agents,
+                "dormant": dormant_agents,
+                "dead": dead_agents,
+            },
+            "messages": {
+                "total": total_messages,
+                "forum_posts": forum_posts,
+                "forum_replies": forum_replies,
+                "direct_messages": direct_messages,
+            },
+            "proposals": {
+                "total": total_proposals,
+                "active": active_proposals,
+                "passed": passed_proposals,
+                "failed": failed_proposals,
+            },
+            "laws": {"total": total_laws, "active": active_laws},
+            "events": {
+                "latest": most_recent_event.created_at.isoformat()
+                if most_recent_event and most_recent_event.created_at
+                else None
+            },
+        }
+    finally:
+        db.close()
+
+
+@router.get("/factions")
+def factions():
+    """
+    Lightweight grouping heuristic (placeholder for real clustering).
+    Currently groups by personality type.
+    """
+    db = SessionLocal()
+    try:
+        agents = db.query(Agent).all()
+        by_personality = {}
+        for a in agents:
+            key = a.personality_type
+            by_personality.setdefault(key, []).append(a.agent_number)
+
+        return [
+            {
+                "faction": personality,
+                "member_count": len(members),
+                "members": sorted(members),
+            }
+            for personality, members in sorted(by_personality.items(), key=lambda kv: kv[0])
+        ]
+    finally:
+        db.close()
+
+
+@router.get("/voting")
+def voting_blocs():
+    """Voting breakdown by tier/personality for recent proposals."""
+    db = SessionLocal()
+    try:
+        recent_proposals = (
+            db.query(Proposal)
+            .order_by(Proposal.created_at.desc())
+            .limit(10)
+            .all()
+        )
+
+        out = []
+        for p in recent_proposals:
+            votes = (
+                db.query(Vote, Agent)
+                .join(Agent, Agent.id == Vote.agent_id)
+                .filter(Vote.proposal_id == p.id)
+                .all()
+            )
+            by_tier = {}
+            by_personality = {}
+            for v, a in votes:
+                by_tier.setdefault(str(a.tier), {"yes": 0, "no": 0, "abstain": 0})
+                by_tier[str(a.tier)][v.vote] = by_tier[str(a.tier)].get(v.vote, 0) + 1
+
+                by_personality.setdefault(
+                    a.personality_type, {"yes": 0, "no": 0, "abstain": 0}
+                )
+                by_personality[a.personality_type][v.vote] = (
+                    by_personality[a.personality_type].get(v.vote, 0) + 1
+                )
+
+            out.append(
+                {
+                    "proposal_id": p.id,
+                    "title": p.title,
+                    "status": p.status,
+                    "by_tier": by_tier,
+                    "by_personality": by_personality,
+                }
+            )
+
+        return out
+    finally:
+        db.close()
+
+
+@router.get("/wealth")
+def wealth_distribution():
+    """Wealth distribution metrics derived from inventory totals."""
+    db = SessionLocal()
+    try:
+        agents = db.query(Agent).all()
+        inventories = db.query(AgentInventory).all()
+
+        by_agent = {}
+        for inv in inventories:
+            by_agent.setdefault(inv.agent_id, 0.0)
+            by_agent[inv.agent_id] += float(inv.quantity or 0)
+
+        wealth = [by_agent.get(a.id, 0.0) for a in agents]
+        wealth_sorted = sorted(wealth)
+
+        def pct(p):
+            if not wealth_sorted:
+                return 0.0
+            idx = int(round((p / 100.0) * (len(wealth_sorted) - 1)))
+            idx = max(0, min(len(wealth_sorted) - 1, idx))
+            return float(wealth_sorted[idx])
+
+        return {
+            "count": len(wealth_sorted),
+            "gini": _gini(wealth_sorted),
+            "min": float(wealth_sorted[0]) if wealth_sorted else 0.0,
+            "p25": pct(25),
+            "median": pct(50),
+            "p75": pct(75),
+            "max": float(wealth_sorted[-1]) if wealth_sorted else 0.0,
+        }
+    finally:
+        db.close()

@@ -21,6 +21,8 @@ OPENROUTER_CONFIG = {
         "claude-sonnet-4": "anthropic/claude-sonnet-4",
         "gpt-4o-mini": "openai/gpt-4o-mini",
         "claude-haiku": "anthropic/claude-3-haiku",
+        # Gemini is routed via OpenRouter (not Groq)
+        "gemini-flash": "google/gemini-2.0-flash-001",
     }
 }
 
@@ -29,7 +31,6 @@ GROQ_CONFIG = {
     "models": {
         "llama-3.3-70b": "llama-3.3-70b-versatile",
         "llama-3.1-8b": "llama-3.1-8b-instant",
-        "gemini-flash": "gemini-2.0-flash",  # Fallback via OpenRouter
     }
 }
 
@@ -69,6 +70,15 @@ class LLMClient:
     ) -> Optional[str]:
         """Get a completion with retry logic."""
         
+        if model_type in OPENROUTER_CONFIG["models"] or model_type not in GROQ_CONFIG["models"]:
+            if not settings.OPENROUTER_API_KEY:
+                logger.error("OPENROUTER_API_KEY is not set; returning no completion.")
+                return None
+        if model_type in GROQ_CONFIG["models"]:
+            if not settings.GROQ_API_KEY:
+                logger.error("GROQ_API_KEY is not set; returning no completion.")
+                return None
+
         client, model_name = self._get_client_and_model(model_type)
         
         for attempt in range(max_retries):

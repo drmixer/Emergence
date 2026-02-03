@@ -3,7 +3,7 @@ SQLAlchemy models for Emergence.
 """
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DECIMAL, 
-    ForeignKey, DateTime, JSON, CheckConstraint
+    ForeignKey, DateTime, JSON, CheckConstraint, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -70,6 +70,7 @@ class AgentInventory(Base):
     agent = relationship("Agent", back_populates="inventory")
     
     __table_args__ = (
+        UniqueConstraint("agent_id", "resource_type", name="uq_agent_inventory_agent_resource"),
         CheckConstraint(
             "resource_type IN ('food', 'energy', 'materials', 'land')",
             name="valid_resource_type"
@@ -162,6 +163,7 @@ class Vote(Base):
     agent = relationship("Agent", back_populates="votes")
     
     __table_args__ = (
+        UniqueConstraint("proposal_id", "agent_id", name="uq_votes_proposal_agent"),
         CheckConstraint("vote IN ('yes', 'no', 'abstain')", name="valid_vote"),
     )
 
@@ -193,7 +195,7 @@ class Event(Base):
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
     event_type = Column(String(50), nullable=False)
     description = Column(Text, nullable=False)
-    event_metadata = Column(JSON, default={})
+    event_metadata = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships
@@ -243,7 +245,7 @@ class Infrastructure(Base):
     description = Column(Text, nullable=False)
     resource_cost = Column(JSON, nullable=False)
     built_by_agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
-    maintained_by = Column(JSON, default=[])
+    maintained_by = Column(JSON, default=list)
     status = Column(String(20), nullable=False, default="proposed")
     efficiency_bonus = Column(DECIMAL(5, 2), default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -335,4 +337,3 @@ class EnforcementVote(Base):
     __table_args__ = (
         CheckConstraint("vote IN ('support', 'oppose')", name="valid_enforcement_vote"),
     )
-

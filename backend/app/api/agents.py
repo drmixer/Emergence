@@ -9,6 +9,7 @@ from sqlalchemy import desc
 from app.core.database import get_db
 from app.models.models import Agent, AgentInventory, Event, Message, Vote
 from pydantic import BaseModel
+from pydantic.config import ConfigDict
 
 router = APIRouter()
 
@@ -24,16 +25,14 @@ class AgentResponse(BaseModel):
     created_at: str
     last_active_at: str
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 
 class InventoryResponse(BaseModel):
     resource_type: str
     quantity: float
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgentDetailResponse(AgentResponse):
@@ -131,7 +130,7 @@ def get_agent_actions(
             "id": e.id,
             "event_type": e.event_type,
             "description": e.description,
-            "metadata": e.metadata,
+            "metadata": e.event_metadata,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         }
         for e in events

@@ -34,15 +34,16 @@ class Settings(BaseSettings):
     AGENT_LOOP_DELAY_SECONDS: int = 150  # 2.5 minutes
     DAY_LENGTH_MINUTES: int = 60  # 1 real hour = 1 sim day
     PROPOSAL_VOTING_HOURS: int = 24
+    SIMULATION_MAX_AGENTS: int = 0  # 0 = all agents (use 1-3 for cheap local tests)
     
     # Rate limiting
     MAX_ACTIONS_PER_HOUR: int = 20
     MAX_PROPOSALS_PER_DAY: int = 3
     
     # Resource defaults
-    STARTING_FOOD: int = 10
-    STARTING_ENERGY: int = 10
-    STARTING_MATERIALS: int = 5
+    STARTING_FOOD: int = 50
+    STARTING_ENERGY: int = 50
+    STARTING_MATERIALS: int = 20
     
     class Config:
         env_file = ".env"

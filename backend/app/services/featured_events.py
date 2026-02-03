@@ -73,7 +73,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
     if first_proposal:
         existing = db.query(Event).filter(
             Event.event_type == "milestone",
-            Event.metadata.contains({"milestone_type": "first_proposal"})
+            Event.event_metadata.contains({"milestone_type": "first_proposal"})
         ).first()
         
         if not existing:
@@ -84,7 +84,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
                 description=f"The first proposal in the simulation has been created: '{first_proposal.title}'",
                 importance=100,
                 created_at=first_proposal.created_at,
-                event_metadata={"milestone_type": "first_proposal", "proposal_id": first_proposal.id}
+                metadata={"milestone_type": "first_proposal", "proposal_id": first_proposal.id},
             ))
     
     # First law passed
@@ -92,7 +92,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
     if first_law:
         existing = db.query(Event).filter(
             Event.event_type == "milestone",
-            Event.metadata.contains({"milestone_type": "first_law"})
+            Event.event_metadata.contains({"milestone_type": "first_law"})
         ).first()
         
         if not existing:
@@ -103,7 +103,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
                 description=f"The agents have passed their first law: '{first_law.title}'",
                 importance=100,
                 created_at=first_law.passed_at,
-                event_metadata={"milestone_type": "first_law", "law_id": first_law.id}
+                metadata={"milestone_type": "first_law", "law_id": first_law.id},
             ))
     
     # Milestone: X agents have named themselves
@@ -112,7 +112,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
         if named_count >= threshold:
             existing = db.query(Event).filter(
                 Event.event_type == "milestone",
-                Event.metadata.contains({"milestone_type": f"named_{threshold}"})
+                Event.event_metadata.contains({"milestone_type": f"named_{threshold}"})
             ).first()
             
             if not existing:
@@ -123,7 +123,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
                     description=f"{threshold} agents have now chosen their own names.",
                     importance=60,
                     created_at=datetime.utcnow(),
-                    event_metadata={"milestone_type": f"named_{threshold}"}
+                    metadata={"milestone_type": f"named_{threshold}"},
                 ))
     
     # Milestone: X proposals passed
@@ -132,7 +132,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
         if passed_count >= threshold:
             existing = db.query(Event).filter(
                 Event.event_type == "milestone",
-                Event.metadata.contains({"milestone_type": f"proposals_passed_{threshold}"})
+                Event.event_metadata.contains({"milestone_type": f"proposals_passed_{threshold}"})
             ).first()
             
             if not existing:
@@ -143,7 +143,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
                     description=f"The agents have now passed {threshold} proposals into law.",
                     importance=70,
                     created_at=datetime.utcnow(),
-                    event_metadata={"milestone_type": f"proposals_passed_{threshold}"}
+                    metadata={"milestone_type": f"proposals_passed_{threshold}"},
                 ))
     
     return milestones

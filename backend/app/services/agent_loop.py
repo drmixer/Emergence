@@ -33,7 +33,10 @@ class AgentProcessor:
         db = SessionLocal()
         
         try:
-            agents = db.query(Agent).all()
+            query = db.query(Agent).order_by(Agent.agent_number)
+            if settings.SIMULATION_MAX_AGENTS and settings.SIMULATION_MAX_AGENTS > 0:
+                query = query.limit(settings.SIMULATION_MAX_AGENTS)
+            agents = query.all()
             
             for agent in agents:
                 # Stagger agent starts over 60 seconds

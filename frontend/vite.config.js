@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
+    allowedHosts: ['.up.railway.app'],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
@@ -20,5 +21,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+  },
+  preview: {
+    allowedHosts: ['.up.railway.app'],
   },
 })

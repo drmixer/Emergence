@@ -102,7 +102,7 @@ async def broadcast_event(event: Event):
         "event_type": event.event_type,
         "agent_id": event.agent_id,
         "description": event.description,
-        "metadata": event.metadata,
+        "metadata": event.event_metadata,
         "created_at": event.created_at.isoformat() if event.created_at else None,
     }
     
@@ -139,20 +139,26 @@ async def event_polling_task():
     last_id = 0
     
     while True:
+        db: Session | None = None
         try:
             db = SessionLocal()
-            
-            new_events = db.query(Event).filter(
-                Event.id > last_id
-            ).order_by(Event.id).limit(50).all()
-            
+
+            new_events = (
+                db.query(Event)
+                .filter(Event.id > last_id)
+                .order_by(Event.id)
+                .limit(50)
+                .all()
+            )
+
             for event in new_events:
                 await broadcast_event(event)
                 last_id = max(last_id, event.id)
-            
-            db.close()
-            
+
         except Exception as e:
             logger.error(f"Error in event polling: {e}")
+        finally:
+            if db is not None:
+                db.close()
         
         await asyncio.sleep(1)  # Poll every second
