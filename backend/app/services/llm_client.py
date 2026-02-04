@@ -105,6 +105,34 @@ class LLMClient:
                 return None
 
         client, model_name = self._get_client_and_model(model_type)
+
+        async def _try_groq_fallback(err: Exception) -> Optional[str]:
+            if not settings.GROQ_API_KEY:
+                return None
+            if client is not self.openrouter_client:
+                return None
+
+            msg = str(err)
+            if "402" not in msg and "Insufficient credits" not in msg:
+                return None
+
+            key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
+            fallback_model = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+            logger.warning("OpenRouter request failed (likely 402); falling back to Groq for this request.")
+            try:
+                response = await self.groq_client.chat.completions.create(
+                    model=fallback_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                return response.choices[0].message.content
+            except Exception as inner:
+                logger.error(f"Groq fallback failed: {inner}")
+                return None
         
         for attempt in range(max_retries):
             try:
@@ -126,36 +154,18 @@ class LLMClient:
                 await asyncio.sleep(wait_time)
                 
             except APIError as e:
-                # If OpenRouter is out of credits (402) but Groq is configured, fall back.
-                msg = str(e)
-                if (
-                    client is self.openrouter_client
-                    and settings.GROQ_API_KEY
-                    and ("402" in msg or "Insufficient credits" in msg)
-                ):
-                    logger.warning("OpenRouter returned 402; falling back to Groq for this request.")
-                    key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
-                    fallback_model = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-                    try:
-                        response = await self.groq_client.chat.completions.create(
-                            model=fallback_model,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                        )
-                        return response.choices[0].message.content
-                    except Exception as inner:
-                        logger.error(f"Groq fallback failed: {inner}")
-
+                groq = await _try_groq_fallback(e)
+                if groq:
+                    return groq
                 logger.error(f"API error: {e}")
                 if attempt == max_retries - 1:
                     raise
                 await asyncio.sleep(1)
                 
             except Exception as e:
+                groq = await _try_groq_fallback(e)
+                if groq:
+                    return groq
                 logger.error(f"Unexpected error: {e}")
                 if attempt == max_retries - 1:
                     raise
