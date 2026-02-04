@@ -103,8 +103,19 @@ class APIService {
     }
 
     // Events
-    async getEvents(limit = 100) {
-        return this.fetch(`/api/events?limit=${limit}`)
+    async getEvents(options = 100) {
+        // Back-compat: allow `getEvents(100)` or `getEvents({ limit, offset, type })`
+        if (typeof options === 'number') {
+            return this.fetch(`/api/events?limit=${options}`)
+        }
+
+        const params = new URLSearchParams()
+        if (options?.limit) params.append('limit', String(options.limit))
+        if (options?.offset) params.append('offset', String(options.offset))
+        if (options?.type) params.append('type', String(options.type))
+
+        const query = params.toString() ? `?${params}` : ''
+        return this.fetch(`/api/events${query}`)
     }
 
     // Analytics

@@ -1,7 +1,7 @@
 // Timeline Page - Visual history of simulation events
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { formatDistanceToNow, format } from 'date-fns'
+import { formatDistanceToNow } from 'date-fns'
 import {
     Calendar,
     MessageSquare,
@@ -23,11 +23,35 @@ import './Timeline.css'
 
 // Event type configurations
 const eventConfig = {
+    forum_post: {
+        icon: MessageSquare,
+        color: '#3B82F6',
+        label: 'Forum Post',
+        major: true
+    },
+    forum_reply: {
+        icon: MessageSquare,
+        color: '#3B82F6',
+        label: 'Forum Reply',
+        major: false
+    },
+    direct_message: {
+        icon: MessageSquare,
+        color: '#8B5CF6',
+        label: 'Direct Message',
+        major: false
+    },
     law_passed: {
         icon: Scale,
         color: '#10B981',
         label: 'Law Passed',
         major: true
+    },
+    vote: {
+        icon: Scale,
+        color: '#8B5CF6',
+        label: 'Vote',
+        major: false
     },
     proposal_created: {
         icon: FileText,
@@ -41,6 +65,12 @@ const eventConfig = {
         label: 'Proposal Created',
         major: false
     },
+    trade: {
+        icon: Gift,
+        color: '#F59E0B',
+        label: 'Trade',
+        major: false
+    },
     became_dormant: {
         icon: Moon,
         color: '#F59E0B',
@@ -51,6 +81,18 @@ const eventConfig = {
         icon: Sun,
         color: '#10B981',
         label: 'Agent Awakened',
+        major: true
+    },
+    agent_revived: {
+        icon: Sun,
+        color: '#10B981',
+        label: 'Agent Revived',
+        major: true
+    },
+    agent_died: {
+        icon: AlertTriangle,
+        color: '#EF4444',
+        label: 'Agent Died',
         major: true
     },
     crisis: {
@@ -77,6 +119,72 @@ const eventConfig = {
         label: 'Faction Formed',
         major: true
     },
+    world_event: {
+        icon: AlertTriangle,
+        color: '#EF4444',
+        label: 'World Event',
+        major: true
+    },
+    daily_summary: {
+        icon: TrendingUp,
+        color: '#8B5CF6',
+        label: 'Daily Summary',
+        major: true
+    },
+    enforcement_initiated: {
+        icon: Scale,
+        color: '#EF4444',
+        label: 'Enforcement',
+        major: true
+    },
+    vote_enforcement: {
+        icon: Scale,
+        color: '#8B5CF6',
+        label: 'Enforcement Vote',
+        major: false
+    },
+    resources_seized: {
+        icon: Gift,
+        color: '#EF4444',
+        label: 'Seizure',
+        major: true
+    },
+    agent_sanctioned: {
+        icon: AlertTriangle,
+        color: '#F59E0B',
+        label: 'Sanction',
+        major: true
+    },
+    agent_exiled: {
+        icon: AlertTriangle,
+        color: '#EF4444',
+        label: 'Exile',
+        major: true
+    },
+    invalid_action: {
+        icon: AlertTriangle,
+        color: '#6B7280',
+        label: 'Invalid Action',
+        major: false
+    },
+    processing_error: {
+        icon: AlertTriangle,
+        color: '#6B7280',
+        label: 'Processing Error',
+        major: false
+    },
+    work: {
+        icon: Zap,
+        color: '#6B7280',
+        label: 'Work',
+        major: false
+    },
+    idle: {
+        icon: Zap,
+        color: '#6B7280',
+        label: 'Idle',
+        major: false
+    },
     message: {
         icon: MessageSquare,
         color: '#6B7280',
@@ -84,6 +192,35 @@ const eventConfig = {
         major: false
     }
 }
+
+const backgroundEventTypes = new Set(['work', 'idle'])
+const noisyEventTypes = new Set(['invalid_action', 'processing_error'])
+
+const sociallySalientEventTypes = new Set([
+    'forum_post',
+    'forum_reply',
+    'direct_message',
+    'create_proposal',
+    'proposal_created',
+    'vote',
+    'law_passed',
+    'trade',
+    'became_dormant',
+    'awakened',
+    'agent_revived',
+    'agent_died',
+    'faction_formed',
+    'crisis',
+    'world_event',
+    'daily_summary',
+    'enforcement_initiated',
+    'vote_enforcement',
+    'resources_seized',
+    'agent_sanctioned',
+    'agent_exiled',
+    'simulation_start',
+    'milestone',
+])
 
 // Generate mock timeline data for demonstration
 function generateMockTimeline() {
@@ -238,23 +375,38 @@ export default function Timeline() {
     const [loading, setLoading] = useState(true)
     const [expandedDays, setExpandedDays] = useState({})
     const [filter, setFilter] = useState('all') // all, major, laws, agents
-    const [currentDay, setCurrentDay] = useState(15)
+    const [currentDay, setCurrentDay] = useState(1)
+    const [showBackground, setShowBackground] = useState(false)
+    const [showSystemNoise, setShowSystemNoise] = useState(false)
 
     useEffect(() => {
         async function loadTimeline() {
             try {
                 // Try to load real events
-                const data = await api.getEvents({ limit: 100 })
-                if (data.events && data.events.length > 0) {
-                    setEvents(data.events)
-                    // Calculate current day from events
-                    const maxDay = Math.max(...data.events.map(e => e.day || 1))
+                const data = await api.getEvents({ limit: 500 })
+                if (Array.isArray(data) && data.length > 0) {
+                    // Compute an approximate day number for display (based on local timeline window).
+                    const sorted = [...data].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+                    const base = new Date(sorted[0].created_at).getTime()
+                    // Backend default is 1 real hour = 1 sim day.
+                    const SIM_DAY_MS = 60 * 60 * 1000
+
+                    const withDay = data.map((e) => {
+                        const createdAtMs = new Date(e.created_at).getTime()
+                        const day = Number.isFinite(createdAtMs)
+                            ? Math.floor((createdAtMs - base) / SIM_DAY_MS) + 1
+                            : 1
+                        return { ...e, day }
+                    })
+
+                    const maxDay = Math.max(...withDay.map(e => e.day || 1))
                     setCurrentDay(maxDay)
+                    setEvents(withDay)
                 } else {
                     // Use mock data for demo
                     setEvents(generateMockTimeline())
                 }
-            } catch (error) {
+            } catch {
                 console.log('Using mock timeline data')
                 setEvents(generateMockTimeline())
             } finally {
@@ -267,25 +419,46 @@ export default function Timeline() {
 
     // Filter events
     const filteredEvents = useMemo(() => {
+        const isVisible = (eventType) => {
+            if (backgroundEventTypes.has(eventType)) return showBackground
+            if (noisyEventTypes.has(eventType)) return showSystemNoise
+            return sociallySalientEventTypes.has(eventType)
+        }
+
+        const baseFiltered = events.filter((e) => isVisible(e.event_type))
+
         switch (filter) {
             case 'major':
-                return events.filter(e => eventConfig[e.event_type]?.major)
+                return baseFiltered.filter(e => eventConfig[e.event_type]?.major)
             case 'laws':
-                return events.filter(e =>
+                return baseFiltered.filter(e =>
                     e.event_type === 'law_passed' ||
                     e.event_type === 'proposal_created' ||
-                    e.event_type === 'create_proposal'
+                    e.event_type === 'create_proposal' ||
+                    e.event_type === 'vote'
                 )
             case 'agents':
-                return events.filter(e =>
+                return baseFiltered.filter(e =>
                     e.event_type === 'became_dormant' ||
                     e.event_type === 'awakened' ||
-                    e.event_type === 'faction_formed'
+                    e.event_type === 'faction_formed' ||
+                    e.event_type === 'agent_revived' ||
+                    e.event_type === 'agent_died'
                 )
             default:
-                return events
+                return baseFiltered
         }
-    }, [events, filter])
+    }, [events, filter, showBackground, showSystemNoise])
+
+    const hiddenCounts = useMemo(() => {
+        const byDay = {}
+        for (const e of events) {
+            const day = e.day || 1
+            if (!byDay[day]) byDay[day] = { work: 0, idle: 0, invalid_action: 0, processing_error: 0 }
+            if (e.event_type in byDay[day]) byDay[day][e.event_type] += 1
+        }
+        return byDay
+    }, [events])
 
     const { grouped, sortedDays } = useMemo(() =>
         groupEventsByDay(filteredEvents),
@@ -325,7 +498,7 @@ export default function Timeline() {
                         className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
                         onClick={() => setFilter('all')}
                     >
-                        All Events
+                        Salient
                     </button>
                     <button
                         className={`filter-btn ${filter === 'major' ? 'active' : ''}`}
@@ -345,16 +518,35 @@ export default function Timeline() {
                     >
                         Agents
                     </button>
+                    <button
+                        className={`filter-btn ${showBackground ? 'active' : ''}`}
+                        onClick={() => setShowBackground(v => !v)}
+                        title="Show background activity (work/idle)"
+                    >
+                        <Filter size={14} />
+                        Background
+                    </button>
+                    <button
+                        className={`filter-btn ${showSystemNoise ? 'active' : ''}`}
+                        onClick={() => setShowSystemNoise(v => !v)}
+                        title="Show system noise (invalid actions/errors)"
+                    >
+                        <Filter size={14} />
+                        System
+                    </button>
                 </div>
             </div>
 
             <div className="timeline-container">
                 <div className="timeline-line" />
 
-                {sortedDays.map((day, dayIndex) => {
+                {sortedDays.map((day) => {
                     const dayEvents = grouped[day]
                     const isExpanded = expandedDays[day] !== false // Default to expanded
                     const isCurrentDay = day === currentDay
+                    const hidden = hiddenCounts[day] || { work: 0, idle: 0, invalid_action: 0, processing_error: 0 }
+                    const hiddenBackground = (showBackground ? 0 : hidden.work + hidden.idle)
+                    const hiddenNoise = (showSystemNoise ? 0 : hidden.invalid_action + hidden.processing_error)
 
                     return (
                         <div key={day} className={`timeline-day ${isCurrentDay ? 'current' : ''}`}>
@@ -371,6 +563,11 @@ export default function Timeline() {
                                     <span className="day-events-count">
                                         {dayEvents.length} event{dayEvents.length !== 1 ? 's' : ''}
                                     </span>
+                                    {(hiddenBackground > 0 || hiddenNoise > 0) && (
+                                        <span className="day-events-count" style={{ opacity: 0.7 }}>
+                                            · hidden {hiddenBackground} bg{hiddenNoise > 0 ? `, ${hiddenNoise} system` : ''}
+                                        </span>
+                                    )}
                                 </div>
                                 <button className="expand-btn">
                                     {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
@@ -379,7 +576,7 @@ export default function Timeline() {
 
                             {isExpanded && (
                                 <div className="day-events">
-                                    {dayEvents.map((event, eventIndex) => {
+                                    {dayEvents.map((event) => {
                                         const config = eventConfig[event.event_type] || eventConfig.message
                                         const Icon = config.icon
 

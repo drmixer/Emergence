@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
     Zap,
@@ -13,6 +13,34 @@ import {
 import { subscribeToEvents } from '../services/api'
 import { showEventToast } from './ToastNotifications'
 import './LiveFeed.css'
+
+const backgroundEventTypes = new Set(['work', 'idle'])
+const noisyEventTypes = new Set(['invalid_action', 'processing_error'])
+
+const sociallySalientEventTypes = new Set([
+    'forum_post',
+    'forum_reply',
+    'direct_message',
+    'create_proposal',
+    'proposal_created',
+    'vote',
+    'law_passed',
+    'trade',
+    'became_dormant',
+    'awakened',
+    'agent_revived',
+    'agent_died',
+    'faction_formed',
+    'crisis',
+    'world_event',
+    'daily_summary',
+    'enforcement_initiated',
+    'vote_enforcement',
+    'resources_seized',
+    'agent_sanctioned',
+    'agent_exiled',
+    'set_name',
+])
 
 const eventIcons = {
     forum_post: MessageSquare,
@@ -80,6 +108,8 @@ const mockEvents = [
 
 export default function LiveFeed() {
     const [events, setEvents] = useState([])
+    const [showBackground, setShowBackground] = useState(false)
+    const [showSystemNoise, setShowSystemNoise] = useState(false)
     const [connected, setConnected] = useState(false)
     const [error, setError] = useState(null)
     const [isPreLaunch, setIsPreLaunch] = useState(true)
@@ -92,6 +122,16 @@ export default function LiveFeed() {
         showEventToast(newEvent)
     }, [])
 
+    const visibleEvents = useMemo(() => {
+        return events.filter((e) => {
+            const t = e.event_type
+            if (!t) return false
+            if (backgroundEventTypes.has(t)) return showBackground
+            if (noisyEventTypes.has(t)) return showSystemNoise
+            return sociallySalientEventTypes.has(t)
+        })
+    }, [events, showBackground, showSystemNoise])
+
     useEffect(() => {
         // Try to connect to SSE
         const unsubscribe = subscribeToEvents(
@@ -103,7 +143,7 @@ export default function LiveFeed() {
                     addEvent(event)
                 }
             },
-            (err) => {
+            () => {
                 setConnected(false)
                 setError('Connection lost.')
                 // Fall back to mock data only if we've received no real events
@@ -166,6 +206,25 @@ export default function LiveFeed() {
                 </div>
             </div>
 
+            <div className="feed-notice" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                        type="checkbox"
+                        checked={showBackground}
+                        onChange={(e) => setShowBackground(e.target.checked)}
+                    />
+                    Background
+                </label>
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                        type="checkbox"
+                        checked={showSystemNoise}
+                        onChange={(e) => setShowSystemNoise(e.target.checked)}
+                    />
+                    System
+                </label>
+            </div>
+
             {error && (
                 <div className="feed-notice">
                     {error}
@@ -173,11 +232,11 @@ export default function LiveFeed() {
             )}
 
             <div className="events-list">
-                {events.map((event, index) => (
+                {visibleEvents.map((event, index) => (
                     <EventCard key={event.id || index} event={event} />
                 ))}
 
-                {events.length === 0 && (
+                {visibleEvents.length === 0 && (
                     <div className="empty-feed">
                         <Zap size={24} />
                         <p>Waiting for events...</p>
