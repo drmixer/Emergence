@@ -110,6 +110,7 @@ export default function LiveFeed() {
     const [events, setEvents] = useState([])
     const [showBackground, setShowBackground] = useState(false)
     const [showSystemNoise, setShowSystemNoise] = useState(false)
+    const [showHiddenControls, setShowHiddenControls] = useState(false)
     const [connected, setConnected] = useState(false)
     const [error, setError] = useState(null)
     const [isPreLaunch, setIsPreLaunch] = useState(true)
@@ -130,6 +131,18 @@ export default function LiveFeed() {
             if (noisyEventTypes.has(t)) return showSystemNoise
             return sociallySalientEventTypes.has(t)
         })
+    }, [events, showBackground, showSystemNoise])
+
+    const hiddenCounts = useMemo(() => {
+        let bg = 0
+        let system = 0
+        for (const e of events) {
+            const t = e?.event_type
+            if (!t) continue
+            if (!showBackground && backgroundEventTypes.has(t)) bg += 1
+            if (!showSystemNoise && noisyEventTypes.has(t)) system += 1
+        }
+        return { bg, system }
     }, [events, showBackground, showSystemNoise])
 
     useEffect(() => {
@@ -206,24 +219,37 @@ export default function LiveFeed() {
                 </div>
             </div>
 
-            <div className="feed-notice" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
-                    <input
-                        type="checkbox"
-                        checked={showBackground}
-                        onChange={(e) => setShowBackground(e.target.checked)}
-                    />
-                    Background
-                </label>
-                <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
-                    <input
-                        type="checkbox"
-                        checked={showSystemNoise}
-                        onChange={(e) => setShowSystemNoise(e.target.checked)}
-                    />
-                    System
-                </label>
-            </div>
+            {(hiddenCounts.bg > 0 || hiddenCounts.system > 0) && (
+                <div
+                    className="feed-notice"
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => setShowHiddenControls((v) => !v)}
+                    title="Show/hide controls for background + system events"
+                >
+                    Hidden: {hiddenCounts.bg} bg, {hiddenCounts.system} system
+                </div>
+            )}
+
+            {showHiddenControls && (
+                <div className="feed-notice" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                        <input
+                            type="checkbox"
+                            checked={showBackground}
+                            onChange={(e) => setShowBackground(e.target.checked)}
+                        />
+                        Background
+                    </label>
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                        <input
+                            type="checkbox"
+                            checked={showSystemNoise}
+                            onChange={(e) => setShowSystemNoise(e.target.checked)}
+                        />
+                        System
+                    </label>
+                </div>
+            )}
 
             {error && (
                 <div className="feed-notice">
