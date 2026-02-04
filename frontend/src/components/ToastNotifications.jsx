@@ -113,10 +113,17 @@ export function showEventToast(event) {
         'law_passed',
         'proposal_created',
         'create_proposal',
+        'enforcement_initiated',
+        'vote_enforcement',
+        'resources_seized',
+        'agent_sanctioned',
+        'agent_exiled',
         'agent_dormant',
         'became_dormant',
         'crisis',
+        'world_event',
         'resource_critical',
+        'trade',
         'milestone',
         'awakened'
     ]

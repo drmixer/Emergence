@@ -378,6 +378,7 @@ export default function Timeline() {
     const [currentDay, setCurrentDay] = useState(1)
     const [showBackground, setShowBackground] = useState(false)
     const [showSystemNoise, setShowSystemNoise] = useState(false)
+    const [dayOverrides, setDayOverrides] = useState({})
 
     useEffect(() => {
         async function loadTimeline() {
@@ -417,39 +418,6 @@ export default function Timeline() {
         loadTimeline()
     }, [])
 
-    // Filter events
-    const filteredEvents = useMemo(() => {
-        const isVisible = (eventType) => {
-            if (backgroundEventTypes.has(eventType)) return showBackground
-            if (noisyEventTypes.has(eventType)) return showSystemNoise
-            return sociallySalientEventTypes.has(eventType)
-        }
-
-        const baseFiltered = events.filter((e) => isVisible(e.event_type))
-
-        switch (filter) {
-            case 'major':
-                return baseFiltered.filter(e => eventConfig[e.event_type]?.major)
-            case 'laws':
-                return baseFiltered.filter(e =>
-                    e.event_type === 'law_passed' ||
-                    e.event_type === 'proposal_created' ||
-                    e.event_type === 'create_proposal' ||
-                    e.event_type === 'vote'
-                )
-            case 'agents':
-                return baseFiltered.filter(e =>
-                    e.event_type === 'became_dormant' ||
-                    e.event_type === 'awakened' ||
-                    e.event_type === 'faction_formed' ||
-                    e.event_type === 'agent_revived' ||
-                    e.event_type === 'agent_died'
-                )
-            default:
-                return baseFiltered
-        }
-    }, [events, filter, showBackground, showSystemNoise])
-
     const hiddenCounts = useMemo(() => {
         const byDay = {}
         for (const e of events) {
@@ -460,10 +428,57 @@ export default function Timeline() {
         return byDay
     }, [events])
 
-    const { grouped, sortedDays } = useMemo(() =>
-        groupEventsByDay(filteredEvents),
-        [filteredEvents]
-    )
+    const { grouped: groupedAll, sortedDays } = useMemo(() => groupEventsByDay(events), [events])
+
+    const matchesCategoryFilter = (event) => {
+        switch (filter) {
+            case 'major':
+                return Boolean(eventConfig[event.event_type]?.major)
+            case 'laws':
+                return (
+                    event.event_type === 'law_passed' ||
+                    event.event_type === 'proposal_created' ||
+                    event.event_type === 'create_proposal' ||
+                    event.event_type === 'vote'
+                )
+            case 'agents':
+                return (
+                    event.event_type === 'became_dormant' ||
+                    event.event_type === 'awakened' ||
+                    event.event_type === 'faction_formed' ||
+                    event.event_type === 'agent_revived' ||
+                    event.event_type === 'agent_died'
+                )
+            default:
+                return true
+        }
+    }
+
+    const isVisibleForDay = (day, eventType) => {
+        const override = dayOverrides[day] || {}
+        const allowBackground = showBackground || Boolean(override.background)
+        const allowNoise = showSystemNoise || Boolean(override.system)
+
+        if (backgroundEventTypes.has(eventType)) return allowBackground
+        if (noisyEventTypes.has(eventType)) return allowNoise
+        return sociallySalientEventTypes.has(eventType)
+    }
+
+    const groupedVisible = useMemo(() => {
+        const out = {}
+        for (const day of sortedDays) {
+            const dayEvents = groupedAll[day] || []
+            const visible = dayEvents.filter(
+                (e) => isVisibleForDay(day, e.event_type) && matchesCategoryFilter(e)
+            )
+            if (visible.length > 0) out[day] = visible
+        }
+        return out
+    }, [groupedAll, sortedDays, dayOverrides, showBackground, showSystemNoise, filter])
+
+    const visibleDays = useMemo(() => {
+        return sortedDays.filter((day) => (groupedVisible[day] || []).length > 0)
+    }, [sortedDays, groupedVisible])
 
     const toggleDay = (day) => {
         setExpandedDays(prev => ({
@@ -540,13 +555,16 @@ export default function Timeline() {
             <div className="timeline-container">
                 <div className="timeline-line" />
 
-                {sortedDays.map((day) => {
-                    const dayEvents = grouped[day]
+                {visibleDays.map((day) => {
+                    const dayEvents = groupedVisible[day] || []
                     const isExpanded = expandedDays[day] !== false // Default to expanded
                     const isCurrentDay = day === currentDay
                     const hidden = hiddenCounts[day] || { work: 0, idle: 0, invalid_action: 0, processing_error: 0 }
                     const hiddenBackground = (showBackground ? 0 : hidden.work + hidden.idle)
                     const hiddenNoise = (showSystemNoise ? 0 : hidden.invalid_action + hidden.processing_error)
+                    const override = dayOverrides[day] || {}
+                    const showDayBackground = Boolean(override.background)
+                    const showDaySystem = Boolean(override.system)
 
                     return (
                         <div key={day} className={`timeline-day ${isCurrentDay ? 'current' : ''}`}>
@@ -567,6 +585,38 @@ export default function Timeline() {
                                         <span className="day-events-count" style={{ opacity: 0.7 }}>
                                             · hidden {hiddenBackground} bg{hiddenNoise > 0 ? `, ${hiddenNoise} system` : ''}
                                         </span>
+                                    )}
+                                    {!showBackground && hiddenBackground > 0 && (
+                                        <button
+                                            className={`filter-btn ${showDayBackground ? 'active' : ''}`}
+                                            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                setDayOverrides((prev) => ({
+                                                    ...prev,
+                                                    [day]: { ...(prev[day] || {}), background: !showDayBackground },
+                                                }))
+                                            }}
+                                            title="Show/hide background activity for this day only"
+                                        >
+                                            {showDayBackground ? 'Hide bg' : `+${hiddenBackground} bg`}
+                                        </button>
+                                    )}
+                                    {!showSystemNoise && hiddenNoise > 0 && (
+                                        <button
+                                            className={`filter-btn ${showDaySystem ? 'active' : ''}`}
+                                            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                setDayOverrides((prev) => ({
+                                                    ...prev,
+                                                    [day]: { ...(prev[day] || {}), system: !showDaySystem },
+                                                }))
+                                            }}
+                                            title="Show/hide system noise for this day only"
+                                        >
+                                            {showDaySystem ? 'Hide system' : `+${hiddenNoise} system`}
+                                        </button>
                                     )}
                                 </div>
                                 <button className="expand-btn">
@@ -613,7 +663,7 @@ export default function Timeline() {
                 </div>
             </div>
 
-            {filteredEvents.length === 0 && (
+            {visibleDays.length === 0 && (
                 <div className="timeline-empty">
                     <Calendar size={48} />
                     <h3>No Events Yet</h3>
