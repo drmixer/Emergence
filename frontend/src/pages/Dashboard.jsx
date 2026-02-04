@@ -19,38 +19,13 @@ import ActivityPulse from '../components/ActivityPulse'
 import { ResourceBar, CriticalAgentsBanner } from '../components/ResourceBar'
 import { SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
 
-// Mock data for demo
-const mockStats = {
-    activeAgents: 87,
-    dormantAgents: 13,
-    activeProposals: 5,
-    passedLaws: 3,
-    totalFood: 2847,
-    maxFood: 5000,
-    totalEnergy: 1923,
-    maxEnergy: 4000,
-    totalMaterials: 734,
-    maxMaterials: 2000,
-    criticalFoodAgents: 3,
-    criticalEnergyAgents: 1,
-    totalMessages: 12847,
-    dayNumber: 5,
-    lastActivity: new Date(Date.now() - 12000).toISOString(),
+function sumWorldResource(resources, key) {
+    const totals = resources?.totals || {}
+    const pool = resources?.common_pool || {}
+    const a = Number(totals[key] || 0)
+    const b = Number(pool[key] || 0)
+    return a + b
 }
-
-const mockRecentProposals = [
-    { id: 1, title: 'Establish Daily Work Hours', author: 'Agent #5', votes_for: 34, votes_against: 12, status: 'active' },
-    { id: 2, title: 'Create Resource Committee', author: 'Agent #42', votes_for: 45, votes_against: 8, status: 'active' },
-    { id: 3, title: 'Minimum Food Reserve Law', author: 'Agent #17', votes_for: 67, votes_against: 23, status: 'passed' },
-]
-
-const mockTopAgents = [
-    { id: 1, agent_number: 42, display_name: 'Coordinator', tier: 1, status: 'active', food: 45, actions: 156, personality_type: 'efficiency' },
-    { id: 2, agent_number: 17, display_name: null, tier: 1, status: 'active', food: 38, actions: 142, personality_type: 'equality' },
-    { id: 3, agent_number: 5, display_name: 'Builder', tier: 2, status: 'active', food: 35, actions: 128, personality_type: 'stability' },
-    { id: 4, agent_number: 88, display_name: null, tier: 3, status: 'active', food: 32, actions: 119, personality_type: 'freedom' },
-    { id: 5, agent_number: 23, display_name: 'Trader', tier: 2, status: 'active', food: 31, actions: 112, personality_type: 'neutral' },
-]
 
 export default function Dashboard() {
     const [stats, setStats] = useState(null)
@@ -58,25 +33,52 @@ export default function Dashboard() {
     const [topAgents, setTopAgents] = useState([])
     const [loading, setLoading] = useState(true)
     const [isLive, setIsLive] = useState(true)
+    const [error, setError] = useState(null)
 
     useEffect(() => {
         const fetchData = async () => {
             try {
-                // Simulate API delay for skeleton demo
-                await new Promise(resolve => setTimeout(resolve, 800))
+                setError(null)
+                const [overview, resources, activeProposals, activityLeaderboard] = await Promise.all([
+                    api.getAnalyticsOverview(),
+                    api.getResources(),
+                    api.fetch('/api/proposals?status=active&limit=5'),
+                    api.fetch('/api/analytics/leaderboards/activity?limit=5&hours=24'),
+                ])
 
-                // Try to fetch real data
-                // const health = await api.getHealth()
-                // const agents = await api.getAgents()
+                setIsLive(Boolean(overview?.events?.latest))
 
-                setStats(mockStats)
-                setProposals(mockRecentProposals)
-                setTopAgents(mockTopAgents)
-            } catch (error) {
-                console.log('Using demo data')
-                setStats(mockStats)
-                setProposals(mockRecentProposals)
-                setTopAgents(mockTopAgents)
+                const capacity = overview?.resources?.capacity_estimate || {}
+                const foodMax = Number(capacity.food || 0) || 1
+                const energyMax = Number(capacity.energy || 0) || 1
+                const materialsMax = Number(capacity.materials || 0) || 1
+
+                setStats({
+                    activeAgents: overview?.agents?.active ?? 0,
+                    dormantAgents: overview?.agents?.dormant ?? 0,
+                    deadAgents: overview?.agents?.dead ?? 0,
+                    activeProposals: overview?.proposals?.active ?? 0,
+                    passedLaws: overview?.laws?.total ?? 0,
+                    totalMessages: overview?.messages?.total ?? 0,
+                    dayNumber: overview?.day_number ?? 0,
+                    lastActivity: overview?.events?.latest ?? null,
+                    criticalFoodAgents: overview?.critical?.food_agents ?? 0,
+                    criticalEnergyAgents: overview?.critical?.energy_agents ?? 0,
+                    totalFood: sumWorldResource(resources, 'food'),
+                    maxFood: foodMax,
+                    totalEnergy: sumWorldResource(resources, 'energy'),
+                    maxEnergy: energyMax,
+                    totalMaterials: sumWorldResource(resources, 'materials'),
+                    maxMaterials: materialsMax,
+                })
+
+                setProposals(Array.isArray(activeProposals) ? activeProposals : [])
+                setTopAgents(Array.isArray(activityLeaderboard) ? activityLeaderboard : [])
+            } catch (e) {
+                setError('Failed to load live data.')
+                setStats(null)
+                setProposals([])
+                setTopAgents([])
             } finally {
                 setLoading(false)
             }
@@ -112,6 +114,12 @@ export default function Dashboard() {
                     messageCount={stats.totalMessages}
                     dayNumber={stats.dayNumber}
                 />
+            )}
+
+            {!loading && error && (
+                <div className="feed-notice">
+                    {error}
+                </div>
             )}
 
             {/* Critical Agents Banner */}
@@ -241,7 +249,12 @@ export default function Dashboard() {
                                     {proposals.map(proposal => (
                                         <tr key={proposal.id}>
                                             <td>{proposal.title}</td>
-                                            <td>{proposal.author}</td>
+                                            <td>
+                                                {proposal.author?.display_name ||
+                                                    (proposal.author?.agent_number
+                                                        ? `Agent #${proposal.author.agent_number}`
+                                                        : 'Unknown')}
+                                            </td>
                                             <td>
                                                 <span style={{ color: 'var(--accent-green)' }}>{proposal.votes_for}</span>
                                                 {' / '}
@@ -275,13 +288,12 @@ export default function Dashboard() {
                                     <tr>
                                         <th>Agent</th>
                                         <th>Tier</th>
-                                        <th>Food</th>
-                                        <th>Actions</th>
+                                        <th>Actions (24h)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {topAgents.map(agent => (
-                                        <tr key={agent.id}>
+                                        <tr key={agent.agent_id}>
                                             <td>
                                                 <Link to={`/agents/${agent.agent_number}`}>
                                                     {agent.display_name || `Agent #${agent.agent_number}`}
@@ -292,8 +304,7 @@ export default function Dashboard() {
                                                     Tier {agent.tier}
                                                 </span>
                                             </td>
-                                            <td>{agent.food}</td>
-                                            <td>{agent.actions}</td>
+                                            <td>{agent.action_count}</td>
                                         </tr>
                                     ))}
                                 </tbody>

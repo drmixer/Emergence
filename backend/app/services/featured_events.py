@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from app.core.database import SessionLocal
+from app.core.time import now_utc
 from app.models.models import Event, Proposal, Law, Agent, Vote
 
 logger = logging.getLogger(__name__)
@@ -67,16 +68,19 @@ class FeaturedEvent:
 def detect_milestones(db: Session) -> List[FeaturedEvent]:
     """Detect milestone events worth celebrating."""
     milestones = []
+
+    # Avoid JSON operator portability issues by scanning existing milestone events in Python.
+    existing_types: set[str] = set()
+    for e in db.query(Event).filter(Event.event_type == "milestone").all():
+        meta = e.event_metadata or {}
+        mt = meta.get("milestone_type")
+        if isinstance(mt, str):
+            existing_types.add(mt)
     
     # First proposal ever
     first_proposal = db.query(Proposal).order_by(Proposal.created_at).first()
     if first_proposal:
-        existing = db.query(Event).filter(
-            Event.event_type == "milestone",
-            Event.event_metadata.contains({"milestone_type": "first_proposal"})
-        ).first()
-        
-        if not existing:
+        if "first_proposal" not in existing_types:
             milestones.append(FeaturedEvent(
                 event_id=first_proposal.id,
                 event_type="milestone",
@@ -90,12 +94,7 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
     # First law passed
     first_law = db.query(Law).order_by(Law.passed_at).first()
     if first_law:
-        existing = db.query(Event).filter(
-            Event.event_type == "milestone",
-            Event.event_metadata.contains({"milestone_type": "first_law"})
-        ).first()
-        
-        if not existing:
+        if "first_law" not in existing_types:
             milestones.append(FeaturedEvent(
                 event_id=first_law.id,
                 event_type="milestone",
@@ -110,40 +109,32 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
     named_count = db.query(Agent).filter(Agent.display_name.isnot(None)).count()
     for threshold in [10, 25, 50, 75, 100]:
         if named_count >= threshold:
-            existing = db.query(Event).filter(
-                Event.event_type == "milestone",
-                Event.event_metadata.contains({"milestone_type": f"named_{threshold}"})
-            ).first()
-            
-            if not existing:
+            key = f"named_{threshold}"
+            if key not in existing_types:
                 milestones.append(FeaturedEvent(
                     event_id=0,
                     event_type="milestone",
                     title=f"{threshold} Agents Named",
                     description=f"{threshold} agents have now chosen their own names.",
                     importance=60,
-                    created_at=datetime.utcnow(),
-                    metadata={"milestone_type": f"named_{threshold}"},
+                    created_at=now_utc(),
+                    metadata={"milestone_type": key},
                 ))
     
     # Milestone: X proposals passed
     passed_count = db.query(Proposal).filter(Proposal.status == "passed").count()
     for threshold in [5, 10, 25, 50]:
         if passed_count >= threshold:
-            existing = db.query(Event).filter(
-                Event.event_type == "milestone",
-                Event.event_metadata.contains({"milestone_type": f"proposals_passed_{threshold}"})
-            ).first()
-            
-            if not existing:
+            key = f"proposals_passed_{threshold}"
+            if key not in existing_types:
                 milestones.append(FeaturedEvent(
                     event_id=0,
                     event_type="milestone",
                     title=f"{threshold} Proposals Passed",
                     description=f"The agents have now passed {threshold} proposals into law.",
                     importance=70,
-                    created_at=datetime.utcnow(),
-                    metadata={"milestone_type": f"proposals_passed_{threshold}"},
+                    created_at=now_utc(),
+                    metadata={"milestone_type": key},
                 ))
     
     return milestones
@@ -174,6 +165,7 @@ def get_featured_events(limit: int = 20) -> List[Dict[str, Any]]:
                 agent = db.query(Agent).filter(Agent.id == event.agent_id).first()
             
             agent_name = agent.display_name or f"Agent #{agent.agent_number}" if agent else "System"
+            meta = event.event_metadata or {}
             
             # Generate title based on event type
             if event.event_type == "became_dormant":
@@ -181,11 +173,11 @@ def get_featured_events(limit: int = 20) -> List[Dict[str, Any]]:
             elif event.event_type == "awakened":
                 title = f"{agent_name} Awakens"
             elif event.event_type == "create_proposal":
-                title = f"New Proposal: {event.event_metadata.get('title', 'Unknown')}"
+                title = f"New Proposal: {meta.get('title', 'Unknown')}"
             elif event.event_type == "law_passed":
-                title = f"Law Passed: {event.event_metadata.get('title', 'Unknown')}"
+                title = f"Law Passed: {meta.get('title', 'Unknown')}"
             elif event.event_type == "world_event":
-                title = event.event_metadata.get("event_name", "World Event")
+                title = meta.get("event_name", "World Event")
             elif event.event_type == "set_name":
                 title = f"Agent Names Themselves"
             else:
@@ -198,7 +190,7 @@ def get_featured_events(limit: int = 20) -> List[Dict[str, Any]]:
                 description=event.description,
                 importance=importance,
                 created_at=event.created_at,
-                metadata=event.event_metadata,
+                metadata=meta,
             ))
         
         # Add milestones

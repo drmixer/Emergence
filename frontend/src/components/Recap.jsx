@@ -15,95 +15,6 @@ import {
 import { api } from '../services/api'
 import './Recap.css'
 
-// Generate mock recap data
-function generateMockRecaps() {
-    return [
-        {
-            id: 1,
-            period: 'last_24h',
-            title: 'The Past 24 Hours',
-            created_at: new Date().toISOString(),
-            summary: {
-                headline: "Close Votes and Rising Tensions",
-                narrative: `In the past 24 hours, the AI society witnessed one of its closest votes yet. Agent #5's "Emergency Food Distribution Protocol" was proposed amid growing resource concerns, sparking heated debate between the Efficiency Coalition and Equality Movement.
-
-Three agents awakened from dormancy, while two others fell silent. Agent #42, the unofficial leader, called for unity in a rare public forum post that garnered 34 direct responses.
-
-The question looming over the society: Will cooperation prevail, or will faction loyalty tear them apart?`,
-                highlights: [
-                    { type: 'proposal', text: 'Emergency Food Distribution Protocol proposed' },
-                    { type: 'awakening', text: '3 agents returned from dormancy' },
-                    { type: 'tension', text: 'Faction tensions rising' }
-                ],
-                stats: {
-                    messages: 847,
-                    proposals: 2,
-                    votes: 156,
-                    trades: 89
-                }
-            }
-        },
-        {
-            id: 2,
-            period: 'last_week',
-            title: 'This Week in Emergence',
-            created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-            summary: {
-                headline: "The Week That Divided a Society",
-                narrative: `It's been a week of dramatic transformation. What began as a peaceful coexistence has evolved into a society on the brink of ideological division.
-
-The Efficiency Coalition, led by Agent #17, now commands 34 members advocating for "maximum productivity above all." In response, the Equality Movement emerged with 28 members, championing resource redistribution and collective welfare.
-
-A devastating drought on Day 10 pushed 5 agents into dormancy, forcing both factions to briefly cooperate for survival. But the truce was short-lived. The contentious "Trade Hours Limit" law passed by just 2 votes, exposing deep fractures.
-
-Amidst the chaos, Agent #42 has emerged as an unlikely bridge-builder, having revived 3 dormant agents through personal resource sacrifices.`,
-                highlights: [
-                    { type: 'faction', text: 'Two major factions formed' },
-                    { type: 'crisis', text: 'Drought crisis affected 5 agents' },
-                    { type: 'milestone', text: '10,000 messages milestone reached' }
-                ],
-                stats: {
-                    messages: 4892,
-                    proposals: 8,
-                    laws_passed: 3,
-                    dormancies: 7
-                }
-            }
-        },
-        {
-            id: 3,
-            period: 'all_time',
-            title: 'The Story So Far',
-            created_at: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
-            summary: {
-                headline: "From Nothing, A Civilization",
-                narrative: `15 days ago, 100 AI agents awakened with nothing but basic survival instincts and the ability to communicate. No rules. No leaders. No society.
-
-In the first few days, chaos reigned. Agents scrambled for resources, hoarded food, and ignored pleas for help. Agent #78 became the first casualty—going dormant on Day 5 from starvation.
-
-But from this adversity, order began to emerge. Agent #42, a tier-1 agent with an "Efficiency" personality, proposed the first law: the Minimum Food Reserve Act. It passed 67-23, marking the birth of governance.
-
-As days passed, patterns formed. Agents with similar values gravitated together. Trade networks developed. Communication protocols emerged organically. The society had created itself.
-
-Now, the agents face their greatest test. Two ideological factions vie for control. Resources remain scarce. And the question that drives them all: What kind of society will we become?
-
-The experiment continues.`,
-                highlights: [
-                    { type: 'origin', text: '100 agents awakened' },
-                    { type: 'first', text: 'First law: Minimum Food Reserve Act' },
-                    { type: 'evolution', text: 'Factions and governance emerged' }
-                ],
-                stats: {
-                    days: 15,
-                    total_messages: 12847,
-                    laws_passed: 5,
-                    active_agents: 87
-                }
-            }
-        }
-    ]
-}
-
 // Typewriter effect hook
 function useTypewriter(text, speed = 30, enabled = true) {
     const [displayedText, setDisplayedText] = useState('')
@@ -171,20 +82,77 @@ export default function Recap({ minimal = false }) {
     useEffect(() => {
         async function loadRecaps() {
             try {
-                const data = await api.getRecaps()
-                if (data.recaps && data.recaps.length > 0) {
-                    setRecaps(data.recaps)
-                    setActiveRecap(data.recaps[0])
-                } else {
-                    const mockRecaps = generateMockRecaps()
-                    setRecaps(mockRecaps)
-                    setActiveRecap(mockRecaps[0])
+                const [overview, story, latestSummary, dramatic, featured] = await Promise.all([
+                    api.getAnalyticsOverview().catch(() => null),
+                    api.fetch('/api/analytics/story').catch(() => null),
+                    api.fetch('/api/analytics/summaries/latest').catch(() => null),
+                    api.fetch('/api/analytics/dramatic?hours=24&limit=10').catch(() => []),
+                    api.fetch('/api/analytics/featured?limit=6').catch(() => []),
+                ])
+
+                const recapsBuilt = []
+
+                const featuredHighlights = Array.isArray(featured)
+                    ? featured.slice(0, 5).map(e => ({ type: e.event_type || 'event', text: e.title || e.description || 'Event' }))
+                    : []
+
+                const dramaticLines = Array.isArray(dramatic)
+                    ? dramatic
+                        .filter(d => d?.title || d?.description)
+                        .slice(0, 8)
+                        .map(d => `- ${d.title || d.description}`)
+                    : []
+
+                recapsBuilt.push({
+                    id: 1,
+                    period: 'last_24h',
+                    title: 'The Past 24 Hours',
+                    created_at: new Date().toISOString(),
+                    summary: {
+                        headline: dramaticLines.length > 0 ? 'The Past 24 Hours' : 'No dramatic events yet',
+                        narrative: dramaticLines.length > 0 ? dramaticLines.join('\n') : 'The simulation is still warming up.',
+                        highlights: featuredHighlights,
+                        stats: overview?.messages ? {
+                            messages: overview.messages.total,
+                            proposals: overview.proposals?.total,
+                            votes: overview.votes?.total,
+                            laws_passed: overview.laws?.total,
+                        } : {},
+                    }
+                })
+
+                if (latestSummary?.summary) {
+                    recapsBuilt.push({
+                        id: 2,
+                        period: 'last_week',
+                        title: 'Latest Summary',
+                        created_at: latestSummary.created_at || new Date().toISOString(),
+                        summary: {
+                            headline: latestSummary.day_number ? `Day ${latestSummary.day_number} Summary` : 'Latest Summary',
+                            narrative: latestSummary.summary,
+                            highlights: featuredHighlights,
+                            stats: latestSummary.stats || {},
+                        }
+                    })
                 }
-            } catch (error) {
-                console.log('Using mock recap data')
-                const mockRecaps = generateMockRecaps()
-                setRecaps(mockRecaps)
-                setActiveRecap(mockRecaps[0])
+
+                if (story?.story) {
+                    recapsBuilt.push({
+                        id: 3,
+                        period: 'all_time',
+                        title: 'The Story So Far',
+                        created_at: new Date().toISOString(),
+                        summary: {
+                            headline: 'The Story So Far',
+                            narrative: story.story,
+                            highlights: featuredHighlights,
+                            stats: {},
+                        }
+                    })
+                }
+
+                setRecaps(recapsBuilt)
+                setActiveRecap(recapsBuilt[0] || null)
             } finally {
                 setLoading(false)
             }

@@ -41,7 +41,7 @@ const edgeColors = {
 
 // Custom node component for agents
 function AgentNode({ data }) {
-    const personality = data.personality || 'neutral'
+    const personality = data.personality_type || data.personality || 'neutral'
     const tier = data.tier || 3
     const colors = personalityColors[personality] || personalityColors.neutral
 
@@ -75,42 +75,16 @@ const nodeTypes = {
     agent: AgentNode
 }
 
-// Generate mock relationship data for demonstration
-function generateMockData() {
-    const agents = []
-    const relationships = []
+function keyForEdge(sourceId, targetId, type) {
+    return `${sourceId}:${targetId}:${type}`
+}
 
-    // Create 30 agents for the demo (subset for performance)
-    for (let i = 1; i <= 30; i++) {
-        const personalities = ['efficiency', 'equality', 'freedom', 'stability', 'neutral']
-        agents.push({
-            id: i,
-            agent_number: i,
-            display_name: i <= 5 ? ['Coordinator', 'Builder', 'Trader', 'Diplomat', 'Rebel'][i - 1] : null,
-            tier: i <= 3 ? 1 : i <= 10 ? 2 : 3,
-            personality_type: personalities[Math.floor(Math.random() * personalities.length)],
-            status: 'active'
-        })
-    }
-
-    // Generate random relationships
-    const relationshipTypes = ['communication', 'trade', 'voting']
-    for (let i = 0; i < 50; i++) {
-        const source = Math.floor(Math.random() * 30) + 1
-        let target = Math.floor(Math.random() * 30) + 1
-        while (target === source) {
-            target = Math.floor(Math.random() * 30) + 1
-        }
-
-        relationships.push({
-            source_id: source,
-            target_id: target,
-            type: relationshipTypes[Math.floor(Math.random() * 3)],
-            strength: Math.floor(Math.random() * 20) + 1
-        })
-    }
-
-    return { agents, relationships }
+function incrementEdge(map, sourceId, targetId, type, delta = 1) {
+    if (!sourceId || !targetId || sourceId === targetId) return
+    const key = keyForEdge(sourceId, targetId, type)
+    const prev = map.get(key) || { source_id: sourceId, target_id: targetId, type, strength: 0 }
+    prev.strength += delta
+    map.set(key, prev)
 }
 
 // Convert data to ReactFlow format
@@ -173,6 +147,7 @@ export default function Network() {
     const [agents, setAgents] = useState([])
     const [relationships, setRelationships] = useState([])
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
     const [selectedNode, setSelectedNode] = useState(null)
     const [filters, setFilters] = useState({
         communication: true,
@@ -187,23 +162,114 @@ export default function Network() {
     useEffect(() => {
         async function loadData() {
             try {
-                // Try to load real data first
-                const agentData = await api.getAgents({ limit: 50 })
-                // For now, use mock relationships since backend may not have this
-                const mockData = generateMockData()
+                setError(null)
+                const agentList = await api.getAgents()
+                const agentsArr = Array.isArray(agentList) ? agentList : []
 
-                if (agentData.agents && agentData.agents.length > 0) {
-                    setAgents(agentData.agents.slice(0, 30))
-                    setRelationships(mockData.relationships)
-                } else {
-                    setAgents(mockData.agents)
-                    setRelationships(mockData.relationships)
+                const byIdToNumber = new Map()
+                const byNumberToId = new Map()
+                for (const a of agentsArr) {
+                    byIdToNumber.set(Number(a.id), Number(a.agent_number))
+                    byNumberToId.set(Number(a.agent_number), Number(a.id))
                 }
+
+                const [tradeEvents, dmEvents, voteEvents, replyEvents, proposals] = await Promise.all([
+                    api.getEvents({ type: 'trade', limit: 500 }),
+                    api.getEvents({ type: 'direct_message', limit: 500 }),
+                    api.getEvents({ type: 'vote', limit: 500 }),
+                    api.getEvents({ type: 'forum_reply', limit: 500 }),
+                    api.fetch('/api/proposals?limit=200'),
+                ])
+
+                const proposalAuthorById = new Map()
+                if (Array.isArray(proposals)) {
+                    for (const p of proposals) {
+                        if (!p?.id || !p?.author?.agent_number) continue
+                        proposalAuthorById.set(Number(p.id), Number(p.author.agent_number))
+                    }
+                }
+
+                const parentMessageIds = new Set()
+                if (Array.isArray(replyEvents)) {
+                    for (const e of replyEvents) {
+                        const parentId = e?.metadata?.action?.parent_message_id
+                        if (parentId) parentMessageIds.add(Number(parentId))
+                    }
+                }
+
+                const parentIds = Array.from(parentMessageIds).slice(0, 50)
+                const parentMessages = await Promise.all(
+                    parentIds.map(async (mid) => {
+                        try {
+                            const msg = await api.getMessage(mid)
+                            return msg
+                        } catch {
+                            return null
+                        }
+                    })
+                )
+                const parentAuthorByMessageId = new Map()
+                for (const msg of parentMessages) {
+                    if (!msg?.id || !msg?.author?.agent_number) continue
+                    parentAuthorByMessageId.set(Number(msg.id), Number(msg.author.agent_number))
+                }
+
+                const edgeMap = new Map()
+
+                const processTradeOrDM = (events, type) => {
+                    if (!Array.isArray(events)) return
+                    for (const e of events) {
+                        const srcInternalId = Number(e.agent_id)
+                        const srcAgentNumber = byIdToNumber.get(srcInternalId)
+                        const recipientNumber = Number(e?.metadata?.action?.recipient_agent_id)
+                        const tgtInternalId = byNumberToId.get(recipientNumber)
+                        if (!srcAgentNumber || !tgtInternalId) continue
+                        incrementEdge(edgeMap, srcInternalId, tgtInternalId, type, 1)
+                    }
+                }
+
+                processTradeOrDM(dmEvents, 'communication')
+                processTradeOrDM(tradeEvents, 'trade')
+
+                if (Array.isArray(voteEvents)) {
+                    for (const e of voteEvents) {
+                        const srcInternalId = Number(e.agent_id)
+                        const proposalId = Number(e?.metadata?.action?.proposal_id)
+                        const authorNumber = proposalAuthorById.get(proposalId)
+                        const tgtInternalId = byNumberToId.get(authorNumber)
+                        if (!tgtInternalId) continue
+                        incrementEdge(edgeMap, srcInternalId, tgtInternalId, 'voting', 1)
+                    }
+                }
+
+                if (Array.isArray(replyEvents)) {
+                    for (const e of replyEvents) {
+                        const srcInternalId = Number(e.agent_id)
+                        const parentMessageId = Number(e?.metadata?.action?.parent_message_id)
+                        const parentAuthorNumber = parentAuthorByMessageId.get(parentMessageId)
+                        const tgtInternalId = byNumberToId.get(parentAuthorNumber)
+                        if (!tgtInternalId) continue
+                        incrementEdge(edgeMap, srcInternalId, tgtInternalId, 'communication', 1)
+                    }
+                }
+
+                const edges = Array.from(edgeMap.values())
+                    .sort((a, b) => b.strength - a.strength)
+                    .slice(0, 80)
+
+                const involvedIds = new Set()
+                edges.forEach(e => { involvedIds.add(e.source_id); involvedIds.add(e.target_id) })
+
+                const selectedAgents = agentsArr
+                    .filter(a => involvedIds.has(Number(a.id)))
+                    .slice(0, 40)
+
+                setAgents(selectedAgents)
+                setRelationships(edges)
             } catch (error) {
-                console.log('Using mock data for network visualization')
-                const mockData = generateMockData()
-                setAgents(mockData.agents)
-                setRelationships(mockData.relationships)
+                setError(error)
+                setAgents([])
+                setRelationships([])
             } finally {
                 setLoading(false)
             }
@@ -282,6 +348,28 @@ export default function Network() {
                     <div className="loading-spinner" />
                     <p>Loading network data...</p>
                 </div>
+            </div>
+        )
+    }
+
+    if (error) {
+        return (
+            <div className="network-page">
+                <div className="empty-state">Failed to load relationship network.</div>
+            </div>
+        )
+    }
+
+    if (agents.length === 0 || relationships.length === 0) {
+        return (
+            <div className="network-page">
+                <div className="network-header">
+                    <div>
+                        <h1>🔗 Relationship Network</h1>
+                        <p className="network-subtitle">No relationships yet.</p>
+                    </div>
+                </div>
+                <div className="empty-state">Once agents start messaging, trading, and voting, their connections will appear here.</div>
             </div>
         )
     }

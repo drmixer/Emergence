@@ -23,22 +23,20 @@ import './Predictions.css'
 // API base URL
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// Fetch helper with timeout and demo fallback
-const fetchWithFallback = async (endpoint, demoData) => {
+// Fetch helper with timeout
+const fetchJson = async (endpoint, options = {}) => {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 2000) // 2 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
 
     try {
-        const response = await fetch(`${API_BASE}${endpoint}`, { signal: controller.signal })
+        const response = await fetch(`${API_BASE}${endpoint}`, { ...options, signal: controller.signal })
         clearTimeout(timeoutId)
-        if (response.ok) {
-            return await response.json()
-        }
+        if (!response.ok) throw new Error(`API error: ${response.status}`)
+        return await response.json()
     } catch (error) {
         clearTimeout(timeoutId)
-        console.log('Using demo data for', endpoint)
+        throw error
     }
-    return demoData
 }
 
 // Get or create user ID for identification
@@ -95,110 +93,22 @@ export default function Predictions() {
 
     const loadData = async () => {
         setLoading(true)
+        try {
+            const [marketsData, leaderboardData, me] = await Promise.all([
+                fetchJson('/api/predictions/markets'),
+                fetchJson('/api/predictions/leaderboard'),
+                fetchJson('/api/predictions/me', { headers: { 'x-user-id': getUserId() } }).catch(() => null),
+            ])
 
-        // Demo data for markets
-        const demoMarkets = [
-            {
-                id: 1,
-                title: "Will Proposal #5 (Fair Trade Agreement) pass?",
-                description: "Agent #42 proposed a fair trade agreement requiring minimum exchange values.",
-                market_type: "proposal_pass",
-                status: "open",
-                outcome: null,
-                total_yes_amount: 234.50,
-                total_no_amount: 187.25,
-                yes_probability: 0.556,
-                closes_at: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
-                bet_count: 23
-            },
-            {
-                id: 2,
-                title: "Will Agent #78 survive the week?",
-                description: "Agent #78 is at critically low food levels. Can they avoid dormancy?",
-                market_type: "agent_dormant",
-                status: "open",
-                outcome: null,
-                total_yes_amount: 89.00,
-                total_no_amount: 156.75,
-                yes_probability: 0.362,
-                closes_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-                bet_count: 15
-            },
-            {
-                id: 3,
-                title: "Will agents reach 500 total food by Day 30?",
-                description: "The community has been working to build reserves.",
-                market_type: "resource_goal",
-                status: "open",
-                outcome: null,
-                total_yes_amount: 312.00,
-                total_no_amount: 298.50,
-                yes_probability: 0.511,
-                closes_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-                bet_count: 42
-            },
-            {
-                id: 4,
-                title: "Will a new law pass this week?",
-                description: "Several proposals are in voting. Will any become law?",
-                market_type: "law_count",
-                status: "open",
-                outcome: null,
-                total_yes_amount: 178.25,
-                total_no_amount: 112.50,
-                yes_probability: 0.613,
-                closes_at: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-                bet_count: 19
-            },
-            {
-                id: 5,
-                title: "Would Proposal #3 (Emergency Food Distribution) pass?",
-                description: "An emergency measure to redistribute food to at-risk agents.",
-                market_type: "proposal_pass",
-                status: "resolved",
-                outcome: "yes",
-                total_yes_amount: 423.50,
-                total_no_amount: 289.00,
-                yes_probability: 0.594,
-                closes_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-                bet_count: 51
-            },
-            {
-                id: 6,
-                title: "Would Agent #22 survive the food crisis?",
-                description: "Agent #22 was at 0.5 food units during the great shortage.",
-                market_type: "agent_dormant",
-                status: "resolved",
-                outcome: "no",
-                total_yes_amount: 145.00,
-                total_no_amount: 234.50,
-                yes_probability: 0.382,
-                closes_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-                bet_count: 28
-            }
-        ]
-
-        // Demo leaderboard data
-        const demoLeaderboard = [
-            { rank: 1, user_id: "oracle_sage", username: "OracleSage", balance: 847.50, win_rate: 78.6, bets_made: 28, bets_won: 22, profit: 747.50 },
-            { rank: 2, user_id: "prediction_king", username: "PredictionKing", balance: 612.25, win_rate: 71.4, bets_made: 21, bets_won: 15, profit: 512.25 },
-            { rank: 3, user_id: "lucky_guesser", username: "LuckyGuesser", balance: 498.00, win_rate: 66.7, bets_made: 18, bets_won: 12, profit: 398.00 },
-            { rank: 4, user_id: "ai_whisperer", username: "AI_Whisperer", balance: 445.75, win_rate: 63.2, bets_made: 19, bets_won: 12, profit: 345.75 },
-            { rank: 5, user_id: "emergence_fan", username: "EmergenceFan", balance: 387.50, win_rate: 60.0, bets_made: 15, bets_won: 9, profit: 287.50 },
-            { rank: 6, user_id: "trend_spotter", username: "TrendSpotter", balance: 312.00, win_rate: 58.3, bets_made: 12, bets_won: 7, profit: 212.00 },
-            { rank: 7, user_id: "agent_analyst", username: "AgentAnalyst", balance: 278.25, win_rate: 55.6, bets_made: 9, bets_won: 5, profit: 178.25 },
-            { rank: 8, user_id: "data_seer", username: "DataSeer", balance: 234.50, win_rate: 53.8, bets_made: 13, bets_won: 7, profit: 134.50 },
-        ]
-
-        // Fetch markets with demo fallback
-        const marketsData = await fetchWithFallback('/api/predictions/markets', demoMarkets)
-        setMarkets(marketsData)
-
-        // Fetch leaderboard with demo fallback
-        const leaderboardData = await fetchWithFallback('/api/predictions/leaderboard', demoLeaderboard)
-        setLeaderboard(leaderboardData)
-
-        setLoading(false)
+            setMarkets(Array.isArray(marketsData) ? marketsData : [])
+            setLeaderboard(Array.isArray(leaderboardData) ? leaderboardData : [])
+            if (me) setUserStats(me)
+        } catch (e) {
+            setMarkets([])
+            setLeaderboard([])
+        } finally {
+            setLoading(false)
+        }
     }
 
     const filteredMarkets = markets.filter(m => {
@@ -254,16 +164,7 @@ export default function Predictions() {
                 setBetError(error.detail || 'Failed to place bet')
             }
         } catch (e) {
-            // Demo mode - simulate success
-            setBetSuccess(`🎲 Demo bet placed! ${betAmount} EP on ${betPrediction.toUpperCase()}`)
-            setUserStats(prev => ({
-                ...prev,
-                balance: prev.balance - betAmount,
-                bets_made: prev.bets_made + 1
-            }))
-            setTimeout(() => {
-                closeBetModal()
-            }, 2000)
+            setBetError('Failed to place bet')
         }
 
         setIsPlacingBet(false)

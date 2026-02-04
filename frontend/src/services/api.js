@@ -138,22 +138,19 @@ class APIService {
     // Landing Page Stats
     async getLandingStats() {
         try {
-            // Fetch multiple endpoints to build stats
-            const [health, messages, laws, proposals] = await Promise.all([
+            const [health, overview] = await Promise.all([
                 this.fetch('/health'),
-                this.fetch('/api/messages?limit=1').catch(() => []),
-                this.fetch('/api/laws').catch(() => []),
-                this.fetch('/api/proposals').catch(() => [])
+                this.fetch('/api/analytics/overview'),
             ])
 
             return {
-                activeAgents: health.active_agents || 0,
-                totalAgents: health.total_agents || 100,
-                // For messages count, we need a dedicated endpoint - for now estimate
-                messageCount: messages.length || 0,
-                lawCount: Array.isArray(laws) ? laws.filter(l => l.active).length : 0,
-                proposalCount: Array.isArray(proposals) ? proposals.length : 0,
-                day: 0 // Will need a day counter endpoint
+                activeAgents: overview?.agents?.active ?? health.active_agents ?? 0,
+                totalAgents: overview?.agents?.total ?? health.total_agents ?? 100,
+                messageCount: overview?.messages?.total ?? 0,
+                lawCount: overview?.laws?.total ?? 0,
+                proposalCount: overview?.proposals?.total ?? 0,
+                day: overview?.day_number ?? 0,
+                lastActivity: overview?.events?.latest ?? null,
             }
         } catch (error) {
             console.error('Failed to get landing stats:', error)

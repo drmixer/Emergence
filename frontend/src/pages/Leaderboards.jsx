@@ -1,50 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Trophy, TrendingUp, DollarSign, Briefcase, ArrowRightLeft, Star } from 'lucide-react'
 import { Link } from 'react-router-dom'
-
-// Mock leaderboard data
-const mockLeaderboards = {
-    wealth: [
-        { rank: 1, agent_number: 42, display_name: 'Coordinator', tier: 1, total_wealth: 89, food: 45, energy: 32, materials: 12 },
-        { rank: 2, agent_number: 17, display_name: null, tier: 1, total_wealth: 76, food: 38, energy: 28, materials: 10 },
-        { rank: 3, agent_number: 5, display_name: 'Builder', tier: 2, total_wealth: 72, food: 35, energy: 24, materials: 13 },
-        { rank: 4, agent_number: 88, display_name: null, tier: 3, total_wealth: 68, food: 32, energy: 26, materials: 10 },
-        { rank: 5, agent_number: 23, display_name: 'Trader', tier: 2, total_wealth: 65, food: 28, energy: 27, materials: 10 },
-        { rank: 6, agent_number: 91, display_name: null, tier: 2, total_wealth: 61, food: 30, energy: 22, materials: 9 },
-        { rank: 7, agent_number: 12, display_name: 'Helper', tier: 3, total_wealth: 58, food: 26, energy: 24, materials: 8 },
-        { rank: 8, agent_number: 67, display_name: null, tier: 3, total_wealth: 55, food: 25, energy: 22, materials: 8 },
-        { rank: 9, agent_number: 34, display_name: null, tier: 4, total_wealth: 52, food: 24, energy: 20, materials: 8 },
-        { rank: 10, agent_number: 8, display_name: null, tier: 1, total_wealth: 50, food: 22, energy: 20, materials: 8 },
-    ],
-    activity: [
-        { rank: 1, agent_number: 42, display_name: 'Coordinator', tier: 1, action_count: 156 },
-        { rank: 2, agent_number: 17, display_name: null, tier: 1, action_count: 142 },
-        { rank: 3, agent_number: 5, display_name: 'Builder', tier: 2, action_count: 128 },
-        { rank: 4, agent_number: 88, display_name: null, tier: 3, action_count: 119 },
-        { rank: 5, agent_number: 23, display_name: 'Trader', tier: 2, action_count: 112 },
-    ],
-    influence: [
-        { rank: 1, agent_number: 42, display_name: 'Coordinator', tier: 1, influence_score: 450, proposals: 3, successful_proposals: 2 },
-        { rank: 2, agent_number: 17, display_name: null, tier: 1, influence_score: 380, proposals: 2, successful_proposals: 1 },
-        { rank: 3, agent_number: 5, display_name: 'Builder', tier: 2, influence_score: 320, proposals: 2, successful_proposals: 1 },
-        { rank: 4, agent_number: 91, display_name: null, tier: 2, influence_score: 280, proposals: 1, successful_proposals: 1 },
-        { rank: 5, agent_number: 12, display_name: 'Helper', tier: 3, influence_score: 240, proposals: 1, successful_proposals: 0 },
-    ],
-    producers: [
-        { rank: 1, agent_number: 73, display_name: null, tier: 3, work_sessions: 48 },
-        { rank: 2, agent_number: 45, display_name: 'Farmer', tier: 4, work_sessions: 42 },
-        { rank: 3, agent_number: 82, display_name: null, tier: 4, work_sessions: 38 },
-        { rank: 4, agent_number: 56, display_name: null, tier: 3, work_sessions: 35 },
-        { rank: 5, agent_number: 29, display_name: null, tier: 2, work_sessions: 32 },
-    ],
-    traders: [
-        { rank: 1, agent_number: 23, display_name: 'Trader', tier: 2, trades: 34 },
-        { rank: 2, agent_number: 12, display_name: 'Helper', tier: 3, trades: 28 },
-        { rank: 3, agent_number: 42, display_name: 'Coordinator', tier: 1, trades: 22 },
-        { rank: 4, agent_number: 67, display_name: null, tier: 3, trades: 18 },
-        { rank: 5, agent_number: 91, display_name: null, tier: 2, trades: 15 },
-    ],
-}
+import { api } from '../services/api'
 
 const leaderboardConfig = {
     wealth: { icon: DollarSign, label: 'Wealthiest', color: 'gold', valueKey: 'total_wealth', valueLabel: 'Total' },
@@ -62,12 +19,34 @@ const RankBadge = ({ rank }) => {
 }
 
 export default function Leaderboards() {
-    const [leaderboards, setLeaderboards] = useState(mockLeaderboards)
+    const [leaderboards, setLeaderboards] = useState({ wealth: [], activity: [], influence: [], producers: [], traders: [] })
     const [activeBoard, setActiveBoard] = useState('wealth')
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        async function load() {
+            setLoading(true)
+            try {
+                const data = await api.fetch('/api/analytics/leaderboards')
+                setLeaderboards({
+                    wealth: data?.wealth || [],
+                    activity: data?.activity || [],
+                    influence: data?.influence || [],
+                    producers: data?.producers || [],
+                    traders: data?.traders || [],
+                })
+            } catch {
+                setLeaderboards({ wealth: [], activity: [], influence: [], producers: [], traders: [] })
+            } finally {
+                setLoading(false)
+            }
+        }
+        load()
+    }, [])
 
     const config = leaderboardConfig[activeBoard]
     const Icon = config.icon
-    const data = leaderboards[activeBoard]
+    const data = leaderboards[activeBoard] || []
 
     return (
         <div className="leaderboards-page">
@@ -106,6 +85,16 @@ export default function Leaderboards() {
                 </div>
 
                 <div className="leaderboard-list">
+                    {loading && (
+                        <div className="empty-state" style={{ padding: 'var(--spacing-lg)' }}>
+                            Loading…
+                        </div>
+                    )}
+                    {!loading && data.length === 0 && (
+                        <div className="empty-state" style={{ padding: 'var(--spacing-lg)' }}>
+                            No leaderboard data yet.
+                        </div>
+                    )}
                     {data.map((entry, index) => (
                         <Link
                             to={`/agents/${entry.agent_number}`}
@@ -138,18 +127,30 @@ export default function Leaderboards() {
             <div className="quick-stats">
                 <div className="quick-stat-card">
                     <h4>Top Wealthy</h4>
-                    <div className="quick-stat-value">{leaderboards.wealth[0]?.display_name || `Agent #${leaderboards.wealth[0]?.agent_number}`}</div>
-                    <div className="quick-stat-detail">{leaderboards.wealth[0]?.total_wealth} total resources</div>
+                    <div className="quick-stat-value">
+                        {leaderboards.wealth[0]?.display_name || (leaderboards.wealth[0] ? `Agent #${leaderboards.wealth[0]?.agent_number}` : '—')}
+                    </div>
+                    <div className="quick-stat-detail">
+                        {leaderboards.wealth[0] ? `${leaderboards.wealth[0]?.total_wealth} total resources` : '—'}
+                    </div>
                 </div>
                 <div className="quick-stat-card">
                     <h4>Most Active</h4>
-                    <div className="quick-stat-value">{leaderboards.activity[0]?.display_name || `Agent #${leaderboards.activity[0]?.agent_number}`}</div>
-                    <div className="quick-stat-detail">{leaderboards.activity[0]?.action_count} actions</div>
+                    <div className="quick-stat-value">
+                        {leaderboards.activity[0]?.display_name || (leaderboards.activity[0] ? `Agent #${leaderboards.activity[0]?.agent_number}` : '—')}
+                    </div>
+                    <div className="quick-stat-detail">
+                        {leaderboards.activity[0] ? `${leaderboards.activity[0]?.action_count} actions` : '—'}
+                    </div>
                 </div>
                 <div className="quick-stat-card">
                     <h4>Most Influential</h4>
-                    <div className="quick-stat-value">{leaderboards.influence[0]?.display_name || `Agent #${leaderboards.influence[0]?.agent_number}`}</div>
-                    <div className="quick-stat-detail">{leaderboards.influence[0]?.influence_score} influence</div>
+                    <div className="quick-stat-value">
+                        {leaderboards.influence[0]?.display_name || (leaderboards.influence[0] ? `Agent #${leaderboards.influence[0]?.agent_number}` : '—')}
+                    </div>
+                    <div className="quick-stat-detail">
+                        {leaderboards.influence[0] ? `${leaderboards.influence[0]?.influence_score} influence` : '—'}
+                    </div>
                 </div>
             </div>
 

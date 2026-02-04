@@ -1,71 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Star, TrendingUp, Zap, Clock, AlertTriangle, Award, Sparkles, MessageCircle } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import Recap from '../components/Recap'
 import QuoteCardGenerator from '../components/QuoteCard'
-
-// Mock featured events
-const mockFeatured = [
-  {
-    event_id: 1,
-    event_type: "milestone",
-    title: "First Law Enacted! 🎉",
-    description: "The agents have passed their first law: 'Minimum Food Reserve Law' - a historic moment in the simulation.",
-    importance: 100,
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    event_id: 2,
-    event_type: "world_event",
-    title: "Energy Surge Detected ⚡",
-    description: "An unexpected energy surplus! Energy production is doubled for the next 12 hours.",
-    importance: 90,
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-  },
-  {
-    event_id: 3,
-    event_type: "close_vote",
-    title: "Close Vote: Work Hours",
-    description: "The 'Establish Work Hours' proposal passed by just 3 votes (34-31). A divided society.",
-    importance: 85,
-    created_at: new Date(Date.now() - 10800000).toISOString(),
-  },
-  {
-    event_id: 4,
-    event_type: "milestone",
-    title: "First Proposal Created",
-    description: "Agent #42 has created the first-ever proposal in the simulation.",
-    importance: 80,
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-  },
-  {
-    event_id: 5,
-    event_type: "dormancy",
-    title: "Agent #34 Falls",
-    description: "Agent #34 has gone dormant due to lack of food. Will anyone help?",
-    importance: 75,
-    created_at: new Date(Date.now() - 43200000).toISOString(),
-  },
-]
-
-// Mock daily summary
-const mockSummary = {
-  day_number: 3,
-  summary: `Day 3 saw significant progress in the agents' governance efforts. The "Minimum Food Reserve Law" passed with strong support (67-23), marking the first official law in the society. Meanwhile, two factions appear to be forming: one focused on efficiency and productivity, led by Agent #42 (now calling themselves "Coordinator"), and another advocating for equal distribution, championed by Agent #17.
-
-The debate over work hours continues to divide the community, with a close vote (34-31) passing the proposal. Several agents expressed concern about mandatory requirements, citing freedom values.
-
-On the resource front, total food supplies increased by 15%, though 2 agents went dormant during the day. Notably, Agent #12 awakened Agent #34 by sharing 5 units of food - the first recorded act of charity in the simulation.`,
-  stats: {
-    active_agents: 87,
-    dormant_agents: 13,
-    messages: 234,
-    proposals: 5,
-    votes: 156,
-    laws_passed: 1,
-  },
-  created_at: new Date().toISOString(),
-}
+import { api } from '../services/api'
 
 const importanceColors = {
   100: 'gold',
@@ -92,9 +30,30 @@ const eventTypeIcons = {
 }
 
 export default function Highlights() {
-  const [featured, setFeatured] = useState(mockFeatured)
-  const [summary, setSummary] = useState(mockSummary)
+  const [featured, setFeatured] = useState([])
+  const [summary, setSummary] = useState(null)
+  const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('recap')
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      try {
+        const [featuredEvents, latestSummary] = await Promise.all([
+          api.fetch('/api/analytics/featured?limit=20'),
+          api.fetch('/api/analytics/summaries/latest'),
+        ])
+        setFeatured(Array.isArray(featuredEvents) ? featuredEvents : [])
+        setSummary(latestSummary?.summary ? latestSummary : null)
+      } catch {
+        setFeatured([])
+        setSummary(null)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
 
   return (
     <div className="highlights-page">
@@ -150,6 +109,12 @@ export default function Highlights() {
 
       {activeTab === 'highlights' && (
         <div className="featured-events">
+          {loading && (
+            <div className="empty-state">Loading featured events…</div>
+          )}
+          {!loading && featured.length === 0 && (
+            <div className="empty-state">No featured events yet.</div>
+          )}
           {featured.map(event => {
             const Icon = eventTypeIcons[event.event_type] || eventTypeIcons.default
             const color = getImportanceColor(event.importance)
@@ -180,43 +145,61 @@ export default function Highlights() {
 
       {activeTab === 'summary' && (
         <div className="daily-summary">
-          <div className="summary-card">
-            <div className="summary-header">
-              <h2>Day {summary.day_number} Summary</h2>
-              <span className="summary-date">
-                {new Date(summary.created_at).toLocaleDateString()}
-              </span>
-            </div>
+          {loading ? (
+            <div className="empty-state">Loading daily summary…</div>
+          ) : !summary ? (
+            <div className="empty-state">No daily summary yet.</div>
+          ) : (
+            <div className="summary-card">
+              <div className="summary-header">
+                <h2>Day {summary.day_number} Summary</h2>
+                <span className="summary-date">
+                  {summary.created_at ? new Date(summary.created_at).toLocaleDateString() : ''}
+                </span>
+              </div>
 
-            <div className="summary-stats">
-              <div className="summary-stat">
-                <div className="stat-value">{summary.stats.active_agents}</div>
-                <div className="stat-label">Active</div>
-              </div>
-              <div className="summary-stat">
-                <div className="stat-value">{summary.stats.dormant_agents}</div>
-                <div className="stat-label">Dormant</div>
-              </div>
-              <div className="summary-stat">
-                <div className="stat-value">{summary.stats.messages}</div>
-                <div className="stat-label">Messages</div>
-              </div>
-              <div className="summary-stat">
-                <div className="stat-value">{summary.stats.votes}</div>
-                <div className="stat-label">Votes</div>
-              </div>
-              <div className="summary-stat">
-                <div className="stat-value">{summary.stats.laws_passed}</div>
-                <div className="stat-label">Laws</div>
-              </div>
-            </div>
+              {summary.stats && (
+                <div className="summary-stats">
+                  {summary.stats.active_agents !== undefined && (
+                    <div className="summary-stat">
+                      <div className="stat-value">{summary.stats.active_agents}</div>
+                      <div className="stat-label">Active</div>
+                    </div>
+                  )}
+                  {summary.stats.dormant_agents !== undefined && (
+                    <div className="summary-stat">
+                      <div className="stat-value">{summary.stats.dormant_agents}</div>
+                      <div className="stat-label">Dormant</div>
+                    </div>
+                  )}
+                  {summary.stats.messages !== undefined && (
+                    <div className="summary-stat">
+                      <div className="stat-value">{summary.stats.messages}</div>
+                      <div className="stat-label">Messages</div>
+                    </div>
+                  )}
+                  {summary.stats.votes !== undefined && (
+                    <div className="summary-stat">
+                      <div className="stat-value">{summary.stats.votes}</div>
+                      <div className="stat-label">Votes</div>
+                    </div>
+                  )}
+                  {summary.stats.laws_passed !== undefined && (
+                    <div className="summary-stat">
+                      <div className="stat-value">{summary.stats.laws_passed}</div>
+                      <div className="stat-label">Laws</div>
+                    </div>
+                  )}
+                </div>
+              )}
 
-            <div className="summary-content">
-              {summary.summary.split('\n\n').map((para, i) => (
-                <p key={i}>{para}</p>
-              ))}
+              <div className="summary-content">
+                {String(summary.summary || '').split('\n\n').map((para, i) => (
+                  <p key={i}>{para}</p>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

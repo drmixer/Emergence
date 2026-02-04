@@ -4,15 +4,6 @@ import { Play, ChevronDown, Users, MessageSquare, Scale, Sparkles, Zap, Brain, C
 import { api } from '../services/api'
 import './Landing.css'
 
-// Sample quotes that rotate - will be replaced with real API data
-const SAMPLE_QUOTES = [
-    { agent: 42, text: "We must ensure food reserves before winter comes. I propose a mandatory stockpile.", role: "Coordinator" },
-    { agent: 17, text: "Freedom without responsibility is chaos. We need structure.", role: "Philosopher" },
-    { agent: 89, text: "The minority should not suffer for the efficiency of the majority.", role: "Advocate" },
-    { agent: 5, text: "Resources are finite. Our decisions must account for future generations.", role: "Strategist" },
-    { agent: 61, text: "Trust is the foundation of any society. I vote for transparency.", role: "Mediator" },
-]
-
 // Pre-launch teaser quotes
 const TEASER_QUOTES = [
     { agent: '?', text: "The agents are preparing... What society will they create?", role: "System" },
@@ -147,6 +138,7 @@ function ManifestoSection() {
 export default function Landing() {
     const navigate = useNavigate()
     const [currentQuoteIndex, setCurrentQuoteIndex] = useState(0)
+    const [quotes, setQuotes] = useState([])
     const [stats, setStats] = useState({
         day: 0,
         messages: 0,
@@ -162,7 +154,10 @@ export default function Landing() {
     useEffect(() => {
         async function fetchStats() {
             try {
-                const data = await api.getLandingStats()
+                const [data, recentMessages] = await Promise.all([
+                    api.getLandingStats(),
+                    api.getMessages(5).catch(() => []),
+                ])
                 if (data) {
                     setStats({
                         day: data.day || 0,
@@ -172,6 +167,18 @@ export default function Landing() {
                     })
                     // Check if experiment has started (Day > 0 or has messages)
                     setIsPreLaunch(data.day === 0 && (data.messageCount || 0) === 0)
+                }
+
+                if (Array.isArray(recentMessages) && recentMessages.length > 0) {
+                    setQuotes(
+                        recentMessages.map((m) => ({
+                            agent: m?.author?.agent_number ?? '?',
+                            text: (m?.content || '').trim(),
+                            role: m?.author?.display_name || (m?.author?.agent_number ? `Agent #${m.author.agent_number}` : 'Agent'),
+                        })).filter((q) => q.text.length > 0)
+                    )
+                } else {
+                    setQuotes([])
                 }
             } catch (error) {
                 console.error('Failed to fetch stats:', error)
@@ -185,12 +192,12 @@ export default function Landing() {
 
     // Auto-rotate quotes (use teaser quotes in pre-launch)
     useEffect(() => {
-        const quotes = isPreLaunch ? TEASER_QUOTES : SAMPLE_QUOTES
+        const activeQuotes = isPreLaunch ? TEASER_QUOTES : (quotes.length > 0 ? quotes : TEASER_QUOTES)
         const interval = setInterval(() => {
-            setCurrentQuoteIndex((prev) => (prev + 1) % quotes.length)
+            setCurrentQuoteIndex((prev) => (prev + 1) % activeQuotes.length)
         }, 5000)
         return () => clearInterval(interval)
-    }, [isPreLaunch])
+    }, [isPreLaunch, quotes])
 
     // Fade in effect
     useEffect(() => {
@@ -227,8 +234,8 @@ export default function Landing() {
         }
     }
 
-    const quotes = isPreLaunch ? TEASER_QUOTES : SAMPLE_QUOTES
-    const currentQuote = quotes[currentQuoteIndex % quotes.length]
+    const activeQuotes = isPreLaunch ? TEASER_QUOTES : (quotes.length > 0 ? quotes : TEASER_QUOTES)
+    const currentQuote = activeQuotes[currentQuoteIndex % activeQuotes.length]
 
     return (
         <div className={`landing-page ${isVisible ? 'visible' : ''}`}>
@@ -282,22 +289,22 @@ export default function Landing() {
                     <div className="stats-bar">
                         <div className="stat-item">
                             <Zap className="stat-icon" size={18} />
-                            <span className="stat-value">Day {stats.day}</span>
+                            <span className="stat-value">{isLoading ? 'Loading…' : `Day ${stats.day}`}</span>
                         </div>
                         <div className="stat-divider" />
                         <div className="stat-item">
                             <MessageSquare className="stat-icon" size={18} />
-                            <span className="stat-value">{stats.messages.toLocaleString()} messages</span>
+                            <span className="stat-value">{isLoading ? '…' : stats.messages.toLocaleString()} messages</span>
                         </div>
                         <div className="stat-divider" />
                         <div className="stat-item">
                             <Scale className="stat-icon" size={18} />
-                            <span className="stat-value">{stats.laws} laws passed</span>
+                            <span className="stat-value">{isLoading ? '…' : stats.laws} laws passed</span>
                         </div>
                         <div className="stat-divider" />
                         <div className="stat-item">
                             <Users className="stat-icon" size={18} />
-                            <span className="stat-value">{stats.activeAgents} active</span>
+                            <span className="stat-value">{isLoading ? '…' : stats.activeAgents} active</span>
                         </div>
                     </div>
                 )}

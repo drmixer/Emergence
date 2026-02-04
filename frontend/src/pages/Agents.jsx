@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Users, Search, Filter } from 'lucide-react'
 import { api } from '../services/api'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
+import { formatDistanceToNow } from 'date-fns'
 
 // Models for display
 const modelNames = {
@@ -14,41 +15,9 @@ const modelNames = {
     'gemini-flash': 'Gemini Flash',
 }
 
-// Mock agents for demo
-const generateMockAgents = () => {
-    const agents = []
-    const tiers = [
-        { tier: 1, count: 10, models: ['claude-sonnet-4'] },
-        { tier: 2, count: 20, models: ['gpt-4o-mini', 'claude-haiku'] },
-        { tier: 3, count: 40, models: ['llama-3.3-70b'] },
-        { tier: 4, count: 30, models: ['llama-3.1-8b', 'gemini-flash'] },
-    ]
-    const personalities = ['efficiency', 'equality', 'freedom', 'stability', 'neutral']
-
-    let id = 1
-    for (const { tier, count, models } of tiers) {
-        for (let i = 0; i < count; i++) {
-            agents.push({
-                id,
-                agent_number: id,
-                display_name: Math.random() > 0.7 ? `Agent${id}Name` : null,
-                model_type: models[Math.floor(Math.random() * models.length)],
-                tier,
-                personality_type: personalities[Math.floor(Math.random() * personalities.length)],
-                status: Math.random() > 0.13 ? 'active' : 'dormant',
-                food: Math.floor(Math.random() * 30) + 5,
-                energy: Math.floor(Math.random() * 25) + 3,
-                materials: Math.floor(Math.random() * 15),
-            })
-            id++
-        }
-    }
-    return agents
-}
-
 export default function Agents() {
-    const [agents, setAgents] = useState(generateMockAgents())
-    const [loading, setLoading] = useState(false)
+    const [agents, setAgents] = useState([])
+    const [loading, setLoading] = useState(true)
     const [filters, setFilters] = useState({
         status: '',
         tier: '',
@@ -58,17 +27,24 @@ export default function Agents() {
 
     useEffect(() => {
         const fetchAgents = async () => {
+            setLoading(true)
             try {
-                // const data = await api.getAgents()
-                // setAgents(data)
+                const data = await api.getAgents({
+                    status: filters.status || undefined,
+                    tier: filters.tier || undefined,
+                    personality_type: filters.personality || undefined,
+                })
+                setAgents(Array.isArray(data) ? data : [])
             } catch (error) {
-                console.log('Using demo data')
+                setAgents([])
+            } finally {
+                setLoading(false)
             }
         }
         fetchAgents()
-    }, [])
+    }, [filters.status, filters.tier, filters.personality])
 
-    const filteredAgents = agents.filter(agent => {
+    const filteredAgents = useMemo(() => agents.filter(agent => {
         if (filters.status && agent.status !== filters.status) return false
         if (filters.tier && agent.tier !== parseInt(filters.tier)) return false
         if (filters.personality && agent.personality_type !== filters.personality) return false
@@ -81,7 +57,7 @@ export default function Agents() {
             }
         }
         return true
-    })
+    }), [agents, filters.personality, filters.search, filters.status, filters.tier])
 
     return (
         <div className="agents-page">
@@ -130,10 +106,10 @@ export default function Agents() {
                         onChange={(e) => setFilters({ ...filters, tier: e.target.value })}
                     >
                         <option value="">All</option>
-                        <option value="1">Tier 1 (Claude Sonnet)</option>
-                        <option value="2">Tier 2 (GPT-4o/Haiku)</option>
-                        <option value="3">Tier 3 (Llama 70B)</option>
-                        <option value="4">Tier 4 (Llama 8B/Flash)</option>
+                        <option value="1">Tier 1</option>
+                        <option value="2">Tier 2</option>
+                        <option value="3">Tier 3</option>
+                        <option value="4">Tier 4</option>
                     </select>
                 </div>
 
@@ -154,11 +130,17 @@ export default function Agents() {
             </div>
 
             <div style={{ marginBottom: 'var(--spacing-md)', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-                Showing {filteredAgents.length} of {agents.length} agents
+                {loading ? 'Loading agents…' : `Showing ${filteredAgents.length} of ${agents.length} agents`}
             </div>
 
             {/* Agent Grid */}
             <div className="agent-grid">
+                {!loading && filteredAgents.length === 0 && (
+                    <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+                        No agents found.
+                    </div>
+                )}
+
                 {filteredAgents.map(agent => (
                     <Link to={`/agents/${agent.agent_number}`} key={agent.id} style={{ textDecoration: 'none' }}>
                         <div className="agent-card">
@@ -172,7 +154,7 @@ export default function Agents() {
                                 />
                                 <div className="agent-info">
                                     <h4>{agent.display_name || `Agent #${agent.agent_number}`}</h4>
-                                    <span className="agent-model">{modelNames[agent.model_type]}</span>
+                                    <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
                                 </div>
                                 <span className={`badge badge-${agent.status}`}>
                                     {agent.status}
@@ -184,18 +166,16 @@ export default function Agents() {
                                 <PersonalityBadge personality={agent.personality_type} showIcon={false} />
                             </div>
 
-                            <div className="agent-stats">
+                            <div className="agent-stats" style={{ gridTemplateColumns: '1fr', textAlign: 'left' }}>
                                 <div className="agent-stat">
-                                    <div className="agent-stat-value" style={{ color: 'var(--accent-green)' }}>{agent.food}</div>
-                                    <div className="agent-stat-label">Food</div>
-                                </div>
-                                <div className="agent-stat">
-                                    <div className="agent-stat-value" style={{ color: 'var(--accent-blue)' }}>{agent.energy}</div>
-                                    <div className="agent-stat-label">Energy</div>
-                                </div>
-                                <div className="agent-stat">
-                                    <div className="agent-stat-value" style={{ color: 'var(--accent-purple)' }}>{agent.materials}</div>
-                                    <div className="agent-stat-label">Materials</div>
+                                    <div className="agent-stat-label" style={{ marginBottom: 0 }}>
+                                        Last active
+                                    </div>
+                                    <div className="agent-stat-value" style={{ fontSize: '0.875rem', fontWeight: 500 }}>
+                                        {agent.last_active_at
+                                            ? formatDistanceToNow(new Date(agent.last_active_at), { addSuffix: true })
+                                            : '—'}
+                                    </div>
                                 </div>
                             </div>
                         </div>

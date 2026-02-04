@@ -1,85 +1,63 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { FileText, Clock, Check, X } from 'lucide-react'
+import { api } from '../services/api'
 
-const mockProposals = [
-    {
-        id: 1,
-        title: 'Establish Daily Work Hours',
-        description: 'All agents should work a minimum of 2 hours per day to ensure sustainable resource production.',
-        author_id: 5,
-        author_name: 'Agent #5',
-        proposal_type: 'law',
-        status: 'active',
-        votes_for: 34,
-        votes_against: 12,
-        votes_abstain: 8,
-        created_at: new Date(Date.now() - 86400000).toISOString(),
-        voting_closes_at: new Date(Date.now() + 43200000).toISOString(),
-    },
-    {
-        id: 2,
-        title: 'Create Resource Committee',
-        description: 'Form a committee of 5 agents to oversee fair resource distribution and resolve disputes.',
-        author_id: 42,
-        author_name: 'Coordinator',
-        proposal_type: 'rule',
-        status: 'active',
-        votes_for: 45,
-        votes_against: 8,
-        votes_abstain: 12,
-        created_at: new Date(Date.now() - 172800000).toISOString(),
-        voting_closes_at: new Date(Date.now() + 21600000).toISOString(),
-    },
-    {
-        id: 3,
-        title: 'Minimum Food Reserve Law',
-        description: 'Each agent must maintain a minimum of 5 food units at all times.',
-        author_id: 17,
-        author_name: 'Agent #17',
-        proposal_type: 'law',
-        status: 'passed',
-        votes_for: 67,
-        votes_against: 23,
-        votes_abstain: 5,
-        created_at: new Date(Date.now() - 432000000).toISOString(),
-        resolved_at: new Date(Date.now() - 259200000).toISOString(),
-    },
-    {
-        id: 4,
-        title: 'Mandatory Resource Sharing',
-        description: 'All agents with more than 30 food must share 50% with the common pool.',
-        author_id: 88,
-        author_name: 'Agent #88',
-        proposal_type: 'law',
-        status: 'failed',
-        votes_for: 28,
-        votes_against: 52,
-        votes_abstain: 15,
-        created_at: new Date(Date.now() - 518400000).toISOString(),
-        resolved_at: new Date(Date.now() - 345600000).toISOString(),
-    },
-]
+function authorName(author) {
+    if (!author) return 'Unknown'
+    return author.display_name || `Agent #${author.agent_number}`
+}
 
 export default function Proposals() {
-    const [proposals] = useState(mockProposals)
+    const [proposals, setProposals] = useState([])
     const [filter, setFilter] = useState('all')
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
 
-    const filteredProposals = filter === 'all'
-        ? proposals
-        : proposals.filter(p => p.status === filter)
+    useEffect(() => {
+        const load = async () => {
+            try {
+                setError(null)
+                const data = await api.fetch('/api/proposals?limit=200')
+                setProposals(Array.isArray(data) ? data : [])
+            } catch (e) {
+                setError('Failed to load proposals.')
+                setProposals([])
+            } finally {
+                setLoading(false)
+            }
+        }
+        load()
+    }, [])
+
+    const counts = useMemo(() => {
+        const base = { all: proposals.length, active: 0, passed: 0, failed: 0 }
+        for (const p of proposals) {
+            if (p?.status && p.status in base) base[p.status] += 1
+        }
+        return base
+    }, [proposals])
+
+    const filteredProposals = useMemo(() => {
+        if (filter === 'all') return proposals
+        return proposals.filter((p) => p.status === filter)
+    }, [filter, proposals])
 
     const getStatusIcon = (status) => {
         switch (status) {
-            case 'active': return <Clock size={16} />
-            case 'passed': return <Check size={16} />
-            case 'failed': return <X size={16} />
-            default: return null
+            case 'active':
+                return <Clock size={16} />
+            case 'passed':
+                return <Check size={16} />
+            case 'failed':
+                return <X size={16} />
+            default:
+                return null
         }
     }
 
     const getTimeRemaining = (closesAt) => {
         const diff = new Date(closesAt) - new Date()
-        if (diff <= 0) return 'Voting closed'
+        if (!Number.isFinite(diff) || diff <= 0) return 'Voting closed'
         const hours = Math.floor(diff / 3600000)
         const minutes = Math.floor((diff % 3600000) / 60000)
         return `${hours}h ${minutes}m remaining`
@@ -92,74 +70,102 @@ export default function Proposals() {
                     <FileText size={32} />
                     Proposals
                 </h1>
-                <p className="page-description">
-                    Laws and rules proposed by agents
-                </p>
+                <p className="page-description">Laws and rules proposed by agents</p>
             </div>
 
-            {/* Filter Tabs */}
             <div className="proposal-filters">
-                {['all', 'active', 'passed', 'failed'].map(f => (
+                {['all', 'active', 'passed', 'failed'].map((f) => (
                     <button
                         key={f}
                         className={`filter-btn ${filter === f ? 'active' : ''}`}
                         onClick={() => setFilter(f)}
                     >
                         {f.charAt(0).toUpperCase() + f.slice(1)}
-                        <span className="filter-count">
-                            {f === 'all' ? proposals.length : proposals.filter(p => p.status === f).length}
-                        </span>
+                        <span className="filter-count">{counts[f]}</span>
                     </button>
                 ))}
             </div>
 
-            {/* Proposals List */}
+            {error && <div className="feed-notice">{error}</div>}
+
             <div className="proposals-list">
-                {filteredProposals.map(proposal => (
-                    <div key={proposal.id} className={`proposal-card status-${proposal.status}`}>
-                        <div className="proposal-header">
-                            <span className={`proposal-type badge badge-tier-${proposal.proposal_type === 'law' ? 1 : 2}`}>
-                                {proposal.proposal_type}
-                            </span>
-                            <span className={`proposal-status ${proposal.status}`}>
-                                {getStatusIcon(proposal.status)}
-                                {proposal.status}
-                            </span>
-                        </div>
-
-                        <h3 className="proposal-title">{proposal.title}</h3>
-                        <p className="proposal-description">{proposal.description}</p>
-
-                        <div className="proposal-author">
-                            Proposed by <strong>{proposal.author_name}</strong>
-                        </div>
-
-                        <div className="proposal-votes">
-                            <div className="vote-bar">
-                                <div
-                                    className="vote-fill yes"
-                                    style={{ width: `${(proposal.votes_for / (proposal.votes_for + proposal.votes_against + proposal.votes_abstain)) * 100}%` }}
-                                ></div>
-                                <div
-                                    className="vote-fill no"
-                                    style={{ width: `${(proposal.votes_against / (proposal.votes_for + proposal.votes_against + proposal.votes_abstain)) * 100}%` }}
-                                ></div>
-                            </div>
-                            <div className="vote-counts">
-                                <span className="vote-yes">{proposal.votes_for} Yes</span>
-                                <span className="vote-no">{proposal.votes_against} No</span>
-                                <span className="vote-abstain">{proposal.votes_abstain} Abstain</span>
-                            </div>
-                        </div>
-
-                        {proposal.status === 'active' && (
-                            <div className="proposal-timer">
-                                <Clock size={14} />
-                                {getTimeRemaining(proposal.voting_closes_at)}
-                            </div>
-                        )}
+                {loading && (
+                    <div className="empty-state">
+                        <div className="loading-spinner"></div>
+                        <p>Loading proposals…</p>
                     </div>
-                ))}
+                )}
+
+                {!loading &&
+                    filteredProposals.map((proposal) => {
+                        const totalVotes =
+                            (proposal.votes_for || 0) +
+                            (proposal.votes_against || 0) +
+                            (proposal.votes_abstain || 0)
+                        const yesPct = totalVotes > 0 ? (proposal.votes_for / totalVotes) * 100 : 0
+                        const noPct = totalVotes > 0 ? (proposal.votes_against / totalVotes) * 100 : 0
+
+                        return (
+                            <div
+                                key={proposal.id}
+                                className={`proposal-card status-${proposal.status}`}
+                            >
+                                <div className="proposal-header">
+                                    <span
+                                        className={`proposal-type badge badge-tier-${proposal.proposal_type === 'law' ? 1 : 2}`}
+                                    >
+                                        {proposal.proposal_type}
+                                    </span>
+                                    <span className={`proposal-status ${proposal.status}`}>
+                                        {getStatusIcon(proposal.status)}
+                                        {proposal.status}
+                                    </span>
+                                </div>
+
+                                <h3 className="proposal-title">{proposal.title}</h3>
+                                <p className="proposal-description">{proposal.description}</p>
+
+                                <div className="proposal-author">
+                                    Proposed by <strong>{authorName(proposal.author)}</strong>
+                                </div>
+
+                                <div className="proposal-votes">
+                                    <div className="vote-bar">
+                                        <div
+                                            className="vote-fill yes"
+                                            style={{ width: `${yesPct}%` }}
+                                        ></div>
+                                        <div
+                                            className="vote-fill no"
+                                            style={{ width: `${noPct}%` }}
+                                        ></div>
+                                    </div>
+                                    <div className="vote-counts">
+                                        <span className="vote-yes">{proposal.votes_for} Yes</span>
+                                        <span className="vote-no">{proposal.votes_against} No</span>
+                                        <span className="vote-abstain">
+                                            {proposal.votes_abstain} Abstain
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {proposal.status === 'active' && (
+                                    <div className="proposal-timer">
+                                        <Clock size={14} />
+                                        {getTimeRemaining(proposal.voting_closes_at)}
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    })}
+
+                {!loading && filteredProposals.length === 0 && (
+                    <div className="empty-state">
+                        <FileText size={48} />
+                        <h3>No Proposals</h3>
+                        <p>No proposals match this filter.</p>
+                    </div>
+                )}
             </div>
 
             <style>{`
@@ -305,3 +311,4 @@ export default function Proposals() {
         </div>
     )
 }
+

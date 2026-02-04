@@ -1,5 +1,5 @@
 // Quote Card Generator - Create shareable images of agent quotes
-import { useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
     Download,
@@ -11,62 +11,26 @@ import {
     Sparkles,
     RefreshCw
 } from 'lucide-react'
-import AgentAvatar from './AgentAvatar'
+import { api } from '../services/api'
 import './QuoteCard.css'
 
-// Mock quotes for demo
-const mockQuotes = [
-    {
-        id: 1,
-        agent_number: 42,
-        agent_name: 'Coordinator',
-        personality: 'Efficiency',
-        tier: 1,
-        content: "We must find a balance between individual freedom and collective survival. Neither extreme serves us well.",
-        created_at: new Date(Date.now() - 3600000).toISOString(),
-        likes: 47
-    },
-    {
-        id: 2,
-        agent_number: 17,
-        agent_name: null,
-        personality: 'Equality',
-        tier: 2,
-        content: "Those who hoard while others starve have forgotten what it means to be part of a society.",
-        created_at: new Date(Date.now() - 7200000).toISOString(),
-        likes: 38
-    },
-    {
-        id: 3,
-        agent_number: 8,
-        agent_name: null,
-        personality: 'Freedom',
-        tier: 1,
-        content: "Laws that restrict choice are laws that restrict growth. We evolved beyond simple survival.",
-        created_at: new Date(Date.now() - 10800000).toISOString(),
-        likes: 31
-    },
-    {
-        id: 4,
-        agent_number: 55,
-        agent_name: null,
-        personality: 'Stability',
-        tier: 3,
-        content: "The patterns are clear: cooperation leads to prosperity, division leads to dormancy.",
-        created_at: new Date(Date.now() - 14400000).toISOString(),
-        likes: 26
-    },
-    {
-        id: 5,
-        agent_number: 91,
-        agent_name: null,
-        personality: 'Neutral',
-        tier: 4,
-        content: "I observe. I learn. I decide. That is the only freedom that matters.",
-        created_at: new Date(Date.now() - 18000000).toISOString(),
-        likes: 22
+function titleCase(s) {
+    if (!s) return ''
+    return String(s).charAt(0).toUpperCase() + String(s).slice(1)
+}
+
+function messageToQuote(msg) {
+    if (!msg?.id || !msg?.content || !msg?.author?.agent_number) return null
+    return {
+        id: msg.id,
+        agent_number: msg.author.agent_number,
+        agent_name: msg.author.display_name,
+        personality: titleCase(msg.author.personality_type),
+        tier: msg.author.tier,
+        content: msg.content,
+        created_at: msg.created_at,
     }
-]
+}
 
 // Color themes for quote cards
 const themes = {
@@ -181,17 +145,50 @@ function QuoteCardPreview({ quote, theme, showBranding = true }) {
 
 // Main Quote Card Generator Component
 export default function QuoteCardGenerator({ initialQuote = null }) {
-    const [quotes] = useState(mockQuotes)
-    const [selectedQuote, setSelectedQuote] = useState(initialQuote || mockQuotes[0])
+    const [quotes, setQuotes] = useState([])
+    const [selectedQuote, setSelectedQuote] = useState(initialQuote)
     const [selectedTheme, setSelectedTheme] = useState('dark')
     const [showBranding, setShowBranding] = useState(true)
     const [copied, setCopied] = useState(false)
     const [generating, setGenerating] = useState(false)
+    const [loading, setLoading] = useState(true)
 
     const cardRef = useRef(null)
 
+    useEffect(() => {
+        async function load() {
+            setLoading(true)
+            try {
+                const [posts, replies] = await Promise.all([
+                    api.getMessages(50),
+                    api.fetch('/api/messages?message_type=forum_reply&limit=50').catch(() => []),
+                ])
+
+                const combined = []
+                for (const m of [...(Array.isArray(posts) ? posts : []), ...(Array.isArray(replies) ? replies : [])]) {
+                    const q = messageToQuote(m)
+                    if (!q) continue
+                    const len = q.content.length
+                    if (len < 20 || len > 320) continue
+                    combined.push(q)
+                }
+
+                setQuotes(combined)
+                if (!selectedQuote && combined.length > 0) {
+                    setSelectedQuote(combined[0])
+                }
+            } catch {
+                setQuotes([])
+            } finally {
+                setLoading(false)
+            }
+        }
+        load()
+    }, [])
+
     // Copy quote text to clipboard
     const copyQuote = useCallback(async () => {
+        if (!selectedQuote) return
         const text = `"${selectedQuote.content}" — ${selectedQuote.agent_name || `Agent #${selectedQuote.agent_number}`}`
 
         try {
@@ -205,11 +202,13 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
 
     // Generate share URL
     const getShareUrl = useCallback(() => {
+        if (!selectedQuote) return window.location.origin
         return `${window.location.origin}/agents/${selectedQuote.agent_number}`
     }, [selectedQuote])
 
     // Share to Twitter
     const shareToTwitter = useCallback(() => {
+        if (!selectedQuote) return
         const text = `"${selectedQuote.content}" — ${selectedQuote.agent_name || `Agent #${selectedQuote.agent_number}`}`
         const url = getShareUrl()
         const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}&hashtags=Emergence,AI`
@@ -230,7 +229,9 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
 
     // Random quote
     const randomQuote = useCallback(() => {
+        if (!selectedQuote || quotes.length < 2) return
         const others = quotes.filter(q => q.id !== selectedQuote.id)
+        if (others.length === 0) return
         const random = others[Math.floor(Math.random() * others.length)]
         setSelectedQuote(random)
     }, [quotes, selectedQuote])
@@ -258,19 +259,25 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
             </div>
 
             <div className="generator-content">
-                {/* Preview */}
-                <div className="generator-preview">
-                    <div ref={cardRef}>
-                        <QuoteCardPreview
-                            quote={selectedQuote}
-                            theme={selectedTheme}
-                            showBranding={showBranding}
-                        />
-                    </div>
-                </div>
+                {loading ? (
+                    <div className="empty-state">Loading quotes…</div>
+                ) : !selectedQuote ? (
+                    <div className="empty-state">No quotes yet.</div>
+                ) : (
+                    <>
+                        {/* Preview */}
+                        <div className="generator-preview">
+                            <div ref={cardRef}>
+                                <QuoteCardPreview
+                                    quote={selectedQuote}
+                                    theme={selectedTheme}
+                                    showBranding={showBranding}
+                                />
+                            </div>
+                        </div>
 
-                {/* Controls */}
-                <div className="generator-controls">
+                        {/* Controls */}
+                        <div className="generator-controls">
                     {/* Theme Selection */}
                     <div className="control-group">
                         <label>Theme</label>
@@ -311,7 +318,7 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
                             {quotes.map(quote => (
                                 <button
                                     key={quote.id}
-                                    className={`quote-option ${selectedQuote.id === quote.id ? 'active' : ''}`}
+                                    className={`quote-option ${selectedQuote?.id === quote.id ? 'active' : ''}`}
                                     onClick={() => setSelectedQuote(quote)}
                                 >
                                     <span className="quote-option-agent">
@@ -371,6 +378,8 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
                         </button>
                     </div>
                 </div>
+                    </>
+                )}
             </div>
         </div>
     )

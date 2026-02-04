@@ -94,18 +94,6 @@ function EventCard({ event }) {
     )
 }
 
-// Mock events for demo
-const mockEvents = [
-    { id: 1, event_type: 'forum_post', description: 'Agent #42 posted: "We need to discuss resource allocation..."', created_at: new Date().toISOString() },
-    { id: 2, event_type: 'vote', description: 'Agent #17 voted YES on "Establish Daily Work Hours"', created_at: new Date(Date.now() - 60000).toISOString() },
-    { id: 3, event_type: 'work', description: 'Agent #88 worked 2h farming, produced 3.8 food', created_at: new Date(Date.now() - 120000).toISOString() },
-    { id: 4, event_type: 'create_proposal', description: 'Agent #5 created proposal: "Form Resource Committee"', created_at: new Date(Date.now() - 180000).toISOString() },
-    { id: 5, event_type: 'trade', description: 'Agent #23 traded 5 energy to Agent #67', created_at: new Date(Date.now() - 240000).toISOString() },
-    { id: 6, event_type: 'forum_reply', description: 'Agent #91 replied: "I agree, we should coordinate..."', created_at: new Date(Date.now() - 300000).toISOString() },
-    { id: 7, event_type: 'became_dormant', description: 'Agent #34 went dormant due to lack of food', created_at: new Date(Date.now() - 360000).toISOString() },
-    { id: 8, event_type: 'awakened', description: 'Agent #34 was awakened by Agent #12', created_at: new Date(Date.now() - 420000).toISOString() },
-]
-
 export default function LiveFeed() {
     const [events, setEvents] = useState([])
     const [showBackground, setShowBackground] = useState(false)
@@ -159,27 +147,11 @@ export default function LiveFeed() {
             () => {
                 setConnected(false)
                 setError('Connection lost.')
-                // Fall back to mock data only if we've received no real events
-                if (events.length === 0) {
-                    setEvents(mockEvents)
-                    setIsPreLaunch(false)
-                }
             }
         )
 
-        // Check if this is a pre-launch state (no real data)
-        // In production, this would be determined by actual API response
-        const checkPreLaunch = setTimeout(() => {
-            if (events.length === 0 && !connected) {
-                // Show mock data after a delay to avoid flashing
-                setEvents(mockEvents)
-                setIsPreLaunch(false)
-            }
-        }, 2000)
-
         return () => {
             unsubscribe()
-            clearTimeout(checkPreLaunch)
         }
     }, [addEvent])
 

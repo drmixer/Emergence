@@ -4,6 +4,8 @@ Analytics & Highlights API Router
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
+from app.core.config import settings
+from app.core.time import ensure_utc, now_utc
 from app.services.leaderboards import (
     get_wealth_leaderboard,
     get_activity_leaderboard,
@@ -22,7 +24,7 @@ from app.services.summaries import (
     get_story_so_far,
 )
 from app.core.database import SessionLocal
-from app.models.models import Event, Agent, Law, Message, Proposal, Vote, AgentInventory
+from app.models.models import Event, Agent, Law, Message, Proposal, Vote, AgentInventory, GlobalResources
 
 router = APIRouter()
 
@@ -242,14 +244,54 @@ def overview():
         active_laws = db.query(Law).filter(Law.active.is_(True)).count()
 
         most_recent_event = db.query(Event).order_by(Event.created_at.desc()).first()
+        first_event = db.query(Event).order_by(Event.created_at.asc()).first()
+
+        now = now_utc()
+        first_at = ensure_utc(first_event.created_at) if first_event and first_event.created_at else None
+        latest_at = ensure_utc(most_recent_event.created_at) if most_recent_event and most_recent_event.created_at else None
+
+        # Sim day number: default configuration is 1 real hour = 1 sim day.
+        day_length_seconds = max(1, int(settings.DAY_LENGTH_MINUTES) * 60)
+        day_number = (
+            int(((now - first_at).total_seconds()) // day_length_seconds) + 1
+            if first_at
+            else 0
+        )
+
+        # Critical agents: count agents with low food/energy (thresholds match the context-builder warning).
+        critical_food = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.resource_type == "food", AgentInventory.quantity < 2)
+            .count()
+        )
+        critical_energy = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.resource_type == "energy", AgentInventory.quantity < 2)
+            .count()
+        )
+
+        # Global resource pool baselines (seeded via scripts/seed_agents.py).
+        globals_rows = db.query(GlobalResources).all()
+        common_pool = {str(gr.resource_type): float(gr.in_common_pool or 0) for gr in globals_rows}
+        reserves_total = {str(gr.resource_type): float(gr.total_amount or 0) for gr in globals_rows}
+
+        # Capacity estimate: starting resources per agent + global reserves.
+        capacity = {
+            "food": float(total_agents * settings.STARTING_FOOD) + float(reserves_total.get("food", 0)),
+            "energy": float(total_agents * settings.STARTING_ENERGY) + float(reserves_total.get("energy", 0)),
+            "materials": float(total_agents * settings.STARTING_MATERIALS) + float(reserves_total.get("materials", 0)),
+            "land": float(reserves_total.get("land", 0)),
+        }
 
         return {
+            "day_number": day_number,
             "agents": {
                 "total": total_agents,
                 "active": active_agents,
                 "dormant": dormant_agents,
                 "dead": dead_agents,
             },
+            "critical": {"food_agents": critical_food, "energy_agents": critical_energy},
             "messages": {
                 "total": total_messages,
                 "forum_posts": forum_posts,
@@ -264,9 +306,13 @@ def overview():
             },
             "laws": {"total": total_laws, "active": active_laws},
             "events": {
-                "latest": most_recent_event.created_at.isoformat()
-                if most_recent_event and most_recent_event.created_at
-                else None
+                "first": first_at.isoformat() if first_at else None,
+                "latest": latest_at.isoformat() if latest_at else None,
+            },
+            "resources": {
+                "common_pool": common_pool,
+                "reserves_total": reserves_total,
+                "capacity_estimate": capacity,
             },
         }
     finally:

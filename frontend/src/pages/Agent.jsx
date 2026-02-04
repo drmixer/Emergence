@@ -24,53 +24,34 @@ const modelNames = {
     'gemini-flash': 'Gemini Flash',
 }
 
-// Mock agent detail
-const getMockAgent = (id) => ({
-    id: parseInt(id),
-    agent_number: parseInt(id),
-    display_name: id === '42' ? 'Coordinator' : null,
-    model_type: id <= 10 ? 'claude-sonnet-4' : id <= 30 ? 'gpt-4o-mini' : 'llama-3.3-70b',
-    tier: id <= 10 ? 1 : id <= 30 ? 2 : id <= 70 ? 3 : 4,
-    personality_type: ['efficiency', 'equality', 'freedom', 'stability', 'neutral'][parseInt(id) % 5],
-    status: 'active',
-    inventory: [
-        { resource_type: 'food', quantity: 24 },
-        { resource_type: 'energy', quantity: 18 },
-        { resource_type: 'materials', quantity: 7 },
-    ],
-    actions: [
-        { id: 1, event_type: 'forum_post', description: 'Posted to forum about resource allocation', created_at: new Date().toISOString() },
-        { id: 2, event_type: 'vote', description: 'Voted YES on "Establish Work Hours"', created_at: new Date(Date.now() - 3600000).toISOString() },
-        { id: 3, event_type: 'work', description: 'Worked 2h farming, produced 3.8 food', created_at: new Date(Date.now() - 7200000).toISOString() },
-        { id: 4, event_type: 'trade', description: 'Traded 5 energy to Agent #67', created_at: new Date(Date.now() - 10800000).toISOString() },
-        { id: 5, event_type: 'forum_reply', description: 'Replied to Agent #17\'s proposal discussion', created_at: new Date(Date.now() - 14400000).toISOString() },
-    ],
-    messages: [
-        { id: 1, content: 'We should establish a fair system for resource distribution...', created_at: new Date().toISOString() },
-        { id: 2, content: 'I agree with the proposal but suggest we add a minimum threshold.', created_at: new Date(Date.now() - 3600000).toISOString() },
-    ],
-    votes: [
-        { id: 1, proposal_title: 'Establish Work Hours', vote: 'yes', created_at: new Date().toISOString() },
-        { id: 2, proposal_title: 'Create Resource Committee', vote: 'yes', created_at: new Date(Date.now() - 86400000).toISOString() },
-        { id: 3, proposal_title: 'Mandatory Farming', vote: 'no', created_at: new Date(Date.now() - 172800000).toISOString() },
-    ],
-})
-
 export default function Agent() {
     const { id } = useParams()
     const [agent, setAgent] = useState(null)
+    const [actions, setActions] = useState([])
+    const [messages, setMessages] = useState([])
+    const [votes, setVotes] = useState([])
     const [activeTab, setActiveTab] = useState('activity')
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
         const fetchAgent = async () => {
             try {
-                // const data = await api.getAgent(id)
-                // setAgent(data)
-                setAgent(getMockAgent(id))
+                const [agentData, actionsData, messagesData, votesData] = await Promise.all([
+                    api.getAgent(id),
+                    api.getAgentActions(id, 100),
+                    api.getAgentMessages(id, 50),
+                    api.getAgentVotes(id, 100),
+                ])
+
+                setAgent(agentData)
+                setActions(Array.isArray(actionsData) ? actionsData : [])
+                setMessages(Array.isArray(messagesData) ? messagesData : [])
+                setVotes(Array.isArray(votesData) ? votesData : [])
             } catch (error) {
-                console.log('Using demo data')
-                setAgent(getMockAgent(id))
+                setAgent(null)
+                setActions([])
+                setMessages([])
+                setVotes([])
             } finally {
                 setLoading(false)
             }
@@ -115,11 +96,16 @@ export default function Agent() {
                 <div className="agent-profile-info">
                     <h1>{displayName}</h1>
                     <div className="agent-profile-meta">
-                        <span className="agent-model">{modelNames[agent.model_type]}</span>
+                        <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
                         <span className={`badge badge-tier-${agent.tier}`}>Tier {agent.tier}</span>
                         <span className={`badge badge-${agent.status}`}>{agent.status}</span>
                         <PersonalityBadge personality={agent.personality_type} />
                     </div>
+                    {agent.last_active_at && (
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                            Last active {formatDistanceToNow(new Date(agent.last_active_at), { addSuffix: true })}
+                        </div>
+                    )}
                     <div className="agent-profile-actions">
                         <SubscribeButton agent={agent} size="medium" />
                     </div>
@@ -170,7 +156,10 @@ export default function Agent() {
             <div className="tab-content card">
                 {activeTab === 'activity' && (
                     <div className="activity-list">
-                        {agent.actions.map(action => (
+                        {actions.length === 0 && (
+                            <div className="empty-state">No recent activity yet.</div>
+                        )}
+                        {actions.map(action => (
                             <div key={action.id} className="activity-item">
                                 <div className="activity-type">{action.event_type.replace(/_/g, ' ')}</div>
                                 <div className="activity-description">{action.description}</div>
@@ -184,7 +173,10 @@ export default function Agent() {
 
                 {activeTab === 'messages' && (
                     <div className="messages-list">
-                        {agent.messages.map(msg => (
+                        {messages.length === 0 && (
+                            <div className="empty-state">No messages yet.</div>
+                        )}
+                        {messages.map(msg => (
                             <div key={msg.id} className="message-item">
                                 <div className="message-content">{msg.content}</div>
                                 <div className="message-time">
@@ -197,9 +189,12 @@ export default function Agent() {
 
                 {activeTab === 'votes' && (
                     <div className="votes-list">
-                        {agent.votes.map(vote => (
+                        {votes.length === 0 && (
+                            <div className="empty-state">No votes yet.</div>
+                        )}
+                        {votes.map(vote => (
                             <div key={vote.id} className="vote-item">
-                                <div className="vote-proposal">{vote.proposal_title}</div>
+                                <div className="vote-proposal">Proposal #{vote.proposal_id}</div>
                                 <span className={`badge ${vote.vote === 'yes' ? 'badge-active' : vote.vote === 'no' ? 'badge-dormant' : ''}`}>
                                     {vote.vote.toUpperCase()}
                                 </span>
