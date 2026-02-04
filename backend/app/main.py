@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting Emergence API...")
+    logger.info(
+        "LLM config: provider=%s groq=%s openrouter=%s groq_default_model=%s",
+        getattr(settings, "LLM_PROVIDER", "auto"),
+        bool(getattr(settings, "GROQ_API_KEY", "")),
+        bool(getattr(settings, "OPENROUTER_API_KEY", "")),
+        getattr(settings, "GROQ_DEFAULT_MODEL", ""),
+    )
     poller = asyncio.create_task(event_polling_task())
     yield
     poller.cancel()
