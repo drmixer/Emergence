@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     # LLM APIs
     OPENROUTER_API_KEY: str = ""
     GROQ_API_KEY: str = ""
+    # LLM routing
+    # - "auto": use model mapping if known, otherwise prefer OpenRouter if configured, else Groq
+    # - "openrouter": force OpenRouter for all unknown models
+    # - "groq": force Groq for all unknown models
+    LLM_PROVIDER: str = "auto"
+    # When forcing Groq (or falling back), pick one of: llama-3.3-70b | llama-3.1-8b
+    GROQ_DEFAULT_MODEL: str = "llama-3.1-8b"
     
     # Security
     SECRET_KEY: str = "development-secret-key-change-in-production"

@@ -51,14 +51,32 @@ class LLMClient:
     
     def _get_client_and_model(self, model_type: str):
         """Get the appropriate client and model name."""
+        provider = (settings.LLM_PROVIDER or "auto").strip().lower()
+
+        if provider == "groq":
+            key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
+            model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+            return self.groq_client, model_name
+
+        if provider == "openrouter":
+            # Fall back to a known OpenRouter model when the DB model_type is something else.
+            model_name = OPENROUTER_CONFIG["models"].get(model_type, OPENROUTER_CONFIG["models"]["gpt-4o-mini"])
+            return self.openrouter_client, model_name
+
+        # auto: honor explicit mapping first, then fall back based on configured keys.
         if model_type in OPENROUTER_CONFIG["models"]:
             return self.openrouter_client, OPENROUTER_CONFIG["models"][model_type]
-        elif model_type in GROQ_CONFIG["models"]:
+        if model_type in GROQ_CONFIG["models"]:
             return self.groq_client, GROQ_CONFIG["models"][model_type]
-        else:
-            # Default to OpenRouter with GPT-4o-mini
-            logger.warning(f"Unknown model type: {model_type}, defaulting to gpt-4o-mini")
+
+        if settings.OPENROUTER_API_KEY:
+            logger.warning(f"Unknown model type: {model_type}, defaulting to OpenRouter gpt-4o-mini")
             return self.openrouter_client, OPENROUTER_CONFIG["models"]["gpt-4o-mini"]
+
+        logger.warning(f"Unknown model type: {model_type}, defaulting to Groq {settings.GROQ_DEFAULT_MODEL}")
+        key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
+        model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+        return self.groq_client, model_name
     
     async def get_completion(
         self,
@@ -70,14 +88,20 @@ class LLMClient:
         max_retries: int = 3,
     ) -> Optional[str]:
         """Get a completion with retry logic."""
-        
-        if model_type in OPENROUTER_CONFIG["models"] or model_type not in GROQ_CONFIG["models"]:
-            if not settings.OPENROUTER_API_KEY:
-                logger.error("OPENROUTER_API_KEY is not set; returning no completion.")
-                return None
-        if model_type in GROQ_CONFIG["models"]:
+
+        provider = (settings.LLM_PROVIDER or "auto").strip().lower()
+        if provider == "groq":
             if not settings.GROQ_API_KEY:
-                logger.error("GROQ_API_KEY is not set; returning no completion.")
+                logger.error("LLM_PROVIDER=groq but GROQ_API_KEY is not set; returning no completion.")
+                return None
+        elif provider == "openrouter":
+            if not settings.OPENROUTER_API_KEY:
+                logger.error("LLM_PROVIDER=openrouter but OPENROUTER_API_KEY is not set; returning no completion.")
+                return None
+        else:
+            # auto
+            if not settings.OPENROUTER_API_KEY and not settings.GROQ_API_KEY:
+                logger.error("Neither OPENROUTER_API_KEY nor GROQ_API_KEY is set; returning no completion.")
                 return None
 
         client, model_name = self._get_client_and_model(model_type)
@@ -102,6 +126,30 @@ class LLMClient:
                 await asyncio.sleep(wait_time)
                 
             except APIError as e:
+                # If OpenRouter is out of credits (402) but Groq is configured, fall back.
+                msg = str(e)
+                if (
+                    client is self.openrouter_client
+                    and settings.GROQ_API_KEY
+                    and ("402" in msg or "Insufficient credits" in msg)
+                ):
+                    logger.warning("OpenRouter returned 402; falling back to Groq for this request.")
+                    key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
+                    fallback_model = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+                    try:
+                        response = await self.groq_client.chat.completions.create(
+                            model=fallback_model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                        )
+                        return response.choices[0].message.content
+                    except Exception as inner:
+                        logger.error(f"Groq fallback failed: {inner}")
+
                 logger.error(f"API error: {e}")
                 if attempt == max_retries - 1:
                     raise
