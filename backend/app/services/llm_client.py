@@ -209,8 +209,21 @@ class LLMClient:
                         max_tokens=max_tokens,
                         temperature=temperature,
                     )
-                
-                return response.choices[0].message.content
+
+                # Guard against occasional provider/library edge cases where a 200 OK yields
+                # an empty/partial payload.
+                try:
+                    choices = getattr(response, "choices", None) or []
+                    first = choices[0] if choices else None
+                    message = getattr(first, "message", None)
+                    content = getattr(message, "content", None)
+                except Exception:
+                    content = None
+
+                if not content:
+                    raise RuntimeError("Empty completion content")
+
+                return content
                 
             except RateLimitError as e:
                 or_fallback = await _try_openrouter_fallback(e)

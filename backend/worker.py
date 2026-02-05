@@ -18,6 +18,7 @@ from app.services.agent_loop import agent_processor
 from app.services.scheduler import scheduler
 from app.services.events_generator import run_event_check, event_generator
 from app.services.summaries import summary_scheduler
+from app.core.time import now_utc
 
 # Configure logging
 logging.basicConfig(
@@ -103,21 +104,25 @@ async def main():
         # Start random event generator
         event_task = asyncio.create_task(run_event_loop())
         
-        # Start summary generator
-        summary_task = asyncio.create_task(run_summary_loop())
+        # Start summary generator (optional; avoid surprise traffic/costs when disabled)
+        if getattr(settings, "SUMMARIES_ENABLED", False):
+            summary_task = asyncio.create_task(run_summary_loop())
+        else:
+            logger.info("Summaries disabled; skipping summary generator loop.")
         
         logger.info("Worker running! All systems active.")
         logger.info("-" * 60)
         
         # Keep running until interrupted
-        last_status_time = datetime.utcnow()
+        last_status_time = now_utc()
         while True:
             await asyncio.sleep(60)
             
             # Log periodic status
             status = await get_status()
             logger.info(
-                f"Status: {status['active_agents']}/{status['total_agents']} agents active | "
+                f"Status: {status['processing_agents']} processing | "
+                f"{status['active_agents']}/{status['total_agents']} agents active | "
                 f"Active effects: {status['active_effects']}"
             )
             
@@ -167,6 +172,7 @@ async def get_status() -> dict:
             "active_agents": active,
             "active_effects": active_effects,
             "processing": agent_processor.running,
+            "processing_agents": len(agent_processor.tasks),
         }
     finally:
         db.close()
