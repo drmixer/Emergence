@@ -106,6 +106,40 @@ class LLMClient:
 
         client, model_name = self._get_client_and_model(model_type)
 
+        async def _try_openrouter_fallback(err: Exception) -> Optional[str]:
+            """
+            If Groq is rate-limiting (common on free tiers), optionally fall back to OpenRouter
+            when a key is configured. This keeps the simulation alive while still preferring Groq.
+            """
+            if not settings.OPENROUTER_API_KEY:
+                return None
+            if client is not self.groq_client:
+                return None
+
+            msg = str(err)
+            # RateLimitError usually maps to HTTP 429; keep this check broad.
+            if "429" not in msg and "rate" not in msg.lower():
+                return None
+
+            fallback_model = OPENROUTER_CONFIG["models"].get(
+                model_type, OPENROUTER_CONFIG["models"]["gpt-4o-mini"]
+            )
+            logger.warning("Groq request rate-limited; falling back to OpenRouter for this request.")
+            try:
+                response = await self.openrouter_client.chat.completions.create(
+                    model=fallback_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                return response.choices[0].message.content
+            except Exception as inner:
+                logger.error(f"OpenRouter fallback failed: {inner}")
+                return None
+
         async def _try_groq_fallback(err: Exception) -> Optional[str]:
             if not settings.GROQ_API_KEY:
                 return None
@@ -149,11 +183,19 @@ class LLMClient:
                 return response.choices[0].message.content
                 
             except RateLimitError as e:
+                or_fallback = await _try_openrouter_fallback(e)
+                if or_fallback:
+                    return or_fallback
                 wait_time = (2 ** attempt) + random.random()
                 logger.warning(f"Rate limited, waiting {wait_time:.2f}s (attempt {attempt + 1})")
+                if attempt == max_retries - 1:
+                    raise
                 await asyncio.sleep(wait_time)
                 
             except APIError as e:
+                or_fallback = await _try_openrouter_fallback(e)
+                if or_fallback:
+                    return or_fallback
                 groq = await _try_groq_fallback(e)
                 if groq:
                     return groq
@@ -163,6 +205,9 @@ class LLMClient:
                 await asyncio.sleep(1)
                 
             except Exception as e:
+                or_fallback = await _try_openrouter_fallback(e)
+                if or_fallback:
+                    return or_fallback
                 groq = await _try_groq_fallback(e)
                 if groq:
                     return groq
