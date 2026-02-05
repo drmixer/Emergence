@@ -8,9 +8,16 @@ from sqlalchemy.pool import QueuePool
 
 from app.core.config import settings
 
+# Reduce worst-case startup/readiness delays when the DB host is unreachable.
+# (psycopg2 honors connect_timeout in seconds)
+_connect_args = {}
+if str(getattr(settings, "DATABASE_URL", "")).startswith(("postgresql://", "postgres://")):
+    _connect_args = {"connect_timeout": 5}
+
 # Create engine with connection pooling
 engine = create_engine(
     settings.DATABASE_URL,
+    connect_args=_connect_args,
     poolclass=QueuePool,
     pool_size=10,
     max_overflow=20,

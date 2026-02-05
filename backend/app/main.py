@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import logging
 
 from app.core.config import settings
@@ -73,28 +74,31 @@ app.include_router(predictions_router, prefix="/api/predictions", tags=["predict
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for Railway."""
-    from app.core.database import SessionLocal
-    from app.models.models import Agent
-    
+    """Liveness check (should be fast and not depend on external services)."""
+    return {
+        "status": "ok",
+        "service": "emergence-backend",
+        "environment": settings.ENVIRONMENT,
+    }
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness check (verifies critical dependencies like the database)."""
     try:
+        from sqlalchemy import text
+
+        from app.core.database import SessionLocal
+
         db = SessionLocal()
-        active_count = db.query(Agent).filter(Agent.status == "active").count()
-        total_count = db.query(Agent).count()
-        db.close()
-        
-        return {
-            "status": "healthy",
-            "database": "connected",
-            "active_agents": active_count,
-            "total_agents": total_count,
-            "environment": settings.ENVIRONMENT,
-        }
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
+
+        return {"status": "ready"}
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-        }
+        return JSONResponse(status_code=503, content={"status": "not_ready", "error": str(e)})
 
 
 @app.get("/")

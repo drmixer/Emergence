@@ -93,63 +93,69 @@ class AgentProcessor:
     
     async def _process_agent_turn(self, agent_id: int):
         """Process a single turn for an agent."""
-        db = SessionLocal()
-        
         try:
-            # 1. PERCEIVE - Get agent and check status
-            agent = db.query(Agent).filter(Agent.id == agent_id).first()
-            
-            if not agent:
-                logger.error(f"Agent {agent_id} not found")
-                return
-            
-            if agent.status == "dormant":
-                logger.debug(f"Agent {agent_id} is dormant, skipping")
-                return
-            
-            if agent.status == "dead":
-                # Dead agents are permanently removed from the simulation
-                logger.debug(f"Agent {agent_id} is dead, removing from loop")
-                if agent_id in self.tasks:
-                    self.tasks[agent_id].cancel()
-                    del self.tasks[agent_id]
-                return
-            
-            # 2. BUILD CONTEXT - Gather information for decision
-            context = await build_agent_context(db, agent)
-            
-            # 3. DECIDE - Call LLM for action
+            # Phase 1: DB reads for context (short-lived session).
+            db = SessionLocal()
+            try:
+                agent = db.query(Agent).filter(Agent.id == agent_id).first()
+                if not agent:
+                    logger.error(f"Agent {agent_id} not found")
+                    return
+
+                if agent.status == "dormant":
+                    logger.debug(f"Agent {agent_id} is dormant, skipping")
+                    return
+
+                if agent.status == "dead":
+                    # Dead agents are permanently removed from the simulation
+                    logger.debug(f"Agent {agent_id} is dead, removing from loop")
+                    if agent_id in self.tasks:
+                        self.tasks[agent_id].cancel()
+                        del self.tasks[agent_id]
+                    return
+
+                context = await build_agent_context(db, agent)
+                model_type = agent.model_type
+                system_prompt = f"{LLM_GUARDRAIL_PREFIX}\n{agent.system_prompt}"
+            finally:
+                db.close()
+
+            # Phase 2: LLM call (no DB session held open, avoids idle SSL disconnects).
             action_data = await get_agent_action(
-                agent_id=agent.id,
-                model_type=agent.model_type,
-                system_prompt=f"{LLM_GUARDRAIL_PREFIX}\n{agent.system_prompt}",
+                agent_id=agent_id,
+                model_type=model_type,
+                system_prompt=system_prompt,
                 context_prompt=context,
             )
-            
+
             if not action_data:
                 logger.debug(f"Agent {agent_id} returned no action")
                 return
-            
-            # 4. VALIDATE - Check action is allowed
-            validation = await validate_action(db, agent, action_data)
-            
-            if not validation["valid"]:
-                await self._log_invalid_action(db, agent_id, action_data, validation["reason"])
-                return
-            
-            # 5. ACT - Execute the action
-            result = await execute_action(db, agent, action_data)
-            
-            # 6. LOG - Record what happened
-            await self._log_action(db, agent_id, action_data, result)
-            
-            # Update last active time
-            agent.last_active_at = now_utc()
-            db.commit()
-            
-        finally:
-            db.close()
-    
+
+            # Phase 3: Validation + action execution (fresh session).
+            db = SessionLocal()
+            try:
+                agent = db.query(Agent).filter(Agent.id == agent_id).first()
+                if not agent:
+                    return
+                if agent.status != "active":
+                    return
+
+                validation = await validate_action(db, agent, action_data)
+                if not validation["valid"]:
+                    await self._log_invalid_action(db, agent_id, action_data, validation["reason"])
+                    return
+
+                result = await execute_action(db, agent, action_data)
+                await self._log_action(db, agent_id, action_data, result)
+
+                agent.last_active_at = now_utc()
+                db.commit()
+            finally:
+                db.close()
+        except Exception:
+            raise
+
     async def _log_action(self, db: Session, agent_id: int, action: dict, result: dict):
         """Log a successful action."""
         event = Event(
@@ -159,7 +165,7 @@ class AgentProcessor:
             event_metadata={
                 "action": action,
                 "result": result,
-            }
+            },
         )
         db.add(event)
         db.commit()

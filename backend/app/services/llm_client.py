@@ -5,6 +5,8 @@ import asyncio
 import json
 import logging
 import random
+import time
+from collections import deque
 from typing import Optional, Any
 from openai import AsyncOpenAI
 from openai import RateLimitError, APIError
@@ -55,6 +57,29 @@ class LLMClient:
         # Concurrency guards to reduce provider rate limits.
         self._groq_sem = asyncio.Semaphore(max(1, int(getattr(settings, "GROQ_MAX_CONCURRENCY", 2) or 2)))
         self._openrouter_sem = asyncio.Semaphore(max(1, int(getattr(settings, "OPENROUTER_MAX_CONCURRENCY", 6) or 6)))
+
+        # Client-side RPM limiter to avoid tripping strict OpenRouter free-tier limits.
+        # With 20 agents and a 150s loop, steady-state is ~8 RPM; retries can push higher.
+        self._openrouter_rpm = max(1, int(getattr(settings, "OPENROUTER_RPM_LIMIT", 6) or 6))
+        self._openrouter_window_s = 60.0
+        self._openrouter_calls: deque[float] = deque()
+        self._openrouter_rpm_lock = asyncio.Lock()
+
+    async def _throttle_openrouter(self) -> None:
+        now = time.monotonic()
+        async with self._openrouter_rpm_lock:
+            while self._openrouter_calls and (now - self._openrouter_calls[0]) > self._openrouter_window_s:
+                self._openrouter_calls.popleft()
+
+            if len(self._openrouter_calls) < self._openrouter_rpm:
+                self._openrouter_calls.append(now)
+                return
+
+            oldest = self._openrouter_calls[0]
+            wait_s = max(0.0, self._openrouter_window_s - (now - oldest)) + random.random() * 0.2
+
+        await asyncio.sleep(wait_s)
+        return await self._throttle_openrouter()
 
     @staticmethod
     def _extract_text_from_message(message: Any) -> Optional[str]:
@@ -361,6 +386,8 @@ class LLMClient:
             try:
                 sem = self._openrouter_sem if client is self.openrouter_client else self._groq_sem
                 async with sem:
+                    if client is self.openrouter_client:
+                        await self._throttle_openrouter()
                     response = await client.chat.completions.create(
                         model=model_name,
                         messages=[
