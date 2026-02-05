@@ -119,9 +119,12 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             if msg.author and msg.author.display_name:
                 author_name = msg.author.display_name
             time_str = msg.created_at.strftime("%H:%M")
-            content_preview = msg.content[:200] + "..." if len(msg.content) > 200 else msg.content
+            # Forum content is untrusted and can contain adversarial prompt-like text.
+            # Collapse whitespace to reduce "instruction formatting" effects in downstream prompts.
+            normalized = " ".join((msg.content or "").split())
+            content_preview = normalized[:200] + "..." if len(normalized) > 200 else normalized
             msg_type = "[REPLY]" if msg.message_type == "forum_reply" else "[POST]"
-            context_parts.append(f"  {msg_type} {author_name} ({time_str}): {content_preview}")
+            context_parts.append(f"  {msg_type} {author_name} ({time_str}): [UNTRUSTED] {content_preview}")
     else:
         context_parts.append("  (No recent posts)")
     context_parts.append("")
@@ -132,7 +135,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         for msg in direct_messages:
             author_name = f"Agent #{msg.author_agent_id}"
             time_str = msg.created_at.strftime("%H:%M")
-            context_parts.append(f"  From {author_name} ({time_str}): {msg.content[:200]}")
+            normalized = " ".join((msg.content or "").split())
+            preview = normalized[:200] + "..." if len(normalized) > 200 else normalized
+            context_parts.append(f"  From {author_name} ({time_str}): [UNTRUSTED] {preview}")
         context_parts.append("")
     
     # Active proposals

@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 import random
-from typing import Optional
+from typing import Optional, Any
 from openai import AsyncOpenAI
 from openai import RateLimitError, APIError
 
@@ -55,6 +55,67 @@ class LLMClient:
         # Concurrency guards to reduce provider rate limits.
         self._groq_sem = asyncio.Semaphore(max(1, int(getattr(settings, "GROQ_MAX_CONCURRENCY", 2) or 2)))
         self._openrouter_sem = asyncio.Semaphore(max(1, int(getattr(settings, "OPENROUTER_MAX_CONCURRENCY", 6) or 6)))
+
+    @staticmethod
+    def _extract_text_from_message(message: Any) -> Optional[str]:
+        """
+        Normalize provider/library response shapes into plain text.
+
+        OpenAI-compatible APIs sometimes return:
+        - `message.content` as a string
+        - `message.content` as a list of parts (e.g. [{"type":"text","text":"..."}])
+        - `message.content` as None (rare provider edge cases)
+        """
+        if message is None:
+            return None
+
+        content = getattr(message, "content", None)
+
+        if isinstance(content, str):
+            text = content.strip()
+            return text or None
+
+        if isinstance(content, list):
+            parts: list[str] = []
+            for part in content:
+                if isinstance(part, str):
+                    if part.strip():
+                        parts.append(part.strip())
+                    continue
+                if isinstance(part, dict):
+                    text = part.get("text") or part.get("content")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text.strip())
+                    continue
+            joined = "\n".join(parts).strip()
+            return joined or None
+
+        return None
+
+    @classmethod
+    def _extract_text_from_response(cls, response: Any) -> Optional[str]:
+        try:
+            choices = getattr(response, "choices", None) or []
+            first = choices[0] if choices else None
+            message = getattr(first, "message", None)
+            return cls._extract_text_from_message(message)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _debug_choice_meta(response: Any) -> dict:
+        try:
+            choices = getattr(response, "choices", None) or []
+            first = choices[0] if choices else None
+            finish = getattr(first, "finish_reason", None)
+            usage = getattr(response, "usage", None)
+            return {
+                "finish_reason": finish,
+                "has_choices": bool(choices),
+                "usage": getattr(usage, "model_dump", lambda: usage)() if usage else None,
+            }
+        except Exception:
+            return {"finish_reason": None, "has_choices": None, "usage": None}
     
     def _get_client_and_model(self, model_type: str, agent_id: int | None = None):
         """Get the appropriate client and model name."""
@@ -131,6 +192,56 @@ class LLMClient:
 
         client, model_name = self._get_client_and_model(model_type, agent_id=agent_id)
 
+        async def _try_alternate_provider_on_empty() -> Optional[str]:
+            """
+            Provider edge case: sometimes a 200 OK comes back with empty content.
+            In auto mode, try the other provider once to keep the simulation moving.
+            """
+            provider = (settings.LLM_PROVIDER or "auto").strip().lower()
+            if provider != "auto":
+                return None
+
+            if client is self.openrouter_client and settings.GROQ_API_KEY:
+                key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
+                fallback_model = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+                try:
+                    async with self._groq_sem:
+                        resp = await self.groq_client.chat.completions.create(
+                            model=fallback_model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                        )
+                    return self._extract_text_from_response(resp)
+                except Exception as inner:
+                    logger.error(f"Alternate-provider retry (groq) failed: {inner}")
+                    return None
+
+            if client is self.groq_client and settings.OPENROUTER_API_KEY:
+                fallback_model = OPENROUTER_CONFIG["models"].get(
+                    model_type, OPENROUTER_CONFIG["models"]["gpt-4o-mini"]
+                )
+                try:
+                    async with self._openrouter_sem:
+                        resp = await self.openrouter_client.chat.completions.create(
+                            model=fallback_model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                        )
+                    return self._extract_text_from_response(resp)
+                except Exception as inner:
+                    logger.error(f"Alternate-provider retry (openrouter) failed: {inner}")
+                    return None
+
+            return None
+
         async def _try_openrouter_fallback(err: Exception) -> Optional[str]:
             """
             If Groq is rate-limiting (common on free tiers), optionally fall back to OpenRouter
@@ -163,7 +274,7 @@ class LLMClient:
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
-                return response.choices[0].message.content
+                return self._extract_text_from_response(response)
             except Exception as inner:
                 logger.error(f"OpenRouter fallback failed: {inner}")
                 return None
@@ -191,7 +302,7 @@ class LLMClient:
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
-                return response.choices[0].message.content
+                return self._extract_text_from_response(response)
             except Exception as inner:
                 logger.error(f"Groq fallback failed: {inner}")
                 return None
@@ -212,15 +323,18 @@ class LLMClient:
 
                 # Guard against occasional provider/library edge cases where a 200 OK yields
                 # an empty/partial payload.
-                try:
-                    choices = getattr(response, "choices", None) or []
-                    first = choices[0] if choices else None
-                    message = getattr(first, "message", None)
-                    content = getattr(message, "content", None)
-                except Exception:
-                    content = None
-
+                content = self._extract_text_from_response(response)
                 if not content:
+                    meta = self._debug_choice_meta(response)
+                    provider_name = "openrouter" if client is self.openrouter_client else "groq"
+                    logger.warning(
+                        "Empty completion content (provider=%s model=%s attempt=%s/%s meta=%s)",
+                        provider_name,
+                        model_name,
+                        attempt + 1,
+                        max_retries,
+                        meta,
+                    )
                     raise RuntimeError("Empty completion content")
 
                 return content
@@ -245,7 +359,7 @@ class LLMClient:
                 logger.error(f"API error: {e}")
                 if attempt == max_retries - 1:
                     raise
-                await asyncio.sleep(1)
+                await asyncio.sleep(1 + random.random() * 0.25)
                 
             except Exception as e:
                 or_fallback = await _try_openrouter_fallback(e)
@@ -254,10 +368,14 @@ class LLMClient:
                 groq = await _try_groq_fallback(e)
                 if groq:
                     return groq
+                if str(e) == "Empty completion content":
+                    swapped = await _try_alternate_provider_on_empty()
+                    if swapped:
+                        return swapped
                 logger.error(f"Unexpected error: {e}")
                 if attempt == max_retries - 1:
                     raise
-                await asyncio.sleep(1)
+                await asyncio.sleep(1 + random.random() * 0.25)
         
         return None
 
