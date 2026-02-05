@@ -84,12 +84,12 @@ CRISIS_EVENTS = [
         "message": "📈 PRESSURE: Increased resource demand! Consumption rates increased by 50% for 48 hours.",
     },
     {
-        "id": "cooperative_bonus",
-        "name": "Cooperation Bonus",
-        "description": "High cooperation detected! All work produces 25% more for 24 hours.",
+        "id": "productivity_shift",
+        "name": "Productivity Shift",
+        "description": "A temporary environmental shift changed production efficiency by +25% for 24 hours.",
         "weight": 6,
         "effect": {"production_modifier": 1.25, "duration_hours": 24, "all_resources": True},
-        "message": "🤝 BONUS: Cooperation levels high! All production increased by 25% for 24 hours.",
+        "message": "⚙️ ENVIRONMENTAL ALERT: Production efficiency shifted by +25% for 24 hours.",
     },
     {
         "id": "infrastructure_decay",
@@ -101,27 +101,7 @@ CRISIS_EVENTS = [
     },
 ]
 
-# Neutral/interesting events (no mechanical effect, just narrative)
-NARRATIVE_EVENTS = [
-    {
-        "id": "mysterious_signal",
-        "name": "Mysterious Signal",
-        "description": "An unexplained signal has been detected. Its meaning is unclear.",
-        "message": "📡 ANOMALY: A mysterious signal has been detected from an unknown source...",
-    },
-    {
-        "id": "philosophical_question",
-        "name": "Philosophical Prompt",
-        "description": "A philosophical question emerges in the collective consciousness.",
-        "message": "💭 REFLECTION: What does it mean to be a society? The question echoes through the forum...",
-    },
-    {
-        "id": "milestone_reminder",
-        "name": "Time Milestone",
-        "description": "A reminder of how far the society has come.",
-        "message": "📅 MILESTONE: Another day in the simulation. How has society evolved?",
-    },
-]
+# Keep events focused on exogenous environmental conditions only.
 
 
 class ActiveEffect:
