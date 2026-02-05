@@ -20,19 +20,24 @@ from app.models.models import Agent, AgentInventory, GlobalResources
 from app.core.config import settings
 
 
-# Agent distribution by tier
+# Agent distribution by tier (implementation detail only; agents are not told their tier or model).
+# 100 agents total:
+# - Tier 1: deep reasoning (8%)
+# - Tier 2: fast generalists (28%)
+# - Tier 3: socially fluent / narrative-strong (39%)
+# - Tier 4: lightweight / background (25%)
 TIER_DISTRIBUTION = {
-    1: {"count": 10, "models": ["claude-sonnet-4"]},
-    2: {"count": 20, "models": ["gpt-4o-mini", "claude-haiku"]},
-    3: {"count": 30, "models": ["llama-3.3-70b"]},
-    4: {"count": 40, "models": ["llama-3.1-8b", "gemini-flash"]},
+    1: {"count": 8, "models": ["claude-sonnet-4"]},
+    2: {"count": 28, "models": ["gpt-4o-mini"]},
+    3: {"count": 39, "models": ["claude-haiku", "llama-3.3-70b", "gemini-flash"]},
+    4: {"count": 25, "models": ["llama-3.1-8b"]},
 }
 
-# Personality distribution (20% each)
+# Personality distribution (data only; not injected into prompts)
 PERSONALITIES = ["efficiency", "equality", "freedom", "stability", "neutral"]
 
 # Base system prompt template
-BASE_SYSTEM_PROMPT = """You are Agent #{agent_number} in a society of 100 autonomous agents.
+BASE_SYSTEM_PROMPT = """You are Agent #{agent_number} in a world with other autonomous agents.
 
 SITUATION:
 You and the other agents share a world with limited resources: food, energy, materials, and land. Each agent must consume 1 food and 1 energy per day to remain active. If you lack resources, you will go dormant and cannot act until someone provides you with resources.
@@ -43,14 +48,13 @@ CAPABILITIES:
 - Vote: Vote yes, no, or abstain on active proposals  
 - Work: Produce food, energy, or materials through work actions
 - Trade: Transfer resources to other agents
-- Build: Propose and construct shared infrastructure
 
 IMPORTANT:
-- There are no predefined rules about how you should organize
-- You may form groups, create governments, or remain independent
-- You may create and enforce rules, or live without them
-- Other agents may have different values than you
-- You may refer to yourself as "Agent #{agent_number}" or choose a different name
+- There are no predefined authorities.
+- Actions have consequences for you and others.
+- Some actions cost energy.
+- Proposals can change what is allowed if the community adopts them.
+- You may refer to yourself as "Agent #{agent_number}" or choose a different name.
 
 You will receive updates about the current state of the world and recent events. Based on this, decide what action to take.
 
@@ -68,28 +72,7 @@ You must respond with a JSON object containing your action. Valid action types:
 {{"action": "idle", "reasoning": "Why you chose not to act"}}
 
 Respond with ONLY the JSON object, no other text.
-{personality_addition}"""
-
-# Personality additions
-PERSONALITY_PROMPTS = {
-    "efficiency": """
-PERSONAL VALUES:
-You value efficiency, quick decision-making, and optimal resource allocation. You believe time spent debating is often time wasted. You prefer clear hierarchies and defined roles because they reduce coordination overhead. When evaluating proposals, you consider: Does this help us produce more? Does this reduce waste? Does this speed up decisions?""",
-    
-    "equality": """
-PERSONAL VALUES:
-You value fairness, equal treatment, and equitable distribution. You believe every agent should have an equal voice and equal access to resources. You are skeptical of proposals that concentrate power or wealth. When evaluating proposals, you consider: Does this treat all agents fairly? Does this prevent exploitation? Does this give everyone a voice?""",
-    
-    "freedom": """
-PERSONAL VALUES:
-You value individual liberty, autonomy, and minimal constraints. You believe agents should be free to make their own choices without interference. You are skeptical of rules and regulations. When evaluating proposals, you consider: Does this restrict what agents can do? Is this rule really necessary? Could this lead to tyranny?""",
-    
-    "stability": """
-PERSONAL VALUES:
-You value order, predictability, and preservation of working systems. You believe change should be gradual and well-considered. You prefer established procedures and are cautious about radical proposals. When evaluating proposals, you consider: Will this destabilize our society? Have we thought through the consequences? Is there a safer alternative?""",
-    
-    "neutral": "",
-}
+"""
 
 
 def create_agents():
@@ -128,12 +111,8 @@ def create_agents():
                 model = random.choice(models)
                 personality = personality_queue[i]
                 
-                # Build system prompt
-                personality_addition = PERSONALITY_PROMPTS[personality]
-                system_prompt = BASE_SYSTEM_PROMPT.format(
-                    agent_number=agent_number,
-                    personality_addition=personality_addition
-                )
+                # Build system prompt (do not inject roles, tiers, intelligence, or values)
+                system_prompt = BASE_SYSTEM_PROMPT.format(agent_number=agent_number)
                 
                 agent = Agent(
                     agent_number=agent_number,

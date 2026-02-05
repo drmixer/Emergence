@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     # If Groq is selected, optionally allow falling back to OpenRouter on rate limits/errors.
     # Keep this off in dev if you want "Groq-only" and to avoid OpenRouter charges.
     ALLOW_OPENROUTER_FALLBACK: bool = False
+    # Optional: send a small % of lightweight agents through Groq even when OpenRouter is available.
+    # Deterministic per-agent (based on agent id). Suggested: 0.05–0.10.
+    GROQ_LIGHTWEIGHT_SHARE: float = 0.0
+
+    # Provider concurrency caps to reduce rate limiting (esp. Groq free tier).
+    GROQ_MAX_CONCURRENCY: int = 2
+    OPENROUTER_MAX_CONCURRENCY: int = 6
     
     # Security
     SECRET_KEY: str = "development-secret-key-change-in-production"

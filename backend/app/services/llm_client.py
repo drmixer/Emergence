@@ -19,11 +19,14 @@ logger = logging.getLogger(__name__)
 OPENROUTER_CONFIG = {
     "base_url": "https://openrouter.ai/api/v1",
     "models": {
-        "claude-sonnet-4": "anthropic/claude-sonnet-4",
-        "gpt-4o-mini": "openai/gpt-4o-mini",
-        "claude-haiku": "anthropic/claude-3-haiku",
-        # Gemini is routed via OpenRouter (not Groq)
-        "gemini-flash": "google/gemini-2.0-flash-001",
+        # NOTE: Pin to explicit :free model IDs to avoid surprise spend.
+        # These keys are internal labels stored on Agent.model_type (agents are not told their tier/model).
+        "claude-sonnet-4": "deepseek/deepseek-r1-0528:free",
+        "gpt-4o-mini": "stepfun/step-3.5-flash:free",
+        "claude-haiku": "arcee-ai/trinity-large-preview:free",
+        "llama-3.3-70b": "stepfun/step-3.5-flash:free",
+        "llama-3.1-8b": "meta-llama/llama-3.2-3b-instruct:free",
+        "gemini-flash": "qwen/qwen3-coder:free",
     }
 }
 
@@ -48,8 +51,12 @@ class LLMClient:
             base_url=GROQ_CONFIG["base_url"],
             api_key=settings.GROQ_API_KEY,
         )
+
+        # Concurrency guards to reduce provider rate limits.
+        self._groq_sem = asyncio.Semaphore(max(1, int(getattr(settings, "GROQ_MAX_CONCURRENCY", 2) or 2)))
+        self._openrouter_sem = asyncio.Semaphore(max(1, int(getattr(settings, "OPENROUTER_MAX_CONCURRENCY", 6) or 6)))
     
-    def _get_client_and_model(self, model_type: str):
+    def _get_client_and_model(self, model_type: str, agent_id: int | None = None):
         """Get the appropriate client and model name."""
         provider = (settings.LLM_PROVIDER or "auto").strip().lower()
 
@@ -65,6 +72,23 @@ class LLMClient:
 
         # auto: honor explicit mapping first, then fall back based on configured keys.
         if model_type in OPENROUTER_CONFIG["models"]:
+            # Optional: send a small % of lightweight agents to Groq to reduce OpenRouter load.
+            # Deterministic per-agent so the "society" has stable capability asymmetry.
+            try:
+                groq_share = float(getattr(settings, "GROQ_LIGHTWEIGHT_SHARE", 0.0) or 0.0)
+            except Exception:
+                groq_share = 0.0
+
+            if (
+                groq_share > 0
+                and settings.GROQ_API_KEY
+                and agent_id is not None
+                and model_type == "llama-3.1-8b"
+            ):
+                rng = random.Random(int(agent_id))
+                if rng.random() < groq_share:
+                    return self.groq_client, GROQ_CONFIG["models"]["llama-3.1-8b"]
+
             return self.openrouter_client, OPENROUTER_CONFIG["models"][model_type]
         if model_type in GROQ_CONFIG["models"]:
             return self.groq_client, GROQ_CONFIG["models"][model_type]
@@ -83,6 +107,7 @@ class LLMClient:
         model_type: str,
         system_prompt: str,
         user_prompt: str,
+        agent_id: int | None = None,
         max_tokens: int = 500,
         temperature: float = 0.7,
         max_retries: int = 3,
@@ -104,7 +129,7 @@ class LLMClient:
                 logger.error("Neither OPENROUTER_API_KEY nor GROQ_API_KEY is set; returning no completion.")
                 return None
 
-        client, model_name = self._get_client_and_model(model_type)
+        client, model_name = self._get_client_and_model(model_type, agent_id=agent_id)
 
         async def _try_openrouter_fallback(err: Exception) -> Optional[str]:
             """
@@ -173,15 +198,17 @@ class LLMClient:
         
         for attempt in range(max_retries):
             try:
-                response = await client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
+                sem = self._openrouter_sem if client is self.openrouter_client else self._groq_sem
+                async with sem:
+                    response = await client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
                 
                 return response.choices[0].message.content
                 
@@ -265,6 +292,7 @@ async def get_agent_action(
             model_type=model_type,
             system_prompt=system_prompt,
             user_prompt=context_prompt,
+            agent_id=agent_id,
             max_tokens=500,
             temperature=0.7,
         )
