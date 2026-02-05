@@ -8,6 +8,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.models import Agent, AgentInventory, Proposal, Law, Event, Transaction, GlobalResources
 
@@ -58,9 +59,14 @@ async def process_daily_consumption():
         logger.info("Processing daily survival cycle...")
         
         # Get all living agents (both active and dormant)
-        living_agents = db.query(Agent).filter(
-            or_(Agent.status == "active", Agent.status == "dormant")
-        ).all()
+        query = db.query(Agent).filter(or_(Agent.status == "active", Agent.status == "dormant"))
+
+        # Dev/test mode: if we cap the simulation to N agents, don't kill the rest via survival ticks.
+        # This keeps "SIMULATION_MAX_AGENTS=20" as a cheap sandbox without destroying the full 100-agent world.
+        if settings.SIMULATION_MAX_AGENTS and settings.SIMULATION_MAX_AGENTS > 0:
+            query = query.filter(Agent.agent_number <= settings.SIMULATION_MAX_AGENTS)
+
+        living_agents = query.all()
         
         # Track outcomes
         agents_consumed = []  # Paid full cost
