@@ -20,4 +20,6 @@ RUN python -m pip install --upgrade pip \
 
 COPY . .
 
-CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --timeout-keep-alive 75"]
+RUN chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]
