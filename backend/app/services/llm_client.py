@@ -87,6 +87,20 @@ class LLMClient:
                     if isinstance(text, str) and text.strip():
                         parts.append(text.strip())
                     continue
+                # Some SDKs/providers return typed objects for content parts.
+                # Be liberal in what we accept: look for common attributes.
+                text_attr = getattr(part, "text", None)
+                if isinstance(text_attr, str) and text_attr.strip():
+                    parts.append(text_attr.strip())
+                    continue
+                content_attr = getattr(part, "content", None)
+                if isinstance(content_attr, str) and content_attr.strip():
+                    parts.append(content_attr.strip())
+                    continue
+                value_attr = getattr(part, "value", None)
+                if isinstance(value_attr, str) and value_attr.strip():
+                    parts.append(value_attr.strip())
+                    continue
             joined = "\n".join(parts).strip()
             return joined or None
 
@@ -191,6 +205,42 @@ class LLMClient:
                 return None
 
         client, model_name = self._get_client_and_model(model_type, agent_id=agent_id)
+
+        async def _try_openrouter_alt_model_on_empty() -> Optional[str]:
+            """
+            If OpenRouter returns an empty payload (e.g., choices=[]), retry once on a different
+            OpenRouter model. This avoids hammering Groq when it is rate-limited.
+            """
+            if client is not self.openrouter_client:
+                return None
+            if not settings.OPENROUTER_API_KEY:
+                return None
+
+            # Prefer a fast, stable instruction model.
+            alt_model = OPENROUTER_CONFIG["models"].get("llama-3.1-8b") or OPENROUTER_CONFIG["models"].get("gpt-4o-mini")
+            if not alt_model or alt_model == model_name:
+                return None
+
+            logger.warning(
+                "Empty OpenRouter completion; retrying once with alt model=%s (original=%s)",
+                alt_model,
+                model_name,
+            )
+            try:
+                async with self._openrouter_sem:
+                    resp = await self.openrouter_client.chat.completions.create(
+                        model=alt_model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
+                return self._extract_text_from_response(resp)
+            except Exception as inner:
+                logger.error(f"OpenRouter alt-model retry failed: {inner}")
+                return None
 
         async def _try_alternate_provider_on_empty() -> Optional[str]:
             """
@@ -335,6 +385,11 @@ class LLMClient:
                         max_retries,
                         meta,
                     )
+                    # If OpenRouter is the selected provider, retry once on a different OpenRouter model
+                    # before we consider cross-provider fallback.
+                    or_alt = await _try_openrouter_alt_model_on_empty()
+                    if or_alt:
+                        return or_alt
                     raise RuntimeError("Empty completion content")
 
                 return content
@@ -424,7 +479,7 @@ async def get_agent_action(
             system_prompt=system_prompt,
             user_prompt=context_prompt,
             agent_id=agent_id,
-            max_tokens=500,
+            max_tokens=250,
             temperature=0.7,
         )
         

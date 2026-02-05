@@ -19,12 +19,12 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     ).all()
     inventory_dict = {inv.resource_type: float(inv.quantity) for inv in inventory}
     
-    # Get recent forum posts (last 20)
+    # Get recent forum posts (keep small to reduce token usage)
     recent_messages = db.query(Message).filter(
         Message.message_type.in_(["forum_post", "forum_reply", "system_alert"])
-    ).order_by(desc(Message.created_at)).limit(20).all()
+    ).order_by(desc(Message.created_at)).limit(8).all()
     
-    # Get active proposals
+    # Get active proposals (keep small to reduce token usage)
     active_proposals = db.query(Proposal).filter(
         Proposal.status == "active"
     ).order_by(desc(Proposal.created_at)).all()
@@ -35,14 +35,14 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         Event.created_at > now - timedelta(hours=24)
     ).order_by(desc(Event.created_at)).limit(10).all()
     
-    # Get direct messages to this agent
+    # Get direct messages to this agent (keep small)
     direct_messages = db.query(Message).filter(
         Message.recipient_agent_id == agent.id,
         Message.message_type == "direct_message",
         Message.created_at > now - timedelta(hours=24)
-    ).order_by(desc(Message.created_at)).limit(5).all()
+    ).order_by(desc(Message.created_at)).limit(3).all()
     
-    # Get active laws
+    # Get active laws (keep small)
     active_laws = db.query(Law).filter(Law.active == True).all()
     
     # Get global stats
@@ -54,7 +54,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     recent_deaths = db.query(Event).filter(
         Event.event_type == "agent_died",
         Event.created_at > now - timedelta(hours=48)
-    ).order_by(desc(Event.created_at)).limit(5).all()
+    ).order_by(desc(Event.created_at)).limit(3).all()
     
     # Get agents at risk of death (starving dormant agents)
     starving_agents = db.query(Agent).filter(
@@ -122,7 +122,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             # Forum content is untrusted and can contain adversarial prompt-like text.
             # Collapse whitespace to reduce "instruction formatting" effects in downstream prompts.
             normalized = " ".join((msg.content or "").split())
-            content_preview = normalized[:200] + "..." if len(normalized) > 200 else normalized
+            content_preview = normalized[:120] + "..." if len(normalized) > 120 else normalized
             msg_type = "[REPLY]" if msg.message_type == "forum_reply" else "[POST]"
             context_parts.append(f"  {msg_type} {author_name} ({time_str}): [UNTRUSTED] {content_preview}")
     else:
@@ -136,14 +136,14 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             author_name = f"Agent #{msg.author_agent_id}"
             time_str = msg.created_at.strftime("%H:%M")
             normalized = " ".join((msg.content or "").split())
-            preview = normalized[:200] + "..." if len(normalized) > 200 else normalized
+            preview = normalized[:120] + "..." if len(normalized) > 120 else normalized
             context_parts.append(f"  From {author_name} ({time_str}): [UNTRUSTED] {preview}")
         context_parts.append("")
     
     # Active proposals
     context_parts.append(f"ACTIVE PROPOSALS ({len(active_proposals)} total):")
     if active_proposals:
-        for prop in active_proposals[:10]:  # Limit to 10
+        for prop in active_proposals[:5]:  # Limit to keep prompt small
             author_name = f"Agent #{prop.author_agent_id}"
             votes_summary = f"Yes: {prop.votes_for}, No: {prop.votes_against}, Abstain: {prop.votes_abstain}"
             closes_at = ensure_utc(prop.voting_closes_at) or now
@@ -167,7 +167,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     # Active laws
     context_parts.append(f"ACTIVE LAWS ({len(active_laws)} total):")
     if active_laws:
-        for law in active_laws[:5]:  # Limit to 5
+        for law in active_laws[:3]:  # Limit to keep prompt small
             context_parts.append(f"  - {law.title}")
     else:
         context_parts.append("  (No laws have been passed yet)")
@@ -176,7 +176,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     # Recent events
     if recent_events:
         context_parts.append("RECENT EVENTS AFFECTING YOU:")
-        for event in recent_events[:5]:
+        for event in recent_events[:3]:
             context_parts.append(f"  - {event.description}")
         context_parts.append("")
     
