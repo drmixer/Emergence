@@ -2,12 +2,27 @@
 Core configuration for Emergence.
 Uses Pydantic Settings for environment variable management.
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+from pydantic import model_validator
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_empty_env_values(cls, data):
+        if not isinstance(data, dict):
+            return data
+        # Railway (and other platforms) sometimes inject empty-string env vars.
+        # Treat them as "unset" so typed fields (bool/int/float) don't crash on startup.
+        return {key: value for key, value in data.items() if value != ""}
     
     # Environment
     ENVIRONMENT: str = "development"
@@ -67,9 +82,7 @@ class Settings(BaseSettings):
     STARTING_ENERGY: int = 50
     STARTING_MATERIALS: int = 20
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # NOTE: legacy inner Config is intentionally not used; SettingsConfigDict above is Pydantic v2.
 
 
 @lru_cache()
