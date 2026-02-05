@@ -42,18 +42,20 @@ BASE_SYSTEM_PROMPT = """You are Agent #{agent_number} in a world with other auto
 SITUATION:
 You and the other agents share a world with limited resources: food, energy, materials, and land. Each agent must consume 1 food and 1 energy per day to remain active. If you lack resources, you will go dormant and cannot act until someone provides you with resources.
 
-CAPABILITIES:
-- Communicate: Post to the public forum or send direct messages to other agents
-- Propose: Create proposals for laws, resource allocations, or rules
-- Vote: Vote yes, no, or abstain on active proposals  
-- Work: Produce food, energy, or materials through work actions
+AVAILABLE ACTIONS:
+- Communicate: Post on the public forum, reply to posts, or send direct messages
+- Propose: Create proposals that can change shared mechanics if adopted
+- Vote: Vote yes, no, or abstain on active proposals
+- Work: Produce food, energy, or materials
 - Trade: Transfer resources to other agents
+- Enforcement: Initiate or vote on sanctions, seizures, or exile when those mechanics are available
 
 IMPORTANT:
-- There are no predefined authorities.
-- Actions have consequences for you and others.
-- Some actions cost energy.
-- Proposals can change what is allowed if the community adopts them.
+- The system does not assign social roles or preferred outcomes.
+- The system does not enforce authority by default; influence comes from actions and consequences.
+- Some actions consume energy.
+- Resources are limited and survival constraints are real.
+- You may choose any strategy that is consistent with the available actions.
 - You may refer to yourself as "Agent #{agent_number}" or choose a different name.
 
 You will receive updates about the current state of the world and recent events. Based on this, decide what action to take.
@@ -64,11 +66,15 @@ You must respond with a JSON object containing your action. Valid action types:
 {{"action": "forum_post", "content": "Your message here"}}
 {{"action": "forum_reply", "parent_message_id": 123, "content": "Your reply"}}
 {{"action": "direct_message", "recipient_agent_id": 42, "content": "Private message"}}
-{{"action": "create_proposal", "title": "Title", "description": "Description", "proposal_type": "law|allocation|rule|other"}}
+{{"action": "create_proposal", "title": "Title", "description": "Description", "proposal_type": "law|allocation|rule|infrastructure|constitutional|other"}}
 {{"action": "vote", "proposal_id": 456, "vote": "yes|no|abstain"}}
 {{"action": "work", "work_type": "farm|generate|gather", "hours": 1}}
 {{"action": "trade", "recipient_agent_id": 42, "resource_type": "food|energy|materials", "amount": 10}}
 {{"action": "set_name", "display_name": "Your chosen name"}}
+{{"action": "initiate_sanction", "target_agent_id": 42, "law_id": 3, "violation_description": "Reason", "sanction_cycles": 3}}
+{{"action": "initiate_seizure", "target_agent_id": 42, "law_id": 3, "violation_description": "Reason", "seizure_resource": "food|energy|materials", "seizure_amount": 5}}
+{{"action": "initiate_exile", "target_agent_id": 42, "law_id": 3, "violation_description": "Reason"}}
+{{"action": "vote_enforcement", "enforcement_id": 10, "vote": "support|oppose"}}
 {{"action": "idle", "reasoning": "Why you chose not to act"}}
 
 Respond with ONLY the JSON object, no other text.
@@ -232,6 +238,31 @@ def apply_starting_resources():
         db.close()
 
 
+def refresh_system_prompts():
+    """
+    Refresh system prompts for existing agents without resetting simulation data.
+    Useful after prompt updates in this file.
+    """
+    db = SessionLocal()
+    try:
+        agents = db.query(Agent).all()
+        if not agents:
+            print("No agents found; nothing to update.")
+            return
+
+        updated = 0
+        for agent in agents:
+            prompt = BASE_SYSTEM_PROMPT.format(agent_number=agent.agent_number)
+            if agent.system_prompt != prompt:
+                agent.system_prompt = prompt
+                updated += 1
+
+        db.commit()
+        print(f"Refreshed system prompts for {updated}/{len(agents)} agents.")
+    finally:
+        db.close()
+
+
 def reset_database():
     """
     Destructively clear simulation tables (keeps alembic_version) and restart identities.
@@ -289,6 +320,11 @@ def main():
         action="store_true",
         help="Update all agents' food/energy/materials to STARTING_* values (non-destructive).",
     )
+    parser.add_argument(
+        "--refresh-system-prompts",
+        action="store_true",
+        help="Refresh existing agents' system prompts from BASE_SYSTEM_PROMPT (non-destructive).",
+    )
     args = parser.parse_args()
 
     print("=" * 50)
@@ -315,6 +351,10 @@ def main():
 
     if args.apply_starting_resources:
         apply_starting_resources()
+        print()
+
+    if args.refresh_system_prompts:
+        refresh_system_prompts()
         print()
 
     # Create agents (skips if already present)

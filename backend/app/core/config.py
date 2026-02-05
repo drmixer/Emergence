@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     # Can be fractional in dev for faster end-to-end testing (e.g. 0.25 = 15 minutes).
     PROPOSAL_VOTING_HOURS: float = 24.0
     SIMULATION_MAX_AGENTS: int = 0  # 0 = all agents (use 1-3 for cheap local tests)
+    # Optional perception lag for agent context (in seconds). Adds information asymmetry.
+    PERCEPTION_LAG_SECONDS: int = 120
 
     # LLM-generated narration (summaries/story/highlights). These call OpenRouter by default and may cost money.
     SUMMARIES_ENABLED: bool = False

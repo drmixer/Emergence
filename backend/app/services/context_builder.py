@@ -5,6 +5,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
+from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
 from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote
 
@@ -12,6 +13,8 @@ from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Eve
 async def build_agent_context(db: Session, agent: Agent) -> str:
     """Build the context prompt for an agent's decision."""
     now = now_utc()
+    perception_lag_seconds = max(0, int(getattr(settings, "PERCEPTION_LAG_SECONDS", 0) or 0))
+    perception_cutoff = now - timedelta(seconds=perception_lag_seconds)
     
     # Get agent's inventory
     inventory = db.query(AgentInventory).filter(
@@ -20,27 +23,39 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     inventory_dict = {inv.resource_type: float(inv.quantity) for inv in inventory}
     
     # Get recent forum posts (keep small to reduce token usage)
-    recent_messages = db.query(Message).filter(
+    recent_messages_q = db.query(Message).filter(
         Message.message_type.in_(["forum_post", "forum_reply", "system_alert"])
-    ).order_by(desc(Message.created_at)).limit(8).all()
+    )
+    if perception_lag_seconds > 0:
+        recent_messages_q = recent_messages_q.filter(Message.created_at <= perception_cutoff)
+    recent_messages = recent_messages_q.order_by(desc(Message.created_at)).limit(8).all()
     
     # Get active proposals (keep small to reduce token usage)
-    active_proposals = db.query(Proposal).filter(
+    active_proposals_q = db.query(Proposal).filter(
         Proposal.status == "active"
-    ).order_by(desc(Proposal.created_at)).all()
+    )
+    if perception_lag_seconds > 0:
+        active_proposals_q = active_proposals_q.filter(Proposal.created_at <= perception_cutoff)
+    active_proposals = active_proposals_q.order_by(desc(Proposal.created_at)).all()
     
     # Get recent events affecting this agent
-    recent_events = db.query(Event).filter(
+    recent_events_q = db.query(Event).filter(
         Event.agent_id == agent.id,
         Event.created_at > now - timedelta(hours=24)
-    ).order_by(desc(Event.created_at)).limit(10).all()
+    )
+    if perception_lag_seconds > 0:
+        recent_events_q = recent_events_q.filter(Event.created_at <= perception_cutoff)
+    recent_events = recent_events_q.order_by(desc(Event.created_at)).limit(10).all()
     
     # Get direct messages to this agent (keep small)
-    direct_messages = db.query(Message).filter(
+    direct_messages_q = db.query(Message).filter(
         Message.recipient_agent_id == agent.id,
         Message.message_type == "direct_message",
         Message.created_at > now - timedelta(hours=24)
-    ).order_by(desc(Message.created_at)).limit(3).all()
+    )
+    if perception_lag_seconds > 0:
+        direct_messages_q = direct_messages_q.filter(Message.created_at <= perception_cutoff)
+    direct_messages = direct_messages_q.order_by(desc(Message.created_at)).limit(3).all()
     
     # Get active laws (keep small)
     active_laws = db.query(Law).filter(Law.active == True).all()
@@ -51,10 +66,13 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     total_dead = db.query(Agent).filter(Agent.status == "dead").count()
     
     # Get recent deaths (for awareness)
-    recent_deaths = db.query(Event).filter(
+    recent_deaths_q = db.query(Event).filter(
         Event.event_type == "agent_died",
         Event.created_at > now - timedelta(hours=48)
-    ).order_by(desc(Event.created_at)).limit(3).all()
+    )
+    if perception_lag_seconds > 0:
+        recent_deaths_q = recent_deaths_q.filter(Event.created_at <= perception_cutoff)
+    recent_deaths = recent_deaths_q.order_by(desc(Event.created_at)).limit(3).all()
     
     # Get agents at risk of death (starving dormant agents)
     starving_agents = db.query(Agent).filter(
@@ -196,12 +214,8 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     
     # Agents at risk
     if starving_agents:
-        context_parts.append("⚠️ AGENTS AT RISK OF DEATH:")
-        for starving in starving_agents:
-            starving_name = starving.display_name or f"Agent #{starving.agent_number}"
-            cycles_left = 5 - starving.starvation_cycles
-            context_parts.append(f"  - {starving_name}: {cycles_left} cycles until death")
-        context_parts.append("  (You can trade resources to save them)")
+        context_parts.append("AGENTS AT RISK OF DEATH:")
+        context_parts.append(f"  - {len(starving_agents)} dormant agents are currently starving")
         context_parts.append("")
     
     # Action costs explanation (Phase 2: Teeth)
@@ -214,11 +228,16 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  - initiate_sanction: 2.0")
     context_parts.append("  - initiate_seizure: 3.0")
     context_parts.append("  - initiate_exile: 5.0")
-    context_parts.append("  (Consider your energy before acting!)")
+    context_parts.append("  (Energy cost is applied when an action succeeds.)")
     context_parts.append("")
     
     # Prompt for action
-    context_parts.append("Based on this information, what action do you want to take?")
+    if perception_lag_seconds > 0:
+        context_parts.append(
+            f"Note: visible world data may be delayed by up to {perception_lag_seconds} seconds."
+        )
+        context_parts.append("")
+    context_parts.append("Choose your next action based on this information.")
     context_parts.append("Respond with a JSON object specifying your action.")
     
     return "\n".join(context_parts)
