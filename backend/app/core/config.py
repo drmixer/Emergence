@@ -40,7 +40,8 @@ class Settings(BaseSettings):
     # Simulation settings
     AGENT_LOOP_DELAY_SECONDS: int = 150  # 2.5 minutes
     DAY_LENGTH_MINUTES: int = 60  # 1 real hour = 1 sim day
-    PROPOSAL_VOTING_HOURS: int = 24
+    # Can be fractional in dev for faster end-to-end testing (e.g. 0.25 = 15 minutes).
+    PROPOSAL_VOTING_HOURS: float = 24.0
     SIMULATION_MAX_AGENTS: int = 0  # 0 = all agents (use 1-3 for cheap local tests)
     
     # Rate limiting
