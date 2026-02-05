@@ -111,6 +111,9 @@ class LLMClient:
             If Groq is rate-limiting (common on free tiers), optionally fall back to OpenRouter
             when a key is configured. This keeps the simulation alive while still preferring Groq.
             """
+            provider = (settings.LLM_PROVIDER or "auto").strip().lower()
+            if provider == "groq" and not getattr(settings, "ALLOW_OPENROUTER_FALLBACK", False):
+                return None
             if not settings.OPENROUTER_API_KEY:
                 return None
             if client is not self.groq_client:

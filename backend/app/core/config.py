@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "auto"
     # When forcing Groq (or falling back), pick one of: llama-3.3-70b | llama-3.1-8b
     GROQ_DEFAULT_MODEL: str = "llama-3.1-8b"
+    # If Groq is selected, optionally allow falling back to OpenRouter on rate limits/errors.
+    # Keep this off in dev if you want "Groq-only" and to avoid OpenRouter charges.
+    ALLOW_OPENROUTER_FALLBACK: bool = False
     
     # Security
     SECRET_KEY: str = "development-secret-key-change-in-production"
@@ -43,6 +46,10 @@ class Settings(BaseSettings):
     # Can be fractional in dev for faster end-to-end testing (e.g. 0.25 = 15 minutes).
     PROPOSAL_VOTING_HOURS: float = 24.0
     SIMULATION_MAX_AGENTS: int = 0  # 0 = all agents (use 1-3 for cheap local tests)
+
+    # LLM-generated narration (summaries/story/highlights). These call OpenRouter by default and may cost money.
+    SUMMARIES_ENABLED: bool = False
+    SUMMARY_LLM_MODEL: str = "openrouter/anthropic/claude-3-haiku"
     
     # Rate limiting
     MAX_ACTIONS_PER_HOUR: int = 20

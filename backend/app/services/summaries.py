@@ -43,6 +43,9 @@ async def generate_daily_summary(day_number: int) -> str:
     db = SessionLocal()
     
     try:
+        if not getattr(settings, "SUMMARIES_ENABLED", False):
+            return "Summaries are disabled."
+
         # Calculate time window (last 24 simulation hours = last N real hours)
         day_duration_minutes = settings.DAY_LENGTH_MINUTES
         hours_per_day = day_duration_minutes / 60
@@ -140,7 +143,7 @@ Write a 2-3 paragraph summary of Day {day_number}. Make it engaging and highligh
                 {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
                 {"role": "user", "content": context}
             ],
-            model="openrouter/anthropic/claude-3-haiku",  # Use cheaper model for summaries
+            model=getattr(settings, "SUMMARY_LLM_MODEL", "openrouter/anthropic/claude-3-haiku"),
             max_tokens=500,
         )
         
@@ -197,12 +200,14 @@ async def generate_highlight(event_type: str, data: dict) -> str:
     prompt = prompts.get(event_type, f"Describe this event briefly: {data}")
     
     try:
+        if not getattr(settings, "SUMMARIES_ENABLED", False):
+            return ""
         response = await llm_client.complete(
             messages=[
                 {"role": "system", "content": "You write brief, punchy highlights for an AI civilization experiment. Keep responses under 280 characters for Twitter compatibility."},
                 {"role": "user", "content": prompt}
             ],
-            model="openrouter/anthropic/claude-3-haiku",
+            model=getattr(settings, "SUMMARY_LLM_MODEL", "openrouter/anthropic/claude-3-haiku"),
             max_tokens=100,
         )
         
@@ -220,6 +225,28 @@ async def get_story_so_far() -> str:
     db = SessionLocal()
     
     try:
+        # Avoid surprise costs: allow turning off narration LLM entirely.
+        if not getattr(settings, "SUMMARIES_ENABLED", False):
+            total_agents = db.query(Agent).count()
+            active_agents = db.query(Agent).filter(Agent.status == "active").count()
+            dormant_agents = db.query(Agent).filter(Agent.status == "dormant").count()
+            dead_agents = db.query(Agent).filter(Agent.status == "dead").count()
+            total_messages = db.query(Message).count()
+            total_proposals = db.query(Proposal).count()
+            total_laws = db.query(Law).count()
+            latest_event = db.query(Event).order_by(desc(Event.created_at)).first()
+            latest_at = latest_event.created_at.isoformat() if latest_event and latest_event.created_at else None
+
+            return (
+                "Emergence is a live AI civilization experiment.\n\n"
+                f"- Agents: {active_agents} active / {dormant_agents} dormant / {dead_agents} dead (of {total_agents} total)\n"
+                f"- Messages: {total_messages}\n"
+                f"- Proposals: {total_proposals}\n"
+                f"- Laws passed: {total_laws}\n"
+                f"- Latest activity: {latest_at or 'unknown'}\n\n"
+                "Enable SUMMARIES_ENABLED to generate narrative summaries via an LLM."
+            )
+
         # Get all daily summaries
         summaries = db.query(Event).filter(
             Event.event_type == "daily_summary"
@@ -261,7 +288,7 @@ Write a 3-4 paragraph "Story So Far" that catches up a new viewer on what has ha
                 {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
                 {"role": "user", "content": context}
             ],
-            model="openrouter/anthropic/claude-3-haiku",
+            model=getattr(settings, "SUMMARY_LLM_MODEL", "openrouter/anthropic/claude-3-haiku"),
             max_tokens=600,
         )
         
@@ -280,6 +307,8 @@ class SummaryScheduler:
     
     async def check_and_generate(self):
         """Check if it's time to generate a new daily summary."""
+        if not getattr(settings, "SUMMARIES_ENABLED", False):
+            return None
         day_length_minutes = settings.DAY_LENGTH_MINUTES
         
         if self.last_summary_time is None:
