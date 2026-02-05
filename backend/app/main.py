@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
+from urllib.parse import urlparse
 
 from app.core.config import settings
 from app.api.agents import router as agents_router
@@ -30,6 +31,12 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting Emergence API...")
+    try:
+        db_host = urlparse(getattr(settings, "DATABASE_URL", "")).hostname
+        redis_host = urlparse(getattr(settings, "REDIS_URL", "")).hostname
+        logger.info("Config: db_host=%s redis_host=%s env=%s", db_host, redis_host, settings.ENVIRONMENT)
+    except Exception:
+        logger.info("Config: env=%s", settings.ENVIRONMENT)
     logger.info(
         "LLM config: provider=%s groq=%s openrouter=%s groq_default_model=%s",
         getattr(settings, "LLM_PROVIDER", "auto"),
@@ -89,14 +96,24 @@ async def readiness_check():
         from sqlalchemy import text
 
         from app.core.database import SessionLocal
+        import redis
 
+        # DB
         db = SessionLocal()
         try:
             db.execute(text("SELECT 1"))
         finally:
             db.close()
 
-        return {"status": "ready"}
+        # Redis
+        r = redis.Redis.from_url(
+            settings.REDIS_URL,
+            socket_connect_timeout=3,
+            socket_timeout=3,
+        )
+        r.ping()
+
+        return {"status": "ready", "db": "ok", "redis": "ok"}
     except Exception as e:
         return JSONResponse(status_code=503, content={"status": "not_ready", "error": str(e)})
 

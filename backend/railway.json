@@ -5,6 +5,7 @@
     },
     "deploy": {
         "startCommand": "/app/start.sh",
+        "preDeployCommand": "alembic upgrade head",
         "healthcheckPath": "/health",
         "numReplicas": 1,
         "restartPolicyType": "ON_FAILURE",
