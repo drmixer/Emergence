@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+set -eu
+
+# Railway "Start Command" is executed without a shell, so `$PORT` (and similar)
+# does not expand and uvicorn crashes. This wrapper makes `uvicorn ... --port $PORT`
+# behave as intended by substituting the numeric PORT env var.
+
+resolved_port="${PORT:-8080}"
+case "${resolved_port}" in
+  ''|*[!0-9]*)
+    resolved_port=8080
+    ;;
+esac
+
+args=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --port)
+      shift
+      if [ "$#" -eq 0 ]; then
+        args="$args --port $resolved_port"
+      else
+        case "$1" in
+          '$PORT'|'${PORT}'|'"$PORT"'|"\\$PORT")
+            args="$args --port $resolved_port"
+            ;;
+          *)
+            args="$args --port $1"
+            ;;
+        esac
+        shift
+      fi
+      ;;
+    --port=*)
+      val="${1#--port=}"
+      case "$val" in
+        '$PORT'|'${PORT}'|'"$PORT"'|"\\$PORT")
+          args="$args --port=$resolved_port"
+          ;;
+        *)
+          args="$args $1"
+          ;;
+      esac
+      shift
+      ;;
+    *)
+      # Preserve quoting as best we can; uvicorn args are simple.
+      args="$args \"$1\""
+      shift
+      ;;
+  esac
+done
+
+# shellcheck disable=SC2086
+exec sh -c "python -m uvicorn $args"

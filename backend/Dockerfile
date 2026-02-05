@@ -3,7 +3,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PORT=8080
+    PORT=8080 \
+    PATH="/app/bin:${PATH}"
 
 WORKDIR /app
 
@@ -20,6 +21,6 @@ RUN python -m pip install --upgrade pip \
 
 COPY . .
 
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh /app/bin/uvicorn
 
 ENTRYPOINT ["/app/start.sh"]
