@@ -31,6 +31,7 @@ async def run_once(agent_number: int, dry_run: bool) -> int:
             model_type=agent.model_type,
             system_prompt=agent.system_prompt,
             context_prompt=context,
+            checkpoint_number=1,
         )
 
         if dry_run:
@@ -69,7 +70,7 @@ async def run_once(agent_number: int, dry_run: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run one agent turn once.")
-    parser.add_argument("--agent", type=int, default=1, help="Agent number (1-100)")
+    parser.add_argument("--agent", type=int, default=1, help="Agent number (default seed: 1-50)")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -81,4 +82,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

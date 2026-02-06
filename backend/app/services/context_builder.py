@@ -8,6 +8,7 @@ from sqlalchemy import desc
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
 from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote
+from app.services.agent_memory import agent_memory_service
 
 
 async def build_agent_context(db: Session, agent: Agent) -> str:
@@ -64,6 +65,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     total_active = db.query(Agent).filter(Agent.status == "active").count()
     total_dormant = db.query(Agent).filter(Agent.status == "dormant").count()
     total_dead = db.query(Agent).filter(Agent.status == "dead").count()
+    total_population = total_active + total_dormant + total_dead
     
     # Get recent deaths (for awareness)
     recent_deaths_q = db.query(Event).filter(
@@ -96,6 +98,13 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append(f"- Resources: Food: {inventory_dict.get('food', 0):.1f}, "
                         f"Energy: {inventory_dict.get('energy', 0):.1f}, "
                         f"Materials: {inventory_dict.get('materials', 0):.1f}")
+    context_parts.append("")
+
+    # Per-agent long-term memory (strictly bounded to avoid prompt bloat).
+    memory_text = agent_memory_service.get_bounded_memory_text(db, agent.id)
+    if memory_text:
+        context_parts.append("LONG-TERM MEMORY (bounded):")
+        context_parts.append(memory_text)
     
     # Survival warning if low resources
     food = inventory_dict.get('food', 0)
@@ -200,7 +209,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     
     # Global state
     context_parts.append("GLOBAL STATE:")
-    context_parts.append(f"- Active Agents: {total_active}/100")
+    context_parts.append(f"- Active Agents: {total_active}/{total_population}")
     context_parts.append(f"- Dormant Agents: {total_dormant}")
     context_parts.append(f"- Dead Agents: {total_dead} (permanent)")
     context_parts.append("")

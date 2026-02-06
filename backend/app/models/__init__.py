@@ -2,6 +2,7 @@
 from app.models.models import (
     Agent,
     AgentInventory,
+    AgentMemory,
     GlobalResources,
     Message,
     Proposal,
@@ -16,6 +17,7 @@ from app.models.models import (
 __all__ = [
     "Agent",
     "AgentInventory", 
+    "AgentMemory",
     "GlobalResources",
     "Message",
     "Proposal",

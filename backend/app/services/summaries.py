@@ -12,6 +12,7 @@ from sqlalchemy import desc, func
 
 from app.core.database import SessionLocal
 from app.core.config import settings
+from app.core.time import ensure_utc, now_utc
 from app.models.models import Event, Message, Proposal, Vote, Law, Agent
 from app.services.llm_client import llm_client
 
@@ -28,6 +29,36 @@ Keep summaries punchy and shareable.
 
 Do NOT editorialize about AI capabilities or make meta-commentary.
 Just report what's happening as if it were a real society."""
+
+
+def _summary_model_type() -> str:
+    """
+    Resolve SUMMARY_LLM_MODEL to a known llm_client model_type key.
+    Supports legacy full provider model ids used by older summary code.
+    """
+    configured = str(getattr(settings, "SUMMARY_LLM_MODEL", "") or "").strip()
+    supported_model_types = {
+        "claude-sonnet-4",
+        "gpt-4o-mini",
+        "claude-haiku",
+        "llama-3.3-70b",
+        "llama-3.1-8b",
+        "gemini-flash",
+    }
+    if configured in supported_model_types:
+        return configured
+
+    legacy_aliases = {
+        "openrouter/anthropic/claude-3-haiku": "claude-haiku",
+        "openrouter/anthropic/claude-3.5-haiku": "claude-haiku",
+        "openrouter/openai/gpt-4o-mini": "gpt-4o-mini",
+    }
+    if configured in legacy_aliases:
+        return legacy_aliases[configured]
+
+    if configured:
+        logger.warning("Unsupported SUMMARY_LLM_MODEL '%s'; falling back to claude-haiku", configured)
+    return "claude-haiku"
 
 
 async def generate_daily_summary(day_number: int) -> str:
@@ -57,7 +88,7 @@ async def generate_daily_summary(day_number: int) -> str:
         events = db.query(Event).filter(Event.created_at >= time_window).all()
         messages = db.query(Message).filter(
             Message.created_at >= time_window,
-            Message.message_type == "forum"
+            Message.message_type.in_(["forum_post", "forum_reply"])
         ).all()
         proposals_created = db.query(Proposal).filter(
             Proposal.created_at >= time_window
@@ -138,16 +169,14 @@ Write a 2-3 paragraph summary of Day {day_number}. Make it engaging and highligh
 """
         
         # Generate summary
-        response = await llm_client.complete(
-            messages=[
-                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                {"role": "user", "content": context}
-            ],
-            model=getattr(settings, "SUMMARY_LLM_MODEL", "openrouter/anthropic/claude-3-haiku"),
+        response = await llm_client.get_completion(
+            model_type=_summary_model_type(),
+            system_prompt=SUMMARY_SYSTEM_PROMPT,
+            user_prompt=context,
             max_tokens=500,
         )
         
-        summary = response.get("content", "Unable to generate summary.")
+        summary = response or "Unable to generate summary."
         
         # Store the summary as an event
         summary_event = Event(
@@ -202,16 +231,14 @@ async def generate_highlight(event_type: str, data: dict) -> str:
     try:
         if not getattr(settings, "SUMMARIES_ENABLED", False):
             return ""
-        response = await llm_client.complete(
-            messages=[
-                {"role": "system", "content": "You write brief, punchy highlights for an AI civilization experiment. Keep responses under 280 characters for Twitter compatibility."},
-                {"role": "user", "content": prompt}
-            ],
-            model=getattr(settings, "SUMMARY_LLM_MODEL", "openrouter/anthropic/claude-3-haiku"),
+        response = await llm_client.get_completion(
+            model_type=_summary_model_type(),
+            system_prompt="You write brief, punchy highlights for an AI civilization experiment. Keep responses under 280 characters for Twitter compatibility.",
+            user_prompt=prompt,
             max_tokens=100,
         )
         
-        return response.get("content", "")
+        return response or ""
     except Exception as e:
         logger.error(f"Error generating highlight: {e}")
         return ""
@@ -261,7 +288,8 @@ async def get_story_so_far() -> str:
         # Get simulation age
         first_event = db.query(Event).order_by(Event.created_at).first()
         if first_event:
-            age = datetime.utcnow() - first_event.created_at
+            first_event_at = ensure_utc(first_event.created_at)
+            age = now_utc() - first_event_at if first_event_at else timedelta(0)
             days = age.days
             hours = age.seconds // 3600
         else:
@@ -278,21 +306,19 @@ The Emergence simulation has been running for {days} days and {hours} hours.
 - Total proposals: {total_proposals}
 
 ## Previous Daily Summaries
-{chr(10).join(f"Day {s.metadata.get('day_number', '?')}: {s.metadata.get('summary', 'No summary')[:200]}..." for s in summaries[-5:]) if summaries else "No summaries yet."}
+{chr(10).join(f"Day {(s.event_metadata or {}).get('day_number', '?')}: {(s.event_metadata or {}).get('summary', 'No summary')[:200]}..." for s in summaries[-5:]) if summaries else "No summaries yet."}
 
 Write a 3-4 paragraph "Story So Far" that catches up a new viewer on what has happened in the simulation. Include key developments, notable agents, and the current state of the society.
 """
         
-        response = await llm_client.complete(
-            messages=[
-                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                {"role": "user", "content": context}
-            ],
-            model=getattr(settings, "SUMMARY_LLM_MODEL", "openrouter/anthropic/claude-3-haiku"),
+        response = await llm_client.get_completion(
+            model_type=_summary_model_type(),
+            system_prompt=SUMMARY_SYSTEM_PROMPT,
+            user_prompt=context,
             max_tokens=600,
         )
         
-        return response.get("content", "The simulation has just begun...")
+        return response or "The simulation has just begun..."
         
     finally:
         db.close()

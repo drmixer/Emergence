@@ -3,6 +3,7 @@ Analytics & Highlights API Router
 """
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
@@ -424,6 +425,193 @@ def wealth_distribution():
             "median": pct(50),
             "p75": pct(75),
             "max": float(wealth_sorted[-1]) if wealth_sorted else 0.0,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/model-attribution")
+def model_attribution(
+    hours: int = Query(24, ge=1, le=24 * 30),
+    run_id: Optional[str] = Query(None),
+):
+    """
+    Break down model behavior by assigned model_type and resolved model.
+
+    - `by_model_type`: attribution-safe view keyed to assigned model cohort.
+    - `by_resolved_model`: actual execution model/provider used for each call.
+    - `action_outcomes_by_model_type`: downstream action/event outcomes by assigned model_type.
+    """
+    db = SessionLocal()
+    try:
+        time_filter = "created_at >= NOW() - (:hours || ' hours')::interval"
+        run_filter = "AND run_id = :run_id" if run_id else ""
+        params = {"hours": hours}
+        if run_id:
+            params["run_id"] = run_id
+
+        by_model_type = db.execute(
+            text(
+                f"""
+                SELECT
+                    model_type,
+                    COUNT(*) AS calls,
+                    COALESCE(SUM(CASE WHEN provider = 'openrouter' THEN 1 ELSE 0 END), 0) AS openrouter_calls,
+                    COALESCE(SUM(CASE WHEN provider = 'openrouter' AND byok_used IS TRUE THEN 1 ELSE 0 END), 0) AS byok_calls,
+                    COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                    COALESCE(AVG(total_tokens), 0) AS avg_tokens_per_call,
+                    COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
+                    COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+                FROM llm_usage
+                WHERE {time_filter}
+                  AND model_type IS NOT NULL
+                  {run_filter}
+                GROUP BY model_type
+                ORDER BY calls DESC, model_type ASC
+                """
+            ),
+            params,
+        ).fetchall()
+
+        by_resolved_model = db.execute(
+            text(
+                f"""
+                SELECT
+                    provider,
+                    resolved_model_name,
+                    COUNT(*) AS calls,
+                    COALESCE(SUM(CASE WHEN byok_used IS TRUE THEN 1 ELSE 0 END), 0) AS byok_calls,
+                    COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                    COALESCE(AVG(total_tokens), 0) AS avg_tokens_per_call,
+                    COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
+                    COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+                FROM llm_usage
+                WHERE {time_filter}
+                  AND resolved_model_name IS NOT NULL
+                  {run_filter}
+                GROUP BY provider, resolved_model_name
+                ORDER BY calls DESC, provider ASC, resolved_model_name ASC
+                """
+            ),
+            params,
+        ).fetchall()
+
+        action_run_filter = ""
+        action_params = {"hours": hours}
+        if run_id:
+            action_run_filter = """
+                  AND e.agent_id IN (
+                      SELECT DISTINCT u.agent_id
+                      FROM llm_usage u
+                      WHERE u.agent_id IS NOT NULL
+                        AND u.created_at >= NOW() - (:hours || ' hours')::interval
+                        AND u.run_id = :run_id
+                  )
+            """
+            action_params["run_id"] = run_id
+
+        action_outcomes = db.execute(
+            text(
+                f"""
+                SELECT
+                    a.model_type AS model_type,
+                    COUNT(*) AS total_events,
+                    COALESCE(SUM(CASE WHEN e.event_type = 'invalid_action' THEN 1 ELSE 0 END), 0) AS invalid_actions,
+                    COALESCE(SUM(CASE WHEN e.event_type = 'work' THEN 1 ELSE 0 END), 0) AS work_actions,
+                    COALESCE(SUM(CASE WHEN e.event_type IN ('forum_post', 'forum_reply', 'direct_message') THEN 1 ELSE 0 END), 0) AS communication_actions,
+                    COALESCE(SUM(CASE WHEN e.event_type IN ('vote', 'create_proposal', 'vote_enforcement', 'initiate_sanction', 'initiate_seizure', 'initiate_exile') THEN 1 ELSE 0 END), 0) AS governance_actions,
+                    COALESCE(SUM(CASE WHEN e.event_type = 'trade' THEN 1 ELSE 0 END), 0) AS trade_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_fallback_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'llm_parse_ok') = 'false' THEN 1 ELSE 0 END), 0) AS llm_parse_fail_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'llm_parse_likely_truncated') = 'true' THEN 1 ELSE 0 END), 0) AS llm_parse_likely_truncated_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'llm_parse_retries') ~ '^[0-9]+$' AND ((e.event_metadata -> 'runtime' ->> 'llm_parse_retries')::int) > 0 THEN 1 ELSE 0 END), 0) AS llm_parse_retry_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'llm_parse_retries') ~ '^[0-9]+$' THEN (e.event_metadata -> 'runtime' ->> 'llm_parse_retries')::int ELSE 0 END), 0) AS llm_parse_retries_total
+                FROM events e
+                JOIN agents a ON a.id = e.agent_id
+                WHERE e.created_at >= NOW() - (:hours || ' hours')::interval
+                  AND e.agent_id IS NOT NULL
+                  {action_run_filter}
+                GROUP BY a.model_type
+                ORDER BY total_events DESC, a.model_type ASC
+                """
+            ),
+            action_params,
+        ).fetchall()
+
+        def _usage_row_to_dict(row):
+            calls = int(row.calls or 0)
+            success_calls = int(row.success_calls or 0)
+            fallback_calls = int(row.fallback_calls or 0)
+            openrouter_calls = int(getattr(row, "openrouter_calls", 0) or 0)
+            if openrouter_calls == 0 and str(getattr(row, "provider", "") or "") == "openrouter":
+                openrouter_calls = calls
+            byok_calls = int(getattr(row, "byok_calls", 0) or 0)
+            return {
+                "calls": calls,
+                "success_calls": success_calls,
+                "fallback_calls": fallback_calls,
+                "success_rate": (success_calls / calls) if calls else 0.0,
+                "fallback_rate": (fallback_calls / calls) if calls else 0.0,
+                "byok_calls": byok_calls,
+                "byok_rate": (byok_calls / calls) if calls else 0.0,
+                "byok_rate_openrouter": (byok_calls / openrouter_calls) if openrouter_calls else 0.0,
+                "total_tokens": int(row.total_tokens or 0),
+                "avg_tokens_per_call": float(row.avg_tokens_per_call or 0.0),
+                "avg_latency_ms": float(row.avg_latency_ms or 0.0),
+                "estimated_cost_usd": float(row.estimated_cost_usd or 0.0),
+            }
+
+        model_type_payload = []
+        for row in by_model_type:
+            payload = {"model_type": row.model_type}
+            payload.update(_usage_row_to_dict(row))
+            model_type_payload.append(payload)
+
+        resolved_payload = []
+        for row in by_resolved_model:
+            payload = {"provider": row.provider, "resolved_model_name": row.resolved_model_name}
+            payload.update(_usage_row_to_dict(row))
+            resolved_payload.append(payload)
+
+        outcomes_payload = [
+            {
+                "model_type": row.model_type,
+                "total_events": int(row.total_events or 0),
+                "invalid_actions": int(row.invalid_actions or 0),
+                "work_actions": int(row.work_actions or 0),
+                "communication_actions": int(row.communication_actions or 0),
+                "governance_actions": int(row.governance_actions or 0),
+                "trade_actions": int(row.trade_actions or 0),
+                "checkpoint_actions": int(row.checkpoint_actions or 0),
+                "deterministic_fallback_actions": int(row.deterministic_fallback_actions or 0),
+                "llm_parse_fail_actions": int(row.llm_parse_fail_actions or 0),
+                "llm_parse_likely_truncated_actions": int(row.llm_parse_likely_truncated_actions or 0),
+                "llm_parse_retry_actions": int(row.llm_parse_retry_actions or 0),
+                "llm_parse_retries_total": int(row.llm_parse_retries_total or 0),
+            }
+            for row in action_outcomes
+        ]
+
+        total_calls = sum(item["calls"] for item in model_type_payload)
+        total_events = sum(item["total_events"] for item in outcomes_payload)
+
+        return {
+            "window_hours": hours,
+            "run_id": run_id,
+            "totals": {
+                "llm_calls": total_calls,
+                "events": total_events,
+                "model_types": len(model_type_payload),
+                "resolved_models": len(resolved_payload),
+            },
+            "by_model_type": model_type_payload,
+            "by_resolved_model": resolved_payload,
+            "action_outcomes_by_model_type": outcomes_payload,
         }
     finally:
         db.close()

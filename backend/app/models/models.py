@@ -23,6 +23,11 @@ class Agent(Base):
     personality_type = Column(String(20), nullable=False)
     status = Column(String(20), nullable=False, default="active")
     system_prompt = Column(Text, nullable=False)
+    # Strategic planning state: checkpoint-generated intent executed between checkpoints.
+    current_intent = Column(JSON, nullable=True, default=dict)
+    intent_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_checkpoint_at = Column(DateTime(timezone=True), nullable=True)
+    next_checkpoint_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_active_at = Column(DateTime(timezone=True), server_default=func.now())
     
@@ -37,6 +42,7 @@ class Agent(Base):
     
     # Relationships
     inventory = relationship("AgentInventory", back_populates="agent", cascade="all, delete-orphan")
+    memory = relationship("AgentMemory", back_populates="agent", uselist=False, cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="author", foreign_keys="Message.author_agent_id")
     proposals = relationship("Proposal", back_populates="author")
     votes = relationship("Vote", back_populates="agent")
@@ -45,7 +51,12 @@ class Agent(Base):
         CheckConstraint("agent_number >= 1 AND agent_number <= 100", name="valid_agent_number"),
         CheckConstraint("tier >= 1 AND tier <= 4", name="valid_tier"),
         CheckConstraint(
-            "model_type IN ('claude-sonnet-4', 'gpt-4o-mini', 'claude-haiku', 'llama-3.3-70b', 'llama-3.1-8b', 'gemini-flash')",
+            "model_type IN ("
+            "'claude-sonnet-4', 'gpt-4o-mini', 'claude-haiku', 'llama-3.3-70b', 'llama-3.1-8b', 'gemini-flash', "
+            "'or_gpt_oss_120b', 'or_qwen3_235b_a22b_2507', 'or_deepseek_v3_2', 'or_deepseek_chat_v3_1', "
+            "'or_gpt_oss_20b', 'or_qwen3_32b', 'or_gpt_oss_20b_free', 'or_qwen3_4b_free', "
+            "'gr_llama_3_1_8b_instant'"
+            ")",
             name="valid_model"
         ),
         CheckConstraint(
@@ -77,6 +88,20 @@ class AgentInventory(Base):
         ),
         CheckConstraint("quantity >= 0", name="non_negative_quantity"),
     )
+
+
+class AgentMemory(Base):
+    """Per-agent long-term memory summary."""
+    __tablename__ = "agent_memory"
+
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, unique=True)
+    summary_text = Column(Text, nullable=False, default="")
+    last_updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_checkpoint_number = Column(Integer, nullable=False, default=0)
+
+    # Relationships
+    agent = relationship("Agent", back_populates="memory")
 
 
 class GlobalResources(Base):

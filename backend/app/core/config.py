@@ -50,11 +50,29 @@ class Settings(BaseSettings):
     ALLOW_OPENROUTER_FALLBACK: bool = False
     # Optional: send a small % of lightweight agents through Groq even when OpenRouter is available.
     # Deterministic per-agent (based on agent id). Suggested: 0.05–0.10.
+    # Legacy knob for old model_type routing; keep 0.0 with pinned cohort assignments.
     GROQ_LIGHTWEIGHT_SHARE: float = 0.0
 
     # Provider concurrency caps to reduce rate limiting (esp. Groq free tier).
     GROQ_MAX_CONCURRENCY: int = 2
     OPENROUTER_MAX_CONCURRENCY: int = 6
+    OPENROUTER_RPM_LIMIT: int = 6
+    # Action-generation output controls (checkpoint decisions).
+    LLM_ACTION_MAX_TOKENS: int = 350
+    LLM_ACTION_PARSE_RETRY_ATTEMPTS: int = 2
+
+    # Daily LLM budget and throughput guardrails.
+    # Soft cap: degrade model route / max_tokens.
+    # Hard cap: stop paid/extra calls and return controlled fallback.
+    LLM_DAILY_BUDGET_USD_SOFT: float = 0.50
+    LLM_DAILY_BUDGET_USD_HARD: float = 1.00
+    LLM_MAX_CALLS_PER_DAY_TOTAL: int = 2200
+    LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE: int = 900
+    LLM_MAX_CALLS_PER_DAY_GROQ: int = 1800
+
+    # Memory compaction knobs (used by upcoming memory subsystem).
+    LLM_MEMORY_UPDATE_EVERY_N_CHECKPOINTS: int = 3
+    LLM_MEMORY_MAX_CHARS: int = 1200
     
     # Security
     SECRET_KEY: str = "development-secret-key-change-in-production"
@@ -67,7 +85,9 @@ class Settings(BaseSettings):
     DAY_LENGTH_MINUTES: int = 60  # 1 real hour = 1 sim day
     # Can be fractional in dev for faster end-to-end testing (e.g. 0.25 = 15 minutes).
     PROPOSAL_VOTING_HOURS: float = 24.0
-    SIMULATION_MAX_AGENTS: int = 0  # 0 = all agents (use 1-3 for cheap local tests)
+    SIMULATION_MAX_AGENTS: int = 50  # Default v1 runtime cap; set 0 to process all seeded agents
+    # Optional run label for llm_usage attribution rows. If empty, runtime generates one.
+    SIMULATION_RUN_ID: str = ""
     # Optional perception lag for agent context (in seconds). Adds information asymmetry.
     PERCEPTION_LAG_SECONDS: int = 120
 

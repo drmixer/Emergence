@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Emergence API",
-    description="AI Civilization Experiment - Watch 100 AI agents build their own society",
+    description="AI Civilization Experiment - Watch 50 AI agents build their own society",
     version="1.0.0",
     lifespan=lifespan,
 )

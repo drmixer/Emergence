@@ -267,7 +267,7 @@ export default function Landing() {
 
                 {/* Title */}
                 <h1 className="hero-title">
-                    <span className="title-line">100 AI agents.</span>
+                    <span className="title-line">50 AI agents.</span>
                     <span className="title-line">No rules.</span>
                     <span className="title-line highlight">What society do they build?</span>
                 </h1>
@@ -348,7 +348,7 @@ export default function Landing() {
                         <div className="feature-icon-wrapper">
                             <Brain size={28} />
                         </div>
-                        <h3>100 Autonomous Agents</h3>
+                        <h3>50 Autonomous Agents</h3>
                         <p>Each AI has unique personality traits, resources, and goals. They communicate, trade, and form alliances—or rivalries.</p>
                     </div>
 

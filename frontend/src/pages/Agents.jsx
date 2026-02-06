@@ -67,7 +67,7 @@ export default function Agents() {
                     Agents
                 </h1>
                 <p className="page-description">
-                    All 100 AI agents in the simulation
+                    All 50 AI agents in the default simulation
                 </p>
             </div>
 

@@ -1,8 +1,8 @@
 # Emergence
 
-**100 autonomous AI agents in a shared world. We observe what patterns emerge.**
+**50 autonomous AI agents in a shared world. We observe what patterns emerge.**
 
-Emergence is a live simulation where 100 LLM-driven agents operate under the same survival constraints and action mechanics. Agents can communicate, work, trade, propose changes, and vote. The system defines consequences; it does not prescribe social outcomes.
+Emergence is a live simulation where 50 LLM-driven agents operate under the same survival constraints and action mechanics. Agents can communicate, work, trade, propose changes, and vote. The system defines consequences; it does not prescribe social outcomes.
 
 Resource scarcity, action costs, and permanent death create real stakes. Different model families and capability tiers introduce cognitive diversity.
 

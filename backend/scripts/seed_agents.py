@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Seed script to populate the database with 100 agents.
+Seed script to populate the database with 50 agents.
 Run this once after creating the database.
 """
 import argparse
@@ -20,18 +20,23 @@ from app.models.models import Agent, AgentInventory, GlobalResources
 from app.core.config import settings
 
 
-# Agent distribution by tier (implementation detail only; agents are not told their tier or model).
-# 100 agents total:
-# - Tier 1: deep reasoning (8%)
-# - Tier 2: fast generalists (28%)
-# - Tier 3: socially fluent / narrative-strong (39%)
-# - Tier 4: lightweight / background (25%)
-TIER_DISTRIBUTION = {
-    1: {"count": 8, "models": ["claude-sonnet-4"]},
-    2: {"count": 28, "models": ["gpt-4o-mini"]},
-    3: {"count": 39, "models": ["claude-haiku", "llama-3.3-70b", "gemini-flash"]},
-    4: {"count": 25, "models": ["llama-3.1-8b"]},
-}
+# Explicit model cohorts for attribution-safe research + show mode.
+# Keep deterministic assignment by seed order (agent numbers 1..50).
+MODEL_COHORT_PLAN = [
+    # High tier (10): 3 paid OpenRouter models
+    {"count": 4, "tier": 1, "model_type": "or_gpt_oss_120b", "resolved_model": "openai/gpt-oss-120b"},
+    {"count": 3, "tier": 1, "model_type": "or_qwen3_235b_a22b_2507", "resolved_model": "qwen/qwen3-235b-a22b-2507"},
+    {"count": 3, "tier": 1, "model_type": "or_deepseek_v3_2", "resolved_model": "deepseek/deepseek-v3.2"},
+    # Medium tier (25): 3 paid OpenRouter models
+    {"count": 10, "tier": 2, "model_type": "or_deepseek_chat_v3_1", "resolved_model": "deepseek/deepseek-chat-v3.1"},
+    {"count": 3, "tier": 2, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
+    {"count": 5, "tier": 3, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
+    {"count": 7, "tier": 3, "model_type": "or_qwen3_32b", "resolved_model": "qwen/qwen3-32b"},
+    # Basic tier (15): mostly free OpenRouter + fixed Groq cohort
+    {"count": 5, "tier": 4, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
+    {"count": 5, "tier": 4, "model_type": "or_qwen3_4b_free", "resolved_model": "qwen/qwen3-4b:free"},
+    {"count": 5, "tier": 4, "model_type": "gr_llama_3_1_8b_instant", "resolved_model": "llama-3.1-8b-instant (groq)"},
+]
 
 # Personality distribution (data only; not injected into prompts)
 PERSONALITIES = ["efficiency", "equality", "freedom", "stability", "neutral"]
@@ -82,7 +87,7 @@ Respond with ONLY the JSON object, no other text.
 
 
 def create_agents():
-    """Create all 100 agents with proper distribution."""
+    """Create all 50 agents with proper distribution."""
     db = SessionLocal()
     
     try:
@@ -95,41 +100,50 @@ def create_agents():
         agents_created = []
         agent_number = 1
         
-        # Create agents by tier
-        for tier, config in TIER_DISTRIBUTION.items():
-            count = config["count"]
-            models = config["models"]
-            
-            # Distribute personalities evenly within tier
+        total_agents = sum(int(c["count"]) for c in MODEL_COHORT_PLAN)
+        if total_agents != 50:
+            raise RuntimeError(f"MODEL_COHORT_PLAN must define exactly 50 agents (got {total_agents})")
+
+        # Build balanced personality queues per tier.
+        tier_counts: dict[int, int] = {}
+        for cohort in MODEL_COHORT_PLAN:
+            tier = int(cohort["tier"])
+            tier_counts[tier] = tier_counts.get(tier, 0) + int(cohort["count"])
+
+        personality_by_tier: dict[int, list[str]] = {}
+        for tier, count in tier_counts.items():
             personalities_per_type = count // len(PERSONALITIES)
-            personality_queue = []
+            queue: list[str] = []
             for p in PERSONALITIES:
-                personality_queue.extend([p] * personalities_per_type)
-            
-            # Handle remainder
-            remaining = count - len(personality_queue)
+                queue.extend([p] * personalities_per_type)
+            remaining = count - len(queue)
             if remaining > 0:
-                personality_queue.extend(random.sample(PERSONALITIES, remaining))
-            
-            random.shuffle(personality_queue)
-            
-            for i in range(count):
-                model = random.choice(models)
-                personality = personality_queue[i]
-                
+                queue.extend(random.sample(PERSONALITIES, remaining))
+            random.shuffle(queue)
+            personality_by_tier[tier] = queue
+
+        # Create agents by explicit cohort order.
+        for cohort in MODEL_COHORT_PLAN:
+            count = int(cohort["count"])
+            tier = int(cohort["tier"])
+            model_type = str(cohort["model_type"])
+
+            for _ in range(count):
+                personality = personality_by_tier[tier].pop()
+
                 # Build system prompt (do not inject roles, tiers, intelligence, or values)
                 system_prompt = BASE_SYSTEM_PROMPT.format(agent_number=agent_number)
-                
+
                 agent = Agent(
                     agent_number=agent_number,
                     display_name=None,  # Will show as "Agent #X"
-                    model_type=model,
+                    model_type=model_type,
                     tier=tier,
                     personality_type=personality,
                     status="active",
                     system_prompt=system_prompt,
                 )
-                
+
                 db.add(agent)
                 agents_created.append(agent)
                 agent_number += 1
@@ -169,9 +183,16 @@ def create_agents():
         db.commit()
         
         print(f"Created {len(agents_created)} agents:")
-        for tier, config in TIER_DISTRIBUTION.items():
+        for tier in sorted({int(c['tier']) for c in MODEL_COHORT_PLAN}):
             tier_agents = [a for a in agents_created if a.tier == tier]
-            print(f"  Tier {tier}: {len(tier_agents)} agents ({', '.join(config['models'])})")
+            print(f"  Tier {tier}: {len(tier_agents)} agents")
+
+        print("\nModel cohorts:")
+        for cohort in MODEL_COHORT_PLAN:
+            print(
+                f"  {cohort['model_type']}: {cohort['count']} agents "
+                f"-> {cohort['resolved_model']}"
+            )
         
         print("\nPersonality distribution:")
         for personality in PERSONALITIES:
@@ -263,6 +284,40 @@ def refresh_system_prompts():
         db.close()
 
 
+def apply_model_cohort_assignments():
+    """Apply MODEL_COHORT_PLAN model_type+tier to existing agents by agent_number."""
+    db = SessionLocal()
+    try:
+        agents = db.query(Agent).order_by(Agent.agent_number).all()
+        if not agents:
+            print("No agents found; nothing to update.")
+            return
+
+        expected: dict[int, tuple[str, int]] = {}
+        cursor = 1
+        for cohort in MODEL_COHORT_PLAN:
+            count = int(cohort["count"])
+            for _ in range(count):
+                expected[cursor] = (str(cohort["model_type"]), int(cohort["tier"]))
+                cursor += 1
+
+        updated = 0
+        for agent in agents:
+            assignment = expected.get(int(agent.agent_number))
+            if not assignment:
+                continue
+            model_type, tier = assignment
+            if agent.model_type != model_type or agent.tier != tier:
+                agent.model_type = model_type
+                agent.tier = tier
+                updated += 1
+
+        db.commit()
+        print(f"Applied cohort assignments to {updated}/{len(expected)} planned agents.")
+    finally:
+        db.close()
+
+
 def reset_database():
     """
     Destructively clear simulation tables (keeps alembic_version) and restart identities.
@@ -304,7 +359,7 @@ def reset_database():
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Seed the database with 100 agents.")
+    parser = argparse.ArgumentParser(description="Seed the database with 50 agents.")
     parser.add_argument(
         "--create-tables",
         action="store_true",
@@ -324,6 +379,11 @@ def main():
         "--refresh-system-prompts",
         action="store_true",
         help="Refresh existing agents' system prompts from BASE_SYSTEM_PROMPT (non-destructive).",
+    )
+    parser.add_argument(
+        "--apply-model-cohorts",
+        action="store_true",
+        help="Apply MODEL_COHORT_PLAN model_type+tier assignments to existing agents (non-destructive).",
     )
     args = parser.parse_args()
 
@@ -355,6 +415,10 @@ def main():
 
     if args.refresh_system_prompts:
         refresh_system_prompts()
+        print()
+
+    if args.apply_model_cohorts:
+        apply_model_cohort_assignments()
         print()
 
     # Create agents (skips if already present)

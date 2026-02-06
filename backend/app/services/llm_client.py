@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 from collections import deque
 from typing import Optional, Any
@@ -13,6 +14,7 @@ from openai import RateLimitError, APIError
 
 from app.core.config import settings
 from app.core.time import now_utc
+from app.services.usage_budget import usage_budget
 
 logger = logging.getLogger(__name__)
 
@@ -21,24 +23,52 @@ logger = logging.getLogger(__name__)
 OPENROUTER_CONFIG = {
     "base_url": "https://openrouter.ai/api/v1",
     "models": {
-        # NOTE: Pin to explicit :free model IDs to avoid surprise spend.
-        # These keys are internal labels stored on Agent.model_type (agents are not told their tier/model).
+        # Attribution cohorts (seeded explicitly in scripts/seed_agents.py)
+        "or_gpt_oss_120b": "openai/gpt-oss-120b",
+        "or_qwen3_235b_a22b_2507": "qwen/qwen3-235b-a22b-2507",
+        "or_deepseek_v3_2": "deepseek/deepseek-v3.2",
+        "or_deepseek_chat_v3_1": "deepseek/deepseek-chat-v3.1",
+        "or_gpt_oss_20b": "openai/gpt-oss-20b",
+        "or_qwen3_32b": "qwen/qwen3-32b",
+        "or_gpt_oss_20b_free": "openai/gpt-oss-20b:free",
+        "or_qwen3_4b_free": "qwen/qwen3-4b:free",
+        # Legacy model_type values kept for backward compatibility.
         "claude-sonnet-4": "deepseek/deepseek-r1-0528:free",
         "gpt-4o-mini": "stepfun/step-3.5-flash:free",
         "claude-haiku": "arcee-ai/trinity-large-preview:free",
         "llama-3.3-70b": "stepfun/step-3.5-flash:free",
         "llama-3.1-8b": "meta-llama/llama-3.2-3b-instruct:free",
         "gemini-flash": "qwen/qwen3-coder:free",
-    }
+    },
 }
 
 GROQ_CONFIG = {
     "base_url": "https://api.groq.com/openai/v1",
     "models": {
+        # Attribution cohort (seeded explicitly in scripts/seed_agents.py)
+        "gr_llama_3_1_8b_instant": "llama-3.1-8b-instant",
+        # Legacy values
         "llama-3.3-70b": "llama-3.3-70b-versatile",
         "llama-3.1-8b": "llama-3.1-8b-instant",
     }
 }
+
+_ACTION_FORMAT_RETRY_SUFFIX = (
+    "\n\nFORMAT RETRY:\n"
+    "- Your previous output could not be parsed.\n"
+    "- Return exactly one valid JSON object and nothing else.\n"
+    "- Include an `action` field.\n"
+    "- Do not use markdown code fences.\n"
+)
+
+
+class RetryableCompletionError(RuntimeError):
+    """Raised when provider output is present but unusable and worth retrying."""
+
+    def __init__(self, reason: str, finish_reason: str | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.finish_reason = finish_reason
 
 
 class LLMClient:
@@ -64,6 +94,9 @@ class LLMClient:
         self._openrouter_window_s = 60.0
         self._openrouter_calls: deque[float] = deque()
         self._openrouter_rpm_lock = asyncio.Lock()
+
+        configured_run_id = str(getattr(settings, "SIMULATION_RUN_ID", "") or "").strip()
+        self._run_id = configured_run_id or now_utc().strftime("run-%Y%m%dT%H%M%SZ")
 
     async def _throttle_openrouter(self) -> None:
         now = time.monotonic()
@@ -155,51 +188,175 @@ class LLMClient:
             }
         except Exception:
             return {"finish_reason": None, "has_choices": None, "usage": None}
+
+    @staticmethod
+    def _extract_byok_used(response: Any, provider_name: str) -> bool | None:
+        """
+        Return BYOK signal when provider exposes it.
+
+        OpenRouter exposes `usage.is_byok` in OpenAI-compatible responses.
+        Return None when unknown/unavailable to avoid false attribution.
+        """
+        if provider_name != "openrouter":
+            return None
+        try:
+            usage = getattr(response, "usage", None)
+            if usage is None:
+                return None
+            value = getattr(usage, "is_byok", None)
+            if value is None and isinstance(usage, dict):
+                value = usage.get("is_byok")
+            if value is None and hasattr(usage, "model_dump"):
+                dumped = usage.model_dump()
+                if isinstance(dumped, dict):
+                    value = dumped.get("is_byok")
+            if value is None:
+                return None
+            return bool(value)
+        except Exception:
+            return None
+
+    def _provider_name_for_client(self, client: AsyncOpenAI) -> str:
+        return "openrouter" if client is self.openrouter_client else "groq"
+
+    async def _create_completion_with_budget(
+        self,
+        *,
+        client: AsyncOpenAI,
+        agent_id: int | None,
+        checkpoint_number: int | None,
+        model_type: str,
+        model_name: str,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+        fallback_used: bool,
+    ) -> tuple[Any | None, str, str, str | None]:
+        """
+        Execute one provider request with budget checks and usage recording.
+
+        Returns:
+            response, used_model_name, provider_name, blocked_reason
+        """
+        provider_name = self._provider_name_for_client(client)
+        decision = usage_budget.preflight(provider=provider_name, model_name=model_name)
+        if not decision.allowed:
+            logger.warning(
+                "LLM request blocked by budget (provider=%s model=%s reason=%s calls_total=%s cost=%.6f)",
+                provider_name,
+                model_name,
+                decision.reason,
+                decision.snapshot.calls_total,
+                decision.snapshot.estimated_cost_usd,
+            )
+            return None, model_name, provider_name, decision.reason
+
+        used_model_name = model_name
+        used_max_tokens = max_tokens
+        used_temperature = temperature
+        degraded = False
+
+        if decision.soft_cap_reached:
+            degraded = True
+            reduced_tokens = max(16, max_tokens // 2 if max_tokens > 1 else max_tokens)
+            used_max_tokens = min(max_tokens, reduced_tokens)
+            used_temperature = min(temperature, 0.5)
+            logger.info(
+                "LLM soft-cap degrade active (provider=%s model=%s max_tokens=%s->%s)",
+                provider_name,
+                model_name,
+                max_tokens,
+                used_max_tokens,
+            )
+
+        sem = self._openrouter_sem if client is self.openrouter_client else self._groq_sem
+        started = time.monotonic()
+        try:
+            async with sem:
+                if client is self.openrouter_client:
+                    await self._throttle_openrouter()
+                response = await client.chat.completions.create(
+                    model=used_model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=used_max_tokens,
+                    temperature=used_temperature,
+                )
+        except Exception as e:
+            latency_ms = int((time.monotonic() - started) * 1000)
+            usage_budget.record_call(
+                run_id=self._run_id,
+                agent_id=agent_id,
+                checkpoint_number=checkpoint_number,
+                provider=provider_name,
+                model_name=used_model_name,
+                model_type=model_type,
+                resolved_model_name=used_model_name,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                success=False,
+                fallback_used=(fallback_used or degraded),
+                byok_used=None,
+                latency_ms=latency_ms,
+                error_type=e.__class__.__name__,
+            )
+            raise
+
+        latency_ms = int((time.monotonic() - started) * 1000)
+        usage = getattr(response, "usage", None)
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens))
+        byok_used = self._extract_byok_used(response=response, provider_name=provider_name)
+        usage_budget.record_call(
+            run_id=self._run_id,
+            agent_id=agent_id,
+            checkpoint_number=checkpoint_number,
+            provider=provider_name,
+            model_name=used_model_name,
+            model_type=model_type,
+            resolved_model_name=used_model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            success=True,
+            fallback_used=(fallback_used or degraded),
+            byok_used=byok_used,
+            latency_ms=latency_ms,
+            error_type=None,
+        )
+        return response, used_model_name, provider_name, None
     
-    def _get_client_and_model(self, model_type: str, agent_id: int | None = None):
+    def _get_client_and_model(self, model_type: str):
         """Get the appropriate client and model name."""
         provider = (settings.LLM_PROVIDER or "auto").strip().lower()
 
-        if provider == "groq":
-            key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
-            model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-            return self.groq_client, model_name
-
-        if provider == "openrouter":
-            # Fall back to a known OpenRouter model when the DB model_type is something else.
-            model_name = OPENROUTER_CONFIG["models"].get(model_type, OPENROUTER_CONFIG["models"]["gpt-4o-mini"])
-            return self.openrouter_client, model_name
-
-        # auto: honor explicit mapping first, then fall back based on configured keys.
+        # Explicit mappings always take precedence for clean attribution.
         if model_type in OPENROUTER_CONFIG["models"]:
-            # Optional: send a small % of lightweight agents to Groq to reduce OpenRouter load.
-            # Deterministic per-agent so the "society" has stable capability asymmetry.
-            try:
-                groq_share = float(getattr(settings, "GROQ_LIGHTWEIGHT_SHARE", 0.0) or 0.0)
-            except Exception:
-                groq_share = 0.0
-
-            if (
-                groq_share > 0
-                and settings.GROQ_API_KEY
-                and agent_id is not None
-                and model_type == "llama-3.1-8b"
-            ):
-                rng = random.Random(int(agent_id))
-                if rng.random() < groq_share:
-                    return self.groq_client, GROQ_CONFIG["models"]["llama-3.1-8b"]
-
             return self.openrouter_client, OPENROUTER_CONFIG["models"][model_type]
         if model_type in GROQ_CONFIG["models"]:
             return self.groq_client, GROQ_CONFIG["models"][model_type]
 
-        if settings.OPENROUTER_API_KEY:
-            logger.warning(f"Unknown model type: {model_type}, defaulting to OpenRouter gpt-4o-mini")
-            return self.openrouter_client, OPENROUTER_CONFIG["models"]["gpt-4o-mini"]
+        # For unknown/legacy unexpected values, respect forced provider if set.
+        if provider == "groq":
+            key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
+            model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+            return self.groq_client, model_name
+        if provider == "openrouter":
+            logger.warning("Unknown model type %s, forcing OpenRouter gpt-oss-20b:free", model_type)
+            return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
 
-        logger.warning(f"Unknown model type: {model_type}, defaulting to Groq {settings.GROQ_DEFAULT_MODEL}")
+        # auto: prefer OpenRouter free fallback, else Groq default.
+        if settings.OPENROUTER_API_KEY:
+            logger.warning("Unknown model type %s, defaulting to OpenRouter gpt-oss-20b:free", model_type)
+            return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
         key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
         model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+        logger.warning("Unknown model type %s, defaulting to Groq %s", model_type, model_name)
         return self.groq_client, model_name
     
     async def get_completion(
@@ -208,223 +365,83 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         agent_id: int | None = None,
+        checkpoint_number: int | None = None,
         max_tokens: int = 500,
         temperature: float = 0.7,
         max_retries: int = 3,
     ) -> Optional[str]:
         """Get a completion with retry logic."""
 
-        provider = (settings.LLM_PROVIDER or "auto").strip().lower()
-        if provider == "groq":
-            if not settings.GROQ_API_KEY:
-                logger.error("LLM_PROVIDER=groq but GROQ_API_KEY is not set; returning no completion.")
-                return None
-        elif provider == "openrouter":
-            if not settings.OPENROUTER_API_KEY:
-                logger.error("LLM_PROVIDER=openrouter but OPENROUTER_API_KEY is not set; returning no completion.")
-                return None
-        else:
-            # auto
-            if not settings.OPENROUTER_API_KEY and not settings.GROQ_API_KEY:
-                logger.error("Neither OPENROUTER_API_KEY nor GROQ_API_KEY is set; returning no completion.")
-                return None
-
-        client, model_name = self._get_client_and_model(model_type, agent_id=agent_id)
-
-        async def _try_openrouter_alt_model_on_empty() -> Optional[str]:
-            """
-            If OpenRouter returns an empty payload (e.g., choices=[]), retry once on a different
-            OpenRouter model. This avoids hammering Groq when it is rate-limited.
-            """
-            if client is not self.openrouter_client:
-                return None
-            if not settings.OPENROUTER_API_KEY:
-                return None
-
-            # Prefer a fast, stable instruction model.
-            alt_model = OPENROUTER_CONFIG["models"].get("llama-3.1-8b") or OPENROUTER_CONFIG["models"].get("gpt-4o-mini")
-            if not alt_model or alt_model == model_name:
-                return None
-
-            logger.warning(
-                "Empty OpenRouter completion; retrying once with alt model=%s (original=%s)",
-                alt_model,
-                model_name,
-            )
-            try:
-                async with self._openrouter_sem:
-                    resp = await self.openrouter_client.chat.completions.create(
-                        model=alt_model,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                    )
-                return self._extract_text_from_response(resp)
-            except Exception as inner:
-                logger.error(f"OpenRouter alt-model retry failed: {inner}")
-                return None
-
-        async def _try_alternate_provider_on_empty() -> Optional[str]:
-            """
-            Provider edge case: sometimes a 200 OK comes back with empty content.
-            In auto mode, try the other provider once to keep the simulation moving.
-            """
-            provider = (settings.LLM_PROVIDER or "auto").strip().lower()
-            if provider != "auto":
-                return None
-
-            if client is self.openrouter_client and settings.GROQ_API_KEY:
-                key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
-                fallback_model = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-                try:
-                    async with self._groq_sem:
-                        resp = await self.groq_client.chat.completions.create(
-                            model=fallback_model,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                        )
-                    return self._extract_text_from_response(resp)
-                except Exception as inner:
-                    logger.error(f"Alternate-provider retry (groq) failed: {inner}")
-                    return None
-
-            if client is self.groq_client and settings.OPENROUTER_API_KEY:
-                fallback_model = OPENROUTER_CONFIG["models"].get(
-                    model_type, OPENROUTER_CONFIG["models"]["gpt-4o-mini"]
-                )
-                try:
-                    async with self._openrouter_sem:
-                        resp = await self.openrouter_client.chat.completions.create(
-                            model=fallback_model,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                        )
-                    return self._extract_text_from_response(resp)
-                except Exception as inner:
-                    logger.error(f"Alternate-provider retry (openrouter) failed: {inner}")
-                    return None
-
+        if not settings.OPENROUTER_API_KEY and not settings.GROQ_API_KEY:
+            logger.error("Neither OPENROUTER_API_KEY nor GROQ_API_KEY is set; returning no completion.")
             return None
 
-        async def _try_openrouter_fallback(err: Exception) -> Optional[str]:
-            """
-            If Groq is rate-limiting (common on free tiers), optionally fall back to OpenRouter
-            when a key is configured. This keeps the simulation alive while still preferring Groq.
-            """
-            provider = (settings.LLM_PROVIDER or "auto").strip().lower()
-            if provider == "groq" and not getattr(settings, "ALLOW_OPENROUTER_FALLBACK", False):
-                return None
-            if not settings.OPENROUTER_API_KEY:
-                return None
-            if client is not self.groq_client:
-                return None
-
-            msg = str(err)
-            # RateLimitError usually maps to HTTP 429; keep this check broad.
-            if "429" not in msg and "rate" not in msg.lower():
-                return None
-
-            fallback_model = OPENROUTER_CONFIG["models"].get(
-                model_type, OPENROUTER_CONFIG["models"]["gpt-4o-mini"]
-            )
-            logger.warning("Groq request rate-limited; falling back to OpenRouter for this request.")
-            try:
-                response = await self.openrouter_client.chat.completions.create(
-                    model=fallback_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
-                return self._extract_text_from_response(response)
-            except Exception as inner:
-                logger.error(f"OpenRouter fallback failed: {inner}")
-                return None
-
-        async def _try_groq_fallback(err: Exception) -> Optional[str]:
-            if not settings.GROQ_API_KEY:
-                return None
-            if client is not self.openrouter_client:
-                return None
-
-            msg = str(err)
-            if "402" not in msg and "Insufficient credits" not in msg:
-                return None
-
-            key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
-            fallback_model = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-            logger.warning("OpenRouter request failed (likely 402); falling back to Groq for this request.")
-            try:
-                response = await self.groq_client.chat.completions.create(
-                    model=fallback_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
-                return self._extract_text_from_response(response)
-            except Exception as inner:
-                logger.error(f"Groq fallback failed: {inner}")
-                return None
+        client, model_name = self._get_client_and_model(model_type)
+        if client is self.groq_client and not settings.GROQ_API_KEY:
+            logger.error("Selected Groq route for model_type=%s but GROQ_API_KEY is not set.", model_type)
+            return None
+        if client is self.openrouter_client and not settings.OPENROUTER_API_KEY:
+            logger.error("Selected OpenRouter route for model_type=%s but OPENROUTER_API_KEY is not set.", model_type)
+            return None
         
+        attempt_max_tokens = max(64, int(max_tokens or 64))
+        max_retry_tokens = 900
+
         for attempt in range(max_retries):
             try:
-                sem = self._openrouter_sem if client is self.openrouter_client else self._groq_sem
-                async with sem:
-                    if client is self.openrouter_client:
-                        await self._throttle_openrouter()
-                    response = await client.chat.completions.create(
-                        model=model_name,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                    )
+                response, used_model_name, provider_name, blocked_reason = await self._create_completion_with_budget(
+                    client=client,
+                    agent_id=agent_id,
+                    checkpoint_number=checkpoint_number,
+                    model_type=model_type,
+                    model_name=model_name,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=attempt_max_tokens,
+                    temperature=temperature,
+                    fallback_used=False,
+                )
+                if blocked_reason:
+                    return None
 
                 # Guard against occasional provider/library edge cases where a 200 OK yields
                 # an empty/partial payload.
                 content = self._extract_text_from_response(response)
                 if not content:
                     meta = self._debug_choice_meta(response)
-                    provider_name = "openrouter" if client is self.openrouter_client else "groq"
+                    finish_reason = str(meta.get("finish_reason") or "")
+                    reason = "empty_content_length" if finish_reason == "length" else "empty_content"
                     logger.warning(
                         "Empty completion content (provider=%s model=%s attempt=%s/%s meta=%s)",
                         provider_name,
-                        model_name,
+                        used_model_name,
                         attempt + 1,
                         max_retries,
                         meta,
                     )
-                    # If OpenRouter is the selected provider, retry once on a different OpenRouter model
-                    # before we consider cross-provider fallback.
-                    or_alt = await _try_openrouter_alt_model_on_empty()
-                    if or_alt:
-                        return or_alt
-                    raise RuntimeError("Empty completion content")
+                    raise RetryableCompletionError(reason=reason, finish_reason=finish_reason or None)
 
                 return content
+
+            except RetryableCompletionError as e:
+                wait_time = 0.5 + random.random() * 0.75
+                if e.finish_reason == "length":
+                    bumped_tokens = min(max_retry_tokens, max(attempt_max_tokens + 120, int(attempt_max_tokens * 1.4)))
+                    if bumped_tokens > attempt_max_tokens:
+                        logger.info(
+                            "Retrying completion after truncation (model_type=%s tokens=%s->%s attempt=%s/%s)",
+                            model_type,
+                            attempt_max_tokens,
+                            bumped_tokens,
+                            attempt + 1,
+                            max_retries,
+                        )
+                        attempt_max_tokens = bumped_tokens
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(wait_time)
                 
             except RateLimitError as e:
-                or_fallback = await _try_openrouter_fallback(e)
-                if or_fallback:
-                    return or_fallback
                 wait_time = (2 ** attempt) + random.random()
                 logger.warning(f"Rate limited, waiting {wait_time:.2f}s (attempt {attempt + 1})")
                 if attempt == max_retries - 1:
@@ -432,28 +449,12 @@ class LLMClient:
                 await asyncio.sleep(wait_time)
                 
             except APIError as e:
-                or_fallback = await _try_openrouter_fallback(e)
-                if or_fallback:
-                    return or_fallback
-                groq = await _try_groq_fallback(e)
-                if groq:
-                    return groq
                 logger.error(f"API error: {e}")
                 if attempt == max_retries - 1:
                     raise
                 await asyncio.sleep(1 + random.random() * 0.25)
                 
             except Exception as e:
-                or_fallback = await _try_openrouter_fallback(e)
-                if or_fallback:
-                    return or_fallback
-                groq = await _try_groq_fallback(e)
-                if groq:
-                    return groq
-                if str(e) == "Empty completion content":
-                    swapped = await _try_alternate_provider_on_empty()
-                    if swapped:
-                        return swapped
                 logger.error(f"Unexpected error: {e}")
                 if attempt == max_retries - 1:
                     raise
@@ -471,6 +472,7 @@ async def get_agent_action(
     model_type: str,
     system_prompt: str,
     context_prompt: str,
+    checkpoint_number: int | None = None,
 ) -> Optional[dict]:
     """Get an action decision from an agent."""
     
@@ -501,20 +503,62 @@ async def get_agent_action(
         }
 
     try:
-        response = await llm_client.get_completion(
-            model_type=model_type,
-            system_prompt=system_prompt,
-            user_prompt=context_prompt,
-            agent_id=agent_id,
-            max_tokens=250,
-            temperature=0.7,
-        )
-        
-        if not response:
-            return _fallback_action("No response from LLM")
-        
-        # Try to parse JSON from response
-        return parse_action_response(response)
+        max_action_tokens = max(128, int(getattr(settings, "LLM_ACTION_MAX_TOKENS", 350) or 350))
+        parse_retry_attempts = max(0, int(getattr(settings, "LLM_ACTION_PARSE_RETRY_ATTEMPTS", 2) or 2))
+        base_context_prompt = context_prompt
+        last_parse_meta: dict[str, Any] | None = None
+
+        for parse_attempt in range(parse_retry_attempts + 1):
+            if parse_attempt == 0:
+                effective_prompt = base_context_prompt
+            else:
+                parse_error = (last_parse_meta or {}).get("error_type") or "parse_error"
+                effective_prompt = (
+                    f"{base_context_prompt}{_ACTION_FORMAT_RETRY_SUFFIX}"
+                    f"- Previous parse error: {parse_error}\n"
+                )
+
+            response = await llm_client.get_completion(
+                model_type=model_type,
+                system_prompt=system_prompt,
+                user_prompt=effective_prompt,
+                agent_id=agent_id,
+                checkpoint_number=checkpoint_number,
+                max_tokens=max_action_tokens,
+                temperature=0.7,
+            )
+
+            if not response:
+                if parse_attempt < parse_retry_attempts:
+                    continue
+                return _fallback_action("No response from LLM")
+
+            action_data, parse_meta = parse_action_response_with_meta(response)
+            parse_meta["attempt"] = parse_attempt + 1
+            parse_meta["max_attempts"] = parse_retry_attempts + 1
+            last_parse_meta = parse_meta
+
+            # Parsed JSON action object as requested.
+            if parse_meta.get("ok"):
+                action_data["_llm_meta"] = {"parse": parse_meta}
+                return action_data
+
+            if parse_attempt < parse_retry_attempts:
+                logger.warning(
+                    "Action parse failed; retrying same model (agent=%s model_type=%s parse_error=%s attempt=%s/%s)",
+                    agent_id,
+                    model_type,
+                    parse_meta.get("error_type"),
+                    parse_attempt + 1,
+                    parse_retry_attempts + 1,
+                )
+                # Give retries more room so JSON isn't cut off.
+                max_action_tokens = min(900, max_action_tokens + 120)
+                continue
+
+            # Final attempt: return safe coercion result, with telemetry attached.
+            action_data["_llm_meta"] = {"parse": parse_meta}
+            return action_data
         
     except Exception as e:
         logger.error(f"Error getting action for agent {agent_id}: {e}")
@@ -523,27 +567,108 @@ async def get_agent_action(
 
 def parse_action_response(response: str) -> dict:
     """Parse LLM response into structured action."""
-    import re
-    
-    # Try to find JSON in the response
+    action, _ = parse_action_response_with_meta(response)
+    return action
+
+
+def parse_action_response_with_meta(response: str) -> tuple[dict, dict]:
+    """
+    Parse LLM response into a structured action and parse telemetry metadata.
+
+    Parse metadata fields:
+    - ok: True when a JSON object with `action` field was parsed.
+    - parse_status: stable status label for analytics.
+    - error_type: machine-friendly failure reason for retries/analysis.
+    - likely_truncated: best-effort signal for outputs cut by token limits.
+    """
+    raw = (response or "").strip()
+
+    base_meta: dict[str, Any] = {
+        "ok": False,
+        "parse_status": "unknown",
+        "error_type": None,
+        "likely_truncated": False,
+        "response_chars": len(raw),
+    }
+
+    if not raw:
+        meta = dict(base_meta)
+        meta.update({"parse_status": "empty_response", "error_type": "empty_response"})
+        return {"action": "idle", "reasoning": "Could not parse response"}, meta
+
     json_patterns = [
-        r'\{[^{}]*\}',  # Simple JSON object
-        r'```json\s*(\{.*?\})\s*```',  # Markdown code block
-        r'```\s*(\{.*?\})\s*```',  # Generic code block
+        r"```json\s*(\{.*?\})\s*```",
+        r"```\s*(\{.*?\})\s*```",
+        r"\{.*\}",
     ]
-    
+
+    last_decode_error: json.JSONDecodeError | None = None
     for pattern in json_patterns:
-        match = re.search(pattern, response, re.DOTALL)
-        if match:
-            try:
-                json_str = match.group(1) if match.lastindex else match.group()
-                return json.loads(json_str)
-            except json.JSONDecodeError:
-                continue
-    
-    # If no valid JSON found, treat as forum post
-    clean_response = response.strip()[:2000]
-    if clean_response:
-        return {"action": "forum_post", "content": clean_response}
-    
-    return {"action": "idle", "reasoning": "Could not parse response"}
+        match = re.search(pattern, raw, re.DOTALL)
+        if not match:
+            continue
+        json_str = match.group(1) if match.lastindex else match.group()
+        try:
+            parsed = json.loads(json_str)
+        except json.JSONDecodeError as decode_error:
+            last_decode_error = decode_error
+            continue
+
+        if not isinstance(parsed, dict):
+            meta = dict(base_meta)
+            meta.update({"parse_status": "non_object_json", "error_type": "non_object_json"})
+            return {"action": "idle", "reasoning": "Could not parse response"}, meta
+
+        action_value = parsed.get("action")
+        if not isinstance(action_value, str) or not action_value.strip():
+            meta = dict(base_meta)
+            meta.update({"parse_status": "json_missing_action", "error_type": "json_missing_action"})
+            return {"action": "idle", "reasoning": "Could not parse response"}, meta
+
+        meta = dict(base_meta)
+        meta.update({"ok": True, "parse_status": "json_ok"})
+        return parsed, meta
+
+    # No JSON object was parsed. Keep simulation moving with a safe coercion.
+    clean_response = raw[:2000]
+    meta = dict(base_meta)
+    if last_decode_error is not None:
+        likely_truncated = _is_likely_truncated_json(raw, last_decode_error)
+        meta.update(
+            {
+                "parse_status": "json_decode_error_coerced_forum_post",
+                "error_type": "json_decode_error",
+                "likely_truncated": likely_truncated,
+            }
+        )
+    else:
+        likely_truncated = raw.count("{") > raw.count("}") or raw.endswith(("{", "[", ":", ",", '"'))
+        meta.update(
+            {
+                "parse_status": "json_not_found_coerced_forum_post",
+                "error_type": "json_not_found",
+                "likely_truncated": likely_truncated,
+            }
+        )
+    return {"action": "forum_post", "content": clean_response}, meta
+
+
+def _is_likely_truncated_json(raw_response: str, error: json.JSONDecodeError) -> bool:
+    """Best-effort signal that malformed JSON was cut off by output limits."""
+    stripped = (raw_response or "").rstrip()
+    if not stripped:
+        return False
+
+    # Unbalanced braces are the strongest signal of cutoff.
+    if stripped.count("{") > stripped.count("}"):
+        return True
+
+    # Common trailing syntax when generation is cut mid-object.
+    if stripped.endswith(("{", "[", ":", ",", '"')):
+        return True
+
+    msg = str(getattr(error, "msg", "") or "")
+    if "Unterminated string" in msg or "Expecting value" in msg:
+        return True
+
+    return False
