@@ -67,11 +67,13 @@ async def main():
     logger.info("=" * 60)
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(
-        "LLM config: provider=%s groq=%s openrouter=%s groq_default_model=%s",
+        "LLM config: provider=%s groq=%s openrouter=%s mistral=%s groq_default_model=%s mistral_model=%s",
         getattr(settings, "LLM_PROVIDER", "auto"),
         bool(getattr(settings, "GROQ_API_KEY", "")),
         bool(getattr(settings, "OPENROUTER_API_KEY", "")),
+        bool(getattr(settings, "MISTRAL_API_KEY", "")),
         getattr(settings, "GROQ_DEFAULT_MODEL", ""),
+        getattr(settings, "MISTRAL_SMALL_MODEL", ""),
     )
     logger.info(f"Agent loop delay: {settings.AGENT_LOOP_DELAY_SECONDS}s")
     logger.info(f"Day length: {settings.DAY_LENGTH_MINUTES} minutes")

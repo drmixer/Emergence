@@ -38,10 +38,14 @@ class Settings(BaseSettings):
     # LLM APIs
     OPENROUTER_API_KEY: str = ""
     GROQ_API_KEY: str = ""
+    MISTRAL_API_KEY: str = ""
+    MISTRAL_BASE_URL: str = "https://api.mistral.ai/v1"
+    MISTRAL_SMALL_MODEL: str = "mistral-small-latest"
     # LLM routing
-    # - "auto": use model mapping if known, otherwise prefer OpenRouter if configured, else Groq
+    # - "auto": use model mapping if known, otherwise prefer OpenRouter, then Mistral, then Groq
     # - "openrouter": force OpenRouter for all unknown models
     # - "groq": force Groq for all unknown models
+    # - "mistral": force direct Mistral for all unknown models
     LLM_PROVIDER: str = "auto"
     # When forcing Groq (or falling back), pick one of: llama-3.3-70b | llama-3.1-8b
     GROQ_DEFAULT_MODEL: str = "llama-3.1-8b"
@@ -56,6 +60,7 @@ class Settings(BaseSettings):
     # Provider concurrency caps to reduce rate limiting (esp. Groq free tier).
     GROQ_MAX_CONCURRENCY: int = 2
     OPENROUTER_MAX_CONCURRENCY: int = 6
+    MISTRAL_MAX_CONCURRENCY: int = 4
     OPENROUTER_RPM_LIMIT: int = 6
     # Action-generation output controls (checkpoint decisions).
     LLM_ACTION_MAX_TOKENS: int = 350

@@ -32,6 +32,7 @@ OPENROUTER_CONFIG = {
         "or_qwen3_32b": "qwen/qwen3-32b",
         "or_gpt_oss_20b_free": "openai/gpt-oss-20b:free",
         "or_qwen3_4b_free": "qwen/qwen3-4b:free",
+        "or_mistral_small_3_1_24b_free": "mistralai/mistral-small-3.1-24b-instruct:free",
         # Legacy model_type values kept for backward compatibility.
         "claude-sonnet-4": "deepseek/deepseek-r1-0528:free",
         "gpt-4o-mini": "stepfun/step-3.5-flash:free",
@@ -51,6 +52,15 @@ GROQ_CONFIG = {
         "llama-3.3-70b": "llama-3.3-70b-versatile",
         "llama-3.1-8b": "llama-3.1-8b-instant",
     }
+}
+
+MISTRAL_CONFIG = {
+    "base_url": "https://api.mistral.ai/v1",
+    "models": {
+        # Cohort label kept stable for DB compatibility.
+        # Resolved direct model is configurable via MISTRAL_SMALL_MODEL.
+        "or_mistral_small_3_1_24b": "mistral-small-latest",
+    },
 }
 
 _ACTION_FORMAT_RETRY_SUFFIX = (
@@ -83,10 +93,15 @@ class LLMClient:
             base_url=GROQ_CONFIG["base_url"],
             api_key=settings.GROQ_API_KEY,
         )
+        self.mistral_client = AsyncOpenAI(
+            base_url=(getattr(settings, "MISTRAL_BASE_URL", "") or MISTRAL_CONFIG["base_url"]),
+            api_key=settings.MISTRAL_API_KEY,
+        )
 
         # Concurrency guards to reduce provider rate limits.
         self._groq_sem = asyncio.Semaphore(max(1, int(getattr(settings, "GROQ_MAX_CONCURRENCY", 2) or 2)))
         self._openrouter_sem = asyncio.Semaphore(max(1, int(getattr(settings, "OPENROUTER_MAX_CONCURRENCY", 6) or 6)))
+        self._mistral_sem = asyncio.Semaphore(max(1, int(getattr(settings, "MISTRAL_MAX_CONCURRENCY", 4) or 4)))
 
         # Client-side RPM limiter to avoid tripping strict OpenRouter free-tier limits.
         # With 20 agents and a 150s loop, steady-state is ~8 RPM; retries can push higher.
@@ -217,7 +232,11 @@ class LLMClient:
             return None
 
     def _provider_name_for_client(self, client: AsyncOpenAI) -> str:
-        return "openrouter" if client is self.openrouter_client else "groq"
+        if client is self.openrouter_client:
+            return "openrouter"
+        if client is self.groq_client:
+            return "groq"
+        return "mistral"
 
     async def _create_completion_with_budget(
         self,
@@ -270,7 +289,12 @@ class LLMClient:
                 used_max_tokens,
             )
 
-        sem = self._openrouter_sem if client is self.openrouter_client else self._groq_sem
+        if client is self.openrouter_client:
+            sem = self._openrouter_sem
+        elif client is self.groq_client:
+            sem = self._groq_sem
+        else:
+            sem = self._mistral_sem
         started = time.monotonic()
         try:
             async with sem:
@@ -334,6 +358,14 @@ class LLMClient:
     def _get_client_and_model(self, model_type: str):
         """Get the appropriate client and model name."""
         provider = (settings.LLM_PROVIDER or "auto").strip().lower()
+        mistral_default_model = str(
+            getattr(settings, "MISTRAL_SMALL_MODEL", MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"])
+            or MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"]
+        ).strip()
+
+        # Direct Mistral cohort mapping.
+        if model_type in MISTRAL_CONFIG["models"]:
+            return self.mistral_client, mistral_default_model
 
         # Explicit mappings always take precedence for clean attribution.
         if model_type in OPENROUTER_CONFIG["models"]:
@@ -349,11 +381,17 @@ class LLMClient:
         if provider == "openrouter":
             logger.warning("Unknown model type %s, forcing OpenRouter gpt-oss-20b:free", model_type)
             return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
+        if provider == "mistral":
+            logger.warning("Unknown model type %s, forcing direct Mistral %s", model_type, mistral_default_model)
+            return self.mistral_client, mistral_default_model
 
         # auto: prefer OpenRouter free fallback, else Groq default.
         if settings.OPENROUTER_API_KEY:
             logger.warning("Unknown model type %s, defaulting to OpenRouter gpt-oss-20b:free", model_type)
             return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
+        if settings.MISTRAL_API_KEY:
+            logger.warning("Unknown model type %s, defaulting to direct Mistral %s", model_type, mistral_default_model)
+            return self.mistral_client, mistral_default_model
         key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
         model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
         logger.warning("Unknown model type %s, defaulting to Groq %s", model_type, model_name)
@@ -372,8 +410,11 @@ class LLMClient:
     ) -> Optional[str]:
         """Get a completion with retry logic."""
 
-        if not settings.OPENROUTER_API_KEY and not settings.GROQ_API_KEY:
-            logger.error("Neither OPENROUTER_API_KEY nor GROQ_API_KEY is set; returning no completion.")
+        if not settings.OPENROUTER_API_KEY and not settings.GROQ_API_KEY and not settings.MISTRAL_API_KEY:
+            logger.error(
+                "No provider API keys are set (OPENROUTER_API_KEY/GROQ_API_KEY/MISTRAL_API_KEY); "
+                "returning no completion."
+            )
             return None
 
         client, model_name = self._get_client_and_model(model_type)
@@ -382,6 +423,9 @@ class LLMClient:
             return None
         if client is self.openrouter_client and not settings.OPENROUTER_API_KEY:
             logger.error("Selected OpenRouter route for model_type=%s but OPENROUTER_API_KEY is not set.", model_type)
+            return None
+        if client is self.mistral_client and not settings.MISTRAL_API_KEY:
+            logger.error("Selected Mistral route for model_type=%s but MISTRAL_API_KEY is not set.", model_type)
             return None
         
         attempt_max_tokens = max(64, int(max_tokens or 64))

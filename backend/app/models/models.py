@@ -54,7 +54,8 @@ class Agent(Base):
             "model_type IN ("
             "'claude-sonnet-4', 'gpt-4o-mini', 'claude-haiku', 'llama-3.3-70b', 'llama-3.1-8b', 'gemini-flash', "
             "'or_gpt_oss_120b', 'or_qwen3_235b_a22b_2507', 'or_deepseek_v3_2', 'or_deepseek_chat_v3_1', "
-            "'or_gpt_oss_20b', 'or_qwen3_32b', 'or_gpt_oss_20b_free', 'or_qwen3_4b_free', "
+            "'or_gpt_oss_20b', 'or_qwen3_32b', 'or_mistral_small_3_1_24b', "
+            "'or_gpt_oss_20b_free', 'or_qwen3_4b_free', 'or_mistral_small_3_1_24b_free', "
             "'gr_llama_3_1_8b_instant'"
             ")",
             name="valid_model"

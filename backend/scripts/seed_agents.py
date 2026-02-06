@@ -25,14 +25,16 @@ from app.core.config import settings
 MODEL_COHORT_PLAN = [
     # High tier (10): 3 paid OpenRouter models
     {"count": 4, "tier": 1, "model_type": "or_gpt_oss_120b", "resolved_model": "openai/gpt-oss-120b"},
-    {"count": 3, "tier": 1, "model_type": "or_qwen3_235b_a22b_2507", "resolved_model": "qwen/qwen3-235b-a22b-2507"},
-    {"count": 3, "tier": 1, "model_type": "or_deepseek_v3_2", "resolved_model": "deepseek/deepseek-v3.2"},
-    # Medium tier (25): 3 paid OpenRouter models
-    {"count": 10, "tier": 2, "model_type": "or_deepseek_chat_v3_1", "resolved_model": "deepseek/deepseek-chat-v3.1"},
-    {"count": 3, "tier": 2, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
-    {"count": 5, "tier": 3, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
-    {"count": 7, "tier": 3, "model_type": "or_qwen3_32b", "resolved_model": "qwen/qwen3-32b"},
-    # Basic tier (15): mostly free OpenRouter + fixed Groq cohort
+    {"count": 4, "tier": 1, "model_type": "or_qwen3_235b_a22b_2507", "resolved_model": "qwen/qwen3-235b-a22b-2507"},
+    {"count": 2, "tier": 1, "model_type": "or_deepseek_v3_2", "resolved_model": "deepseek/deepseek-v3.2"},
+    # Medium tier (25): cheap paid OpenRouter models plus one direct-Mistral cohort.
+    {"count": 6, "tier": 2, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
+    {"count": 4, "tier": 2, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
+    {"count": 2, "tier": 2, "model_type": "or_qwen3_32b", "resolved_model": "qwen/qwen3-32b"},
+    {"count": 6, "tier": 3, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
+    {"count": 4, "tier": 3, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
+    {"count": 3, "tier": 3, "model_type": "or_qwen3_32b", "resolved_model": "qwen/qwen3-32b"},
+    # Basic tier (15): free OpenRouter cohorts + fixed Groq cohort.
     {"count": 5, "tier": 4, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
     {"count": 5, "tier": 4, "model_type": "or_qwen3_4b_free", "resolved_model": "qwen/qwen3-4b:free"},
     {"count": 5, "tier": 4, "model_type": "gr_llama_3_1_8b_instant", "resolved_model": "llama-3.1-8b-instant (groq)"},
