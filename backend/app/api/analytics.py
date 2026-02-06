@@ -1,7 +1,9 @@
 """
 Analytics & Highlights API Router
 """
+import logging
 from fastapi import APIRouter, HTTPException, Query
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from sqlalchemy import text
 
@@ -24,10 +26,23 @@ from app.services.summaries import (
     generate_daily_summary,
     get_story_so_far,
 )
+from app.services.usage_budget import usage_budget
+from app.services.emergence_metrics import compute_emergence_metrics
 from app.core.database import SessionLocal
-from app.models.models import Event, Agent, Law, Message, Proposal, Vote, AgentInventory, GlobalResources
+from app.models.models import (
+    Event,
+    Agent,
+    Law,
+    Message,
+    Proposal,
+    Vote,
+    AgentInventory,
+    GlobalResources,
+    EmergenceMetricSnapshot,
+)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 def _gini(values):
     xs = [float(v) for v in values if v is not None]
@@ -42,6 +57,48 @@ def _gini(values):
     for i, x in enumerate(xs, start=1):
         cum += i * x
     return (2.0 * cum) / (n * total) - (n + 1.0) / n
+
+
+def _safe_ratio(numerator: int | float, denominator: int | float) -> float:
+    den = float(denominator or 0)
+    if den <= 0:
+        return 0.0
+    return float(numerator or 0) / den
+
+
+def _resolve_day_key(day: Optional[str]) -> date:
+    if not day:
+        return now_utc().date()
+    try:
+        return date.fromisoformat(day)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid `day`; expected YYYY-MM-DD") from e
+
+
+def _day_window_utc(day_key: date) -> tuple[datetime, datetime]:
+    start = datetime.combine(day_key, datetime.min.time(), tzinfo=timezone.utc)
+    end = start + timedelta(days=1)
+    return start, end
+
+
+def _serialize_emergence_snapshot(row: EmergenceMetricSnapshot) -> dict:
+    return {
+        "simulation_day": int(row.simulation_day or 0),
+        "window_start_at": ensure_utc(row.window_start_at).isoformat() if row.window_start_at else None,
+        "window_end_at": ensure_utc(row.window_end_at).isoformat() if row.window_end_at else None,
+        "living_agents": int(row.living_agents or 0),
+        "governance_participants": int(row.governance_participants or 0),
+        "governance_participation_rate": float(row.governance_participation_rate or 0.0),
+        "coalition_edge_count": int(row.coalition_edge_count or 0),
+        "coalition_churn": (None if row.coalition_churn is None else float(row.coalition_churn)),
+        "inequality_gini": float(row.inequality_gini or 0.0),
+        "inequality_trend": (None if row.inequality_trend is None else float(row.inequality_trend)),
+        "conflict_events": int(row.conflict_events or 0),
+        "cooperation_events": int(row.cooperation_events or 0),
+        "conflict_rate": float(row.conflict_rate or 0.0),
+        "cooperation_rate": float(row.cooperation_rate or 0.0),
+        "created_at": ensure_utc(row.created_at).isoformat() if row.created_at else None,
+    }
 
 
 # ===== LEADERBOARDS =====
@@ -425,6 +482,338 @@ def wealth_distribution():
             "median": pct(50),
             "p75": pct(75),
             "max": float(wealth_sorted[-1]) if wealth_sorted else 0.0,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/usage/budget-status")
+def usage_budget_status():
+    """
+    Current UTC-day budget/counter status.
+    """
+    snapshot = usage_budget.get_snapshot()
+    calls_total = int(snapshot.calls_total or 0)
+    calls_or_free = int(snapshot.calls_openrouter_free or 0)
+    calls_groq = int(snapshot.calls_groq or 0)
+    cost_usd = float(snapshot.estimated_cost_usd or 0.0)
+
+    soft_budget = float(getattr(settings, "LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0)
+    hard_budget = float(getattr(settings, "LLM_DAILY_BUDGET_USD_HARD", 0.0) or 0.0)
+    max_total = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_TOTAL", 0) or 0)
+    max_or_free = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE", 0) or 0)
+    max_groq = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_GROQ", 0) or 0)
+
+    soft_budget_reached = bool(soft_budget > 0 and cost_usd >= soft_budget)
+    hard_budget_reached = bool(hard_budget > 0 and cost_usd >= hard_budget)
+    soft_total_reached = bool(max_total > 0 and calls_total >= int(max_total * 0.85))
+    hard_total_reached = bool(max_total > 0 and calls_total >= max_total)
+    soft_or_free_reached = bool(max_or_free > 0 and calls_or_free >= int(max_or_free * 0.85))
+    hard_or_free_reached = bool(max_or_free > 0 and calls_or_free >= max_or_free)
+    soft_groq_reached = bool(max_groq > 0 and calls_groq >= int(max_groq * 0.85))
+    hard_groq_reached = bool(max_groq > 0 and calls_groq >= max_groq)
+
+    return {
+        "day_key_utc": snapshot.day_key.isoformat(),
+        "snapshot": {
+            "calls_total": calls_total,
+            "calls_openrouter_free": calls_or_free,
+            "calls_groq": calls_groq,
+            "estimated_cost_usd": cost_usd,
+        },
+        "limits": {
+            "daily_budget_usd_soft": soft_budget,
+            "daily_budget_usd_hard": hard_budget,
+            "max_calls_per_day_total": max_total,
+            "max_calls_per_day_openrouter_free": max_or_free,
+            "max_calls_per_day_groq": max_groq,
+        },
+        "utilization": {
+            "budget_soft_pct": (_safe_ratio(cost_usd, soft_budget) * 100.0) if soft_budget > 0 else None,
+            "budget_hard_pct": (_safe_ratio(cost_usd, hard_budget) * 100.0) if hard_budget > 0 else None,
+            "calls_total_pct": (_safe_ratio(calls_total, max_total) * 100.0) if max_total > 0 else None,
+            "calls_openrouter_free_pct": (_safe_ratio(calls_or_free, max_or_free) * 100.0) if max_or_free > 0 else None,
+            "calls_groq_pct": (_safe_ratio(calls_groq, max_groq) * 100.0) if max_groq > 0 else None,
+        },
+        "flags": {
+            "soft_cap_active": bool(
+                soft_budget_reached or soft_total_reached or soft_or_free_reached or soft_groq_reached
+            ),
+            "hard_cap_reached": bool(
+                hard_budget_reached or hard_total_reached or hard_or_free_reached or hard_groq_reached
+            ),
+            "soft_budget_reached": soft_budget_reached,
+            "hard_budget_reached": hard_budget_reached,
+            "soft_calls_total_reached": soft_total_reached,
+            "hard_calls_total_reached": hard_total_reached,
+            "soft_calls_openrouter_free_reached": soft_or_free_reached,
+            "hard_calls_openrouter_free_reached": hard_or_free_reached,
+            "soft_calls_groq_reached": soft_groq_reached,
+            "hard_calls_groq_reached": hard_groq_reached,
+        },
+    }
+
+
+@router.get("/usage/daily")
+def usage_daily(
+    day: Optional[str] = Query(None, description="UTC date (YYYY-MM-DD). Defaults to today."),
+    run_id: Optional[str] = Query(None, description="Optional run_id filter."),
+):
+    """
+    Daily usage and runtime-mode telemetry.
+
+    Exposes:
+    - calls/day by provider/model
+    - estimated spend/day
+    - fallback rate
+    - checkpoint vs deterministic action ratio
+    """
+    day_key = _resolve_day_key(day)
+    start_ts, end_ts = _day_window_utc(day_key)
+
+    llm_run_filter = "AND run_id = :run_id" if run_id else ""
+    llm_params: dict[str, object] = {"day_key": day_key}
+    if run_id:
+        llm_params["run_id"] = run_id
+
+    event_run_filter = ""
+    event_params: dict[str, object] = {"start_ts": start_ts, "end_ts": end_ts, "day_key": day_key}
+    if run_id:
+        event_run_filter = """
+          AND e.agent_id IN (
+              SELECT DISTINCT u.agent_id
+              FROM llm_usage u
+              WHERE u.day_key = :day_key
+                AND u.run_id = :run_id
+                AND u.agent_id IS NOT NULL
+          )
+        """
+        event_params["run_id"] = run_id
+
+    db = SessionLocal()
+    try:
+        totals = db.execute(
+            text(
+                f"""
+                SELECT
+                    COUNT(*) AS calls,
+                    COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                    COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+                FROM llm_usage
+                WHERE day_key = :day_key
+                {llm_run_filter}
+                """
+            ),
+            llm_params,
+        ).first()
+
+        by_provider_rows = db.execute(
+            text(
+                f"""
+                SELECT
+                    provider,
+                    COUNT(*) AS calls,
+                    COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                    COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+                FROM llm_usage
+                WHERE day_key = :day_key
+                {llm_run_filter}
+                GROUP BY provider
+                ORDER BY calls DESC, provider ASC
+                """
+            ),
+            llm_params,
+        ).fetchall()
+
+        by_model_rows = db.execute(
+            text(
+                f"""
+                SELECT
+                    provider,
+                    COALESCE(resolved_model_name, model_name) AS model_name,
+                    COUNT(*) AS calls,
+                    COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                    COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+                FROM llm_usage
+                WHERE day_key = :day_key
+                {llm_run_filter}
+                GROUP BY provider, COALESCE(resolved_model_name, model_name)
+                ORDER BY calls DESC, provider ASC, model_name ASC
+                """
+            ),
+            llm_params,
+        ).fetchall()
+
+        runtime_row = db.execute(
+            text(
+                f"""
+                SELECT
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_actions
+                FROM events e
+                WHERE e.created_at >= :start_ts
+                  AND e.created_at < :end_ts
+                  {event_run_filter}
+                """
+            ),
+            event_params,
+        ).first()
+
+        total_calls = int((totals.calls if totals else 0) or 0)
+        success_calls = int((totals.success_calls if totals else 0) or 0)
+        fallback_calls = int((totals.fallback_calls if totals else 0) or 0)
+        checkpoint_actions = int((runtime_row.checkpoint_actions if runtime_row else 0) or 0)
+        deterministic_actions = int((runtime_row.deterministic_actions if runtime_row else 0) or 0)
+        runtime_total = checkpoint_actions + deterministic_actions
+
+        by_provider = []
+        for row in by_provider_rows:
+            calls = int(row.calls or 0)
+            fallback = int(row.fallback_calls or 0)
+            by_provider.append(
+                {
+                    "provider": row.provider,
+                    "calls": calls,
+                    "success_calls": int(row.success_calls or 0),
+                    "fallback_calls": fallback,
+                    "fallback_rate": _safe_ratio(fallback, calls),
+                    "total_tokens": int(row.total_tokens or 0),
+                    "estimated_cost_usd": float(row.estimated_cost_usd or 0.0),
+                }
+            )
+
+        by_model = []
+        for row in by_model_rows:
+            calls = int(row.calls or 0)
+            fallback = int(row.fallback_calls or 0)
+            by_model.append(
+                {
+                    "provider": row.provider,
+                    "model_name": row.model_name,
+                    "calls": calls,
+                    "success_calls": int(row.success_calls or 0),
+                    "fallback_calls": fallback,
+                    "fallback_rate": _safe_ratio(fallback, calls),
+                    "total_tokens": int(row.total_tokens or 0),
+                    "estimated_cost_usd": float(row.estimated_cost_usd or 0.0),
+                }
+            )
+
+        return {
+            "day_key_utc": day_key.isoformat(),
+            "run_id": run_id,
+            "llm_totals": {
+                "calls": total_calls,
+                "success_calls": success_calls,
+                "fallback_calls": fallback_calls,
+                "success_rate": _safe_ratio(success_calls, total_calls),
+                "fallback_rate": _safe_ratio(fallback_calls, total_calls),
+                "prompt_tokens": int((totals.prompt_tokens if totals else 0) or 0),
+                "completion_tokens": int((totals.completion_tokens if totals else 0) or 0),
+                "total_tokens": int((totals.total_tokens if totals else 0) or 0),
+                "estimated_cost_usd": float((totals.estimated_cost_usd if totals else 0.0) or 0.0),
+            },
+            "by_provider": by_provider,
+            "by_model": by_model,
+            "runtime_actions": {
+                "checkpoint_actions": checkpoint_actions,
+                "deterministic_actions": deterministic_actions,
+                "total_runtime_actions": runtime_total,
+                "checkpoint_ratio": _safe_ratio(checkpoint_actions, runtime_total),
+                "deterministic_ratio": _safe_ratio(deterministic_actions, runtime_total),
+            },
+        }
+    finally:
+        db.close()
+
+
+@router.get("/emergence/metrics")
+def emergence_metrics(
+    hours: int = Query(24, ge=1, le=24 * 30),
+):
+    """
+    Current emergence metrics window.
+
+    Includes:
+    - coalition churn
+    - inequality trend
+    - governance participation
+    - conflict/cooperation rates
+    """
+    now = now_utc()
+    window_end = now
+    window_start = now - timedelta(hours=hours)
+    previous_window_start = window_start - timedelta(hours=hours)
+    previous_window_end = window_start
+
+    db = SessionLocal()
+    try:
+        try:
+            previous_snapshot = (
+                db.query(EmergenceMetricSnapshot)
+                .order_by(EmergenceMetricSnapshot.simulation_day.desc())
+                .first()
+            )
+        except Exception:
+            db.rollback()
+            previous_snapshot = None
+        metrics = compute_emergence_metrics(
+            db,
+            window_start=window_start,
+            window_end=window_end,
+            previous_window_start=previous_window_start,
+            previous_window_end=previous_window_end,
+            previous_inequality_gini=(
+                float(previous_snapshot.inequality_gini) if previous_snapshot and previous_snapshot.inequality_gini is not None else None
+            ),
+        )
+        metrics.pop("coalition_edge_keys", None)
+        return {
+            "window_hours": hours,
+            "window_start_utc": window_start.isoformat(),
+            "window_end_utc": window_end.isoformat(),
+            "metrics": metrics,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/emergence/snapshots")
+def emergence_snapshots(
+    limit: int = Query(30, ge=1, le=365),
+):
+    """
+    Persisted per-day emergence metric snapshots for trend analysis.
+    """
+    db = SessionLocal()
+    try:
+        try:
+            rows = (
+                db.query(EmergenceMetricSnapshot)
+                .order_by(EmergenceMetricSnapshot.simulation_day.desc())
+                .limit(limit)
+                .all()
+            )
+        except Exception as e:
+            db.rollback()
+            message = str(e)
+            if "emergence_metric_snapshots" in message and "does not exist" in message:
+                logger.info("Emergence snapshots table not migrated yet; returning empty payload.")
+            else:
+                logger.warning("Emergence snapshots unavailable: %s", e)
+            rows = []
+        payload = [_serialize_emergence_snapshot(row) for row in reversed(rows)]
+        return {
+            "count": len(payload),
+            "snapshots": payload,
         }
     finally:
         db.close()

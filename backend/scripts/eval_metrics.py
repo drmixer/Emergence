@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.core.database import SessionLocal
 from app.core.time import ensure_utc, now_utc
 from app.models.models import AgentInventory, Event
+from app.services.emergence_metrics import compute_emergence_metrics
 
 
 ACTION_TYPES = {
@@ -245,11 +246,29 @@ def main() -> int:
         window_rows.append(row)
 
     latest = window_rows[-1] if window_rows else {}
+    emergence_metrics_latest_window: dict = {}
+    if windows:
+        current_window = windows[-1]
+        previous_window = windows[-2] if len(windows) > 1 else None
+        db = SessionLocal()
+        try:
+            emergence_metrics_latest_window = compute_emergence_metrics(
+                db,
+                window_start=current_window.start,
+                window_end=current_window.end,
+                previous_window_start=(previous_window.start if previous_window else None),
+                previous_window_end=(previous_window.end if previous_window else None),
+            )
+            emergence_metrics_latest_window.pop("coalition_edge_keys", None)
+        finally:
+            db.close()
+
     report = {
         "generated_at_utc": _iso(generated_at),
         "windows": args.windows,
         "window_minutes": args.window_minutes,
         "latest_window": latest,
+        "emergence_metrics_latest_window": emergence_metrics_latest_window,
         "resource_concentration_now": _resource_concentration(),
         "rows": window_rows,
     }

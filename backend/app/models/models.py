@@ -105,6 +105,34 @@ class AgentMemory(Base):
     agent = relationship("Agent", back_populates="memory")
 
 
+class EmergenceMetricSnapshot(Base):
+    """Persisted daily emergence metrics for trend tracking."""
+    __tablename__ = "emergence_metric_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    simulation_day = Column(Integer, nullable=False, unique=True)
+    window_start_at = Column(DateTime(timezone=True), nullable=False)
+    window_end_at = Column(DateTime(timezone=True), nullable=False)
+
+    living_agents = Column(Integer, nullable=False, default=0)
+    governance_participants = Column(Integer, nullable=False, default=0)
+    governance_participation_rate = Column(DECIMAL(8, 6), nullable=False, default=0)
+
+    coalition_edge_count = Column(Integer, nullable=False, default=0)
+    coalition_churn = Column(DECIMAL(8, 6), nullable=True)
+    coalition_edge_keys = Column(JSON, nullable=True, default=list)
+
+    inequality_gini = Column(DECIMAL(8, 6), nullable=False, default=0)
+    inequality_trend = Column(DECIMAL(8, 6), nullable=True)
+
+    conflict_events = Column(Integer, nullable=False, default=0)
+    cooperation_events = Column(Integer, nullable=False, default=0)
+    conflict_rate = Column(DECIMAL(8, 6), nullable=False, default=0)
+    cooperation_rate = Column(DECIMAL(8, 6), nullable=False, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class GlobalResources(Base):
     """Global resource tracking (common pool)."""
     __tablename__ = "global_resources"

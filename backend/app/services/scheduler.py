@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.models import Agent, AgentInventory, Proposal, Law, Event, Transaction, GlobalResources
+from app.services.emergence_metrics import persist_completed_day_snapshot
 
 # Twitter bot integration (optional)
 try:
@@ -442,6 +443,11 @@ class SchedulerRunner:
         # Daily stats reset
         self.tasks.append(
             asyncio.create_task(self._run_periodic(reset_daily_stats, day_length_minutes * 60))
+        )
+
+        # Persist one emergence metrics snapshot per completed simulation day.
+        self.tasks.append(
+            asyncio.create_task(self._run_periodic(persist_completed_day_snapshot, day_length_minutes * 60))
         )
         
         logger.info(f"Scheduler started (day length: {day_length_minutes} minutes)")
