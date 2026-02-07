@@ -20,14 +20,15 @@ class APIService {
 
     async fetch(endpoint, options = {}) {
         const url = `${this.baseUrl}${endpoint}`
+        const { headers: optionHeaders = {}, ...restOptions } = options
 
         try {
             const response = await fetch(url, {
+                ...restOptions,
                 headers: {
                     'Content-Type': 'application/json',
-                    ...options.headers,
+                    ...optionHeaders,
                 },
-                ...options,
             })
 
             if (!response.ok) {
