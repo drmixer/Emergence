@@ -14,6 +14,7 @@ from openai import RateLimitError, APIError
 
 from app.core.config import settings
 from app.core.time import now_utc
+from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
 
 logger = logging.getLogger(__name__)
@@ -115,11 +116,15 @@ class LLMClient:
 
     async def _throttle_openrouter(self) -> None:
         now = time.monotonic()
+        rpm_limit = max(
+            1,
+            int(runtime_config_service.get_effective_value_cached("OPENROUTER_RPM_LIMIT") or self._openrouter_rpm),
+        )
         async with self._openrouter_rpm_lock:
             while self._openrouter_calls and (now - self._openrouter_calls[0]) > self._openrouter_window_s:
                 self._openrouter_calls.popleft()
 
-            if len(self._openrouter_calls) < self._openrouter_rpm:
+            if len(self._openrouter_calls) < rpm_limit:
                 self._openrouter_calls.append(now)
                 return
 
@@ -357,6 +362,21 @@ class LLMClient:
     
     def _get_client_and_model(self, model_type: str):
         """Get the appropriate client and model name."""
+        force_cheapest = bool(runtime_config_service.get_effective_value_cached("FORCE_CHEAPEST_ROUTE"))
+        if force_cheapest:
+            if settings.OPENROUTER_API_KEY:
+                return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
+            if settings.GROQ_API_KEY:
+                key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
+                model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+                return self.groq_client, model_name
+            if settings.MISTRAL_API_KEY:
+                mistral_default_model = str(
+                    getattr(settings, "MISTRAL_SMALL_MODEL", MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"])
+                    or MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"]
+                ).strip()
+                return self.mistral_client, mistral_default_model
+
         provider = (settings.LLM_PROVIDER or "auto").strip().lower()
         mistral_default_model = str(
             getattr(settings, "MISTRAL_SMALL_MODEL", MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"])
@@ -547,8 +567,14 @@ async def get_agent_action(
         }
 
     try:
-        max_action_tokens = max(128, int(getattr(settings, "LLM_ACTION_MAX_TOKENS", 350) or 350))
-        parse_retry_attempts = max(0, int(getattr(settings, "LLM_ACTION_PARSE_RETRY_ATTEMPTS", 2) or 2))
+        max_action_tokens = max(
+            128,
+            int(runtime_config_service.get_effective_value_cached("LLM_ACTION_MAX_TOKENS") or 350),
+        )
+        parse_retry_attempts = max(
+            0,
+            int(runtime_config_service.get_effective_value_cached("LLM_ACTION_PARSE_RETRY_ATTEMPTS") or 2),
+        )
         base_context_prompt = context_prompt
         last_parse_meta: dict[str, Any] | None = None
 

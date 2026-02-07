@@ -7,9 +7,9 @@ from datetime import timedelta
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
 from app.models.models import Agent, AgentMemory, Event
+from app.services.runtime_config import runtime_config_service
 from app.services.salience_detector import (
     SALIENT_EVENT_TYPES,
     detect_salient_events,
@@ -35,8 +35,14 @@ class AgentMemoryService:
     ) -> dict:
         """Update memory only when cadence or salience policy requires it."""
         checkpoint_number = max(1, int(checkpoint_number or 1))
-        cadence_n = max(1, int(getattr(settings, "LLM_MEMORY_UPDATE_EVERY_N_CHECKPOINTS", 3) or 3))
-        max_chars = max(200, int(getattr(settings, "LLM_MEMORY_MAX_CHARS", 1200) or 1200))
+        cadence_n = max(
+            1,
+            int(runtime_config_service.get_effective_value_cached("LLM_MEMORY_UPDATE_EVERY_N_CHECKPOINTS") or 3),
+        )
+        max_chars = max(
+            200,
+            int(runtime_config_service.get_effective_value_cached("LLM_MEMORY_MAX_CHARS") or 1200),
+        )
 
         memory = (
             db.query(AgentMemory)
@@ -103,7 +109,10 @@ class AgentMemoryService:
 
     def get_bounded_memory_text(self, db: Session, agent_id: int) -> str:
         """Return capped memory text for prompt injection."""
-        max_chars = max(200, int(getattr(settings, "LLM_MEMORY_MAX_CHARS", 1200) or 1200))
+        max_chars = max(
+            200,
+            int(runtime_config_service.get_effective_value_cached("LLM_MEMORY_MAX_CHARS") or 1200),
+        )
         memory = (
             db.query(AgentMemory)
             .filter(AgentMemory.agent_id == agent_id)

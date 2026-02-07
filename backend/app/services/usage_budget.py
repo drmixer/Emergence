@@ -16,6 +16,7 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.time import now_utc
+from app.services.runtime_config import runtime_config_service
 
 logger = logging.getLogger(__name__)
 
@@ -161,10 +162,12 @@ class UsageBudgetService:
     def preflight(self, provider: str, model_name: str) -> BudgetDecision:
         snapshot = self.get_snapshot()
 
-        hard_budget = float(getattr(settings, "LLM_DAILY_BUDGET_USD_HARD", 1.0) or 0.0)
-        max_total = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_TOTAL", 0) or 0)
-        max_or_free = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE", 0) or 0)
-        max_groq = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_GROQ", 0) or 0)
+        hard_budget = float(runtime_config_service.get_effective_value_cached("LLM_DAILY_BUDGET_USD_HARD") or 0.0)
+        max_total = int(runtime_config_service.get_effective_value_cached("LLM_MAX_CALLS_PER_DAY_TOTAL") or 0)
+        max_or_free = int(
+            runtime_config_service.get_effective_value_cached("LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE") or 0
+        )
+        max_groq = int(runtime_config_service.get_effective_value_cached("LLM_MAX_CALLS_PER_DAY_GROQ") or 0)
 
         if hard_budget > 0 and snapshot.estimated_cost_usd >= hard_budget:
             return BudgetDecision(False, "hard_budget_reached", False, snapshot)
@@ -177,7 +180,7 @@ class UsageBudgetService:
             if snapshot.calls_groq >= max_groq:
                 return BudgetDecision(False, "max_calls_groq_reached", False, snapshot)
 
-        soft_budget = float(getattr(settings, "LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0)
+        soft_budget = float(runtime_config_service.get_effective_value_cached("LLM_DAILY_BUDGET_USD_SOFT") or 0.0)
         soft_cap_reached = False
         if soft_budget > 0 and snapshot.estimated_cost_usd >= soft_budget:
             soft_cap_reached = True

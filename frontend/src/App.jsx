@@ -33,6 +33,7 @@ import Leaderboards from './pages/Leaderboards'
 import Network from './pages/Network'
 import Timeline from './pages/Timeline'
 import Predictions from './pages/Predictions'
+import Ops from './pages/Ops'
 
 // Components
 import LiveFeed from './components/LiveFeed'
@@ -201,6 +202,7 @@ function App() {
               <Route path="/leaderboards" element={<Leaderboards />} />
               <Route path="/predictions" element={<Predictions />} />
               <Route path="/about" element={<About />} />
+              <Route path="/ops" element={<Ops />} />
             </Routes>
           </main>
 

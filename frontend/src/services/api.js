@@ -4,6 +4,15 @@
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+export function getViewerUserId() {
+    let userId = localStorage.getItem('emergence_user_id')
+    if (!userId) {
+        userId = `user_${Math.random().toString(36).slice(2, 15)}`
+        localStorage.setItem('emergence_user_id', userId)
+    }
+    return userId
+}
+
 class APIService {
     constructor(baseUrl) {
         this.baseUrl = baseUrl
@@ -22,7 +31,20 @@ class APIService {
             })
 
             if (!response.ok) {
-                throw new Error(`API error: ${response.status}`)
+                let detail = ''
+                try {
+                    const errorPayload = await response.json()
+                    if (errorPayload && typeof errorPayload.detail === 'string') {
+                        detail = errorPayload.detail
+                    }
+                } catch {
+                    // Ignore JSON parse failures for non-JSON error responses.
+                }
+                const suffix = detail ? `: ${detail}` : ''
+                const error = new Error(`API error: ${response.status}${suffix}`)
+                error.status = response.status
+                error.detail = detail
+                throw error
             }
 
             return response.json()
@@ -30,6 +52,19 @@ class APIService {
             console.error(`API Error (${endpoint}):`, error)
             throw error
         }
+    }
+
+    _adminHeaders(token, adminUser = null) {
+        const cleanToken = String(token || '').trim()
+        const cleanUser = String(adminUser || '').trim()
+        const headers = {}
+        if (cleanToken) {
+            headers.Authorization = `Bearer ${cleanToken}`
+        }
+        if (cleanUser) {
+            headers['X-Admin-User'] = cleanUser
+        }
+        return headers
     }
 
     // Agents
@@ -151,6 +186,107 @@ class APIService {
 
     async getClassMobility(hours = 24) {
         return this.fetch(`/api/analytics/class-mobility?hours=${hours}`)
+    }
+
+    async getPlotTurnReplay(hours = 24, minSalience = 55, bucketMinutes = 30, limit = 220) {
+        return this.fetch(
+            `/api/analytics/plot-turns/replay?hours=${hours}&min_salience=${minSalience}&bucket_minutes=${bucketMinutes}&limit=${limit}`
+        )
+    }
+
+    // Prediction markets
+    async getPredictionMarkets(status = null, limit = 20) {
+        const params = new URLSearchParams()
+        if (status) params.append('status', status)
+        if (limit) params.append('limit', String(limit))
+        const query = params.toString() ? `?${params.toString()}` : ''
+        return this.fetch(`/api/predictions/markets${query}`)
+    }
+
+    async getPredictionMe(userId = getViewerUserId()) {
+        return this.fetch('/api/predictions/me', {
+            headers: { 'x-user-id': userId },
+        })
+    }
+
+    async placePredictionBet(marketId, prediction, amount, userId = getViewerUserId()) {
+        return this.fetch(`/api/predictions/markets/${marketId}/bet`, {
+            method: 'POST',
+            headers: { 'x-user-id': userId },
+            body: JSON.stringify({ prediction, amount }),
+        })
+    }
+
+    // Admin / Ops
+    async getAdminStatus(token, adminUser = null) {
+        return this.fetch('/api/admin/status', {
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
+    async getAdminConfig(token, adminUser = null) {
+        return this.fetch('/api/admin/config', {
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
+    async updateAdminConfig(token, updates, reason = '', adminUser = null) {
+        return this.fetch('/api/admin/config', {
+            method: 'PATCH',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                updates,
+                reason: String(reason || '').trim() || null,
+            }),
+        })
+    }
+
+    async getAdminAudit(token, limit = 50, offset = 0, adminUser = null) {
+        return this.fetch(`/api/admin/audit?limit=${limit}&offset=${offset}`, {
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
+    async pauseSimulation(token, reason = '', adminUser = null) {
+        return this.fetch('/api/admin/control/pause', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                reason: String(reason || '').trim() || null,
+            }),
+        })
+    }
+
+    async resumeSimulation(token, reason = '', adminUser = null) {
+        return this.fetch('/api/admin/control/resume', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                reason: String(reason || '').trim() || null,
+            }),
+        })
+    }
+
+    async setDegradedRouting(token, enabled, reason = '', adminUser = null) {
+        const endpoint = enabled ? '/api/admin/control/degrade' : '/api/admin/control/degrade/clear'
+        return this.fetch(endpoint, {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                reason: String(reason || '').trim() || null,
+            }),
+        })
+    }
+
+    async setSimulationRunMode(token, mode, reason = '', adminUser = null) {
+        return this.fetch('/api/admin/control/run-mode', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                mode,
+                reason: String(reason || '').trim() || null,
+            }),
+        })
     }
 
     // Landing Page Stats

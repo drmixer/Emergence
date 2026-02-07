@@ -12,6 +12,8 @@ from app.models.models import (
     Transaction,
     AgentAction,
     Infrastructure,
+    RuntimeConfigOverride,
+    AdminConfigChange,
 )
 
 __all__ = [
@@ -27,4 +29,6 @@ __all__ = [
     "Transaction",
     "AgentAction",
     "Infrastructure",
+    "RuntimeConfigOverride",
+    "AdminConfigChange",
 ]

@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = "development-secret-key-change-in-production"
+
+    # Internal admin/ops dashboard controls.
+    # Keep ADMIN_WRITE_ENABLED=false in production until explicitly enabled.
+    ADMIN_ENABLED: bool = False
+    ADMIN_WRITE_ENABLED: bool = False
+    ADMIN_API_TOKEN: str = ""
+    # Optional comma-separated IP allowlist for admin requests.
+    # Example: "127.0.0.1,10.0.0.5"
+    ADMIN_IP_ALLOWLIST: str = ""
     
     # CORS
     FRONTEND_URL: str = "http://localhost:3000"
@@ -91,6 +100,10 @@ class Settings(BaseSettings):
     # Can be fractional in dev for faster end-to-end testing (e.g. 0.25 = 15 minutes).
     PROPOSAL_VOTING_HOURS: float = 24.0
     SIMULATION_MAX_AGENTS: int = 50  # Default v1 runtime cap; set 0 to process all seeded agents
+    # Runtime ops controls (can be overridden via internal admin APIs).
+    SIMULATION_RUN_MODE: str = "test"  # test | real
+    SIMULATION_PAUSED: bool = False
+    FORCE_CHEAPEST_ROUTE: bool = False
     # Optional run label for llm_usage attribution rows. If empty, runtime generates one.
     SIMULATION_RUN_ID: str = ""
     # Optional perception lag for agent context (in seconds). Adds information asymmetry.

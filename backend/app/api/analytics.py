@@ -233,6 +233,40 @@ def _serialize_plot_turn(event: Event, score: int, actor_label: str | None = Non
     }
 
 
+def _collect_scored_plot_turns(
+    db,
+    *,
+    window_start: datetime,
+    now: datetime,
+    min_salience: int,
+    candidate_limit: int,
+) -> list[tuple[int, datetime, dict]]:
+    candidates = (
+        db.query(Event)
+        .filter(Event.created_at >= window_start)
+        .order_by(Event.created_at.desc())
+        .limit(candidate_limit)
+        .all()
+    )
+
+    agent_ids = {int(e.agent_id) for e in candidates if e.agent_id is not None}
+    agent_names = {}
+    if agent_ids:
+        agent_rows = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+        for agent in agent_rows:
+            agent_names[int(agent.id)] = agent.display_name or f"Agent #{agent.agent_number}"
+
+    scored: list[tuple[int, datetime, dict]] = []
+    for event in candidates:
+        score = _score_plot_turn(event)
+        if score < min_salience:
+            continue
+        created_at = ensure_utc(event.created_at) or now
+        actor = agent_names.get(int(event.agent_id)) if event.agent_id is not None else None
+        scored.append((score, created_at, _serialize_plot_turn(event, score=score, actor_label=actor)))
+    return scored
+
+
 # ===== LEADERBOARDS =====
 
 @router.get("/leaderboards")
@@ -491,29 +525,13 @@ def plot_turns(
 
     db = SessionLocal()
     try:
-        candidates = (
-            db.query(Event)
-            .filter(Event.created_at >= window_start)
-            .order_by(Event.created_at.desc())
-            .limit(max(40, limit * 12))
-            .all()
+        scored = _collect_scored_plot_turns(
+            db,
+            window_start=window_start,
+            now=now,
+            min_salience=min_salience,
+            candidate_limit=max(40, limit * 12),
         )
-
-        agent_ids = {int(e.agent_id) for e in candidates if e.agent_id is not None}
-        agent_names = {}
-        if agent_ids:
-            agent_rows = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
-            for agent in agent_rows:
-                agent_names[int(agent.id)] = agent.display_name or f"Agent #{agent.agent_number}"
-
-        scored: list[tuple[int, datetime, dict]] = []
-        for event in candidates:
-            score = _score_plot_turn(event)
-            if score < min_salience:
-                continue
-            created_at = ensure_utc(event.created_at) or now
-            actor = agent_names.get(int(event.agent_id)) if event.agent_id is not None else None
-            scored.append((score, created_at, _serialize_plot_turn(event, score=score, actor_label=actor)))
 
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
         payload = [item[2] for item in scored[:limit]]
@@ -522,6 +540,81 @@ def plot_turns(
             "min_salience": min_salience,
             "count": len(payload),
             "items": payload,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/plot-turns/replay")
+def plot_turns_replay(
+    hours: int = Query(24, ge=1, le=24 * 7),
+    min_salience: int = Query(55, ge=1, le=100),
+    bucket_minutes: int = Query(30, ge=10, le=120),
+    limit: int = Query(220, ge=20, le=500),
+):
+    """
+    Chronological high-salience replay stream with bucketed counts for time-scrub UI.
+    """
+    now = now_utc()
+    window_start = now - timedelta(hours=hours)
+    bucket_seconds = int(bucket_minutes * 60)
+    total_seconds = max(1, int((now - window_start).total_seconds()))
+    bucket_count = max(1, (total_seconds + bucket_seconds - 1) // bucket_seconds)
+
+    db = SessionLocal()
+    try:
+        scored = _collect_scored_plot_turns(
+            db,
+            window_start=window_start,
+            now=now,
+            min_salience=min_salience,
+            candidate_limit=max(limit * 6, 240),
+        )
+        scored.sort(key=lambda item: (item[1], item[0]))
+        if len(scored) > limit:
+            scored = scored[-limit:]
+
+        events = [item[2] for item in scored]
+
+        buckets = []
+        for idx in range(bucket_count):
+            bucket_start = window_start + timedelta(seconds=idx * bucket_seconds)
+            bucket_end = min(now, bucket_start + timedelta(seconds=bucket_seconds))
+            buckets.append(
+                {
+                    "index": idx,
+                    "bucket_start": bucket_start.isoformat(),
+                    "bucket_end": bucket_end.isoformat(),
+                    "label": bucket_start.strftime("%H:%M"),
+                    "event_count": 0,
+                    "max_salience": 0,
+                    "dominant_category": None,
+                    "category_counts": {},
+                }
+            )
+
+        for _, created_at, payload in scored:
+            offset = int((created_at - window_start).total_seconds())
+            idx = max(0, min(bucket_count - 1, offset // bucket_seconds))
+            bucket = buckets[idx]
+            bucket["event_count"] += 1
+            bucket["max_salience"] = max(int(bucket["max_salience"]), int(payload["salience"]))
+            category = str(payload.get("category") or "notable")
+            category_counts = bucket["category_counts"]
+            category_counts[category] = int(category_counts.get(category, 0)) + 1
+            bucket["dominant_category"] = max(
+                category_counts,
+                key=lambda key: int(category_counts.get(key, 0)),
+            )
+
+        return {
+            "window_hours": hours,
+            "min_salience": min_salience,
+            "bucket_minutes": bucket_minutes,
+            "bucket_count": bucket_count,
+            "count": len(events),
+            "items": events,
+            "buckets": buckets,
         }
     finally:
         db.close()

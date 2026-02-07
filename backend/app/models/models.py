@@ -391,3 +391,29 @@ class EnforcementVote(Base):
     __table_args__ = (
         CheckConstraint("vote IN ('support', 'oppose')", name="valid_enforcement_vote"),
     )
+
+
+class RuntimeConfigOverride(Base):
+    """Mutable runtime config overrides for ops/admin controls."""
+    __tablename__ = "runtime_config_overrides"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(120), nullable=False, unique=True)
+    value_json = Column(JSON, nullable=False)
+    updated_by = Column(String(120), nullable=True)
+    reason = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AdminConfigChange(Base):
+    """Audit log for admin config changes."""
+    __tablename__ = "admin_config_changes"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String(120), nullable=False)
+    old_value = Column(JSON, nullable=True)
+    new_value = Column(JSON, nullable=False)
+    changed_by = Column(String(120), nullable=False)
+    environment = Column(String(50), nullable=False)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

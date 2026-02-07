@@ -18,6 +18,7 @@ from app.services.llm_client import get_agent_action
 from app.services.actions import execute_action, validate_action
 from app.services.context_builder import build_agent_context
 from app.services.agent_memory import agent_memory_service
+from app.services.runtime_config import runtime_config_service
 from app.services.routine_executor import routine_executor
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,9 @@ class AgentProcessor:
         
         while self.running:
             try:
+                if bool(runtime_config_service.get_effective_value_cached("SIMULATION_PAUSED")):
+                    await asyncio.sleep(15)
+                    continue
                 await self._process_agent_turn(agent_id)
                 
             except asyncio.CancelledError:
@@ -97,8 +101,12 @@ class AgentProcessor:
                 logger.error(f"Error in agent {agent_id} loop: {e}")
                 await self._log_error(agent_id, str(e))
             
-            # Wait before next action (2-3 minutes with jitter)
-            delay = settings.AGENT_LOOP_DELAY_SECONDS + random.randint(-30, 30)
+            # Wait before next action with runtime-configurable delay + jitter.
+            base_delay = int(
+                runtime_config_service.get_effective_value_cached("AGENT_LOOP_DELAY_SECONDS")
+                or settings.AGENT_LOOP_DELAY_SECONDS
+            )
+            delay = base_delay + random.randint(-30, 30)
             await asyncio.sleep(max(60, delay))  # Minimum 1 minute
     
     async def _process_agent_turn(self, agent_id: int):
