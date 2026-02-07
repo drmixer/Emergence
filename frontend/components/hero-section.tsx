@@ -58,8 +58,17 @@ export function HeroSection() {
 
   useEffect(() => {
     let cancelled = false
-    const configuredApiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "")
-    const apiBase = configuredApiBase || (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "")
+    const configuredApiBase = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/+$/, "")
+    const apiBase = (() => {
+      if (configuredApiBase) {
+        // Prevent mixed-content warnings if an http URL is accidentally configured in prod.
+        if (window.location.protocol === "https:" && configuredApiBase.startsWith("http://")) {
+          return configuredApiBase.replace(/^http:\/\//, "https://")
+        }
+        return configuredApiBase
+      }
+      return process.env.NODE_ENV === "development" ? "http://localhost:8000" : ""
+    })()
 
     async function loadPreview() {
       if (!apiBase) {
