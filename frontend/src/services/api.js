@@ -2,7 +2,10 @@
  * API Service - Handles all communication with the backend
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE =
+    (typeof globalThis !== 'undefined' && globalThis?.process?.env?.NEXT_PUBLIC_API_URL) ||
+    ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ? import.meta.env.VITE_API_URL : '') ||
+    'http://localhost:8000'
 
 export function getViewerUserId() {
     let userId = localStorage.getItem('emergence_user_id')

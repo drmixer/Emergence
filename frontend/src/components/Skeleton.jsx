@@ -1,5 +1,4 @@
 // Skeleton loading components for perceived performance
-import './Skeleton.css'
 
 export function SkeletonCard({ className = '' }) {
     return (

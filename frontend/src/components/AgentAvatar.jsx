@@ -1,5 +1,4 @@
 // Agent Avatar with personality-based styling
-import './AgentAvatar.css'
 
 // Personality color schemes
 const personalityColors = {

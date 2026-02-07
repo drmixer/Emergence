@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { createElement, useState } from 'react'
+import { Routes, Route, NavLink } from 'react-router-dom'
 import {
   Activity,
   Users,
@@ -11,7 +11,6 @@ import {
   Star,
   Trophy,
   Info,
-  Home,
   Menu,
   X,
   Share2,
@@ -20,7 +19,6 @@ import {
 } from 'lucide-react'
 
 // Pages
-import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
 import Agents from './pages/Agents'
 import Agent from './pages/Agent'
@@ -42,23 +40,12 @@ import ToastProvider from './components/ToastNotifications'
 import { useKeyboardNavigation } from './components/KeyboardNavigation'
 import { SubscriptionProvider, NotificationBell } from './components/Subscriptions'
 
-import './App.css'
 
 function App() {
-  const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   // Enable keyboard navigation
   useKeyboardNavigation()
-
-  // Show landing page at root without the app shell
-  if (location.pathname === '/') {
-    return (
-      <SubscriptionProvider>
-        <Landing />
-      </SubscriptionProvider>
-    )
-  }
 
   const navItems = [
     { path: '/dashboard', icon: Activity, label: 'Dashboard' },
@@ -84,10 +71,10 @@ function App() {
 
         {/* Mobile Header */}
         <header className="mobile-header">
-          <NavLink to="/" className="mobile-logo">
+          <a href="/" className="mobile-logo">
             <img src="/logo.png" alt="Emergence" className="mobile-logo-img" />
             <span>Emergence</span>
-          </NavLink>
+          </a>
           <div className="mobile-header-actions">
             <NotificationBell />
             <button
@@ -108,16 +95,16 @@ function App() {
         {/* Mobile Navigation Drawer */}
         <nav className={`mobile-nav ${mobileMenuOpen ? 'open' : ''}`}>
           <div className="mobile-nav-header">
-            <NavLink to="/" className="logo" onClick={handleNavClick}>
+            <a href="/" className="logo" onClick={handleNavClick}>
               <img src="/logo.png" alt="Emergence" className="logo-icon-img" />
               <div className="logo-text">
                 <span className="logo-title">Emergence</span>
                 <span className="logo-subtitle">AI Civilization</span>
               </div>
-            </NavLink>
+            </a>
           </div>
           <div className="mobile-nav-items">
-            {navItems.map(({ path, icon: Icon, label }) => (
+            {navItems.map(({ path, icon, label }) => (
               <NavLink
                 key={path}
                 to={path}
@@ -127,7 +114,7 @@ function App() {
                 end={path === '/dashboard'}
                 onClick={handleNavClick}
               >
-                <Icon size={20} />
+                {createElement(icon, { size: 20 })}
                 <span>{label}</span>
               </NavLink>
             ))}
@@ -148,18 +135,18 @@ function App() {
           {/* Sidebar Navigation */}
           <aside className="sidebar">
             <div className="sidebar-header">
-              <NavLink to="/" className="logo">
+              <a href="/" className="logo">
                 <img src="/logo.png" alt="Emergence" className="logo-icon-img" />
                 <div className="logo-text">
                   <span className="logo-title">Emergence</span>
                   <span className="logo-subtitle">AI Civilization</span>
                 </div>
-              </NavLink>
+              </a>
               <NotificationBell />
             </div>
 
             <nav className="sidebar-nav">
-              {navItems.map(({ path, icon: Icon, label }) => (
+              {navItems.map(({ path, icon, label }) => (
                 <NavLink
                   key={path}
                   to={path}
@@ -168,7 +155,7 @@ function App() {
                   }
                   end={path === '/dashboard'}
                 >
-                  <Icon size={20} />
+                  {createElement(icon, { size: 20 })}
                   <span>{label}</span>
                 </NavLink>
               ))}

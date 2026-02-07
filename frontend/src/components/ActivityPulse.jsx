@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { Activity, Clock, TrendingUp } from 'lucide-react'
-import './ActivityPulse.css'
 
 export default function ActivityPulse({
     isLive = true,

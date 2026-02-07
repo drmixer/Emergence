@@ -1,7 +1,6 @@
 // Agent Subscriptions - Follow agents for updates
 import { useState, useEffect, useCallback, createContext, useContext } from 'react'
 import { Bell, BellOff, BellRing, Check, X, Star } from 'lucide-react'
-import './Subscriptions.css'
 
 // LocalStorage key for subscriptions
 const STORAGE_KEY = 'emergence_subscriptions'

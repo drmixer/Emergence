@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Play, ChevronDown, Users, MessageSquare, Scale, Sparkles, Zap, Brain, Clock, Loader } from 'lucide-react'
 import { api } from '../services/api'
-import './Landing.css'
 
 // Pre-launch teaser quotes
 const TEASER_QUOTES = [

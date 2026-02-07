@@ -12,7 +12,6 @@ import {
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { api } from '../services/api'
-import './Ops.css'
 
 const TOKEN_STORAGE_KEY = 'emergence_admin_token'
 const USER_STORAGE_KEY = 'emergence_admin_user'

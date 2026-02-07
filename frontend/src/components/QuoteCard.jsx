@@ -12,7 +12,6 @@ import {
     RefreshCw
 } from 'lucide-react'
 import { api } from '../services/api'
-import './QuoteCard.css'
 
 function titleCase(s) {
     if (!s) return ''

@@ -1,7 +1,6 @@
 // Share Button with copy-to-clipboard and social sharing
 import { useState } from 'react'
 import { Share2, Copy, Check, Twitter, Link as LinkIcon } from 'lucide-react'
-import './ShareButton.css'
 
 export default function ShareButton({
     url,

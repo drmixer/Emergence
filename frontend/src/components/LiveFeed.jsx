@@ -12,7 +12,6 @@ import {
 } from 'lucide-react'
 import { subscribeToEvents } from '../services/api'
 import { showEventToast } from './ToastNotifications'
-import './LiveFeed.css'
 
 const backgroundEventTypes = new Set(['work', 'idle'])
 const noisyEventTypes = new Set(['invalid_action', 'processing_error'])

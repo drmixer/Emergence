@@ -13,7 +13,6 @@ import {
     Calendar
 } from 'lucide-react'
 import { api } from '../services/api'
-import './Recap.css'
 
 // Typewriter effect hook
 function useTypewriter(text, speed = 30, enabled = true) {

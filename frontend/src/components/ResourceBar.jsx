@@ -1,6 +1,5 @@
 // Resource Bar with anxiety indicators
 import { AlertTriangle, TrendingDown } from 'lucide-react'
-import './ResourceBar.css'
 
 // Get color based on resource level (percentage)
 function getResourceLevel(current, max) {

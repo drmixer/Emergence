@@ -18,10 +18,12 @@ import {
     Sparkles
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import './Predictions.css'
 
 // API base URL
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE =
+    (typeof globalThis !== 'undefined' && globalThis?.process?.env?.NEXT_PUBLIC_API_URL) ||
+    ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ? import.meta.env.VITE_API_URL : '') ||
+    'http://localhost:8000'
 
 // Fetch helper with timeout
 const fetchJson = async (endpoint, options = {}) => {

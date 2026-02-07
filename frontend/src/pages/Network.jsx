@@ -11,9 +11,7 @@ import ReactFlow, {
     Handle,
     Position
 } from 'reactflow'
-import 'reactflow/dist/style.css'
 import { api } from '../services/api'
-import './Network.css'
 
 // Personality colors for nodes
 const personalityColors = {
