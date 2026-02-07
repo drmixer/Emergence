@@ -44,6 +44,43 @@ from app.models.models import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Section 7 viewer-surface heuristics.
+CONFLICT_EVENT_TYPES = {
+    "initiate_sanction",
+    "initiate_seizure",
+    "initiate_exile",
+    "vote_enforcement",
+    "enforcement_initiated",
+    "agent_sanctioned",
+    "resources_seized",
+    "agent_exiled",
+}
+COOPERATION_EVENT_TYPES = {
+    "trade",
+    "direct_message",
+    "forum_reply",
+    "forum_post",
+    "agent_revived",
+}
+ALLIANCE_KEYWORDS = {"alliance", "ally", "coalition", "truce", "bloc"}
+CONFLICT_KEYWORDS = {"conflict", "hostile", "fight", "war", "betray", "sanction", "exile", "retaliation"}
+COOPERATION_KEYWORDS = {"cooperate", "cooperation", "help", "support", "rescue", "aid"}
+PLOT_TURN_BASE_SCORES = {
+    "law_passed": 95,
+    "proposal_resolved": 90,
+    "world_event": 92,
+    "agent_died": 95,
+    "agent_exiled": 88,
+    "agent_sanctioned": 82,
+    "resources_seized": 80,
+    "became_dormant": 80,
+    "agent_revived": 78,
+    "awakened": 74,
+    "create_proposal": 60,
+    "vote_enforcement": 72,
+}
+
+
 def _gini(values):
     xs = [float(v) for v in values if v is not None]
     if not xs:
@@ -98,6 +135,101 @@ def _serialize_emergence_snapshot(row: EmergenceMetricSnapshot) -> dict:
         "conflict_rate": float(row.conflict_rate or 0.0),
         "cooperation_rate": float(row.cooperation_rate or 0.0),
         "created_at": ensure_utc(row.created_at).isoformat() if row.created_at else None,
+    }
+
+
+def _contains_any(text: str, keywords: set[str]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _titleize_key(value: str) -> str:
+    return str(value or "").replace("_", " ").strip().title() or "Unknown Event"
+
+
+def _estimate_affected_agents(db, effect: dict, living_agents: int) -> int:
+    if not isinstance(effect, dict):
+        return 0
+    if any(k in effect for k in ("reduce_all_agents", "consumption_modifier", "disable_communication", "all_resources")):
+        return living_agents
+    resource = str(effect.get("resource") or "").strip().lower()
+    if resource in {"food", "energy", "materials", "land"}:
+        return int(
+            db.query(AgentInventory.agent_id)
+            .filter(AgentInventory.resource_type == resource)
+            .distinct()
+            .count()
+        )
+    return living_agents
+
+
+def _score_plot_turn(event: Event) -> int:
+    event_type = str(event.event_type or "")
+    description = str(event.description or "").lower()
+    metadata = event.event_metadata or {}
+
+    score = int(PLOT_TURN_BASE_SCORES.get(event_type, 35))
+    if event.agent_id:
+        score += 4
+    if _contains_any(description, ALLIANCE_KEYWORDS):
+        score += 8
+    if _contains_any(description, CONFLICT_KEYWORDS):
+        score += 9
+    if _contains_any(description, COOPERATION_KEYWORDS):
+        score += 4
+    if event_type == "proposal_resolved" and str(metadata.get("result") or "") in {"passed", "failed", "expired"}:
+        score += 10
+    if event_type in {"agent_died", "agent_exiled"}:
+        score += 6
+    return min(score, 100)
+
+
+def _plot_turn_category(event: Event) -> str:
+    event_type = str(event.event_type or "")
+    description = str(event.description or "").lower()
+    if event_type == "world_event":
+        return "crisis"
+    if event_type in {"law_passed", "proposal_resolved", "vote_enforcement", "create_proposal"}:
+        return "governance"
+    if event_type in CONFLICT_EVENT_TYPES or _contains_any(description, CONFLICT_KEYWORDS):
+        return "conflict"
+    if _contains_any(description, ALLIANCE_KEYWORDS):
+        return "alliance"
+    if event_type in COOPERATION_EVENT_TYPES or _contains_any(description, COOPERATION_KEYWORDS):
+        return "cooperation"
+    return "notable"
+
+
+def _plot_turn_title(event: Event) -> str:
+    metadata = event.event_metadata or {}
+    event_type = str(event.event_type or "")
+    if event_type == "world_event":
+        return str(metadata.get("event_name") or "World Event")
+    if event_type == "law_passed":
+        return f"Law Passed: {metadata.get('title') or 'Untitled'}"
+    if event_type == "proposal_resolved":
+        title = str(metadata.get("title") or metadata.get("proposal_title") or "Proposal")
+        result = str(metadata.get("result") or "").strip().lower()
+        if result:
+            return f"{title} ({result})"
+        return title
+    if event_type == "agent_died":
+        return "Permanent Death"
+    if event_type == "agent_exiled":
+        return "Exile Enforced"
+    return _titleize_key(event_type)
+
+
+def _serialize_plot_turn(event: Event, score: int, actor_label: str | None = None) -> dict:
+    return {
+        "event_id": int(event.id or 0),
+        "event_type": str(event.event_type or ""),
+        "title": _plot_turn_title(event),
+        "description": str(event.description or ""),
+        "salience": int(score),
+        "category": _plot_turn_category(event),
+        "actor": actor_label,
+        "created_at": ensure_utc(event.created_at).isoformat() if event.created_at else None,
+        "metadata": event.event_metadata or {},
     }
 
 
@@ -274,6 +406,357 @@ def get_active_effects():
         }
         for e in effects
     ]
+
+
+@router.get("/crisis-strip")
+def crisis_strip(limit: int = Query(6, ge=1, le=20)):
+    """
+    Active crisis/effect strip with timers and rough affected-agent counts.
+    """
+    from app.services.events_generator import event_generator
+
+    now = now_utc()
+    active_effects = event_generator.get_active_effects()
+
+    db = SessionLocal()
+    try:
+        living_agents = int(db.query(Agent).filter(Agent.status != "dead").count())
+        recent_world_events = (
+            db.query(Event)
+            .filter(Event.event_type == "world_event")
+            .order_by(Event.created_at.desc())
+            .limit(100)
+            .all()
+        )
+        recent_by_event_id = {}
+        for event in recent_world_events:
+            meta = event.event_metadata or {}
+            event_id = str(meta.get("event_id") or "").strip()
+            if event_id and event_id not in recent_by_event_id:
+                recent_by_event_id[event_id] = event
+
+        strip_items = []
+        for active in active_effects:
+            event_id = str(active.event_id or "").strip()
+            effect = active.effect if isinstance(active.effect, dict) else {}
+            source_event = recent_by_event_id.get(event_id)
+            expires_at = ensure_utc(active.expires_at)
+            seconds_remaining = max(
+                0,
+                int((expires_at - now).total_seconds()) if expires_at else 0,
+            )
+            source_meta = (source_event.event_metadata or {}) if source_event else {}
+            name = str(source_meta.get("event_name") or _titleize_key(event_id))
+            description = str(source_event.description) if source_event and source_event.description else ""
+            affected_agents = _estimate_affected_agents(db, effect, living_agents=living_agents)
+            strip_items.append(
+                {
+                    "event_id": event_id,
+                    "name": name,
+                    "description": description,
+                    "effect": effect,
+                    "affected_agents": int(affected_agents),
+                    "seconds_remaining": seconds_remaining,
+                    "expires_at": expires_at.isoformat() if expires_at else None,
+                    "started_at": ensure_utc(source_event.created_at).isoformat() if source_event and source_event.created_at else None,
+                }
+            )
+
+        strip_items.sort(
+            key=lambda item: (
+                -int(item.get("seconds_remaining") or 0),
+                str(item.get("name") or ""),
+            )
+        )
+        return {
+            "active_count": len(strip_items),
+            "generated_at": now.isoformat(),
+            "items": strip_items[:limit],
+        }
+    finally:
+        db.close()
+
+
+@router.get("/plot-turns")
+def plot_turns(
+    limit: int = Query(8, ge=1, le=30),
+    hours: int = Query(48, ge=1, le=24 * 14),
+    min_salience: int = Query(60, ge=1, le=100),
+):
+    """
+    High-salience events suitable for a viewer-facing "Plot Turns" panel.
+    """
+    now = now_utc()
+    window_start = now - timedelta(hours=hours)
+
+    db = SessionLocal()
+    try:
+        candidates = (
+            db.query(Event)
+            .filter(Event.created_at >= window_start)
+            .order_by(Event.created_at.desc())
+            .limit(max(40, limit * 12))
+            .all()
+        )
+
+        agent_ids = {int(e.agent_id) for e in candidates if e.agent_id is not None}
+        agent_names = {}
+        if agent_ids:
+            agent_rows = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+            for agent in agent_rows:
+                agent_names[int(agent.id)] = agent.display_name or f"Agent #{agent.agent_number}"
+
+        scored: list[tuple[int, datetime, dict]] = []
+        for event in candidates:
+            score = _score_plot_turn(event)
+            if score < min_salience:
+                continue
+            created_at = ensure_utc(event.created_at) or now
+            actor = agent_names.get(int(event.agent_id)) if event.agent_id is not None else None
+            scored.append((score, created_at, _serialize_plot_turn(event, score=score, actor_label=actor)))
+
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        payload = [item[2] for item in scored[:limit]]
+        return {
+            "window_hours": hours,
+            "min_salience": min_salience,
+            "count": len(payload),
+            "items": payload,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/social-dynamics")
+def social_dynamics(days: int = Query(7, ge=3, le=30)):
+    """
+    Daily social signal series: alliance/conflict/cooperation deltas + coalition churn.
+    """
+    now = now_utc()
+    start_day = now.date() - timedelta(days=days - 1)
+    window_start = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
+
+    day_keys = [(start_day + timedelta(days=idx)).isoformat() for idx in range(days)]
+    buckets = {
+        day_key: {
+            "day_key": day_key,
+            "conflict_events": 0,
+            "cooperation_events": 0,
+            "alliance_signals": 0,
+            "coalition_churn": None,
+            "inequality_trend": None,
+        }
+        for day_key in day_keys
+    }
+
+    db = SessionLocal()
+    try:
+        events = db.query(Event).filter(Event.created_at >= window_start).all()
+        for event in events:
+            created_at = ensure_utc(event.created_at)
+            if not created_at:
+                continue
+            day_key = created_at.date().isoformat()
+            if day_key not in buckets:
+                continue
+
+            event_type = str(event.event_type or "")
+            description = str(event.description or "").lower()
+            if event_type in CONFLICT_EVENT_TYPES or _contains_any(description, CONFLICT_KEYWORDS):
+                buckets[day_key]["conflict_events"] += 1
+            if event_type in COOPERATION_EVENT_TYPES or _contains_any(description, COOPERATION_KEYWORDS):
+                buckets[day_key]["cooperation_events"] += 1
+            if _contains_any(description, ALLIANCE_KEYWORDS):
+                buckets[day_key]["alliance_signals"] += 1
+
+        try:
+            snapshots = (
+                db.query(EmergenceMetricSnapshot)
+                .filter(EmergenceMetricSnapshot.created_at >= window_start)
+                .order_by(EmergenceMetricSnapshot.created_at.asc())
+                .all()
+            )
+        except Exception:
+            db.rollback()
+            snapshots = []
+        for snapshot in snapshots:
+            created_at = ensure_utc(snapshot.created_at)
+            if not created_at:
+                continue
+            day_key = created_at.date().isoformat()
+            if day_key not in buckets:
+                continue
+            buckets[day_key]["coalition_churn"] = (
+                None if snapshot.coalition_churn is None else float(snapshot.coalition_churn)
+            )
+            buckets[day_key]["inequality_trend"] = (
+                None if snapshot.inequality_trend is None else float(snapshot.inequality_trend)
+            )
+
+        series = []
+        for day_key in day_keys:
+            row = dict(buckets[day_key])
+            d = date.fromisoformat(day_key)
+            row["day_label"] = d.strftime("%b %d")
+            series.append(row)
+
+        latest = series[-1] if series else None
+        previous = series[-2] if len(series) > 1 else None
+        deltas = None
+        if latest and previous:
+            deltas = {
+                "conflict_events_delta": int(latest["conflict_events"] - previous["conflict_events"]),
+                "cooperation_events_delta": int(latest["cooperation_events"] - previous["cooperation_events"]),
+                "alliance_signals_delta": int(latest["alliance_signals"] - previous["alliance_signals"]),
+            }
+
+        return {
+            "days": days,
+            "window_start_utc": window_start.isoformat(),
+            "window_end_utc": now.isoformat(),
+            "series": series,
+            "latest": latest,
+            "deltas_vs_prev_day": deltas,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/class-mobility")
+def class_mobility(hours: int = Query(24, ge=1, le=24 * 14)):
+    """
+    Inequality + mobility proxy cards for the viewer dashboard.
+    """
+    now = now_utc()
+    window_start = now - timedelta(hours=hours)
+
+    db = SessionLocal()
+    try:
+        agents = db.query(Agent).all()
+        inventories = db.query(AgentInventory).all()
+
+        wealth_by_agent: dict[int, float] = {}
+        for inv in inventories:
+            if inv.agent_id is None:
+                continue
+            wealth_by_agent.setdefault(int(inv.agent_id), 0.0)
+            wealth_by_agent[int(inv.agent_id)] += float(inv.quantity or 0.0)
+
+        status_counts = {"active": 0, "dormant": 0, "dead": 0}
+        tier_stats = {
+            tier: {"tier": tier, "agents": 0, "living_agents": 0, "total_wealth": 0.0}
+            for tier in (1, 2, 3, 4)
+        }
+        living_wealth_values: list[float] = []
+
+        for agent in agents:
+            status = str(agent.status or "active")
+            if status in status_counts:
+                status_counts[status] += 1
+
+            tier = int(agent.tier or 4)
+            tier_entry = tier_stats.setdefault(
+                tier,
+                {"tier": tier, "agents": 0, "living_agents": 0, "total_wealth": 0.0},
+            )
+            tier_entry["agents"] += 1
+            wealth = float(wealth_by_agent.get(int(agent.id), 0.0))
+            tier_entry["total_wealth"] += wealth
+
+            if status != "dead":
+                tier_entry["living_agents"] += 1
+                living_wealth_values.append(wealth)
+
+        living_agents = int(status_counts["active"] + status_counts["dormant"])
+        sorted_wealth = sorted(living_wealth_values)
+        wealth_total = float(sum(sorted_wealth))
+
+        def _pct(p: float) -> float:
+            if not sorted_wealth:
+                return 0.0
+            idx = int(round((p / 100.0) * (len(sorted_wealth) - 1)))
+            idx = max(0, min(len(sorted_wealth) - 1, idx))
+            return float(sorted_wealth[idx])
+
+        status_event_types = {"awakened", "became_dormant", "agent_died", "agent_revived"}
+        status_events = (
+            db.query(Event)
+            .filter(Event.created_at >= window_start, Event.event_type.in_(tuple(status_event_types)))
+            .all()
+        )
+        status_change_counts = {
+            "awakened": 0,
+            "became_dormant": 0,
+            "agent_died": 0,
+            "agent_revived": 0,
+        }
+        for event in status_events:
+            event_type = str(event.event_type or "")
+            if event_type in status_change_counts:
+                status_change_counts[event_type] += 1
+
+        upward_signals = int(status_change_counts["awakened"] + status_change_counts["agent_revived"])
+        downward_signals = int(status_change_counts["became_dormant"] + status_change_counts["agent_died"])
+        total_signals = upward_signals + downward_signals
+
+        try:
+            latest_snapshot = (
+                db.query(EmergenceMetricSnapshot)
+                .order_by(EmergenceMetricSnapshot.simulation_day.desc())
+                .first()
+            )
+        except Exception:
+            db.rollback()
+            latest_snapshot = None
+        inequality_trend = (
+            None
+            if not latest_snapshot or latest_snapshot.inequality_trend is None
+            else float(latest_snapshot.inequality_trend)
+        )
+
+        tier_payload = []
+        for tier in sorted(tier_stats):
+            row = tier_stats[tier]
+            agent_count = int(row["agents"])
+            tier_payload.append(
+                {
+                    "tier": int(tier),
+                    "agents": agent_count,
+                    "living_agents": int(row["living_agents"]),
+                    "total_wealth": float(row["total_wealth"]),
+                    "avg_wealth": _safe_ratio(row["total_wealth"], agent_count),
+                    "wealth_share": _safe_ratio(row["total_wealth"], wealth_total),
+                }
+            )
+
+        return {
+            "window_hours": hours,
+            "window_start_utc": window_start.isoformat(),
+            "window_end_utc": now.isoformat(),
+            "status_counts": {
+                **status_counts,
+                "living": living_agents,
+            },
+            "status_change_counts": status_change_counts,
+            "mobility": {
+                "upward_signals": upward_signals,
+                "downward_signals": downward_signals,
+                "net_signal": int(upward_signals - downward_signals),
+                "signal_flux": int(total_signals),
+                "signal_flux_rate": _safe_ratio(total_signals, living_agents),
+            },
+            "inequality": {
+                "gini": _gini(sorted_wealth),
+                "p25": _pct(25),
+                "median": _pct(50),
+                "p75": _pct(75),
+                "max": float(sorted_wealth[-1]) if sorted_wealth else 0.0,
+                "trend": inequality_trend,
+            },
+            "tiers": tier_payload,
+        }
+    finally:
+        db.close()
 
 
 # ===== FRONTEND DASHBOARD ENDPOINTS =====

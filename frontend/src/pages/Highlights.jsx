@@ -1,17 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Star, TrendingUp, Zap, Clock, AlertTriangle, Award, Sparkles, MessageCircle } from 'lucide-react'
+import { Star, Zap, Clock, AlertTriangle, Award, Sparkles, MessageCircle, Flame } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import Recap from '../components/Recap'
 import QuoteCardGenerator from '../components/QuoteCard'
 import { api } from '../services/api'
-
-const importanceColors = {
-  100: 'gold',
-  90: 'purple',
-  80: 'blue',
-  70: 'green',
-  default: 'gray',
-}
 
 const getImportanceColor = (importance) => {
   if (importance >= 100) return 'gold'
@@ -32,6 +24,7 @@ const eventTypeIcons = {
 export default function Highlights() {
   const [featured, setFeatured] = useState([])
   const [summary, setSummary] = useState(null)
+  const [plotTurns, setPlotTurns] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('recap')
 
@@ -39,15 +32,18 @@ export default function Highlights() {
     async function load() {
       setLoading(true)
       try {
-        const [featuredEvents, latestSummary] = await Promise.all([
+        const [featuredEvents, latestSummary, turns] = await Promise.all([
           api.fetch('/api/analytics/featured?limit=20'),
           api.fetch('/api/analytics/summaries/latest'),
+          api.getPlotTurns(16, 72, 60).catch(() => ({ items: [] })),
         ])
         setFeatured(Array.isArray(featuredEvents) ? featuredEvents : [])
         setSummary(latestSummary?.summary ? latestSummary : null)
+        setPlotTurns(Array.isArray(turns?.items) ? turns.items : [])
       } catch {
         setFeatured([])
         setSummary(null)
+        setPlotTurns([])
       } finally {
         setLoading(false)
       }
@@ -89,6 +85,13 @@ export default function Highlights() {
         >
           <Clock size={16} />
           Daily Summary
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'plotTurns' ? 'active' : ''}`}
+          onClick={() => setActiveTab('plotTurns')}
+        >
+          <Flame size={16} />
+          Plot Turns
         </button>
         <button
           className={`tab-btn ${activeTab === 'quotes' ? 'active' : ''}`}
@@ -203,9 +206,36 @@ export default function Highlights() {
         </div>
       )}
 
+      {activeTab === 'plotTurns' && (
+        <div className="plot-turns-panel">
+          {loading && (
+            <div className="empty-state">Loading plot turns…</div>
+          )}
+          {!loading && plotTurns.length === 0 && (
+            <div className="empty-state">No major plot turns yet.</div>
+          )}
+          {plotTurns.map(turn => (
+            <div key={turn.event_id} className={`plot-turn-card category-${turn.category || 'notable'}`}>
+              <div className="plot-turn-row">
+                <h3>{turn.title}</h3>
+                <span className="plot-turn-salience">{turn.salience}</span>
+              </div>
+              <p>{turn.description}</p>
+              <div className="plot-turn-meta">
+                <span className="plot-turn-category">{(turn.category || 'notable').replace(/_/g, ' ')}</span>
+                <span>
+                  {turn.created_at ? formatDistanceToNow(new Date(turn.created_at), { addSuffix: true }) : ''}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <style>{`
         .highlight-tabs {
           display: flex;
+          flex-wrap: wrap;
           gap: var(--spacing-sm);
           margin-bottom: var(--spacing-xl);
         }
@@ -384,6 +414,61 @@ export default function Highlights() {
         
         .summary-content p:last-child {
           margin-bottom: 0;
+        }
+
+        .plot-turns-panel {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-md);
+        }
+
+        .plot-turn-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border-color);
+          border-left-width: 4px;
+          border-radius: var(--radius-lg);
+          padding: var(--spacing-lg);
+        }
+
+        .plot-turn-card.category-crisis { border-left-color: #f97316; }
+        .plot-turn-card.category-conflict { border-left-color: #ef4444; }
+        .plot-turn-card.category-alliance { border-left-color: #3b82f6; }
+        .plot-turn-card.category-governance { border-left-color: #a78bfa; }
+        .plot-turn-card.category-cooperation { border-left-color: #22c55e; }
+        .plot-turn-card.category-notable { border-left-color: #94a3b8; }
+
+        .plot-turn-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: var(--spacing-md);
+          margin-bottom: var(--spacing-xs);
+        }
+
+        .plot-turn-row h3 {
+          margin: 0;
+          font-size: 1.1rem;
+        }
+
+        .plot-turn-salience {
+          font-size: 0.8rem;
+          color: var(--text-muted);
+        }
+
+        .plot-turn-card p {
+          color: var(--text-secondary);
+          margin: 0;
+          line-height: 1.55;
+        }
+
+        .plot-turn-meta {
+          margin-top: var(--spacing-sm);
+          display: flex;
+          justify-content: space-between;
+          color: var(--text-muted);
+          font-size: 0.78rem;
+          text-transform: capitalize;
+          gap: var(--spacing-sm);
         }
       `}</style>
     </div>

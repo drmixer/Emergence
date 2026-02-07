@@ -135,6 +135,24 @@ class APIService {
         return this.fetch('/api/analytics/wealth')
     }
 
+    async getCrisisStrip(limit = 6) {
+        return this.fetch(`/api/analytics/crisis-strip?limit=${limit}`)
+    }
+
+    async getPlotTurns(limit = 8, hours = 48, minSalience = 60) {
+        return this.fetch(
+            `/api/analytics/plot-turns?limit=${limit}&hours=${hours}&min_salience=${minSalience}`
+        )
+    }
+
+    async getSocialDynamics(days = 7) {
+        return this.fetch(`/api/analytics/social-dynamics?days=${days}`)
+    }
+
+    async getClassMobility(hours = 24) {
+        return this.fetch(`/api/analytics/class-mobility?hours=${hours}`)
+    }
+
     // Landing Page Stats
     async getLandingStats() {
         try {
