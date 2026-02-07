@@ -28,6 +28,14 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         allowed_values=("test", "real"),
         description="Simulation mode label used by ops and automation.",
     ),
+    "SIMULATION_RUN_ID": MutableSettingSpec(
+        python_type=str,
+        description="Run label for metrics attribution (max 64 chars). Empty value uses auto-generated id.",
+    ),
+    "SIMULATION_ACTIVE": MutableSettingSpec(
+        python_type=bool,
+        description="Global run switch for worker loops (idle when false).",
+    ),
     "SIMULATION_PAUSED": MutableSettingSpec(
         python_type=bool,
         description="Pauses simulation processing when true.",
@@ -139,6 +147,12 @@ def _coerce_value(key: str, raw_value: Any, spec: MutableSettingSpec) -> Any:
     if spec.allowed_values and str(value) not in spec.allowed_values:
         allowed = ", ".join(spec.allowed_values)
         raise ValueError(f"must be one of: {allowed}")
+
+    if key == "SIMULATION_RUN_ID":
+        text = str(value or "").strip()
+        if len(text) > 64:
+            raise ValueError("must be <= 64 characters")
+        value = text
 
     if isinstance(value, (int, float)):
         if spec.min_value is not None and value < spec.min_value:

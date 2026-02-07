@@ -52,6 +52,10 @@ export default function Ops() {
   const [status, setStatus] = useState(null)
   const [config, setConfig] = useState(null)
   const [audit, setAudit] = useState([])
+  const [runMetrics, setRunMetrics] = useState(null)
+  const [runIdInput, setRunIdInput] = useState('')
+  const [runControlReason, setRunControlReason] = useState('')
+  const [resetOnTestStart, setResetOnTestStart] = useState(true)
 
   const [draftValues, setDraftValues] = useState({})
   const [reason, setReason] = useState('')
@@ -61,11 +65,13 @@ export default function Ops() {
   const [controlAction, setControlAction] = useState('')
 
   const [error, setError] = useState('')
+  const [metricsWarning, setMetricsWarning] = useState('')
   const [notice, setNotice] = useState('')
 
   const connected = Boolean(token.trim())
   const writeEnabled = Boolean(config?.admin_write_enabled)
   const environment = String(config?.environment || status?.environment || 'unknown').toUpperCase()
+  const isProduction = environment === 'PRODUCTION'
 
   useEffect(() => {
     localStorage.setItem(USER_STORAGE_KEY, adminUser)
@@ -75,6 +81,7 @@ export default function Ops() {
     if (!connected) return
     setLoading(true)
     setError('')
+    setMetricsWarning('')
 
     try {
       const [statusResponse, configResponse, auditResponse] = await Promise.all([
@@ -82,10 +89,20 @@ export default function Ops() {
         api.getAdminConfig(token, adminUser),
         api.getAdminAudit(token, 50, 0, adminUser),
       ])
+      const activeRunId = String(statusResponse?.viewer_ops?.run_id || '').trim()
+      let runMetricsResponse = null
+      try {
+        runMetricsResponse = await api.getAdminRunMetrics(token, activeRunId, 24, adminUser)
+      } catch (runMetricsError) {
+        setMetricsWarning(formatApiError(runMetricsError, 'Run metrics are temporarily unavailable'))
+      }
 
       setStatus(statusResponse)
       setConfig(configResponse)
       setAudit(Array.isArray(auditResponse?.items) ? auditResponse.items : [])
+      setRunMetrics(runMetricsResponse)
+      setRunIdInput(activeRunId)
+      setResetOnTestStart(String(configResponse?.environment || statusResponse?.environment || '').toLowerCase() !== 'production')
       setDraftValues(configResponse?.effective || {})
     } catch (loadError) {
       setError(formatApiError(loadError, 'Failed to load admin data'))
@@ -141,6 +158,7 @@ export default function Ops() {
     if (!cleanToken) {
       setToken('')
       localStorage.removeItem(TOKEN_STORAGE_KEY)
+      setMetricsWarning('')
       return
     }
 
@@ -175,8 +193,9 @@ export default function Ops() {
     setError('')
 
     try {
-      await actionFn()
-      setNotice(successMessage)
+      const response = await actionFn()
+      const resolvedMessage = typeof successMessage === 'function' ? successMessage(response) : successMessage
+      setNotice(resolvedMessage || 'Action completed')
       await loadOpsData()
     } catch (controlError) {
       setError(formatApiError(controlError, 'Control action failed'))
@@ -185,9 +204,89 @@ export default function Ops() {
     }
   }
 
-  const runMode = status?.viewer_ops?.run_mode || 'test'
+  const startRun = async (mode) => {
+    if (isProduction) {
+      setError('Start actions are disabled in production from this UI')
+      return
+    }
+
+    const reasonText = String(runControlReason || '').trim()
+    const runId = String(runIdInput || '').trim()
+    const shouldReset = mode === 'test' && resetOnTestStart
+    const actionId = mode === 'test' ? 'start-test' : 'start-real'
+    const modeLabel = mode === 'test' ? 'test' : 'real'
+
+    if (mode === 'real' && !window.confirm('Start REAL run now? This enables live simulation traffic.')) {
+      return
+    }
+    if (mode === 'test' && shouldReset && !window.confirm('Start TEST run and reset/reseed world first? This is destructive for dev state.')) {
+      return
+    }
+
+    await onRunControl(
+      actionId,
+      () =>
+        api.startSimulationRun(
+          token,
+          {
+            mode,
+            run_id: runId,
+            reset_world: shouldReset,
+            reason: reasonText || `ops_ui_start_${mode}`,
+          },
+          adminUser
+        ),
+      (result) => `${modeLabel.toUpperCase()} run started${result?.run_id ? ` (${result.run_id})` : ''}`
+    )
+  }
+
+  const stopRun = async () => {
+    if (!simulationActive || paused) {
+      setNotice('Run is already paused')
+      return
+    }
+    if (!window.confirm('Pause the active run now?')) {
+      return
+    }
+
+    const reasonText = String(runControlReason || '').trim()
+    await onRunControl(
+      'stop-run',
+      () =>
+        api.stopSimulationRun(
+          token,
+          {
+            clear_run_id: false,
+            reason: reasonText || 'ops_ui_stop_run',
+          },
+          adminUser
+        ),
+      (result) => `Run paused${result?.run_id ? ` (${result.run_id})` : ''}`
+    )
+  }
+
+  const resetDev = async () => {
+    if (isProduction) {
+      setError('Reset Dev World is disabled in production')
+      return
+    }
+    if (!window.confirm('Reset and reseed the dev world now? This will wipe current world state.')) {
+      return
+    }
+
+    const reasonText = String(runControlReason || '').trim()
+    await onRunControl(
+      'reset-dev',
+      () => api.resetDevWorld(token, reasonText || 'ops_ui_reset_dev', adminUser),
+      'Dev world reset + reseeded'
+    )
+  }
+
+  const activeRunId = String(status?.viewer_ops?.run_id || '').trim()
+  const simulationActive = Boolean(status?.viewer_ops?.simulation_active)
   const paused = Boolean(status?.viewer_ops?.simulation_paused)
   const degraded = Boolean(status?.viewer_ops?.force_cheapest_route)
+  const isRunning = simulationActive && !paused
 
   return (
     <div className="ops-page">
@@ -254,6 +353,7 @@ export default function Ops() {
           </div>
 
           {error && <div className="ops-alert error">{error}</div>}
+          {metricsWarning && <div className="ops-alert warn">{metricsWarning}</div>}
           {notice && <div className="ops-alert success">{notice}</div>}
 
           <div className="ops-grid">
@@ -273,6 +373,14 @@ export default function Ops() {
                     <div className="ops-kv-item">
                       <span>Run mode</span>
                       <strong>{status.viewer_ops?.run_mode || 'n/a'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Run ID</span>
+                      <strong>{activeRunId || 'not set'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Simulation active</span>
+                      <strong>{simulationActive ? 'yes' : 'no'}</strong>
                     </div>
                     <div className="ops-kv-item">
                       <span>Paused</span>
@@ -300,10 +408,66 @@ export default function Ops() {
                 <h3>Run Controls</h3>
               </div>
               <div className="card-body ops-controls">
+                <label className="ops-field">
+                  <span>Run ID (optional)</span>
+                  <input
+                    type="text"
+                    value={runIdInput}
+                    onChange={(event) => setRunIdInput(event.target.value)}
+                    placeholder="test-20260207T120000Z"
+                    disabled={!writeEnabled || isProduction}
+                  />
+                </label>
+
+                <label className="ops-field">
+                  <span>Run reason (optional)</span>
+                  <input
+                    type="text"
+                    value={runControlReason}
+                    onChange={(event) => setRunControlReason(event.target.value)}
+                    placeholder="burn-in, smoke, replay validation"
+                    disabled={!writeEnabled}
+                  />
+                </label>
+
+                <label className="ops-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(resetOnTestStart)}
+                    onChange={(event) => setResetOnTestStart(event.target.checked)}
+                    disabled={!writeEnabled || isProduction}
+                  />
+                  <span>Reset + reseed world before test start (dev only)</span>
+                </label>
+                {isProduction && (
+                  <div className="ops-alert warn compact">
+                    Production safety mode: start/run-reset actions are disabled in this UI.
+                  </div>
+                )}
+
                 <div className="ops-control-row">
                   <button
                     className="btn-primary"
-                    disabled={!writeEnabled || controlAction === 'pause' || paused}
+                    disabled={!writeEnabled || isProduction || controlAction === 'start-test' || isRunning}
+                    onClick={() => startRun('test')}
+                  >
+                    {controlAction === 'start-test' ? <Loader2 size={14} className="spin" /> : <Rocket size={14} />}
+                    Start Test Run
+                  </button>
+                  <button
+                    className="btn-primary"
+                    disabled={!writeEnabled || isProduction || controlAction === 'start-real' || isRunning}
+                    onClick={() => startRun('real')}
+                  >
+                    {controlAction === 'start-real' ? <Loader2 size={14} className="spin" /> : <Rocket size={14} />}
+                    Start Real Run
+                  </button>
+                </div>
+
+                <div className="ops-control-row">
+                  <button
+                    className="btn-primary"
+                    disabled={!writeEnabled || controlAction === 'pause' || paused || !simulationActive}
                     onClick={() => onRunControl('pause', () => api.pauseSimulation(token, 'ops_ui_pause', adminUser), 'Simulation paused')}
                   >
                     {controlAction === 'pause' ? <Loader2 size={14} className="spin" /> : <PauseCircle size={14} />}
@@ -311,11 +475,30 @@ export default function Ops() {
                   </button>
                   <button
                     className="btn-primary"
-                    disabled={!writeEnabled || controlAction === 'resume' || !paused}
+                    disabled={!writeEnabled || controlAction === 'resume' || !paused || !simulationActive}
                     onClick={() => onRunControl('resume', () => api.resumeSimulation(token, 'ops_ui_resume', adminUser), 'Simulation resumed')}
                   >
                     {controlAction === 'resume' ? <Loader2 size={14} className="spin" /> : <PlayCircle size={14} />}
                     Resume
+                  </button>
+                </div>
+
+                <div className="ops-control-row">
+                  <button
+                    className="btn-primary"
+                    disabled={!writeEnabled || controlAction === 'stop-run' || paused || !simulationActive}
+                    onClick={stopRun}
+                  >
+                    {controlAction === 'stop-run' ? <Loader2 size={14} className="spin" /> : <PauseCircle size={14} />}
+                    Stop Run
+                  </button>
+                  <button
+                    className="btn-primary"
+                    disabled={!writeEnabled || isProduction || controlAction === 'reset-dev'}
+                    onClick={resetDev}
+                  >
+                    {controlAction === 'reset-dev' ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+                    Reset Dev World
                   </button>
                 </div>
 
@@ -337,25 +520,54 @@ export default function Ops() {
                     Degrade Off
                   </button>
                 </div>
+              </div>
+            </section>
 
-                <div className="ops-control-row">
-                  <button
-                    className="btn-primary"
-                    disabled={!writeEnabled || controlAction === 'run-test' || runMode === 'test'}
-                    onClick={() => onRunControl('run-test', () => api.setSimulationRunMode(token, 'test', 'ops_ui_mode_test', adminUser), 'Run mode set to test')}
-                  >
-                    {controlAction === 'run-test' ? <Loader2 size={14} className="spin" /> : <Rocket size={14} />}
-                    Run Mode: test
-                  </button>
-                  <button
-                    className="btn-primary"
-                    disabled={!writeEnabled || controlAction === 'run-real' || runMode === 'real'}
-                    onClick={() => onRunControl('run-real', () => api.setSimulationRunMode(token, 'real', 'ops_ui_mode_real', adminUser), 'Run mode set to real')}
-                  >
-                    {controlAction === 'run-real' ? <Loader2 size={14} className="spin" /> : <Rocket size={14} />}
-                    Run Mode: real
-                  </button>
-                </div>
+            <section className="card">
+              <div className="card-header">
+                <h3>Run Metrics</h3>
+              </div>
+              <div className="card-body">
+                {!runMetrics ? (
+                  <div className="empty-state compact">No run metrics loaded.</div>
+                ) : (
+                  <div className="ops-kv-grid">
+                    <div className="ops-kv-item">
+                      <span>Active run ID</span>
+                      <strong>{runMetrics.run_id || 'not set'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Run started</span>
+                      <strong>{runMetrics.run_started_at || 'n/a'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>LLM calls</span>
+                      <strong>{runMetrics.llm?.calls ?? 0}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Runtime actions</span>
+                      <strong>
+                        {(runMetrics.activity?.checkpoint_actions ?? 0) + (runMetrics.activity?.deterministic_actions ?? 0)}
+                      </strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Proposal actions</span>
+                      <strong>{runMetrics.activity?.proposal_actions ?? 0}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Vote actions</span>
+                      <strong>{runMetrics.activity?.vote_actions ?? 0}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Forum actions</span>
+                      <strong>{runMetrics.activity?.forum_actions ?? 0}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Est. run cost</span>
+                      <strong>${Number(runMetrics.llm?.estimated_cost_usd || 0).toFixed(4)}</strong>
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           </div>

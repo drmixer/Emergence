@@ -6,6 +6,7 @@ This is a separate process from the API server.
 import asyncio
 import logging
 import os
+import json
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -18,6 +19,7 @@ from app.services.agent_loop import agent_processor
 from app.services.scheduler import scheduler
 from app.services.events_generator import run_event_check, event_generator
 from app.services.summaries import summary_scheduler
+from app.services.runtime_config import runtime_config_service
 from app.core.time import now_utc
 
 # Configure logging
@@ -26,6 +28,71 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+async def _healthcheck_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """Serve a minimal HTTP health response for Railway worker health checks."""
+    try:
+        request_line = await reader.readline()
+        if not request_line:
+            return
+
+        parts = request_line.decode("utf-8", errors="ignore").strip().split()
+        method = parts[0] if len(parts) >= 1 else "GET"
+        path = parts[1] if len(parts) >= 2 else "/"
+
+        # Drain request headers.
+        while True:
+            line = await reader.readline()
+            if not line or line in (b"\r\n", b"\n"):
+                break
+
+        if method == "GET" and path == "/health":
+            body = json.dumps(
+                {
+                    "status": "ok",
+                    "service": "emergence-worker",
+                    "environment": settings.ENVIRONMENT,
+                }
+            ).encode("utf-8")
+            status = "200 OK"
+        else:
+            body = b'{"status":"not_found"}'
+            status = "404 Not Found"
+
+        response = (
+            f"HTTP/1.1 {status}\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8") + body
+
+        writer.write(response)
+        await writer.drain()
+    except Exception:
+        # Keep healthcheck server resilient to malformed probes.
+        pass
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def _start_health_server() -> asyncio.AbstractServer | None:
+    """Start lightweight worker health server bound to PORT for Railway checks."""
+    port_raw = str(os.environ.get("PORT", "8080") or "8080").strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        logger.warning("Invalid PORT=%s for worker health server; skipping health endpoint", port_raw)
+        return None
+
+    server = await asyncio.start_server(_healthcheck_handler, host="0.0.0.0", port=port)
+    logger.info("Worker health server listening on 0.0.0.0:%s", port)
+    return server
 
 
 async def run_event_loop():
@@ -62,6 +129,7 @@ async def run_summary_loop():
 
 async def main():
     """Main worker entry point."""
+    health_server = None
     logger.info("=" * 60)
     logger.info("EMERGENCE WORKER - Starting")
     logger.info("=" * 60)
@@ -80,15 +148,18 @@ async def main():
     logger.info(
         f"Max agents: {'all' if settings.SIMULATION_MAX_AGENTS == 0 else settings.SIMULATION_MAX_AGENTS}"
     )
+
+    # Expose health endpoint to satisfy Railway worker health checks.
+    health_server = await _start_health_server()
     
-    # Check if we should actually run
-    simulation_active = os.environ.get("SIMULATION_ACTIVE", "true").lower() == "true"
-    
-    if not simulation_active:
+    # Check if we should actually run (runtime-config aware, so ops can start runs without redeploy).
+    while True:
+        simulation_active = bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
+        if simulation_active:
+            break
         logger.info("SIMULATION_ACTIVE is false, worker will idle")
-        while True:
-            await asyncio.sleep(60)
-            logger.info("Worker idle (SIMULATION_ACTIVE=false)")
+        await asyncio.sleep(60)
+        logger.info("Worker idle (SIMULATION_ACTIVE=false)")
     
     # Background tasks
     event_task = None
@@ -153,6 +224,12 @@ async def main():
         
         await agent_processor.stop()
         await scheduler.stop()
+        if health_server is not None:
+            health_server.close()
+            try:
+                await health_server.wait_closed()
+            except Exception:
+                pass
         logger.info("Worker stopped")
 
 

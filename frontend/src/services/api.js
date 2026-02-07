@@ -290,6 +290,50 @@ class APIService {
         })
     }
 
+    async startSimulationRun(token, payload, adminUser = null) {
+        return this.fetch('/api/admin/control/run/start', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                mode: payload?.mode,
+                run_id: String(payload?.run_id || '').trim() || null,
+                reset_world: Boolean(payload?.reset_world),
+                reason: String(payload?.reason || '').trim() || null,
+            }),
+        })
+    }
+
+    async stopSimulationRun(token, payload = {}, adminUser = null) {
+        return this.fetch('/api/admin/control/run/stop', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                clear_run_id: Boolean(payload?.clear_run_id),
+                reason: String(payload?.reason || '').trim() || null,
+            }),
+        })
+    }
+
+    async resetDevWorld(token, reason = '', adminUser = null) {
+        return this.fetch('/api/admin/control/run/reset-dev', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                reason: String(reason || '').trim() || null,
+            }),
+        })
+    }
+
+    async getAdminRunMetrics(token, runId = '', hoursFallback = 24, adminUser = null) {
+        const params = new URLSearchParams()
+        if (runId) params.append('run_id', String(runId))
+        params.append('hours_fallback', String(hoursFallback))
+        const query = params.toString() ? `?${params.toString()}` : ''
+        return this.fetch(`/api/admin/run/metrics${query}`, {
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
     // Landing Page Stats
     async getLandingStats() {
         try {

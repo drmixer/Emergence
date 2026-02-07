@@ -6,6 +6,8 @@ Stores per-call usage rows in Postgres and keeps fast daily counters in Redis.
 from __future__ import annotations
 
 import logging
+import os
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -68,13 +70,24 @@ class UsageBudgetService:
             return None
 
     @staticmethod
+    def _key_prefix() -> str:
+        configured = str(getattr(settings, "USAGE_BUDGET_KEY_PREFIX", "") or "").strip()
+        fallback = str(os.environ.get("RAILWAY_PROJECT_NAME", "") or "").strip()
+        prefix = configured or fallback
+        if not prefix:
+            return ""
+        normalized = re.sub(r"[^a-zA-Z0-9:_-]+", "-", prefix.lower()).strip("-")
+        return f"{normalized}:" if normalized else ""
+
+    @staticmethod
     def _counter_keys(day_key: date) -> dict[str, str]:
         day = day_key.isoformat()
+        prefix = UsageBudgetService._key_prefix()
         return {
-            "total": f"llm:usage:{day}:calls_total",
-            "openrouter_free": f"llm:usage:{day}:calls_openrouter_free",
-            "groq": f"llm:usage:{day}:calls_groq",
-            "cost": f"llm:usage:{day}:estimated_cost_usd",
+            "total": f"{prefix}llm:usage:{day}:calls_total",
+            "openrouter_free": f"{prefix}llm:usage:{day}:calls_openrouter_free",
+            "groq": f"{prefix}llm:usage:{day}:calls_groq",
+            "cost": f"{prefix}llm:usage:{day}:estimated_cost_usd",
         }
 
     def _get_db_snapshot(self, day_key: date) -> BudgetSnapshot:

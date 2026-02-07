@@ -112,7 +112,13 @@ class LLMClient:
         self._openrouter_rpm_lock = asyncio.Lock()
 
         configured_run_id = str(getattr(settings, "SIMULATION_RUN_ID", "") or "").strip()
-        self._run_id = configured_run_id or now_utc().strftime("run-%Y%m%dT%H%M%SZ")
+        self._default_run_id = configured_run_id or now_utc().strftime("run-%Y%m%dT%H%M%SZ")
+
+    def _current_run_id(self) -> str:
+        configured_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+        if configured_run_id:
+            return configured_run_id[:64]
+        return self._default_run_id
 
     async def _throttle_openrouter(self) -> None:
         now = time.monotonic()
@@ -317,7 +323,7 @@ class LLMClient:
         except Exception as e:
             latency_ms = int((time.monotonic() - started) * 1000)
             usage_budget.record_call(
-                run_id=self._run_id,
+                run_id=self._current_run_id(),
                 agent_id=agent_id,
                 checkpoint_number=checkpoint_number,
                 provider=provider_name,
@@ -342,7 +348,7 @@ class LLMClient:
         total_tokens = int(getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens))
         byok_used = self._extract_byok_used(response=response, provider_name=provider_name)
         usage_budget.record_call(
-            run_id=self._run_id,
+            run_id=self._current_run_id(),
             agent_id=agent_id,
             checkpoint_number=checkpoint_number,
             provider=provider_name,

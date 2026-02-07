@@ -109,6 +109,12 @@
   color: #def7ed;
 }
 
+.ops-alert.warn {
+  border-color: rgba(220, 196, 130, 0.4);
+  background: rgba(120, 96, 40, 0.24);
+  color: #f8edcf;
+}
+
 .ops-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

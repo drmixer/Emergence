@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
+    # Optional Redis key prefix for usage/budget counters.
+    # If empty, usage_budget falls back to RAILWAY_PROJECT_NAME for isolation.
+    USAGE_BUDGET_KEY_PREFIX: str = ""
     
     # LLM APIs
     OPENROUTER_API_KEY: str = ""
@@ -102,6 +105,7 @@ class Settings(BaseSettings):
     SIMULATION_MAX_AGENTS: int = 50  # Default v1 runtime cap; set 0 to process all seeded agents
     # Runtime ops controls (can be overridden via internal admin APIs).
     SIMULATION_RUN_MODE: str = "test"  # test | real
+    SIMULATION_ACTIVE: bool = True
     SIMULATION_PAUSED: bool = False
     FORCE_CHEAPEST_ROUTE: bool = False
     # Optional run label for llm_usage attribution rows. If empty, runtime generates one.
