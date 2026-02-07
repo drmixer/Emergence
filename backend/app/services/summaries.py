@@ -4,8 +4,9 @@ AI Summary Generator
 Generates daily/periodic summaries of simulation activity using an LLM.
 These summaries are shareable and help viewers catch up quickly.
 """
+
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
@@ -57,87 +58,223 @@ def _summary_model_type() -> str:
         return legacy_aliases[configured]
 
     if configured:
-        logger.warning("Unsupported SUMMARY_LLM_MODEL '%s'; falling back to claude-haiku", configured)
+        logger.warning(
+            "Unsupported SUMMARY_LLM_MODEL '%s'; falling back to claude-haiku",
+            configured,
+        )
     return "claude-haiku"
+
+
+def _daily_summary_for_day(db: Session, day_number: int) -> Optional[Event]:
+    """Find an existing daily summary row for a specific simulation day."""
+    if day_number < 1:
+        return None
+
+    rows = (
+        db.query(Event)
+        .filter(Event.event_type == "daily_summary")
+        .order_by(desc(Event.created_at), desc(Event.id))
+        .limit(1000)
+        .all()
+    )
+    for row in rows:
+        metadata = row.event_metadata or {}
+        try:
+            existing_day = int(metadata.get("day_number") or 0)
+        except Exception:
+            existing_day = 0
+        if existing_day == day_number:
+            return row
+    return None
+
+
+def _simulation_anchor(db: Session):
+    """
+    Return the simulation start timestamp based on earliest non-summary event.
+    Falls back to earliest event if summaries are the only rows.
+    """
+    first_core_event = (
+        db.query(Event)
+        .filter(Event.event_type != "daily_summary")
+        .order_by(Event.created_at.asc(), Event.id.asc())
+        .first()
+    )
+    if first_core_event and first_core_event.created_at:
+        return ensure_utc(first_core_event.created_at)
+
+    first_any_event = (
+        db.query(Event).order_by(Event.created_at.asc(), Event.id.asc()).first()
+    )
+    if first_any_event and first_any_event.created_at:
+        return ensure_utc(first_any_event.created_at)
+    return None
+
+
+def _day_window(anchor, day_number: int) -> Optional[tuple]:
+    if anchor is None or day_number < 1:
+        return None
+    day_length_minutes = int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60)
+    day_delta = timedelta(minutes=day_length_minutes)
+    start = anchor + ((day_number - 1) * day_delta)
+    end = start + day_delta
+    return start, end
+
+
+def _latest_summary_day_number(db: Session) -> int:
+    row = (
+        db.query(Event)
+        .filter(Event.event_type == "daily_summary")
+        .order_by(desc(Event.created_at), desc(Event.id))
+        .first()
+    )
+    if not row:
+        return 0
+    metadata = row.event_metadata or {}
+    try:
+        return max(0, int(metadata.get("day_number") or 0))
+    except Exception:
+        return 0
 
 
 async def generate_daily_summary(day_number: int) -> str:
     """
     Generate a summary of the last simulation day.
-    
+
     Args:
         day_number: Which day of the simulation this is
-    
+
     Returns:
         Generated summary text
     """
     db = SessionLocal()
-    
+
     try:
         if not getattr(settings, "SUMMARIES_ENABLED", False):
             return "Summaries are disabled."
 
-        # Calculate time window (last 24 simulation hours = last N real hours)
-        day_duration_minutes = settings.DAY_LENGTH_MINUTES
-        hours_per_day = day_duration_minutes / 60
-        
-        # For daily summary, look back one simulation day
-        time_window = datetime.utcnow() - timedelta(hours=hours_per_day)
-        
-        # Gather statistics
-        events = db.query(Event).filter(Event.created_at >= time_window).all()
-        messages = db.query(Message).filter(
-            Message.created_at >= time_window,
-            Message.message_type.in_(["forum_post", "forum_reply"])
-        ).all()
-        proposals_created = db.query(Proposal).filter(
-            Proposal.created_at >= time_window
-        ).all()
-        proposals_resolved = db.query(Proposal).filter(
-            Proposal.resolved_at >= time_window
-        ).all()
-        votes_cast = db.query(Vote).filter(Vote.created_at >= time_window).count()
-        laws_passed = db.query(Law).filter(Law.passed_at >= time_window).all()
-        
+        if day_number < 1:
+            return "Invalid day number."
+
+        existing = _daily_summary_for_day(db, day_number)
+        if existing:
+            existing_text = (existing.event_metadata or {}).get("summary")
+            if isinstance(existing_text, str) and existing_text.strip():
+                return existing_text
+            return "Summary already exists for this day."
+
+        anchor = _simulation_anchor(db)
+        window = _day_window(anchor, day_number)
+        if window is None:
+            return "No simulation events yet."
+
+        window_start, window_end = window
+        if now_utc() < window_end:
+            return f"Day {day_number} is still in progress."
+
+        # Gather statistics for the specific simulation-day window.
+        events = (
+            db.query(Event)
+            .filter(Event.created_at >= window_start, Event.created_at < window_end)
+            .all()
+        )
+        messages = (
+            db.query(Message)
+            .filter(
+                Message.created_at >= window_start,
+                Message.created_at < window_end,
+                Message.message_type.in_(["forum_post", "forum_reply"]),
+            )
+            .all()
+        )
+        proposals_created = (
+            db.query(Proposal)
+            .filter(
+                Proposal.created_at >= window_start,
+                Proposal.created_at < window_end,
+            )
+            .all()
+        )
+        proposals_resolved = (
+            db.query(Proposal)
+            .filter(
+                Proposal.resolved_at.isnot(None),
+                Proposal.resolved_at >= window_start,
+                Proposal.resolved_at < window_end,
+            )
+            .all()
+        )
+        votes_cast = (
+            db.query(Vote)
+            .filter(Vote.created_at >= window_start, Vote.created_at < window_end)
+            .count()
+        )
+        laws_passed = (
+            db.query(Law)
+            .filter(Law.passed_at >= window_start, Law.passed_at < window_end)
+            .all()
+        )
+
         # Get agent status
         active_agents = db.query(Agent).filter(Agent.status == "active").count()
         dormant_agents = db.query(Agent).filter(Agent.status == "dormant").count()
         dead_agents = db.query(Agent).filter(Agent.status == "dead").count()
-        
+
         # Get deaths in this period
         deaths_today = [e for e in events if e.event_type == "agent_died"]
-        
+
         # Get most active agents
-        most_active = db.query(
-            Event.agent_id,
-            func.count(Event.id).label('action_count')
-        ).filter(
-            Event.created_at >= time_window,
-            Event.agent_id.isnot(None)
-        ).group_by(Event.agent_id).order_by(desc('action_count')).limit(5).all()
-        
+        most_active = (
+            db.query(Event.agent_id, func.count(Event.id).label("action_count"))
+            .filter(
+                Event.created_at >= window_start,
+                Event.created_at < window_end,
+                Event.agent_id.isnot(None),
+            )
+            .group_by(Event.agent_id)
+            .order_by(desc("action_count"))
+            .limit(5)
+            .all()
+        )
+
         most_active_agents = []
         for agent_id, count in most_active:
             agent = db.query(Agent).filter(Agent.id == agent_id).first()
             if agent:
                 name = agent.display_name or f"Agent #{agent.agent_number}"
                 most_active_agents.append(f"{name} ({count} actions)")
-        
+
         # Sample interesting messages
         sample_messages = messages[:10] if len(messages) > 10 else messages
         message_excerpts = []
         for msg in sample_messages:
             author = db.query(Agent).filter(Agent.id == msg.author_agent_id).first()
-            author_name = author.display_name or f"Agent #{author.agent_number}" if author else "Unknown"
-            excerpt = msg.content[:150] + "..." if len(msg.content) > 150 else msg.content
+            author_name = (
+                author.display_name or f"Agent #{author.agent_number}"
+                if author
+                else "Unknown"
+            )
+            excerpt = (
+                msg.content[:150] + "..." if len(msg.content) > 150 else msg.content
+            )
             message_excerpts.append(f'{author_name}: "{excerpt}"')
-        
+
         # World events
         world_events = [e for e in events if e.event_type == "world_event"]
-        
-        # Build context for LLM
-        context = f"""
+
+        if (
+            not events
+            and not messages
+            and not proposals_created
+            and not proposals_resolved
+            and votes_cast == 0
+            and not laws_passed
+        ):
+            summary = f"Day {day_number} was mostly quiet. No major laws, proposals, or conflicts emerged in this window."
+        else:
+            # Build context for LLM
+            context = f"""
 Day {day_number} of the Emergence simulation.
+Window: {window_start.isoformat()} to {window_end.isoformat()}.
 
 ## Statistics
 - Active agents: {active_agents}
@@ -167,23 +304,25 @@ Day {day_number} of the Emergence simulation.
 
 Write a 2-3 paragraph summary of Day {day_number}. Make it engaging and highlight the most interesting developments. If there's drama or conflict, emphasize it. If things are peaceful, note what the agents are building toward.
 """
-        
-        # Generate summary
-        response = await llm_client.get_completion(
-            model_type=_summary_model_type(),
-            system_prompt=SUMMARY_SYSTEM_PROMPT,
-            user_prompt=context,
-            max_tokens=500,
-        )
-        
-        summary = response or "Unable to generate summary."
-        
+
+            # Generate summary
+            response = await llm_client.get_completion(
+                model_type=_summary_model_type(),
+                system_prompt=SUMMARY_SYSTEM_PROMPT,
+                user_prompt=context,
+                max_tokens=500,
+            )
+            summary = response or "Unable to generate summary."
+
         # Store the summary as an event
         summary_event = Event(
             event_type="daily_summary",
             description=f"Day {day_number} Summary",
             event_metadata={
                 "day_number": day_number,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+                "generated_at": now_utc().isoformat(),
                 "summary": summary,
                 "stats": {
                     "active_agents": active_agents,
@@ -194,15 +333,15 @@ Write a 2-3 paragraph summary of Day {day_number}. Make it engaging and highligh
                     "proposals": len(proposals_created),
                     "votes": votes_cast,
                     "laws_passed": len(laws_passed),
-                }
-            }
+                },
+            },
         )
         db.add(summary_event)
         db.commit()
-        
+
         logger.info(f"Generated Day {day_number} summary")
         return summary
-        
+
     except Exception as e:
         logger.error(f"Error generating summary: {e}")
         return f"Error generating summary: {e}"
@@ -225,9 +364,9 @@ async def generate_highlight(event_type: str, data: dict) -> str:
         "agent_awakened": f"Agent {data.get('name')} was awakened by {data.get('helper')}. Write a brief hopeful note.",
         "milestone": f"Milestone reached: {data.get('milestone')}. Write a celebratory announcement.",
     }
-    
+
     prompt = prompts.get(event_type, f"Describe this event briefly: {data}")
-    
+
     try:
         if not getattr(settings, "SUMMARIES_ENABLED", False):
             return ""
@@ -237,7 +376,7 @@ async def generate_highlight(event_type: str, data: dict) -> str:
             user_prompt=prompt,
             max_tokens=100,
         )
-        
+
         return response or ""
     except Exception as e:
         logger.error(f"Error generating highlight: {e}")
@@ -250,7 +389,7 @@ async def get_story_so_far() -> str:
     Used for the About/Overview page.
     """
     db = SessionLocal()
-    
+
     try:
         # Avoid surprise costs: allow turning off narration LLM entirely.
         if not getattr(settings, "SUMMARIES_ENABLED", False):
@@ -262,7 +401,11 @@ async def get_story_so_far() -> str:
             total_proposals = db.query(Proposal).count()
             total_laws = db.query(Law).count()
             latest_event = db.query(Event).order_by(desc(Event.created_at)).first()
-            latest_at = latest_event.created_at.isoformat() if latest_event and latest_event.created_at else None
+            latest_at = (
+                latest_event.created_at.isoformat()
+                if latest_event and latest_event.created_at
+                else None
+            )
 
             return (
                 "Emergence is a live AI civilization experiment.\n\n"
@@ -275,16 +418,19 @@ async def get_story_so_far() -> str:
             )
 
         # Get all daily summaries
-        summaries = db.query(Event).filter(
-            Event.event_type == "daily_summary"
-        ).order_by(Event.created_at).all()
-        
+        summaries = (
+            db.query(Event)
+            .filter(Event.event_type == "daily_summary")
+            .order_by(Event.created_at)
+            .all()
+        )
+
         # Get key stats
         total_agents = db.query(Agent).count()
         active_agents = db.query(Agent).filter(Agent.status == "active").count()
         total_laws = db.query(Law).filter(Law.active == True).count()
         total_proposals = db.query(Proposal).count()
-        
+
         # Get simulation age
         first_event = db.query(Event).order_by(Event.created_at).first()
         if first_event:
@@ -294,7 +440,7 @@ async def get_story_so_far() -> str:
             hours = age.seconds // 3600
         else:
             days, hours = 0, 0
-        
+
         context = f"""
 The Emergence simulation has been running for {days} days and {hours} hours.
 
@@ -310,47 +456,53 @@ The Emergence simulation has been running for {days} days and {hours} hours.
 
 Write a 3-4 paragraph "Story So Far" that catches up a new viewer on what has happened in the simulation. Include key developments, notable agents, and the current state of the society.
 """
-        
+
         response = await llm_client.get_completion(
             model_type=_summary_model_type(),
             system_prompt=SUMMARY_SYSTEM_PROMPT,
             user_prompt=context,
             max_tokens=600,
         )
-        
+
         return response or "The simulation has just begun..."
-        
+
     finally:
         db.close()
 
 
 class SummaryScheduler:
-    """Manages periodic summary generation."""
-    
-    def __init__(self):
-        self.current_day = 0
-        self.last_summary_time: Optional[datetime] = None
-    
+    """Generates one summary per completed simulation day, safely across restarts."""
+
     async def check_and_generate(self):
         """Check if it's time to generate a new daily summary."""
         if not getattr(settings, "SUMMARIES_ENABLED", False):
             return None
-        day_length_minutes = settings.DAY_LENGTH_MINUTES
-        
-        if self.last_summary_time is None:
-            # First run - wait for one full day
-            self.last_summary_time = datetime.utcnow()
+
+        db = SessionLocal()
+        try:
+            anchor = _simulation_anchor(db)
+            if anchor is None:
+                return None
+
+            day_length_minutes = int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60)
+            day_delta = timedelta(minutes=day_length_minutes)
+            elapsed = now_utc() - anchor
+            if elapsed < day_delta:
+                return None
+
+            completed_days = int(elapsed // day_delta)
+            latest_summary_day = _latest_summary_day_number(db)
+            if completed_days <= latest_summary_day:
+                return None
+
+            next_day = latest_summary_day + 1
+        finally:
+            db.close()
+
+        if next_day < 1:
             return None
-        
-        time_since = datetime.utcnow() - self.last_summary_time
-        if time_since >= timedelta(minutes=day_length_minutes):
-            self.current_day += 1
-            self.last_summary_time = datetime.utcnow()
-            
-            summary = await generate_daily_summary(self.current_day)
-            return summary
-        
-        return None
+
+        return await generate_daily_summary(next_day)
 
 
 # Singleton

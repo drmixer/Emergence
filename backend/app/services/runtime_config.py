@@ -1,4 +1,5 @@
 """Runtime config overrides and admin audit helpers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -110,6 +111,34 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=50000,
         description="Daily cap for Groq-route calls.",
     ),
+    "STOP_CONDITION_ENFORCEMENT_ENABLED": MutableSettingSpec(
+        python_type=bool,
+        description="Enable runtime stop conditions (budget/failures/DB pressure).",
+    ),
+    "STOP_PROVIDER_FAILURE_WINDOW_MINUTES": MutableSettingSpec(
+        python_type=int,
+        min_value=1,
+        max_value=1440,
+        description="Lookback window for repeated provider failure stop condition.",
+    ),
+    "STOP_PROVIDER_FAILURE_THRESHOLD": MutableSettingSpec(
+        python_type=int,
+        min_value=1,
+        max_value=50000,
+        description="Failed LLM calls in window required to stop the run.",
+    ),
+    "STOP_DB_POOL_UTILIZATION_THRESHOLD": MutableSettingSpec(
+        python_type=float,
+        min_value=0.5,
+        max_value=1.0,
+        description="QueuePool utilization threshold for DB pressure stop condition.",
+    ),
+    "STOP_DB_POOL_CONSECUTIVE_CHECKS": MutableSettingSpec(
+        python_type=int,
+        min_value=1,
+        max_value=60,
+        description="Consecutive high-pressure pool checks required before stopping run.",
+    ),
 }
 
 
@@ -183,7 +212,9 @@ class RuntimeConfigService:
         overrides = self.get_overrides(db)
         effective: dict[str, Any] = {}
         for key in MUTABLE_SETTINGS:
-            effective[key] = overrides[key] if key in overrides else getattr(settings, key)
+            effective[key] = (
+                overrides[key] if key in overrides else getattr(settings, key)
+            )
         return effective
 
     def _refresh_cache(self) -> None:
@@ -216,7 +247,9 @@ class RuntimeConfigService:
                 "description": spec.description,
                 "min": spec.min_value,
                 "max": spec.max_value,
-                "allowed_values": list(spec.allowed_values) if spec.allowed_values else None,
+                "allowed_values": (
+                    list(spec.allowed_values) if spec.allowed_values else None
+                ),
             }
             for key, spec in MUTABLE_SETTINGS.items()
         }
@@ -225,7 +258,9 @@ class RuntimeConfigService:
             "overrides": overrides,
             "effective": effective,
             "mutable_keys": mutable_keys,
-            "admin_write_enabled": bool(getattr(settings, "ADMIN_WRITE_ENABLED", False)),
+            "admin_write_enabled": bool(
+                getattr(settings, "ADMIN_WRITE_ENABLED", False)
+            ),
             "environment": getattr(settings, "ENVIRONMENT", "development"),
         }
 
@@ -260,7 +295,9 @@ class RuntimeConfigService:
         soft_cap = float(after.get("LLM_DAILY_BUDGET_USD_SOFT", 0) or 0)
         hard_cap = float(after.get("LLM_DAILY_BUDGET_USD_HARD", 0) or 0)
         if hard_cap > 0 and soft_cap > 0 and hard_cap < soft_cap:
-            raise ValueError("LLM_DAILY_BUDGET_USD_HARD must be >= LLM_DAILY_BUDGET_USD_SOFT")
+            raise ValueError(
+                "LLM_DAILY_BUDGET_USD_HARD must be >= LLM_DAILY_BUDGET_USD_SOFT"
+            )
 
         applied: dict[str, Any] = {}
         for key, new_value in validated_updates.items():
@@ -309,7 +346,9 @@ class RuntimeConfigService:
         }
 
     @staticmethod
-    def list_audit_entries(db: Session, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def list_audit_entries(
+        db: Session, limit: int = 50, offset: int = 0
+    ) -> list[dict[str, Any]]:
         rows = (
             db.query(AdminConfigChange)
             .order_by(desc(AdminConfigChange.created_at), desc(AdminConfigChange.id))

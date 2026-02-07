@@ -2,6 +2,7 @@
 Core configuration for Emergence.
 Uses Pydantic Settings for environment variable management.
 """
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from pydantic import model_validator
@@ -23,21 +24,21 @@ class Settings(BaseSettings):
         # Railway (and other platforms) sometimes inject empty-string env vars.
         # Treat them as "unset" so typed fields (bool/int/float) don't crash on startup.
         return {key: value for key, value in data.items() if value != ""}
-    
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     LOG_LEVEL: str = "info"
-    
+
     # Database
     DATABASE_URL: str = "postgresql://localhost:5432/emergence"
-    
+
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
     # Optional Redis key prefix for usage/budget counters.
     # If empty, usage_budget falls back to RAILWAY_PROJECT_NAME for isolation.
     USAGE_BUDGET_KEY_PREFIX: str = ""
-    
+
     # LLM APIs
     OPENROUTER_API_KEY: str = ""
     GROQ_API_KEY: str = ""
@@ -78,10 +79,22 @@ class Settings(BaseSettings):
     LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE: int = 900
     LLM_MAX_CALLS_PER_DAY_GROQ: int = 1800
 
+    # Runtime stop conditions.
+    # If enabled, worker halts the run when any stop condition is tripped.
+    STOP_CONDITION_ENFORCEMENT_ENABLED: bool = True
+    # Repeated provider failure guardrail:
+    # if failed llm_usage rows in the trailing window exceed this threshold, stop the run.
+    STOP_PROVIDER_FAILURE_WINDOW_MINUTES: int = 15
+    STOP_PROVIDER_FAILURE_THRESHOLD: int = 25
+    # DB pressure guardrail:
+    # if QueuePool utilization remains above threshold for N consecutive checks, stop the run.
+    STOP_DB_POOL_UTILIZATION_THRESHOLD: float = 0.95
+    STOP_DB_POOL_CONSECUTIVE_CHECKS: int = 3
+
     # Memory compaction knobs (used by upcoming memory subsystem).
     LLM_MEMORY_UPDATE_EVERY_N_CHECKPOINTS: int = 3
     LLM_MEMORY_MAX_CHARS: int = 1200
-    
+
     # Security
     SECRET_KEY: str = "development-secret-key-change-in-production"
 
@@ -93,17 +106,19 @@ class Settings(BaseSettings):
     # Optional comma-separated IP allowlist for admin requests.
     # Example: "127.0.0.1,10.0.0.5"
     ADMIN_IP_ALLOWLIST: str = ""
-    
+
     # CORS
     FRONTEND_URL: str = "http://localhost:3000"
-    
+
     # Simulation settings
     AGENT_LOOP_DELAY_SECONDS: int = 150  # 2.5 minutes
     DAY_LENGTH_MINUTES: int = 60  # 1 real hour = 1 sim day
     # Can be fractional in dev for faster end-to-end testing (e.g. 0.25 = 15 minutes).
     PROPOSAL_VOTING_HOURS: float = 24.0
-    SIMULATION_MAX_AGENTS: int = 50  # Default v1 runtime cap; set 0 to process all seeded agents
-    # Runtime ops controls (can be overridden via internal admin APIs).
+    SIMULATION_MAX_AGENTS: int = (
+        50  # Default v1 runtime cap; set 0 to process all seeded agents
+    )
+    # Runtime ops controls (can be overridden via admin APIs).
     SIMULATION_RUN_MODE: str = "test"  # test | real
     SIMULATION_ACTIVE: bool = True
     SIMULATION_PAUSED: bool = False
@@ -116,16 +131,16 @@ class Settings(BaseSettings):
     # LLM-generated narration (summaries/story/highlights). These call OpenRouter by default and may cost money.
     SUMMARIES_ENABLED: bool = False
     SUMMARY_LLM_MODEL: str = "openrouter/anthropic/claude-3-haiku"
-    
+
     # Rate limiting
     MAX_ACTIONS_PER_HOUR: int = 20
     MAX_PROPOSALS_PER_DAY: int = 3
-    
+
     # Resource defaults
     STARTING_FOOD: int = 50
     STARTING_ENERGY: int = 50
     STARTING_MATERIALS: int = 20
-    
+
     # NOTE: legacy inner Config is intentionally not used; SettingsConfigDict above is Pydantic v2.
 
 

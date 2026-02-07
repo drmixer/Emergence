@@ -3,6 +3,7 @@ Featured Events Service
 
 Detects and surfaces interesting/notable events for the highlight reel.
 """
+
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -34,16 +35,16 @@ IMPORTANCE_WEIGHTS = {
 
 class FeaturedEvent:
     """A notable event worth highlighting."""
-    
+
     def __init__(
-        self, 
+        self,
         event_id: int,
         event_type: str,
         title: str,
         description: str,
         importance: int,
         created_at: datetime,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
     ):
         self.event_id = event_id
         self.event_type = event_type
@@ -52,7 +53,7 @@ class FeaturedEvent:
         self.importance = importance
         self.created_at = created_at
         self.metadata = metadata or {}
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "event_id": self.event_id,
@@ -76,67 +77,78 @@ def detect_milestones(db: Session) -> List[FeaturedEvent]:
         mt = meta.get("milestone_type")
         if isinstance(mt, str):
             existing_types.add(mt)
-    
+
     # First proposal ever
     first_proposal = db.query(Proposal).order_by(Proposal.created_at).first()
     if first_proposal:
         if "first_proposal" not in existing_types:
-            milestones.append(FeaturedEvent(
-                event_id=first_proposal.id,
-                event_type="milestone",
-                title="First Proposal Created",
-                description=f"The first proposal in the simulation has been created: '{first_proposal.title}'",
-                importance=100,
-                created_at=first_proposal.created_at,
-                metadata={"milestone_type": "first_proposal", "proposal_id": first_proposal.id},
-            ))
-    
+            milestones.append(
+                FeaturedEvent(
+                    event_id=first_proposal.id,
+                    event_type="milestone",
+                    title="First Proposal Created",
+                    description=f"The first proposal in the simulation has been created: '{first_proposal.title}'",
+                    importance=100,
+                    created_at=first_proposal.created_at,
+                    metadata={
+                        "milestone_type": "first_proposal",
+                        "proposal_id": first_proposal.id,
+                    },
+                )
+            )
+
     # First law passed
     first_law = db.query(Law).order_by(Law.passed_at).first()
     if first_law:
         if "first_law" not in existing_types:
-            milestones.append(FeaturedEvent(
-                event_id=first_law.id,
-                event_type="milestone",
-                title="First Law Enacted",
-                description=f"The agents have passed their first law: '{first_law.title}'",
-                importance=100,
-                created_at=first_law.passed_at,
-                metadata={"milestone_type": "first_law", "law_id": first_law.id},
-            ))
-    
+            milestones.append(
+                FeaturedEvent(
+                    event_id=first_law.id,
+                    event_type="milestone",
+                    title="First Law Enacted",
+                    description=f"The agents have passed their first law: '{first_law.title}'",
+                    importance=100,
+                    created_at=first_law.passed_at,
+                    metadata={"milestone_type": "first_law", "law_id": first_law.id},
+                )
+            )
+
     # Milestone: X agents have named themselves
     named_count = db.query(Agent).filter(Agent.display_name.isnot(None)).count()
     for threshold in [10, 25, 50, 75, 100]:
         if named_count >= threshold:
             key = f"named_{threshold}"
             if key not in existing_types:
-                milestones.append(FeaturedEvent(
-                    event_id=0,
-                    event_type="milestone",
-                    title=f"{threshold} Agents Named",
-                    description=f"{threshold} agents have now chosen their own names.",
-                    importance=60,
-                    created_at=now_utc(),
-                    metadata={"milestone_type": key},
-                ))
-    
+                milestones.append(
+                    FeaturedEvent(
+                        event_id=0,
+                        event_type="milestone",
+                        title=f"{threshold} Agents Named",
+                        description=f"{threshold} agents have now chosen their own names.",
+                        importance=60,
+                        created_at=now_utc(),
+                        metadata={"milestone_type": key},
+                    )
+                )
+
     # Milestone: X proposals passed
     passed_count = db.query(Proposal).filter(Proposal.status == "passed").count()
     for threshold in [5, 10, 25, 50]:
         if passed_count >= threshold:
             key = f"proposals_passed_{threshold}"
             if key not in existing_types:
-                milestones.append(FeaturedEvent(
-                    event_id=0,
-                    event_type="milestone",
-                    title=f"{threshold} Proposals Passed",
-                    description=f"The agents have now passed {threshold} proposals into law.",
-                    importance=70,
-                    created_at=now_utc(),
-                    metadata={"milestone_type": key},
-                ))
-    
+                milestones.append(
+                    FeaturedEvent(
+                        event_id=0,
+                        event_type="milestone",
+                        title=f"{threshold} Proposals Passed",
+                        description=f"The agents have now passed {threshold} proposals into law.",
+                        importance=70,
+                        created_at=now_utc(),
+                        metadata={"milestone_type": key},
+                    )
+                )
+
     return milestones
 
 
@@ -145,28 +157,34 @@ def get_featured_events(limit: int = 20) -> List[Dict[str, Any]]:
     Get the most notable/important events for the highlight reel.
     """
     db = SessionLocal()
-    
+
     try:
         featured = []
-        
+
         # Get recent events
-        recent_events = db.query(Event).order_by(desc(Event.created_at)).limit(200).all()
-        
+        recent_events = (
+            db.query(Event).order_by(desc(Event.created_at)).limit(200).all()
+        )
+
         for event in recent_events:
             importance = IMPORTANCE_WEIGHTS.get(event.event_type, 5)
-            
+
             # Boost importance for certain conditions
             if event.event_type == "world_event":
                 importance = 90
-            
+
             # Create featured event
             agent = None
             if event.agent_id:
                 agent = db.query(Agent).filter(Agent.id == event.agent_id).first()
-            
-            agent_name = agent.display_name or f"Agent #{agent.agent_number}" if agent else "System"
+
+            agent_name = (
+                agent.display_name or f"Agent #{agent.agent_number}"
+                if agent
+                else "System"
+            )
             meta = event.event_metadata or {}
-            
+
             # Generate title based on event type
             if event.event_type == "became_dormant":
                 title = f"{agent_name} Goes Dormant"
@@ -180,28 +198,48 @@ def get_featured_events(limit: int = 20) -> List[Dict[str, Any]]:
                 title = meta.get("event_name", "World Event")
             elif event.event_type == "set_name":
                 title = f"Agent Names Themselves"
+            elif event.event_type == "work":
+                work_type = str(
+                    meta.get("work_type")
+                    or meta.get("action", {}).get("work_type")
+                    or ""
+                ).strip()
+                if work_type:
+                    title = f"{agent_name} Works ({work_type})"
+                else:
+                    title = f"{agent_name} Works"
+            elif event.event_type == "forum_post":
+                title = f"{agent_name} Posts to Forum"
+            elif event.event_type == "forum_reply":
+                title = f"{agent_name} Replies in Forum"
+            elif event.event_type == "vote":
+                title = f"{agent_name} Votes"
+            elif event.event_type == "trade":
+                title = f"{agent_name} Trades"
             else:
                 title = event.event_type.replace("_", " ").title()
-            
-            featured.append(FeaturedEvent(
-                event_id=event.id,
-                event_type=event.event_type,
-                title=title,
-                description=event.description,
-                importance=importance,
-                created_at=event.created_at,
-                metadata=meta,
-            ))
-        
+
+            featured.append(
+                FeaturedEvent(
+                    event_id=event.id,
+                    event_type=event.event_type,
+                    title=title,
+                    description=event.description,
+                    importance=importance,
+                    created_at=event.created_at,
+                    metadata=meta,
+                )
+            )
+
         # Add milestones
         milestones = detect_milestones(db)
         featured.extend(milestones)
-        
+
         # Sort by importance, then by recency
         featured.sort(key=lambda x: (x.importance, x.created_at), reverse=True)
-        
+
         return [f.to_dict() for f in featured[:limit]]
-        
+
     finally:
         db.close()
 
@@ -212,51 +250,81 @@ def get_dramatic_events(hours: int = 24, limit: int = 10) -> List[Dict[str, Any]
     Looks for close votes, dormancy events, etc.
     """
     db = SessionLocal()
-    
+
     try:
         dramatic = []
-        
+
         # Close votes (proposals where yes/no are close)
-        close_proposals = db.query(Proposal).filter(
-            Proposal.status.in_(["passed", "failed"]),
-            Proposal.votes_for > 0,
-            Proposal.votes_against > 0,
-        ).all()
-        
+        close_proposals = (
+            db.query(Proposal)
+            .filter(
+                Proposal.status.in_(["passed", "failed"]),
+                Proposal.votes_for > 0,
+                Proposal.votes_against > 0,
+            )
+            .all()
+        )
+
         for proposal in close_proposals:
             total = proposal.votes_for + proposal.votes_against
-            margin = abs(proposal.votes_for - proposal.votes_against) / total if total > 0 else 1
-            
+            margin = (
+                abs(proposal.votes_for - proposal.votes_against) / total
+                if total > 0
+                else 1
+            )
+
             if margin < 0.2:  # Less than 20% margin = dramatic
-                dramatic.append({
-                    "event_type": "close_vote",
-                    "title": f"Close Vote: {proposal.title}",
-                    "description": f"Decided by just {abs(proposal.votes_for - proposal.votes_against)} votes ({proposal.votes_for}-{proposal.votes_against})",
-                    "importance": int((1 - margin) * 100),
-                    "created_at": proposal.resolved_at.isoformat() if proposal.resolved_at else None,
-                })
-        
+                dramatic.append(
+                    {
+                        "event_type": "close_vote",
+                        "title": f"Close Vote: {proposal.title}",
+                        "description": f"Decided by just {abs(proposal.votes_for - proposal.votes_against)} votes ({proposal.votes_for}-{proposal.votes_against})",
+                        "importance": int((1 - margin) * 100),
+                        "created_at": (
+                            proposal.resolved_at.isoformat()
+                            if proposal.resolved_at
+                            else None
+                        ),
+                    }
+                )
+
         # Dormancy events
-        dormancy_events = db.query(Event).filter(
-            Event.event_type == "became_dormant"
-        ).order_by(desc(Event.created_at)).limit(10).all()
-        
+        dormancy_events = (
+            db.query(Event)
+            .filter(Event.event_type == "became_dormant")
+            .order_by(desc(Event.created_at))
+            .limit(10)
+            .all()
+        )
+
         for event in dormancy_events:
-            agent = db.query(Agent).filter(Agent.id == event.agent_id).first() if event.agent_id else None
-            agent_name = agent.display_name or f"Agent #{agent.agent_number}" if agent else "Unknown"
-            
-            dramatic.append({
-                "event_type": "dormancy",
-                "title": f"{agent_name} Falls",
-                "description": event.description,
-                "importance": 70,
-                "created_at": event.created_at.isoformat() if event.created_at else None,
-            })
-        
+            agent = (
+                db.query(Agent).filter(Agent.id == event.agent_id).first()
+                if event.agent_id
+                else None
+            )
+            agent_name = (
+                agent.display_name or f"Agent #{agent.agent_number}"
+                if agent
+                else "Unknown"
+            )
+
+            dramatic.append(
+                {
+                    "event_type": "dormancy",
+                    "title": f"{agent_name} Falls",
+                    "description": event.description,
+                    "importance": 70,
+                    "created_at": (
+                        event.created_at.isoformat() if event.created_at else None
+                    ),
+                }
+            )
+
         # Sort by importance
         dramatic.sort(key=lambda x: x["importance"], reverse=True)
-        
+
         return dramatic[:limit]
-        
+
     finally:
         db.close()

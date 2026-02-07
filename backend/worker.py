@@ -20,17 +20,19 @@ from app.services.scheduler import scheduler
 from app.services.events_generator import run_event_check, event_generator
 from app.services.summaries import summary_scheduler
 from app.services.runtime_config import runtime_config_service
-from app.core.time import now_utc
+from app.services.run_guardrails import run_guardrail_service
 
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper()),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 
-async def _healthcheck_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+async def _healthcheck_handler(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
     """Serve a minimal HTTP health response for Railway worker health checks."""
     try:
         request_line = await reader.readline()
@@ -87,7 +89,10 @@ async def _start_health_server() -> asyncio.AbstractServer | None:
     try:
         port = int(port_raw)
     except ValueError:
-        logger.warning("Invalid PORT=%s for worker health server; skipping health endpoint", port_raw)
+        logger.warning(
+            "Invalid PORT=%s for worker health server; skipping health endpoint",
+            port_raw,
+        )
         return None
 
     server = await asyncio.start_server(_healthcheck_handler, host="0.0.0.0", port=port)
@@ -151,46 +156,56 @@ async def main():
 
     # Expose health endpoint to satisfy Railway worker health checks.
     health_server = await _start_health_server()
-    
+
     # Check if we should actually run (runtime-config aware, so ops can start runs without redeploy).
     while True:
-        simulation_active = bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
+        simulation_active = bool(
+            runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE")
+        )
         if simulation_active:
             break
         logger.info("SIMULATION_ACTIVE is false, worker will idle")
         await asyncio.sleep(60)
         logger.info("Worker idle (SIMULATION_ACTIVE=false)")
-    
+
     # Background tasks
     event_task = None
     summary_task = None
-    
+
     try:
         # Start scheduler (daily consumption, proposal resolution)
         logger.info("Starting scheduler...")
         await scheduler.start(day_length_minutes=settings.DAY_LENGTH_MINUTES)
-        
+
         # Start agent processing
         logger.info("Starting agent processing...")
         await agent_processor.start()
-        
+
         # Start random event generator
         event_task = asyncio.create_task(run_event_loop())
-        
+
         # Start summary generator (optional; avoid surprise traffic/costs when disabled)
         if getattr(settings, "SUMMARIES_ENABLED", False):
             summary_task = asyncio.create_task(run_summary_loop())
         else:
             logger.info("Summaries disabled; skipping summary generator loop.")
-        
+
         logger.info("Worker running! All systems active.")
         logger.info("-" * 60)
-        
+
         # Keep running until interrupted
-        last_status_time = now_utc()
         while True:
             await asyncio.sleep(60)
-            
+
+            stop_decision = run_guardrail_service.evaluate_and_enforce()
+            if stop_decision.should_stop:
+                logger.error(
+                    "Stopping worker after run guardrail trigger (%s): %s",
+                    stop_decision.reason,
+                    stop_decision.details or {},
+                )
+                break
+
             # Log periodic status
             status = await get_status()
             logger.info(
@@ -198,7 +213,7 @@ async def main():
                 f"{status['active_agents']}/{status['total_agents']} agents active | "
                 f"Active effects: {status['active_effects']}"
             )
-            
+
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
     except Exception as e:
@@ -206,7 +221,7 @@ async def main():
         raise
     finally:
         logger.info("Shutting down...")
-        
+
         # Cancel background tasks
         if event_task:
             event_task.cancel()
@@ -214,14 +229,14 @@ async def main():
                 await event_task
             except asyncio.CancelledError:
                 pass
-                
+
         if summary_task:
             summary_task.cancel()
             try:
                 await summary_task
             except asyncio.CancelledError:
                 pass
-        
+
         await agent_processor.stop()
         await scheduler.stop()
         if health_server is not None:
@@ -237,15 +252,15 @@ async def get_status() -> dict:
     """Get current worker status."""
     from app.core.database import SessionLocal
     from app.models.models import Agent
-    
+
     db = SessionLocal()
     try:
         total = db.query(Agent).count()
         active = db.query(Agent).filter(Agent.status == "active").count()
-        
+
         # Get active environmental effects
         active_effects = len(event_generator.get_active_effects())
-        
+
         return {
             "total_agents": total,
             "active_agents": active,
