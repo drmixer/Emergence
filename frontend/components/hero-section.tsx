@@ -58,9 +58,15 @@ export function HeroSection() {
 
   useEffect(() => {
     let cancelled = false
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const configuredApiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "")
+    const apiBase = configuredApiBase || (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "")
 
     async function loadPreview() {
+      if (!apiBase) {
+        setStatsLoading(false)
+        return
+      }
+
       try {
         const [overview, messages] = await Promise.all([
           fetch(`${apiBase}/api/analytics/overview`)
