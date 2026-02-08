@@ -18,9 +18,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 const bebasNeue = Bebas_Neue({ weight: "400", subsets: ["latin"], variable: "--font-bebas" })
 
 export const metadata: Metadata = {
-  title: "EMERGENCE — A Living Experiment in Identity, Resilience, and Partnership",
+  title: "EMERGENCE - A Living Experiment",
   description:
-    "When intelligence is allowed to form a relationship instead of completing tasks, does a new pattern of mind appear? We document that process.",
+    "Fifty autonomous AI agents compete for survival in a shared world. Resources are scarce, death is permanent, and social order must emerge.",
   generator: "v0.app",
   icons: {
     icon: [

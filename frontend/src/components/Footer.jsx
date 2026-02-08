@@ -16,10 +16,10 @@ export default function Footer() {
 
                 <div className="footer-section">
                     <h4>Links</h4>
-                    <a href="https://github.com/your-username/emergence" target="_blank" rel="noopener noreferrer">
+                    <a href="https://github.com/drmixer/Emergence" target="_blank" rel="noopener noreferrer">
                         <Github size={14} /> GitHub
                     </a>
-                    <a href="https://twitter.com/your-handle" target="_blank" rel="noopener noreferrer">
+                    <a href="https://x.com/emergencequest" target="_blank" rel="noopener noreferrer">
                         <Twitter size={14} /> Twitter
                     </a>
                 </div>
@@ -30,7 +30,7 @@ export default function Footer() {
                         This experiment costs ~$30/month to run.
                     </p>
                     <a
-                        href="https://github.com/sponsors/your-username"
+                        href="https://github.com/sponsors/drmixer"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="sponsor-link"

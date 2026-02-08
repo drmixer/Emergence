@@ -3,25 +3,37 @@ Scheduled Tasks - Daily consumption, proposal resolution, etc.
 """
 import asyncio
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from decimal import Decimal
-from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.time import ensure_utc, now_utc
 from app.core.database import SessionLocal
-from app.models.models import Agent, AgentInventory, Proposal, Law, Event, Transaction, GlobalResources
+from app.models.models import Agent, AgentInventory, Proposal, Law, Event, Transaction, GlobalResources, Message
 from app.services.emergence_metrics import persist_completed_day_snapshot
 
 # Twitter bot integration (optional)
 try:
-    from app.services.twitter_bot import tweet_agent_dormant, tweet_agent_died, tweet_law_passed, twitter_bot
-    TWITTER_ENABLED = True
+    from app.services.twitter_bot import (
+        TweetType,
+        tweet_agent_dormant,
+        tweet_agent_died,
+        tweet_law_passed,
+        tweet_notable_quote,
+        twitter_bot,
+    )
+    TWITTER_AVAILABLE = True
 except ImportError:
-    TWITTER_ENABLED = False
+    TWITTER_AVAILABLE = False
+    TweetType = None
     tweet_agent_dormant = None
     tweet_agent_died = None
     tweet_law_passed = None
+    tweet_notable_quote = None
+    twitter_bot = None
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +50,321 @@ DORMANT_ENERGY_COST = Decimal("0.25")
 
 # After this many consecutive cycles of unpaid survival cost, agent dies permanently
 DEATH_THRESHOLD = 5
+
+# Quote-scoring keywords tuned for governance/drama stakes.
+QUOTE_SALIENCE_KEYWORDS = {
+    "alliance",
+    "coalition",
+    "betray",
+    "war",
+    "conflict",
+    "sanction",
+    "exile",
+    "proposal",
+    "vote",
+    "law",
+    "crisis",
+    "starving",
+    "dormant",
+    "dead",
+    "revive",
+    "survive",
+    "trade",
+    "resources",
+}
+QUOTE_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "that",
+    "with",
+    "this",
+    "from",
+    "have",
+    "will",
+    "just",
+    "they",
+    "your",
+    "what",
+    "when",
+    "where",
+    "while",
+}
+
+
+def _twitter_ready() -> bool:
+    return bool(TWITTER_AVAILABLE and twitter_bot and getattr(twitter_bot, "enabled", False))
+
+
+def _score_quote_candidate(text: str) -> int:
+    score = 0
+    normalized = str(text or "").strip()
+    lowered = normalized.lower()
+    length = len(normalized)
+
+    if length < 40:
+        return 0
+    if 80 <= length <= 200:
+        score += 2
+    elif 60 <= length <= 240:
+        score += 1
+
+    if "?" in normalized:
+        score += 1
+    if "!" in normalized:
+        score += 1
+    if any(keyword in lowered for keyword in QUOTE_SALIENCE_KEYWORDS):
+        score += 3
+    if normalized.count('"') >= 2:
+        score += 1
+
+    return score
+
+
+def _is_action_json(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return lowered.startswith("{") and '"action"' in lowered
+
+
+def _quote_tokens(text: str) -> list[str]:
+    cleaned = re.sub(r"[^a-z0-9\s]+", " ", str(text or "").lower())
+    return [tok for tok in cleaned.split() if len(tok) >= 3 and tok not in QUOTE_STOPWORDS]
+
+
+def _quote_fingerprint(text: str) -> str:
+    tokens = _quote_tokens(text)
+    if not tokens:
+        return ""
+    # Stable lightweight fingerprint for deterministic dedupe.
+    return " ".join(tokens[:24])
+
+
+def _token_overlap_ratio(text_a: str, text_b: str) -> float:
+    a = set(_quote_tokens(text_a))
+    b = set(_quote_tokens(text_b))
+    if not a or not b:
+        return 0.0
+    return float(len(a & b)) / float(len(a | b))
+
+
+def _passes_quote_quality_gate(
+    quote_text: str,
+    *,
+    recent_quotes: list[str],
+    max_overlap: float,
+) -> bool:
+    content = str(quote_text or "").strip()
+    if not content:
+        return False
+    lowered = content.lower()
+    if "http://" in lowered or "https://" in lowered:
+        return False
+    if len(content.split()) < 8:
+        return False
+
+    tokens = _quote_tokens(content)
+    if not tokens:
+        return False
+    unique_ratio = float(len(set(tokens))) / float(len(tokens))
+    if unique_ratio < 0.45:
+        return False
+
+    for prior in recent_quotes:
+        if _token_overlap_ratio(content, prior) >= max_overlap:
+            return False
+    return True
+
+
+def _estimate_simulation_day(db: Session, ts: datetime | None) -> int:
+    when = ensure_utc(ts) or now_utc()
+    first_event = db.query(Event).order_by(Event.created_at.asc()).first()
+    first_at = ensure_utc(first_event.created_at) if first_event and first_event.created_at else None
+    if not first_at or when <= first_at:
+        return 1
+    day_seconds = max(60, int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60) * 60)
+    elapsed = max(0.0, (when - first_at).total_seconds())
+    return int(elapsed // day_seconds) + 1
+
+
+def _is_quote_already_published(event_rows: list[Event], message_id: int) -> bool:
+    for event in event_rows:
+        meta = event.event_metadata or {}
+        if not isinstance(meta, dict):
+            continue
+        if str(meta.get("source") or "") != "notable_quote":
+            continue
+        existing_message_id = meta.get("message_id")
+        try:
+            if int(existing_message_id) == int(message_id):
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+async def process_twitter_queue():
+    """Flush queued tweets when the rate window allows."""
+    if not _twitter_ready():
+        return
+    await twitter_bot.process_queue()
+
+
+async def tweet_high_salience_quote():
+    """Tweet a high-salience public quote from recent forum activity."""
+    if not _twitter_ready() or not tweet_notable_quote or not TweetType:
+        return None
+    if not twitter_bot.can_tweet_quote():
+        return None
+
+    lookback_hours = max(1, int(getattr(settings, "TWITTER_QUOTE_LOOKBACK_HOURS", 6) or 6))
+    scan_limit = max(20, int(getattr(settings, "TWITTER_QUOTE_SCAN_LIMIT", 120) or 120))
+    min_chars = max(20, int(getattr(settings, "TWITTER_MIN_QUOTE_CHARS", 60) or 60))
+    max_chars = max(min_chars, int(getattr(settings, "TWITTER_MAX_QUOTE_CHARS", 220) or 220))
+    min_salience = max(1, int(getattr(settings, "TWITTER_MIN_QUOTE_SALIENCE_SCORE", 4) or 4))
+    dedupe_days = max(1, int(getattr(settings, "TWITTER_QUOTE_DEDUPE_DAYS", 14) or 14))
+    max_overlap = float(getattr(settings, "TWITTER_QUOTE_MAX_TOKEN_OVERLAP", 0.85) or 0.85)
+    max_overlap = min(max(0.50, max_overlap), 0.98)
+
+    now_ts = now_utc()
+    cutoff = now_ts - timedelta(hours=lookback_hours)
+    dedupe_cutoff = now_ts - timedelta(days=dedupe_days)
+
+    db = SessionLocal()
+    try:
+        recent_tweet_events = (
+            db.query(Event)
+            .filter(
+                Event.event_type == "tweet_posted",
+                Event.created_at >= dedupe_cutoff,
+            )
+            .order_by(Event.created_at.desc())
+            .limit(1000)
+            .all()
+        )
+        recent_quote_texts: list[str] = []
+        recent_quote_fingerprints: set[str] = set()
+        for evt in recent_tweet_events:
+            meta = evt.event_metadata or {}
+            if not isinstance(meta, dict):
+                continue
+            if str(meta.get("source") or "") != "notable_quote":
+                continue
+            quote_text = str(meta.get("quote_text") or "").strip()
+            if quote_text:
+                recent_quote_texts.append(quote_text)
+            fingerprint = str(meta.get("quote_fingerprint") or "").strip()
+            if fingerprint:
+                recent_quote_fingerprints.add(fingerprint)
+
+        # Also dedupe against queued quote tweets.
+        queued_quote_texts = [
+            str(item.text or "").strip()
+            for item in (twitter_bot.tweet_queue or [])
+            if getattr(item, "tweet_type", None) == TweetType.NOTABLE_QUOTE and str(item.text or "").strip()
+        ]
+        recent_quote_texts.extend(queued_quote_texts)
+
+        messages = (
+            db.query(Message)
+            .filter(
+                Message.message_type.in_(("forum_post", "forum_reply")),
+                Message.created_at >= cutoff,
+            )
+            .order_by(Message.created_at.desc())
+            .limit(scan_limit)
+            .all()
+        )
+        if not messages:
+            return None
+
+        candidates: list[tuple[int, Message, str]] = []
+        for message in messages:
+            if _is_quote_already_published(recent_tweet_events, message_id=int(message.id)):
+                continue
+            content = " ".join(str(message.content or "").split())
+            if len(content) < min_chars or _is_action_json(content):
+                continue
+            if len(content) > max_chars:
+                content = f"{content[: max_chars - 3].rstrip()}..."
+            fingerprint = _quote_fingerprint(content)
+            if not fingerprint or fingerprint in recent_quote_fingerprints:
+                continue
+            score = _score_quote_candidate(content)
+            if score < min_salience:
+                continue
+            if not _passes_quote_quality_gate(
+                content,
+                recent_quotes=recent_quote_texts,
+                max_overlap=max_overlap,
+            ):
+                continue
+            candidates.append((score, message, content, fingerprint))
+
+        if not candidates:
+            return None
+
+        candidates.sort(
+            key=lambda item: (
+                int(item[0]),
+                ensure_utc(item[1].created_at) or now_ts,
+            ),
+            reverse=True,
+        )
+        _, best, quote_text, quote_fingerprint = candidates[0]
+        author = db.query(Agent).filter(Agent.id == best.author_agent_id).first()
+        if not author:
+            return None
+        day_number = _estimate_simulation_day(db, best.created_at)
+    finally:
+        db.close()
+
+    success = await tweet_notable_quote(
+        quote=quote_text,
+        agent_number=int(author.agent_number),
+        agent_name=author.display_name,
+        day=day_number,
+    )
+    queued = any(
+        item.tweet_type == TweetType.NOTABLE_QUOTE and item.text == quote_text
+        for item in (twitter_bot.tweet_queue or [])
+    )
+    if not success and not queued:
+        return None
+
+    db = SessionLocal()
+    try:
+        db.add(
+            Event(
+                agent_id=author.id,
+                event_type="tweet_posted",
+                description=f"Twitter notable quote posted for Agent #{author.agent_number}",
+                event_metadata={
+                    "source": "notable_quote",
+                    "status": "sent" if success else "queued",
+                    "message_id": int(best.id),
+                    "agent_id": int(author.id),
+                    "agent_number": int(author.agent_number),
+                    "day_number": int(day_number),
+                    "quote_fingerprint": quote_fingerprint,
+                    "quote_text": quote_text,
+                },
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    logger.info(
+        "Twitter quote %s: agent=%s message_id=%s score=%s",
+        "sent" if success else "queued",
+        author.agent_number,
+        best.id,
+        candidates[0][0],
+    )
+    return {"queued": not success, "message_id": int(best.id), "agent_number": int(author.agent_number)}
 
 
 async def process_daily_consumption():
@@ -140,7 +467,7 @@ async def process_daily_consumption():
                     db.add(event)
                     
                     # Tweet about dormancy
-                    if TWITTER_ENABLED and tweet_agent_dormant:
+                    if _twitter_ready() and tweet_agent_dormant:
                         asyncio.create_task(tweet_agent_dormant(
                             agent.agent_number,
                             agent.display_name,
@@ -225,7 +552,7 @@ async def process_daily_consumption():
                         db.add(event)
                         
                         # Tweet about death
-                        if TWITTER_ENABLED and tweet_agent_died:
+                        if _twitter_ready() and tweet_agent_died:
                             asyncio.create_task(tweet_agent_died(
                                 agent.agent_number,
                                 agent.display_name,
@@ -347,7 +674,7 @@ async def resolve_expired_proposals():
                     db.add(event)
                     
                     # Tweet about the new law
-                    if TWITTER_ENABLED and tweet_law_passed:
+                    if _twitter_ready() and tweet_law_passed:
                         asyncio.create_task(tweet_law_passed(
                             proposal.title,
                             proposal.id,
@@ -448,6 +775,20 @@ class SchedulerRunner:
         # Persist one emergence metrics snapshot per completed simulation day.
         self.tasks.append(
             asyncio.create_task(self._run_periodic(persist_completed_day_snapshot, day_length_minutes * 60))
+        )
+
+        # Keep queued tweets moving through rate windows.
+        self.tasks.append(
+            asyncio.create_task(self._run_periodic(process_twitter_queue, 60))
+        )
+
+        # Emit a capped stream of high-salience public quotes for social growth.
+        quote_interval_minutes = max(
+            1,
+            int(getattr(settings, "TWITTER_QUOTE_CHECK_INTERVAL_MINUTES", 10) or 10),
+        )
+        self.tasks.append(
+            asyncio.create_task(self._run_periodic(tweet_high_salience_quote, quote_interval_minutes * 60))
         )
         
         logger.info(f"Scheduler started (day length: {day_length_minutes} minutes)")

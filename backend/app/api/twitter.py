@@ -6,7 +6,7 @@ Monitor and control the Twitter bot
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-import asyncio
+from app.core.admin_auth import AdminActor, require_admin_auth
 
 # Twitter bot integration
 try:
@@ -38,7 +38,7 @@ class TestTweetRequest(BaseModel):
 
 
 @router.get("/status")
-async def get_status():
+async def get_status(_actor: AdminActor = Depends(require_admin_auth)):
     """Get current Twitter bot status"""
     if not TWITTER_AVAILABLE:
         return {
@@ -53,7 +53,10 @@ async def get_status():
 
 
 @router.post("/test")
-async def test_tweet_format(request: TestTweetRequest):
+async def test_tweet_format(
+    request: TestTweetRequest,
+    _actor: AdminActor = Depends(require_admin_auth),
+):
     """
     Test tweet formatting without actually sending
     Returns what the tweet would look like
@@ -128,7 +131,10 @@ async def test_tweet_format(request: TestTweetRequest):
 
 
 @router.post("/send")
-async def send_manual_tweet(request: TweetRequest):
+async def send_manual_tweet(
+    request: TweetRequest,
+    _actor: AdminActor = Depends(require_admin_auth),
+):
     """
     Send a manual tweet (requires TWITTER_ENABLED=true)
     Use with caution!
@@ -171,7 +177,7 @@ async def send_manual_tweet(request: TweetRequest):
 
 
 @router.post("/reset-counter")
-async def reset_daily_counter():
+async def reset_daily_counter(_actor: AdminActor = Depends(require_admin_auth)):
     """Reset the daily tweet counter (for testing)"""
     if not TWITTER_AVAILABLE:
         raise HTTPException(status_code=503, detail="Twitter bot not available")
@@ -185,7 +191,7 @@ async def reset_daily_counter():
 
 
 @router.get("/queue")
-async def get_tweet_queue():
+async def get_tweet_queue(_actor: AdminActor = Depends(require_admin_auth)):
     """Get the current tweet queue"""
     if not TWITTER_AVAILABLE:
         raise HTTPException(status_code=503, detail="Twitter bot not available")

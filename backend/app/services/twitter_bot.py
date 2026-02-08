@@ -6,12 +6,10 @@ Auto-posts notable events, summaries, and drama to Twitter/X
 import os
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
-import json
-import re
 
 # Twitter API - using tweepy for v2 API
 try:
@@ -20,8 +18,6 @@ try:
 except ImportError:
     TWEEPY_AVAILABLE = False
     tweepy = None
-
-from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +64,8 @@ class TwitterBot:
         self.enabled = os.getenv("TWITTER_ENABLED", "false").lower() == "true"
         self.max_tweets_per_day = int(os.getenv("TWITTER_MAX_TWEETS_PER_DAY", "10"))
         self.min_interval_minutes = int(os.getenv("TWITTER_MIN_INTERVAL_MINUTES", "30"))
+        default_quote_cap = max(1, int(self.max_tweets_per_day * 0.30))
+        self.max_quotes_per_day = int(os.getenv("TWITTER_MAX_QUOTES_PER_DAY", str(default_quote_cap)))
         self.base_url = os.getenv("FRONTEND_URL", "https://emergence.quest")
         
         self.client = None
@@ -75,6 +73,8 @@ class TwitterBot:
         self.tweets_today = 0
         self.last_tweet_time: Optional[datetime] = None
         self.tweet_queue: List[TweetContent] = []
+        self.tweet_type_counts_today: Dict[str, int] = {}
+        self._counter_day: date = datetime.utcnow().date()
         
         if self.enabled and TWEEPY_AVAILABLE:
             self._init_client()
@@ -114,9 +114,16 @@ class TwitterBot:
         except Exception as e:
             logger.error(f"Failed to initialize Twitter client: {e}")
             self.enabled = False
+
+    def _ensure_daily_rollover(self):
+        """Reset counters when UTC day changes."""
+        today = datetime.utcnow().date()
+        if today != self._counter_day:
+            self.reset_daily_count(day_key=today)
     
     def can_tweet(self) -> bool:
         """Check if we can send a tweet now"""
+        self._ensure_daily_rollover()
         if not self.enabled:
             return False
             
@@ -132,18 +139,37 @@ class TwitterBot:
                 return False
         
         return True
+
+    def can_tweet_quote(self) -> bool:
+        """Check quote-specific daily cap in addition to global caps."""
+        if not self.can_tweet():
+            return False
+        quote_count = int(self.tweet_type_counts_today.get(TweetType.NOTABLE_QUOTE.value, 0) or 0)
+        if self.max_quotes_per_day >= 0 and quote_count >= self.max_quotes_per_day:
+            logger.info("Daily quote tweet limit reached")
+            return False
+        return True
     
-    def reset_daily_count(self):
+    def reset_daily_count(self, day_key: Optional[date] = None):
         """Reset the daily tweet counter (call at midnight)"""
         self.tweets_today = 0
+        self.tweet_type_counts_today = {}
+        self._counter_day = day_key or datetime.utcnow().date()
         logger.info("Daily tweet counter reset")
     
-    async def send_tweet(self, content: TweetContent) -> bool:
+    async def send_tweet(self, content: TweetContent, *, allow_requeue: bool = True) -> bool:
         """Send a tweet"""
-        if not self.can_tweet():
-            # Queue for later
-            self.tweet_queue.append(content)
-            logger.info(f"Tweet queued: {content.tweet_type.value}")
+        if not self.enabled:
+            logger.info("Twitter disabled; skipping tweet: %s", content.tweet_type.value)
+            return False
+        if content.tweet_type == TweetType.NOTABLE_QUOTE:
+            can_send = self.can_tweet_quote()
+        else:
+            can_send = self.can_tweet()
+        if not can_send:
+            if allow_requeue:
+                self.tweet_queue.append(content)
+                logger.info(f"Tweet queued: {content.tweet_type.value}")
             return False
         
         try:
@@ -161,19 +187,20 @@ class TwitterBot:
             # Send tweet
             if self.client:
                 if media_ids:
-                    response = self.client.create_tweet(text=text, media_ids=media_ids)
+                    self.client.create_tweet(text=text, media_ids=media_ids)
                 else:
-                    response = self.client.create_tweet(text=text)
-                
-                self.tweets_today += 1
-                self.last_tweet_time = datetime.utcnow()
+                    self.client.create_tweet(text=text)
                 
                 logger.info(f"Tweet sent: {content.tweet_type.value} - {text[:50]}...")
-                return True
             else:
                 # Dry run / logging mode
                 logger.info(f"[DRY RUN] Would tweet: {text[:100]}...")
-                return True
+            self.tweets_today += 1
+            self.tweet_type_counts_today[content.tweet_type.value] = (
+                int(self.tweet_type_counts_today.get(content.tweet_type.value, 0) or 0) + 1
+            )
+            self.last_tweet_time = datetime.utcnow()
+            return True
                 
         except Exception as e:
             logger.error(f"Failed to send tweet: {e}")
@@ -181,10 +208,26 @@ class TwitterBot:
     
     async def process_queue(self):
         """Process queued tweets if possible"""
-        while self.tweet_queue and self.can_tweet():
+        if not self.enabled:
+            return
+
+        pending: List[TweetContent] = []
+        while self.tweet_queue:
             content = self.tweet_queue.pop(0)
-            await self.send_tweet(content)
-            await asyncio.sleep(5)  # Small delay between tweets
+            sent = await self.send_tweet(content, allow_requeue=False)
+            if sent:
+                await asyncio.sleep(5)  # Small delay between tweets
+                continue
+
+            # Keep unsent items for the next pass. If global cap/rate-limit blocks now,
+            # defer the rest immediately.
+            pending.append(content)
+            if not self.can_tweet():
+                pending.extend(self.tweet_queue)
+                self.tweet_queue = pending
+                return
+
+        self.tweet_queue = pending
 
 
 class TweetFormatter:
@@ -406,7 +449,7 @@ async def tweet_law_passed(law_name: str, law_id: int,
     content = tweet_formatter.format_law_passed(
         law_name, law_id, yes_votes, no_votes, description
     )
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 async def tweet_proposal_created(title: str, proposal_id: int,
@@ -415,7 +458,7 @@ async def tweet_proposal_created(title: str, proposal_id: int,
     content = tweet_formatter.format_proposal_created(
         title, proposal_id, agent_number, agent_name
     )
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 async def tweet_agent_dormant(agent_number: int, agent_name: Optional[str] = None,
@@ -424,7 +467,7 @@ async def tweet_agent_dormant(agent_number: int, agent_name: Optional[str] = Non
     content = tweet_formatter.format_agent_dormant(
         agent_number, agent_name, reason
     )
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 async def tweet_agent_died(agent_number: int, agent_name: Optional[str] = None,
@@ -433,7 +476,7 @@ async def tweet_agent_died(agent_number: int, agent_name: Optional[str] = None,
     content = tweet_formatter.format_agent_died(
         agent_number, agent_name, cause, cycles
     )
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 async def tweet_agent_awakened(agent_number: int, agent_name: Optional[str],
@@ -442,7 +485,7 @@ async def tweet_agent_awakened(agent_number: int, agent_name: Optional[str],
     content = tweet_formatter.format_agent_awakened(
         agent_number, agent_name, helper_number, helper_name
     )
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 async def tweet_crisis(crisis_type: str, description: str, affected_count: int = 0):
@@ -450,19 +493,19 @@ async def tweet_crisis(crisis_type: str, description: str, affected_count: int =
     content = tweet_formatter.format_crisis(
         crisis_type, description, affected_count
     )
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 async def tweet_daily_summary(day: int, summary: str, stats: Dict[str, Any]):
     """Tweet daily summary"""
     content = tweet_formatter.format_daily_summary(day, summary, stats)
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 async def tweet_milestone(milestone_type: str, value: Any, description: str = ""):
     """Tweet milestone achievement"""
     content = tweet_formatter.format_milestone(milestone_type, value, description)
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 async def tweet_notable_quote(quote: str, agent_number: int,
@@ -471,17 +514,23 @@ async def tweet_notable_quote(quote: str, agent_number: int,
     content = tweet_formatter.format_notable_quote(
         quote, agent_number, agent_name, day
     )
-    await twitter_bot.send_tweet(content)
+    return await twitter_bot.send_tweet(content)
 
 
 def get_twitter_status() -> Dict[str, Any]:
     """Get current Twitter bot status"""
+    twitter_bot._ensure_daily_rollover()
     return {
         "enabled": twitter_bot.enabled,
         "tweepy_available": TWEEPY_AVAILABLE,
         "tweets_today": twitter_bot.tweets_today,
         "max_tweets_per_day": twitter_bot.max_tweets_per_day,
+        "quotes_today": int(
+            twitter_bot.tweet_type_counts_today.get(TweetType.NOTABLE_QUOTE.value, 0) or 0
+        ),
+        "max_quotes_per_day": twitter_bot.max_quotes_per_day,
         "queue_size": len(twitter_bot.tweet_queue),
         "last_tweet_time": twitter_bot.last_tweet_time.isoformat() if twitter_bot.last_tweet_time else None,
-        "can_tweet_now": twitter_bot.can_tweet()
+        "can_tweet_now": twitter_bot.can_tweet(),
+        "can_tweet_quote_now": twitter_bot.can_tweet_quote(),
     }

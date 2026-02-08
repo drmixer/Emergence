@@ -6,6 +6,7 @@ import { PrinciplesSection } from "@/components/principles-section"
 import { ColophonSection } from "@/components/colophon-section"
 import { SideNav } from "@/components/side-nav"
 import { SectionDivider } from "@/components/section-divider"
+import { ScrollToTopButton } from "@/components/scroll-to-top"
 
 export default function Page() {
   return (
@@ -27,6 +28,7 @@ export default function Page() {
         <SectionDivider index="04" />
         <ColophonSection />
       </div>
+      <ScrollToTopButton />
     </main>
   )
 }

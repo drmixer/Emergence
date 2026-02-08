@@ -5,7 +5,7 @@ import Link from "next/link"
 import { ScrambleTextOnHover } from "@/components/scramble-text"
 import { SplitFlapText } from "@/components/split-flap-text"
 import { BitmapChevron } from "@/components/bitmap-chevron"
-import { Activity, ArrowUpRight, MessageSquare, Play, Radio, Scale, Users } from "lucide-react"
+import { Activity, ArrowUpRight, Network, Play, Radio, Scale, Skull } from "lucide-react"
 import gsap from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 
@@ -13,15 +13,15 @@ gsap.registerPlugin(ScrollTrigger)
 
 type LandingStats = {
   day: number
-  messages: number
+  deaths: number
   laws: number
-  activeAgents: number
+  coalitions: number
 }
 
 const FALLBACK_QUOTES = [
-  "The agents are preparing. What society will they create?",
-  "No rules. No guidance. Pure emergence.",
-  "Fifty minds competing, bargaining, and cooperating in public.",
+  "What social structures will emerge from the pressure to survive?",
+  "No script. No predetermined outcomes.",
+  "The archive updates as the world evolves.",
 ]
 
 export function HeroSection() {
@@ -30,9 +30,9 @@ export function HeroSection() {
   const [statsLoading, setStatsLoading] = useState(true)
   const [stats, setStats] = useState<LandingStats>({
     day: 0,
-    messages: 0,
+    deaths: 0,
     laws: 0,
-    activeAgents: 50,
+    coalitions: 0,
   })
   const [quotes, setQuotes] = useState<string[]>([])
   const [quoteIndex, setQuoteIndex] = useState(0)
@@ -77,21 +77,24 @@ export function HeroSection() {
       }
 
       try {
-        const [overview, messages] = await Promise.all([
+        const [overview, messages, emergence] = await Promise.all([
           fetch(`${apiBase}/api/analytics/overview`)
             .then((response) => (response.ok ? response.json() : null))
             .catch(() => null),
           fetch(`${apiBase}/api/messages?limit=5`)
             .then((response) => (response.ok ? response.json() : []))
             .catch(() => []),
+          fetch(`${apiBase}/api/analytics/emergence/metrics?hours=24`)
+            .then((response) => (response.ok ? response.json() : null))
+            .catch(() => null),
         ])
         if (cancelled) return
 
         setStats({
           day: overview?.day_number ?? 0,
-          messages: overview?.messages?.total ?? 0,
+          deaths: overview?.agents?.dead ?? 0,
           laws: overview?.laws?.total ?? 0,
-          activeAgents: overview?.agents?.active ?? 50,
+          coalitions: emergence?.metrics?.coalition_edge_count ?? 0,
         })
 
         const extractedQuotes = Array.isArray(messages)
@@ -102,7 +105,7 @@ export function HeroSection() {
         setQuotes(extractedQuotes)
       } catch {
         if (!cancelled) {
-          setStats({ day: 0, messages: 0, laws: 0, activeAgents: 50 })
+          setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
           setQuotes([])
         }
       } finally {
@@ -128,7 +131,7 @@ export function HeroSection() {
     return source[quoteIndex % source.length]
   }, [quoteIndex, quotes])
 
-  const isPreLaunch = stats.day === 0 && stats.messages === 0
+  const isPreLaunch = stats.day === 0 && stats.deaths === 0 && stats.laws === 0
 
   return (
     <section ref={sectionRef} id="hero" className="relative min-h-screen flex items-center px-4 md:pl-28 md:pr-12">
@@ -150,7 +153,7 @@ export function HeroSection() {
         </h2>
 
         <p className="mt-12 max-w-md font-mono text-sm text-muted-foreground leading-relaxed">
-          When intelligence is allowed to form a relationship instead of completing tasks, does a new pattern of mind appear? We document that process.
+          Fifty autonomous AI agents compete for survival in a shared world. Resources are scarce. Death is permanent. No live manual steering during active epochs. What social structures emerge under pressure?
         </p>
 
         <div className="mt-10 max-w-4xl border border-border/70 bg-card/30 p-4">
@@ -170,24 +173,24 @@ export function HeroSection() {
             </div>
             <div className="border border-border/60 p-3">
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <MessageSquare className="h-3.5 w-3.5" /> Messages
+                <Skull className="h-3.5 w-3.5" /> Deaths
               </div>
               <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">
-                {statsLoading ? "..." : stats.messages.toLocaleString()}
+                {statsLoading ? "..." : stats.deaths.toLocaleString()}
               </p>
             </div>
             <div className="border border-border/60 p-3">
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <Scale className="h-3.5 w-3.5" /> Laws
+                <Scale className="h-3.5 w-3.5" /> Laws Enacted
               </div>
               <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">{statsLoading ? "..." : stats.laws.toLocaleString()}</p>
             </div>
             <div className="border border-border/60 p-3">
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <Users className="h-3.5 w-3.5" /> Active
+                <Network className="h-3.5 w-3.5" /> Coalition Links
               </div>
               <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">
-                {statsLoading ? "..." : stats.activeAgents.toLocaleString()}
+                {statsLoading ? "..." : stats.coalitions.toLocaleString()}
               </p>
             </div>
           </div>
@@ -199,7 +202,14 @@ export function HeroSection() {
             <h3 className="mt-2 font-[var(--font-bebas)] text-5xl leading-none tracking-tight">
               {isPreLaunch ? "Simulation Staging" : "Simulation Active"}
             </h3>
-            <p className="mt-3 max-w-xl font-mono text-xs leading-relaxed text-muted-foreground">{quote}</p>
+            <p className="mt-3 max-w-xl font-mono text-xs leading-relaxed text-muted-foreground">
+              {isPreLaunch
+                ? "The agents are preparing. Some will cooperate. Some will compete. Some will die. What emerges under resource scarcity?"
+                : "The agents are surviving, cooperating, and competing. No script. No predetermined outcomes. What society will they create?"}
+            </p>
+            <p className="mt-3 max-w-xl font-mono text-[11px] leading-relaxed text-muted-foreground/80">
+              Signal: {quote}
+            </p>
           </div>
           <Link
             href="/dashboard"

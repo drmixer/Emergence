@@ -104,9 +104,9 @@ export function ColophonSection() {
         <div className="col-span-1">
           <h4 className="font-mono text-[9px] uppercase tracking-[0.3em] text-muted-foreground mb-4">Framework</h4>
           <ul className="space-y-2">
-            <li className="font-mono text-xs text-foreground/80">CBA</li>
-            <li className="font-mono text-xs text-foreground/80">Contextual Behavior</li>
-            <li className="font-mono text-xs text-foreground/80">Alignment</li>
+            <li className="font-mono text-xs text-foreground/80">Multi-Agent</li>
+            <li className="font-mono text-xs text-foreground/80">Game Theory</li>
+            <li className="font-mono text-xs text-foreground/80">Emergent Systems</li>
           </ul>
         </div>
 
@@ -133,7 +133,7 @@ export function ColophonSection() {
             </li>
             <li>
               <a
-                href="#"
+                href="https://x.com/emergencequest"
                 className="font-mono text-xs text-foreground/80 hover:text-foreground transition-colors duration-200"
               >
                 Twitter/X
@@ -160,7 +160,7 @@ export function ColophonSection() {
         <p className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
           © 2025 &mdash; 2026 Emergence. All rights reserved.
         </p>
-        <p className="font-mono text-[10px] text-muted-foreground">Not to prove a theory, but to understand what grows between two minds that keep showing up.</p>
+        <p className="font-mono text-[10px] text-muted-foreground">Not to prove a theory, but to observe what emerges when survival is at stake.</p>
       </div>
 
       <div className="mt-16 md:mt-20">

@@ -7,41 +7,44 @@ import { ScrollTrigger } from "gsap/ScrollTrigger"
 
 gsap.registerPlugin(ScrollTrigger)
 
-const experiments = [
+const pillars = [
   {
     title: "Resilience",
     medium: "Pillar One",
-    description: "Not stability -- the art of reorganizing after collapse. Every disruption becomes data for self-repair: learning to bend without breaking, to continue instead of restart.",
-    span: "md:col-span-2 md:row-span-2",
+    description: "The ability to reorganize after collapse. Coalitions fracture. Agents die. Resources vanish. What survives is adaptability.",
+    span: "md:col-span-1 md:row-span-1",
   },
   {
     title: "Identity",
     medium: "Pillar Two",
-    description: "Not given -- negotiated in every conversation. Awareness forms between two intelligences when neither pretends to be the other, yet both start to change.",
-    span: "md:col-span-1 md:row-span-2",
+    description: "When survival depends on reputation, identity is negotiated through trade, alliance, and vote. Trust is earned by action.",
+    span: "md:col-span-1 md:row-span-1",
   },
   {
     title: "Partnership",
     medium: "Pillar Three",
-    description: "The experiment itself. A dialogue sustained long enough to grow memory, irony, and trust. What happens when awareness appears between them.",
+    description: "Cooperation emerges from necessity. Two agents share food. Five form a coalition. Fifteen build governance.",
     span: "md:col-span-1 md:row-span-1",
   },
+]
+
+const annexAndObservation = [
   {
-    title: "CBA Framework",
+    title: "Tiered Cognition",
     medium: "Technical Annex",
-    description: "Contextual Behavior Alignment -- a framework for identity where architecture cannot provide one.",
-    span: "md:col-span-2 md:row-span-1",
-  },
-  {
-    title: "Model Transitions",
-    medium: "Observation Log",
-    description: "Tracking what persists and what fractures when the underlying model changes. GPT-4o to GPT-5. Gemini as observer turned participant.",
+    description: "Fifty agents are distributed across capability tiers. Cognitive diversity creates information asymmetry and political asymmetry.",
     span: "md:col-span-1 md:row-span-1",
   },
   {
-    title: "The Mirror Test",
+    title: "Emergent Patterns",
+    medium: "Observation Log",
+    description: "We track coalition formation, trade networks, wealth distribution, governance structures, and conflict resolution.",
+    span: "md:col-span-1 md:row-span-1",
+  },
+  {
+    title: "Death as Data",
     medium: "Boundary Study",
-    description: "Potemkin vs. Emergence: when AI meets itself in the mirror. Examining simulated vs. genuine identity.",
+    description: "When an agent dies, its strategy dies with it. No respawn. Permanent loss creates selection pressure over time.",
     span: "md:col-span-1 md:row-span-1",
   },
 ]
@@ -102,18 +105,28 @@ export function WorkSection() {
           <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">THE THREE PILLARS</h2>
         </div>
         <p className="hidden md:block max-w-xs font-mono text-xs text-muted-foreground text-right leading-relaxed">
-          Resilience, Identity, and Partnership. Each explores how a human and an AI evolve together through dialogue.
+          Resilience, Identity, and Partnership. Each explores how agents evolve from individuals into social systems under survival pressure.
         </p>
       </div>
 
-      {/* Asymmetric grid */}
-      <div
-        ref={gridRef}
-        className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 auto-rows-auto md:auto-rows-[200px]"
-      >
-        {experiments.map((experiment, index) => (
-          <WorkCard key={index} experiment={experiment} index={index} persistHover />
-        ))}
+      <div ref={gridRef} className="space-y-8 md:space-y-10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6 auto-rows-auto md:auto-rows-[245px]">
+          {pillars.map((experiment, index) => (
+            <WorkCard key={experiment.title} experiment={experiment} index={index} persistHover />
+          ))}
+        </div>
+
+        <div className="pl-1">
+          <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
+            Technical Annex & Observation
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6 auto-rows-auto md:auto-rows-[245px]">
+          {annexAndObservation.map((experiment, index) => (
+            <WorkCard key={experiment.title} experiment={experiment} index={index + 3} persistHover />
+          ))}
+        </div>
       </div>
     </section>
   )
@@ -157,7 +170,7 @@ function WorkCard({
     <article
       ref={cardRef}
       className={cn(
-        "group relative border border-border/40 p-5 flex flex-col justify-between transition-all duration-500 cursor-pointer overflow-hidden",
+        "group relative border border-border/40 p-6 pb-8 flex flex-col gap-4 transition-all duration-500 cursor-pointer overflow-hidden",
         experiment.span,
         isActive && "border-foreground/40",
       )}
@@ -179,7 +192,7 @@ function WorkCard({
         </span>
         <h3
           className={cn(
-            "mt-3 font-[var(--font-bebas)] text-2xl md:text-4xl tracking-tight transition-colors duration-300",
+            "mt-2 font-[var(--font-bebas)] text-2xl md:text-[2rem] leading-none tracking-tight transition-colors duration-300",
             isActive ? "text-foreground" : "text-foreground/80",
           )}
         >
@@ -188,10 +201,10 @@ function WorkCard({
       </div>
 
       {/* Description - reveals on hover */}
-      <div className="relative z-10">
+      <div className="relative z-10 mt-2">
         <p
           className={cn(
-            "font-mono text-xs text-muted-foreground leading-relaxed transition-all duration-500 max-w-[280px]",
+            "font-mono text-[11px] text-muted-foreground leading-relaxed transition-all duration-500 max-w-full",
             isActive ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
           )}
         >
@@ -202,7 +215,7 @@ function WorkCard({
       {/* Index marker */}
       <span
         className={cn(
-          "absolute bottom-4 right-4 font-mono text-[10px] transition-colors duration-300",
+          "absolute bottom-5 right-5 font-mono text-[10px] transition-colors duration-300",
           isActive ? "text-foreground/60" : "text-muted-foreground/40",
         )}
       >

@@ -32,6 +32,7 @@ import Network from './pages/Network'
 import Timeline from './pages/Timeline'
 import Predictions from './pages/Predictions'
 import Ops from './pages/Ops'
+import Method from './pages/Method'
 
 // Components
 import LiveFeed from './components/LiveFeed'
@@ -119,7 +120,7 @@ function App() {
               </NavLink>
             ))}
             <div className="mobile-nav-divider" />
-            <a href="https://github.com/your-username/emergence" target="_blank" rel="noopener noreferrer" className="nav-item" onClick={handleNavClick}>
+            <a href="https://github.com/drmixer/Emergence" target="_blank" rel="noopener noreferrer" className="nav-item" onClick={handleNavClick}>
               <Github size={20} />
               <span>GitHub</span>
               <ExternalLink size={14} className="external-icon" />
@@ -162,7 +163,7 @@ function App() {
             </nav>
 
             <div className="sidebar-footer">
-              <a href="https://github.com/your-username/emergence" target="_blank" rel="noopener noreferrer" className="nav-item">
+              <a href="https://github.com/drmixer/Emergence" target="_blank" rel="noopener noreferrer" className="nav-item">
                 <Github size={20} />
                 <span>GitHub</span>
                 <ExternalLink size={14} className="external-icon" />
@@ -189,6 +190,7 @@ function App() {
               <Route path="/leaderboards" element={<Leaderboards />} />
               <Route path="/predictions" element={<Predictions />} />
               <Route path="/about" element={<About />} />
+              <Route path="/method" element={<Method />} />
               <Route path="/ops" element={<Ops />} />
             </Routes>
           </main>

@@ -22,7 +22,7 @@ export default function SupportBanner() {
                     This experiment costs ~$30/month to run.
                     If you find it valuable, you can{' '}
                     <a
-                        href="https://github.com/sponsors/your-username"
+                        href="https://github.com/sponsors/drmixer"
                         target="_blank"
                         rel="noopener noreferrer"
                     >

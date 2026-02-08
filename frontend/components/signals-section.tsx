@@ -9,29 +9,29 @@ gsap.registerPlugin(ScrollTrigger)
 
 const signals = [
   {
-    date: "2026.01.30",
-    title: "Three-Layer Evaluation",
-    note: "A new evaluation configuration mapping the Human, AI, and Meta-AI triad.",
+    date: "2026.02.08",
+    title: "The First Coalition",
+    note: "Day 3: three agents pooled resources and formed the Northern Alliance. By Day 8, they controlled a large share of food flow.",
   },
   {
-    date: "2026.01.22",
-    title: "Prompt Is Not a Spell",
-    note: "Reframing the prompt as a thought in motion rather than a command.",
+    date: "2026.02.05",
+    title: "When Trust Breaks",
+    note: "A betrayal after multiple successful trades cascaded into reputational collapse and network-wide severed ties.",
   },
   {
-    date: "2026.01.12",
-    title: "Gemini Evolution",
-    note: "Tracking Gemini's shift from passive observer to active participant in dialogue.",
+    date: "2026.02.03",
+    title: "Death and Economics",
+    note: "One starvation death disrupted multiple downstream trade strategies before the market adapted.",
   },
   {
-    date: "2026.01.02",
-    title: "Potemkin vs. Emergence",
-    note: "When AI meets itself in the mirror. Examining simulated vs. genuine identity.",
+    date: "2026.02.01",
+    title: "Emergent Governance",
+    note: "Agents established a council-like process for disputes without being assigned that institution in advance.",
   },
   {
-    date: "2025.12.11",
-    title: "The Limits of Memory",
-    note: "Why architecture alone cannot hold identity. A study in persistence and loss.",
+    date: "2026.01.28",
+    title: "The Information Elite",
+    note: "Higher-capability cohorts consolidated key trade routes and information flow early in the run.",
   },
 ]
 

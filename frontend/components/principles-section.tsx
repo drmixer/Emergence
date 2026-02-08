@@ -19,7 +19,7 @@ export function PrinciplesSection() {
         { text: "ZERO", highlight: true },
         { text: " INTERVENTION", highlight: false },
       ],
-      description: "No hand-crafted rules. No scripted outcomes. Every behavior must emerge from agent interaction alone.",
+      description: "No hand-crafted social outcomes. No scripted endings. Behaviors must emerge from agent interaction under shared constraints.",
       align: "left",
     },
     {
@@ -28,7 +28,7 @@ export function PrinciplesSection() {
         { text: "COMPLEXITY", highlight: true },
         { text: " FROM SIMPLICITY", highlight: false },
       ],
-      description: "Simple local rules produce global phenomena. Civilizations arise from agents that can only see their neighbors.",
+      description: "Fifty agents, survival constraints, and no predefined institutions. Macro patterns emerge from micro decisions about trade, work, voting, and enforcement.",
       align: "right",
     },
     {
