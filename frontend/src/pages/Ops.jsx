@@ -928,7 +928,7 @@ export default function Ops() {
                     type="text"
                     value={articleEditor.title}
                     onChange={(event) => setArticleEditor((prev) => ({ ...prev, title: event.target.value }))}
-                    placeholder="Coalitions Under Death Pressure"
+                    placeholder="Before the First Full Run"
                     disabled={!writeEnabled}
                   />
                 </label>
@@ -940,7 +940,7 @@ export default function Ops() {
                       type="text"
                       value={articleEditor.slug}
                       onChange={(event) => setArticleEditor((prev) => ({ ...prev, slug: slugify(event.target.value) }))}
-                      placeholder="coalitions-under-death-pressure"
+                      placeholder="before-the-first-full-run"
                       disabled={!writeEnabled}
                     />
                   </label>

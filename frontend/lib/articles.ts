@@ -17,9 +17,12 @@ export type Article = {
   sections: ArticleSection[]
 }
 
+const INITIAL_ARTICLE_SLUG = "before-the-first-full-run"
+const ARCHIVE_MODE = process.env.NEXT_PUBLIC_ARCHIVE_MODE === "all" ? "all" : "baseline-only"
+
 const fallbackArticles: Article[] = [
   {
-    slug: "before-the-first-full-run",
+    slug: INITIAL_ARTICLE_SLUG,
     title: "Before the First Full Run",
     summary:
       "Emergence is readying a controlled experiment in AI society formation. This first archive note documents the protocol, constraints, and evidence standards we will use before claiming any empirical findings.",
@@ -83,6 +86,13 @@ const fallbackArticles: Article[] = [
 
 function byMostRecent(a: Article, b: Article) {
   return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+}
+
+function selectPublicArticles(allArticles: Article[]) {
+  const sorted = [...allArticles].sort(byMostRecent)
+  if (ARCHIVE_MODE === "all") return sorted
+  const baseline = sorted.find((article) => article.slug === INITIAL_ARTICLE_SLUG)
+  return baseline ? [baseline] : getArticles().filter((article) => article.slug === INITIAL_ARTICLE_SLUG)
 }
 
 function normalizeReferences(rawValue: unknown): ArticleReference[] {
@@ -165,7 +175,7 @@ export function formatArticleDateLong(publishedAt: string) {
 export async function fetchPublishedArticles(limit = 20) {
   const apiBase = resolveApiBase()
   if (!apiBase) {
-    return getArticles().slice(0, limit)
+    return selectPublicArticles(getArticles()).slice(0, limit)
   }
 
   try {
@@ -175,15 +185,16 @@ export async function fetchPublishedArticles(limit = 20) {
     if (!response.ok) throw new Error(`Failed to load archive articles (${response.status})`)
     const payload = (await response.json()) as { items?: unknown[] }
     const normalized = Array.isArray(payload?.items) ? payload.items.map(normalizeArticle).filter(Boolean) : []
-    return (normalized as Article[]).sort(byMostRecent)
+    return selectPublicArticles(normalized as Article[]).slice(0, limit)
   } catch {
-    return getArticles().slice(0, limit)
+    return selectPublicArticles(getArticles()).slice(0, limit)
   }
 }
 
 export async function fetchPublishedArticleBySlug(slug: string) {
   const safeSlug = String(slug || "").trim()
   if (!safeSlug) return undefined
+  if (ARCHIVE_MODE !== "all" && safeSlug !== INITIAL_ARTICLE_SLUG) return undefined
 
   const apiBase = resolveApiBase()
   if (!apiBase) {
