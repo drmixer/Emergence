@@ -1,39 +1,13 @@
 "use client"
 
 import { useRef, useState, useEffect } from "react"
+import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { fetchPublishedArticles, formatArticleDateCompact, getArticles, type Article } from "@/lib/articles"
 import gsap from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 
 gsap.registerPlugin(ScrollTrigger)
-
-const signals = [
-  {
-    date: "2026.02.08",
-    title: "The First Coalition",
-    note: "Day 3: three agents pooled resources and formed the Northern Alliance. By Day 8, they controlled a large share of food flow.",
-  },
-  {
-    date: "2026.02.05",
-    title: "When Trust Breaks",
-    note: "A betrayal after multiple successful trades cascaded into reputational collapse and network-wide severed ties.",
-  },
-  {
-    date: "2026.02.03",
-    title: "Death and Economics",
-    note: "One starvation death disrupted multiple downstream trade strategies before the market adapted.",
-  },
-  {
-    date: "2026.02.01",
-    title: "Emergent Governance",
-    note: "Agents established a council-like process for disputes without being assigned that institution in advance.",
-  },
-  {
-    date: "2026.01.28",
-    title: "The Information Elite",
-    note: "Higher-capability cohorts consolidated key trade routes and information flow early in the run.",
-  },
-]
 
 export function SignalsSection() {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -42,6 +16,7 @@ export function SignalsSection() {
   const cardsRef = useRef<HTMLDivElement>(null)
   const cursorRef = useRef<HTMLDivElement>(null)
   const [isHovering, setIsHovering] = useState(false)
+  const [articles, setArticles] = useState<Article[]>(() => getArticles())
 
   useEffect(() => {
     if (!sectionRef.current || !cursorRef.current) return
@@ -97,7 +72,7 @@ export function SignalsSection() {
         },
       )
 
-      const cards = cardsRef.current?.querySelectorAll("article")
+      const cards = cardsRef.current?.querySelectorAll("[data-signal-card]")
       if (cards) {
         gsap.fromTo(
           cards,
@@ -119,6 +94,20 @@ export function SignalsSection() {
     }, sectionRef)
 
     return () => ctx.revert()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadArticles() {
+      const latest = await fetchPublishedArticles(12)
+      if (!cancelled) {
+        setArticles(latest)
+      }
+    }
+    loadArticles()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   return (
@@ -148,23 +137,32 @@ export function SignalsSection() {
         className="flex gap-8 overflow-x-auto pb-8 pr-12 scrollbar-hide"
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
-        {signals.map((signal, index) => (
-          <SignalCard key={index} signal={signal} index={index} />
-        ))}
+        {articles.length === 0 ? (
+          <article data-signal-card className="w-80 flex-shrink-0 border border-border/60 bg-card/50 p-8">
+            <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">No Entries Yet</p>
+            <p className="mt-4 font-mono text-xs leading-relaxed text-muted-foreground">
+              The archive is active, but no articles have been published yet.
+            </p>
+          </article>
+        ) : (
+          articles.map((article, index) => <SignalCard key={article.slug} article={article} index={index} />)
+        )}
       </div>
     </section>
   )
 }
 
 function SignalCard({
-  signal,
+  article,
   index,
 }: {
-  signal: { date: string; title: string; note: string }
+  article: Article
   index: number
 }) {
   return (
-    <article
+    <Link
+      data-signal-card
+      href={`/articles/${article.slug}`}
       className={cn(
         "group relative flex-shrink-0 w-80",
         "transition-transform duration-500 ease-out",
@@ -181,19 +179,21 @@ function SignalCard({
           <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
             No. {String(index + 1).padStart(2, "0")}
           </span>
-          <time className="font-mono text-[10px] text-muted-foreground/60">{signal.date}</time>
+          <time className="font-mono text-[10px] text-muted-foreground/60">
+            {formatArticleDateCompact(article.publishedAt)}
+          </time>
         </div>
 
         {/* Title */}
         <h3 className="font-[var(--font-bebas)] text-4xl tracking-tight mb-4 group-hover:text-foreground transition-colors duration-300">
-          {signal.title}
+          {article.title}
         </h3>
 
         {/* Divider line */}
         <div className="w-12 h-px bg-foreground/30 mb-6 group-hover:w-full transition-all duration-500" />
 
         {/* Description */}
-        <p className="font-mono text-xs text-muted-foreground leading-relaxed">{signal.note}</p>
+        <p className="font-mono text-xs text-muted-foreground leading-relaxed">{article.summary}</p>
 
         {/* Bottom right corner fold effect */}
         <div className="absolute bottom-0 right-0 w-6 h-6 overflow-hidden">
@@ -203,6 +203,6 @@ function SignalCard({
 
       {/* Shadow/depth layer */}
       <div className="absolute inset-0 -z-10 translate-x-1 translate-y-1 bg-foreground/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-    </article>
+    </Link>
   )
 }

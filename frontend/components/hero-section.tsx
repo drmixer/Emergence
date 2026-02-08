@@ -229,12 +229,12 @@ export function HeroSection() {
             <ScrambleTextOnHover text="Enter the Archive" as="span" duration={0.6} />
             <BitmapChevron className="transition-transform duration-[400ms] ease-in-out group-hover:rotate-45" />
           </a>
-          <a
-            href="#signals"
+          <Link
+            href="/articles"
             className="font-mono text-xs uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors duration-200"
           >
             Latest Articles
-          </a>
+          </Link>
         </div>
       </div>
 

@@ -337,6 +337,70 @@ class APIService {
         })
     }
 
+    // Admin archive/articles
+    async getAdminArchiveArticles(token, adminUser = null, status = 'all', limit = 200, offset = 0) {
+        const params = new URLSearchParams()
+        params.append('status', String(status || 'all'))
+        params.append('limit', String(limit))
+        params.append('offset', String(offset))
+        return this.fetch(`/api/admin/archive/articles?${params.toString()}`, {
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
+    async createAdminArchiveArticle(token, payload, adminUser = null) {
+        return this.fetch('/api/admin/archive/articles', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify(payload || {}),
+        })
+    }
+
+    async updateAdminArchiveArticle(token, articleId, payload, adminUser = null) {
+        return this.fetch(`/api/admin/archive/articles/${articleId}`, {
+            method: 'PATCH',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify(payload || {}),
+        })
+    }
+
+    async publishAdminArchiveArticle(token, articleId, publishedAt = null, adminUser = null) {
+        return this.fetch(`/api/admin/archive/articles/${articleId}/publish`, {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                published_at: publishedAt || null,
+            }),
+        })
+    }
+
+    async unpublishAdminArchiveArticle(token, articleId, adminUser = null) {
+        return this.fetch(`/api/admin/archive/articles/${articleId}/unpublish`, {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({}),
+        })
+    }
+
+    async deleteAdminArchiveArticle(token, articleId, adminUser = null) {
+        return this.fetch(`/api/admin/archive/articles/${articleId}`, {
+            method: 'DELETE',
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
+    // Public archive/articles
+    async getArchiveArticles(limit = 20, offset = 0) {
+        const params = new URLSearchParams()
+        params.append('limit', String(limit))
+        params.append('offset', String(offset))
+        return this.fetch(`/api/archive/articles?${params.toString()}`)
+    }
+
+    async getArchiveArticleBySlug(slug) {
+        return this.fetch(`/api/archive/articles/${encodeURIComponent(String(slug || '').trim())}`)
+    }
+
     // Landing Page Stats
     async getLandingStats() {
         try {

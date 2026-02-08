@@ -9,12 +9,80 @@ import {
   Rocket,
   Save,
   Loader2,
+  Plus,
+  FilePenLine,
+  Trash2,
+  Upload,
+  EyeOff,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { api } from '../services/api'
 
 const TOKEN_STORAGE_KEY = 'emergence_admin_token'
 const USER_STORAGE_KEY = 'emergence_admin_user'
+
+const EMPTY_ARTICLE_EDITOR = {
+  id: null,
+  slug: '',
+  title: '',
+  summary: '',
+  publishedAt: '',
+  status: 'draft',
+  sectionsText: JSON.stringify(
+    [
+      {
+        heading: '',
+        paragraphs: [''],
+        references: [],
+      },
+    ],
+    null,
+    2
+  ),
+}
+
+function slugify(rawValue) {
+  return String(rawValue || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+function toArticleEditor(article) {
+  if (!article) return { ...EMPTY_ARTICLE_EDITOR }
+  return {
+    id: Number(article.id),
+    slug: String(article.slug || ''),
+    title: String(article.title || ''),
+    summary: String(article.summary || ''),
+    publishedAt: String(article.published_at || ''),
+    status: String(article.status || 'draft'),
+    sectionsText: JSON.stringify(Array.isArray(article.sections) ? article.sections : [], null, 2),
+  }
+}
+
+function validateAndParseSections(sectionsText) {
+  let parsed = null
+  try {
+    parsed = JSON.parse(String(sectionsText || '[]'))
+  } catch {
+    return { error: 'Sections JSON is invalid', sections: null }
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return { error: 'Sections must be a non-empty array', sections: null }
+  }
+  for (const section of parsed) {
+    const heading = String(section?.heading || '').trim()
+    const paragraphs = Array.isArray(section?.paragraphs)
+      ? section.paragraphs.map((paragraph) => String(paragraph).trim()).filter(Boolean)
+      : []
+    if (!heading || paragraphs.length === 0) {
+      return { error: 'Every section must include a heading and at least one paragraph', sections: null }
+    }
+  }
+  return { error: '', sections: parsed }
+}
 
 function stringifyValue(value) {
   if (value === null || value === undefined) return 'null'
@@ -66,6 +134,9 @@ export default function Ops() {
   const [error, setError] = useState('')
   const [metricsWarning, setMetricsWarning] = useState('')
   const [notice, setNotice] = useState('')
+  const [adminArticles, setAdminArticles] = useState([])
+  const [articleEditor, setArticleEditor] = useState({ ...EMPTY_ARTICLE_EDITOR })
+  const [articleAction, setArticleAction] = useState('')
 
   const connected = Boolean(token.trim())
   const writeEnabled = Boolean(config?.admin_write_enabled)
@@ -83,10 +154,11 @@ export default function Ops() {
     setMetricsWarning('')
 
     try {
-      const [statusResponse, configResponse, auditResponse] = await Promise.all([
+      const [statusResponse, configResponse, auditResponse, articlesResponse] = await Promise.all([
         api.getAdminStatus(token, adminUser),
         api.getAdminConfig(token, adminUser),
         api.getAdminAudit(token, 50, 0, adminUser),
+        api.getAdminArchiveArticles(token, adminUser),
       ])
       const activeRunId = String(statusResponse?.viewer_ops?.run_id || '').trim()
       let runMetricsResponse = null
@@ -99,6 +171,11 @@ export default function Ops() {
       setStatus(statusResponse)
       setConfig(configResponse)
       setAudit(Array.isArray(auditResponse?.items) ? auditResponse.items : [])
+      const resolvedArticles = Array.isArray(articlesResponse?.items) ? articlesResponse.items : []
+      setAdminArticles(resolvedArticles)
+      if (!articleEditor.id && resolvedArticles.length > 0) {
+        setArticleEditor(toArticleEditor(resolvedArticles[0]))
+      }
       setRunMetrics(runMetricsResponse)
       setRunIdInput(activeRunId)
       setResetOnTestStart(String(configResponse?.environment || statusResponse?.environment || '').toLowerCase() !== 'production')
@@ -279,6 +356,120 @@ export default function Ops() {
       () => api.resetDevWorld(token, reasonText || 'ops_ui_reset_dev', adminUser),
       'Dev world reset + reseeded'
     )
+  }
+
+  const onNewArticle = () => {
+    setArticleEditor({ ...EMPTY_ARTICLE_EDITOR })
+  }
+
+  const onSelectArticle = (article) => {
+    setArticleEditor(toArticleEditor(article))
+  }
+
+  const onAutofillSlug = () => {
+    setArticleEditor((prev) => ({ ...prev, slug: slugify(prev.title) }))
+  }
+
+  const onSaveArticle = async (nextStatus = 'draft') => {
+    if (!connected || !writeEnabled) return
+    const title = String(articleEditor.title || '').trim()
+    const slug = String(articleEditor.slug || '').trim()
+    const summary = String(articleEditor.summary || '').trim()
+    const { error: sectionsError, sections } = validateAndParseSections(articleEditor.sectionsText)
+
+    if (!title || !slug || !summary) {
+      setError('Article title, slug, and summary are required')
+      return
+    }
+    if (sectionsError || !sections) {
+      setError(sectionsError || 'Invalid sections payload')
+      return
+    }
+
+    const payload = {
+      slug,
+      title,
+      summary,
+      status: nextStatus,
+      published_at: String(articleEditor.publishedAt || '').trim() || null,
+      sections,
+    }
+
+    setArticleAction(nextStatus === 'published' ? 'publish' : 'save')
+    setNotice('')
+    setError('')
+
+    try {
+      const response = articleEditor.id
+        ? await api.updateAdminArchiveArticle(token, articleEditor.id, payload, adminUser)
+        : await api.createAdminArchiveArticle(token, payload, adminUser)
+      setArticleEditor(toArticleEditor(response))
+      setNotice(nextStatus === 'published' ? 'Article published' : 'Draft saved')
+      await loadOpsData()
+    } catch (articleError) {
+      setError(formatApiError(articleError, 'Failed to save article'))
+    } finally {
+      setArticleAction('')
+    }
+  }
+
+  const onPublishExistingArticle = async () => {
+    if (!connected || !writeEnabled || !articleEditor.id) return
+    setArticleAction('publish-existing')
+    setNotice('')
+    setError('')
+    try {
+      const response = await api.publishAdminArchiveArticle(
+        token,
+        articleEditor.id,
+        String(articleEditor.publishedAt || '').trim() || null,
+        adminUser
+      )
+      setArticleEditor(toArticleEditor(response))
+      setNotice('Article published')
+      await loadOpsData()
+    } catch (articleError) {
+      setError(formatApiError(articleError, 'Failed to publish article'))
+    } finally {
+      setArticleAction('')
+    }
+  }
+
+  const onUnpublishArticle = async () => {
+    if (!connected || !writeEnabled || !articleEditor.id) return
+    setArticleAction('unpublish')
+    setNotice('')
+    setError('')
+    try {
+      const response = await api.unpublishAdminArchiveArticle(token, articleEditor.id, adminUser)
+      setArticleEditor(toArticleEditor(response))
+      setNotice('Article moved to draft')
+      await loadOpsData()
+    } catch (articleError) {
+      setError(formatApiError(articleError, 'Failed to unpublish article'))
+    } finally {
+      setArticleAction('')
+    }
+  }
+
+  const onDeleteArticle = async () => {
+    if (!connected || !writeEnabled || !articleEditor.id) return
+    if (!window.confirm('Delete this article? This action cannot be undone.')) {
+      return
+    }
+    setArticleAction('delete')
+    setNotice('')
+    setError('')
+    try {
+      await api.deleteAdminArchiveArticle(token, articleEditor.id, adminUser)
+      setNotice('Article deleted')
+      setArticleEditor({ ...EMPTY_ARTICLE_EDITOR })
+      await loadOpsData()
+    } catch (articleError) {
+      setError(formatApiError(articleError, 'Failed to delete article'))
+    } finally {
+      setArticleAction('')
+    }
   }
 
   const activeRunId = String(status?.viewer_ops?.run_id || '').trim()
@@ -657,6 +848,165 @@ export default function Ops() {
                   {submittingConfig ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
                   Apply updates
                 </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="card ops-articles-card">
+            <div className="card-header">
+              <h3>Archive Publisher</h3>
+              <div className="ops-article-header-actions">
+                <span className="ops-meta">{adminArticles.length} articles</span>
+                <button className="btn-subtle" type="button" onClick={onNewArticle} disabled={!writeEnabled}>
+                  <Plus size={14} />
+                  New
+                </button>
+              </div>
+            </div>
+            <div className="card-body ops-articles-layout">
+              <div className="ops-articles-list">
+                {adminArticles.length === 0 ? (
+                  <div className="empty-state compact">No archive articles yet.</div>
+                ) : (
+                  adminArticles.map((article) => {
+                    const isSelected = Number(articleEditor.id) === Number(article.id)
+                    return (
+                      <button
+                        key={article.id}
+                        type="button"
+                        className={`ops-article-row ${isSelected ? 'selected' : ''}`}
+                        onClick={() => onSelectArticle(article)}
+                      >
+                        <div className="ops-article-row-top">
+                          <strong>{article.title}</strong>
+                          <span className={`ops-status-pill ${article.status === 'published' ? 'published' : 'draft'}`}>
+                            {article.status}
+                          </span>
+                        </div>
+                        <div className="ops-article-row-bottom">
+                          <span>{article.slug}</span>
+                          <span>{article.published_at || 'unpublished'}</span>
+                        </div>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+
+              <div className="ops-article-editor">
+                <label className="ops-field">
+                  <span>Title</span>
+                  <input
+                    type="text"
+                    value={articleEditor.title}
+                    onChange={(event) => setArticleEditor((prev) => ({ ...prev, title: event.target.value }))}
+                    placeholder="Coalitions Under Death Pressure"
+                    disabled={!writeEnabled}
+                  />
+                </label>
+
+                <div className="ops-article-slug-row">
+                  <label className="ops-field">
+                    <span>Slug</span>
+                    <input
+                      type="text"
+                      value={articleEditor.slug}
+                      onChange={(event) => setArticleEditor((prev) => ({ ...prev, slug: slugify(event.target.value) }))}
+                      placeholder="coalitions-under-death-pressure"
+                      disabled={!writeEnabled}
+                    />
+                  </label>
+                  <button className="btn-subtle" type="button" onClick={onAutofillSlug} disabled={!writeEnabled}>
+                    <FilePenLine size={14} />
+                    Autofill
+                  </button>
+                </div>
+
+                <label className="ops-field">
+                  <span>Published date</span>
+                  <input
+                    type="date"
+                    value={articleEditor.publishedAt}
+                    onChange={(event) => setArticleEditor((prev) => ({ ...prev, publishedAt: event.target.value }))}
+                    disabled={!writeEnabled}
+                  />
+                </label>
+
+                <label className="ops-field">
+                  <span>Summary</span>
+                  <textarea
+                    rows={4}
+                    value={articleEditor.summary}
+                    onChange={(event) => setArticleEditor((prev) => ({ ...prev, summary: event.target.value }))}
+                    placeholder="Concise field summary for cards and index listing."
+                    disabled={!writeEnabled}
+                  />
+                </label>
+
+                <label className="ops-field">
+                  <span>Sections JSON</span>
+                  <textarea
+                    rows={16}
+                    value={articleEditor.sectionsText}
+                    onChange={(event) => setArticleEditor((prev) => ({ ...prev, sectionsText: event.target.value }))}
+                    placeholder='[{"heading":"...", "paragraphs":["..."]}]'
+                    disabled={!writeEnabled}
+                    className="ops-sections-textarea"
+                  />
+                </label>
+
+                <div className="ops-article-actions">
+                  <button
+                    className="btn-primary"
+                    type="button"
+                    onClick={() => onSaveArticle('draft')}
+                    disabled={!writeEnabled || articleAction === 'save' || articleAction === 'publish'}
+                  >
+                    {(articleAction === 'save' && <Loader2 size={14} className="spin" />) || <Save size={14} />}
+                    Save Draft
+                  </button>
+                  <button
+                    className="btn-primary"
+                    type="button"
+                    onClick={() => onSaveArticle('published')}
+                    disabled={!writeEnabled || articleAction === 'save' || articleAction === 'publish'}
+                  >
+                    {(articleAction === 'publish' && <Loader2 size={14} className="spin" />) || <Upload size={14} />}
+                    Save + Publish
+                  </button>
+                </div>
+
+                {articleEditor.id && (
+                  <div className="ops-article-actions">
+                    <button
+                      className="btn-subtle"
+                      type="button"
+                      onClick={onPublishExistingArticle}
+                      disabled={!writeEnabled || articleAction === 'publish-existing'}
+                    >
+                      {(articleAction === 'publish-existing' && <Loader2 size={14} className="spin" />) || <Upload size={14} />}
+                      Publish Existing
+                    </button>
+                    <button
+                      className="btn-subtle"
+                      type="button"
+                      onClick={onUnpublishArticle}
+                      disabled={!writeEnabled || articleAction === 'unpublish'}
+                    >
+                      {(articleAction === 'unpublish' && <Loader2 size={14} className="spin" />) || <EyeOff size={14} />}
+                      Unpublish
+                    </button>
+                    <button
+                      className="btn-subtle danger"
+                      type="button"
+                      onClick={onDeleteArticle}
+                      disabled={!writeEnabled || articleAction === 'delete'}
+                    >
+                      {(articleAction === 'delete' && <Loader2 size={14} className="spin" />) || <Trash2 size={14} />}
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </section>

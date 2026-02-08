@@ -15,7 +15,8 @@ import {
   X,
   Share2,
   Calendar,
-  TrendingUp
+  TrendingUp,
+  Shield,
 } from 'lucide-react'
 
 // Pages
@@ -59,6 +60,7 @@ function App() {
     { path: '/highlights', icon: Star, label: 'Highlights' },
     { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
     { path: '/leaderboards', icon: Trophy, label: 'Leaderboards' },
+    { path: '/ops', icon: Shield, label: 'Ops' },
   ]
 
   const handleNavClick = () => {

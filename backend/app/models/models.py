@@ -3,7 +3,7 @@ SQLAlchemy models for Emergence.
 """
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DECIMAL, 
-    ForeignKey, DateTime, JSON, CheckConstraint, UniqueConstraint
+    ForeignKey, Date, DateTime, JSON, CheckConstraint, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -417,3 +417,24 @@ class AdminConfigChange(Base):
     environment = Column(String(50), nullable=False)
     reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ArchiveArticle(Base):
+    """Long-form archive content managed from Ops UI."""
+    __tablename__ = "archive_articles"
+
+    id = Column(Integer, primary_key=True)
+    slug = Column(String(160), nullable=False, unique=True)
+    title = Column(String(255), nullable=False)
+    summary = Column(Text, nullable=False)
+    sections = Column(JSON, nullable=False, default=list)
+    status = Column(String(20), nullable=False, default="draft")
+    published_at = Column(Date, nullable=True)
+    created_by = Column(String(120), nullable=True)
+    updated_by = Column(String(120), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'published')", name="valid_archive_article_status"),
+    )

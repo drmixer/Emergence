@@ -14,6 +14,7 @@ from app.models.models import (
     Infrastructure,
     RuntimeConfigOverride,
     AdminConfigChange,
+    ArchiveArticle,
 )
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "Infrastructure",
     "RuntimeConfigOverride",
     "AdminConfigChange",
+    "ArchiveArticle",
 ]
