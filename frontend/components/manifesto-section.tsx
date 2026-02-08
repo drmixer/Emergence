@@ -93,7 +93,7 @@ function typeStanza(
     for (let i = 0; i < line.text.length; i++) {
       const span = document.createElement("span")
       if (line.text[i] === " ") {
-        span.innerHTML = "&nbsp;"
+        span.textContent = " "
       } else {
         span.textContent = line.text[i]
       }
@@ -159,7 +159,7 @@ function Stanza({ stanza, index }: { stanza: (typeof stanzas)[number]; index: nu
             ref={(el) => {
               linesRef.current[i] = el
             }}
-            className="font-mono text-base md:text-lg text-foreground/90 leading-relaxed inline-flex items-baseline"
+            className="font-mono text-base md:text-lg text-foreground/90 leading-relaxed block w-full"
           >
             <span className="char-container" />
             <span
