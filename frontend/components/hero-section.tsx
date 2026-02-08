@@ -222,19 +222,19 @@ export function HeroSection() {
         </div>
 
         <div className="mt-10 flex flex-wrap items-center gap-4 sm:gap-8">
-          <a
-            href="#work"
-            className="group inline-flex items-center gap-3 border border-foreground/20 px-6 py-3 font-mono text-xs uppercase tracking-widest text-foreground hover:border-foreground hover:text-foreground transition-all duration-200"
+          <Link
+            href="/articles"
+            className="group inline-flex items-center gap-3 border border-foreground/20 px-6 py-3 font-mono text-xs uppercase tracking-widest text-foreground transition-all duration-200 hover:border-foreground hover:text-foreground"
           >
             <ScrambleTextOnHover text="Enter the Archive" as="span" duration={0.6} />
             <BitmapChevron className="transition-transform duration-[400ms] ease-in-out group-hover:rotate-45" />
-          </a>
-          <Link
-            href="/articles"
-            className="font-mono text-xs uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors duration-200"
-          >
-            Latest Articles
           </Link>
+          <a
+            href="#work"
+            className="font-mono text-xs uppercase tracking-widest text-muted-foreground transition-colors duration-200 hover:text-foreground"
+          >
+            Explore Pillars
+          </a>
         </div>
       </div>
 

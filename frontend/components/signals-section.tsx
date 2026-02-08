@@ -15,6 +15,8 @@ export function SignalsSection() {
   const headerRef = useRef<HTMLDivElement>(null)
   const cardsRef = useRef<HTMLDivElement>(null)
   const cursorRef = useRef<HTMLDivElement>(null)
+  const rafRef = useRef<number | null>(null)
+  const cursorTargetRef = useRef({ x: 0, y: 0 })
   const [isHovering, setIsHovering] = useState(false)
   const [articles, setArticles] = useState<Article[]>(() => getArticles())
 
@@ -23,28 +25,48 @@ export function SignalsSection() {
 
     const section = sectionRef.current
     const cursor = cursorRef.current
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    if (reduceMotion) return
+
+    const moveCursorX = gsap.quickTo(cursor, "x", {
+      duration: 0.22,
+      ease: "power3.out",
+    })
+    const moveCursorY = gsap.quickTo(cursor, "y", {
+      duration: 0.22,
+      ease: "power3.out",
+    })
+
+    const flushCursorPosition = () => {
+      rafRef.current = null
+      moveCursorX(cursorTargetRef.current.x)
+      moveCursorY(cursorTargetRef.current.y)
+    }
 
     const handleMouseMove = (e: MouseEvent) => {
       const rect = section.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
+      cursorTargetRef.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      }
 
-      gsap.to(cursor, {
-        x: x,
-        y: y,
-        duration: 0.5,
-        ease: "power3.out",
-      })
+      if (rafRef.current === null) {
+        rafRef.current = window.requestAnimationFrame(flushCursorPosition)
+      }
     }
 
     const handleMouseEnter = () => setIsHovering(true)
     const handleMouseLeave = () => setIsHovering(false)
 
-    section.addEventListener("mousemove", handleMouseMove)
+    section.addEventListener("mousemove", handleMouseMove, { passive: true })
     section.addEventListener("mouseenter", handleMouseEnter)
     section.addEventListener("mouseleave", handleMouseLeave)
 
     return () => {
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
       section.removeEventListener("mousemove", handleMouseMove)
       section.removeEventListener("mouseenter", handleMouseEnter)
       section.removeEventListener("mouseleave", handleMouseLeave)
@@ -117,7 +139,7 @@ export function SignalsSection() {
         className={cn(
           "pointer-events-none absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 z-50",
           "w-12 h-12 rounded-full border-2 border-foreground bg-foreground",
-          "transition-opacity duration-300",
+          "transition-opacity duration-300 will-change-transform",
           isHovering ? "opacity-100" : "opacity-0",
         )}
       />
