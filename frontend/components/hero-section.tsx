@@ -131,17 +131,17 @@ export function HeroSection() {
   const isPreLaunch = stats.day === 0 && stats.messages === 0
 
   return (
-    <section ref={sectionRef} id="hero" className="relative min-h-screen flex items-center pl-6 md:pl-28 pr-6 md:pr-12">
+    <section ref={sectionRef} id="hero" className="relative min-h-screen flex items-center px-4 md:pl-28 md:pr-12">
       {/* Left vertical label */}
-      <div className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2">
+      <div className="hidden md:block absolute left-4 md:left-6 top-1/2 -translate-y-1/2">
         <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground -rotate-90 origin-left block whitespace-nowrap">
           EMERGENCE
         </span>
       </div>
 
       {/* Main content */}
-      <div ref={contentRef} className="flex-1 w-full">
-        <SplitFlapText text="EMERGENCE" speed={80} />
+      <div ref={contentRef} className="flex-1 w-full min-w-0">
+        <SplitFlapText text="EMERGENCE" speed={80} className="max-w-full origin-left scale-[0.86] sm:scale-100" />
 
         <h2 className="font-[var(--font-bebas)] text-muted-foreground/60 text-[clamp(1rem,3vw,2rem)] mt-4 tracking-wide">
           A Living Experiment
