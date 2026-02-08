@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 from app.core.admin_auth import AdminActor, require_admin_auth
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.time import now_utc
 from app.models.models import ArchiveArticle
+from app.services.archive_drafts import generate_weekly_draft
 
 router = APIRouter()
 
@@ -46,6 +48,10 @@ class ArticleUpsertRequest(BaseModel):
 
 class ArticlePublishRequest(BaseModel):
     published_at: date | None = None
+
+
+class WeeklyDraftRequest(BaseModel):
+    lookback_days: int = Field(default=7, ge=1, le=30)
 
 
 def _serialize_section(section: ArticleSectionPayload) -> dict[str, Any]:
@@ -218,3 +224,28 @@ def delete_admin_archive_article(
     db.delete(article)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/drafts/weekly")
+def generate_weekly_archive_draft(
+    request: WeeklyDraftRequest,
+    db: Session = Depends(get_db),
+    actor: AdminActor = Depends(require_admin_auth),
+):
+    _assert_writes_enabled()
+    now = now_utc()
+    result = generate_weekly_draft(
+        db,
+        actor_id=actor.actor_id,
+        lookback_days=int(request.lookback_days),
+        anchor_date=now.date(),
+        now_ts=now,
+        skip_if_exists_for_anchor=True,
+    )
+    if result.created:
+        db.commit()
+        db.refresh(result.article)
+
+    payload = _serialize_article(result.article)
+    payload["generated"] = bool(result.created)
+    return payload

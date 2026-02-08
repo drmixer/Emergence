@@ -389,6 +389,14 @@ class APIService {
         })
     }
 
+    async generateWeeklyArchiveDraft(token, payload = {}, adminUser = null) {
+        return this.fetch('/api/admin/archive/drafts/weekly', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify(payload || {}),
+        })
+    }
+
     // Public archive/articles
     async getArchiveArticles(limit = 20, offset = 0) {
         const params = new URLSearchParams()

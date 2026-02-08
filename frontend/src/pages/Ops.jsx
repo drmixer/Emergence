@@ -14,6 +14,7 @@ import {
   Trash2,
   Upload,
   EyeOff,
+  WandSparkles,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { api } from '../services/api'
@@ -472,6 +473,23 @@ export default function Ops() {
     }
   }
 
+  const onGenerateWeeklyDraft = async () => {
+    if (!connected || !writeEnabled) return
+    setArticleAction('generate-weekly')
+    setNotice('')
+    setError('')
+    try {
+      const response = await api.generateWeeklyArchiveDraft(token, { lookback_days: 7 }, adminUser)
+      setArticleEditor(toArticleEditor(response))
+      setNotice(`Weekly draft created: ${response.slug}`)
+      await loadOpsData()
+    } catch (articleError) {
+      setError(formatApiError(articleError, 'Failed to generate weekly draft'))
+    } finally {
+      setArticleAction('')
+    }
+  }
+
   const activeRunId = String(status?.viewer_ops?.run_id || '').trim()
   const simulationActive = Boolean(status?.viewer_ops?.simulation_active)
   const paused = Boolean(status?.viewer_ops?.simulation_paused)
@@ -857,6 +875,16 @@ export default function Ops() {
               <h3>Archive Publisher</h3>
               <div className="ops-article-header-actions">
                 <span className="ops-meta">{adminArticles.length} articles</span>
+                <span className="ops-meta">Auto weekly drafts run on server schedule (UTC)</span>
+                <button
+                  className="btn-subtle"
+                  type="button"
+                  onClick={onGenerateWeeklyDraft}
+                  disabled={!writeEnabled || articleAction === 'generate-weekly'}
+                >
+                  {(articleAction === 'generate-weekly' && <Loader2 size={14} className="spin" />) || <WandSparkles size={14} />}
+                  Weekly Draft
+                </button>
                 <button className="btn-subtle" type="button" onClick={onNewArticle} disabled={!writeEnabled}>
                   <Plus size={14} />
                   New

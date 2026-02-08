@@ -132,6 +132,20 @@ class Settings(BaseSettings):
     SUMMARIES_ENABLED: bool = False
     SUMMARY_LLM_MODEL: str = "openrouter/anthropic/claude-3-haiku"
 
+    # Archive weekly draft generation (creates drafts only; no auto-publish).
+    ARCHIVE_WEEKLY_DRAFT_ENABLED: bool = True
+    ARCHIVE_WEEKLY_DRAFT_LOOKBACK_DAYS: int = 7
+    # UTC schedule for weekly draft creation.
+    # Weekday: Monday=0 ... Sunday=6
+    ARCHIVE_WEEKLY_DRAFT_WEEKDAY_UTC: int = 0
+    ARCHIVE_WEEKLY_DRAFT_HOUR_UTC: int = 15
+    ARCHIVE_WEEKLY_DRAFT_MINUTE_UTC: int = 0
+    # Allow delayed generation after scheduled time (for restarts/downtime).
+    ARCHIVE_WEEKLY_DRAFT_GRACE_HOURS: int = 48
+    # How often scheduler checks whether draft is due.
+    ARCHIVE_WEEKLY_DRAFT_CHECK_INTERVAL_MINUTES: int = 60
+    ARCHIVE_WEEKLY_DRAFT_ACTOR: str = "archive-weekly-bot"
+
     # Rate limiting
     MAX_ACTIONS_PER_HOUR: int = 20
     MAX_PROPOSALS_PER_DAY: int = 3
