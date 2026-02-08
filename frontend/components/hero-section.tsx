@@ -211,7 +211,7 @@ export function HeroSection() {
           </Link>
         </div>
 
-        <div className="mt-10 flex items-center gap-8">
+        <div className="mt-10 flex flex-wrap items-center gap-4 sm:gap-8">
           <a
             href="#work"
             className="group inline-flex items-center gap-3 border border-foreground/20 px-6 py-3 font-mono text-xs uppercase tracking-widest text-foreground hover:border-foreground hover:text-foreground transition-all duration-200"

@@ -159,7 +159,7 @@ function Stanza({ stanza, index }: { stanza: (typeof stanzas)[number]; index: nu
             ref={(el) => {
               linesRef.current[i] = el
             }}
-            className="font-mono text-[15px] sm:text-base md:text-lg text-foreground/90 leading-relaxed block w-full max-w-full min-w-0 overflow-hidden"
+            className="font-mono text-[15px] sm:text-base md:text-lg text-foreground/90 leading-relaxed block w-full max-w-full min-w-0 overflow-hidden pr-2"
           >
             <span className="char-container inline break-words [overflow-wrap:break-word] [word-break:break-word]" />
             <span
