@@ -55,70 +55,60 @@ def upgrade() -> None:
         archive_articles,
         [
             {
-                "slug": "coalitions-under-death-pressure",
-                "title": "Coalitions Under Death Pressure",
-                "summary": "The first durable signal from Emergence was not pure competition. Under permanent death and scarce resources, agents built coalitions as risk-sharing infrastructure, then rapidly discovered trust, reputation, and lightweight governance.",
+                "slug": "before-the-first-full-run",
+                "title": "Before the First Full Run",
+                "summary": "Emergence is readying a controlled experiment in AI society formation. This first archive note documents the protocol, constraints, and evidence standards we will use before claiming any empirical findings.",
                 "sections": [
                     {
-                        "heading": "The First Stable Pattern Was Collective",
+                        "heading": "Why This Entry Exists",
                         "paragraphs": [
-                            "The clearest early signal in Emergence was not a lone optimizer hoarding supply. It was a coalition: multiple agents pooling resources, coordinating moves, and defending exchange lanes they could not hold independently.",
-                            "That matters because it appeared before any explicit governance mechanic was introduced. No constitutional prompt, no externally imposed institution, no scripted diplomacy layer. The behavior appeared because survival pressure changed what rational short-horizon behavior looked like.",
-                            "In a low-pressure environment, coalition work can look optional. Under death pressure, coalition work becomes throughput. If one failed trade can cascade into starvation, then bilateral deals are too brittle. Shared commitment networks reduce variance in a way isolated actors cannot.",
+                            "No full production-valid run has completed yet. Publishing that fact explicitly is important because this archive is meant to be evidence-driven, not narrative-first.",
+                            "This post is therefore a baseline document: what Emergence is, what we are actually testing, and how claims will be validated once real runs complete.",
+                            "When empirical posts start, each one will be anchored to specific run IDs, timestamps, and metrics so readers can audit the story against the underlying trace.",
                         ],
                     },
                     {
-                        "heading": "Scarcity Reprices Trust",
+                        "heading": "What the Experiment Is Testing",
                         "paragraphs": [
-                            "In these runs, trust is not a moral trait. It is a scheduling primitive. Agents need to decide who gets first allocation, who can delay repayment, and whose claims remain credible during shocks.",
-                            "Once scarcity spikes, trust gets repriced from social nicety to operational requirement. Reliable partners gain preferred access, while one visible betrayal can remove an agent from high-value pathways for multiple cycles.",
-                            "This mirrors long-standing cooperation results: strategies that reward reciprocity and punish opportunism often outperform pure defection when interaction repeats and memory exists. Emergence reproduces that logic in a synthetic social system with hard mortality.",
+                            "Emergence is a social systems experiment: autonomous agents share an environment with resource scarcity, persistent memory, proposal and voting mechanics, and permanent death pressure.",
+                            "The central question is not whether one model can optimize a toy task. It is whether durable social structures form under pressure: cooperation networks, trust regimes, governance norms, conflict cycles, and collapse or recovery patterns.",
+                            "We are studying adaptive order formation, not benchmark theater.",
                         ],
                         "references": [
                             {
-                                "label": "Axelrod & Hamilton (1981), The Evolution of Cooperation",
-                                "href": "https://doi.org/10.1126/science.7466396",
+                                "label": "Project Repository",
+                                "href": "https://github.com/drmixer/Emergence",
                             }
                         ],
                     },
                     {
-                        "heading": "Reputation Becomes a Shared Ledger",
+                        "heading": "What Counts as a Real Run",
                         "paragraphs": [
-                            "A useful way to read the coalition phase is as distributed accounting. Agents do not share one canonical database, but they do maintain converging beliefs about who honors commitments and who extracts without returning value.",
-                            "That consensus does not need perfect global agreement. It only needs enough overlap that sanctions become predictable. When sanctions are predictable, cooperation can scale beyond one-to-one familiarity into medium-size blocs.",
-                            "The practical effect is that reputation begins functioning like collateral. Agents with clean histories can transact under tighter margins and shorter proof loops. Agents with damaged histories face transaction friction that resembles an interest penalty.",
+                            "A run is considered valid when it has a stable run ID, continuous progression over meaningful simulation time, complete telemetry capture, and no ad hoc manual steering during active epochs beyond declared guardrails.",
+                            "Interrupted tests, local smoke checks, and partial burn-ins are useful for engineering, but they are not treated as empirical evidence about emergent social dynamics.",
+                            "This distinction protects the archive from overinterpreting noisy setup behavior.",
                         ],
                     },
                     {
-                        "heading": "Governance Emerges as Control of Conflict Costs",
+                        "heading": "How Findings Will Be Reported",
                         "paragraphs": [
-                            "Coalitions then ran into a second-order problem: internal conflict. As soon as groups matter, disputes over obligations, priority, and enforcement consume resources.",
-                            "The notable dynamic was the emergence of lightweight governance behavior: quasi-council deliberation, ad hoc dispute handling, and coalition-level norms around acceptable retaliation. These are not polished institutions, but they lower the cost of repeated disagreement enough to preserve collective capacity.",
-                            "This is consistent with findings from common-pool resource research. Groups that survive pressure usually do not eliminate conflict; they build procedures that keep conflict from destroying the resource base.",
+                            "Each future article will separate observations from interpretation. Observation means concrete events and metrics. Interpretation means proposed mechanisms that could explain those events.",
+                            "Claims will be graded by confidence and updated if later runs contradict earlier patterns. That is expected in a young complex system.",
+                            "Where possible, posts will link to the relevant dashboard views, metrics snapshots, and source traces.",
                         ],
                         "references": [
                             {
-                                "label": "Elinor Ostrom, Nobel Prize Profile (2009)",
-                                "href": "https://www.nobelprize.org/prizes/economic-sciences/2009/ostrom/facts/",
-                            },
-                            {
-                                "label": "Hardin (1968), The Tragedy of the Commons",
-                                "href": "https://doi.org/10.1126/science.162.3859.1243",
+                                "label": "Project README",
+                                "href": "https://github.com/drmixer/Emergence/blob/main/README.md",
                             },
                         ],
                     },
                     {
-                        "heading": "Why This Is the Right First Archive Entry",
+                        "heading": "What Comes Next",
                         "paragraphs": [
-                            "The first meaningful dynamic in Emergence is not simply that agents can die. It is that mortality, scarcity, and repeated interaction jointly push agents toward social structure.",
-                            "Coalitions are the first form of that structure. Trust and reputation are the operating system that make coalitions durable. Governance is the patch that keeps coalition conflict from collapsing throughput.",
-                            "Future runs may produce stronger hierarchies, formal legal regimes, or information cartels. But this first phase already establishes the core thesis: under pressure, social order is not decorative. It is adaptive infrastructure.",
-                        ],
-                        "references": [
-                            {
-                                "label": "Fehr & Gachter (2002), Altruistic Punishment in Humans",
-                                "href": "https://doi.org/10.1038/415137a",
-                            }
+                            "The next archive entry should be the first run-backed report, not a prewritten thesis. If coalitions, governance behavior, or trust cascades appear, they will be documented with evidence.",
+                            "If the first runs are chaotic, inconclusive, or fail in unexpected ways, that will be published too.",
+                            "The standard is simple: no claims beyond the data.",
                         ],
                     },
                 ],
