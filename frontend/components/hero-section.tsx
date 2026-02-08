@@ -96,8 +96,8 @@ export function HeroSection() {
 
         const extractedQuotes = Array.isArray(messages)
           ? messages
-              .map((message: { content?: string }) => (message?.content || "").trim())
-              .filter((message: string) => message.length > 0)
+            .map((message: { content?: string }) => (message?.content || "").trim())
+            .filter((message: string) => message.length > 0)
           : []
         setQuotes(extractedQuotes)
       } catch {
@@ -140,8 +140,10 @@ export function HeroSection() {
       </div>
 
       {/* Main content */}
-      <div ref={contentRef} className="flex-1 w-full min-w-0">
-        <SplitFlapText text="EMERGENCE" speed={80} className="max-w-full origin-left scale-[0.86] sm:scale-100" />
+      <div ref={contentRef} className="flex-1 w-full min-w-0 overflow-x-hidden">
+        <div className="w-full overflow-hidden">
+          <SplitFlapText text="EMERGENCE" speed={80} className="max-w-full" />
+        </div>
 
         <h2 className="font-[var(--font-bebas)] text-muted-foreground/60 text-[clamp(1rem,3vw,2rem)] mt-4 tracking-wide">
           A Living Experiment

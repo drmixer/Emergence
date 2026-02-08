@@ -112,7 +112,7 @@ function typeStanza(
 
     chars.forEach((char, ci) => {
       gsap.delayedCall(lineStart + ci * charSpeed, () => {
-        ;(char as HTMLElement).style.visibility = "visible"
+        ; (char as HTMLElement).style.visibility = "visible"
       })
     })
 
@@ -159,9 +159,9 @@ function Stanza({ stanza, index }: { stanza: (typeof stanzas)[number]; index: nu
             ref={(el) => {
               linesRef.current[i] = el
             }}
-            className="font-mono text-base md:text-lg text-foreground/90 leading-relaxed block w-full max-w-full min-w-0 break-words [overflow-wrap:anywhere] pr-2"
+            className="font-mono text-[15px] sm:text-base md:text-lg text-foreground/90 leading-relaxed block w-full max-w-full min-w-0 overflow-hidden"
           >
-            <span className="char-container whitespace-pre-wrap break-words [overflow-wrap:anywhere]" />
+            <span className="char-container inline break-words [overflow-wrap:break-word] [word-break:break-word]" />
             <span
               ref={(el) => {
                 cursorsRef.current[i] = el
@@ -178,8 +178,8 @@ function Stanza({ stanza, index }: { stanza: (typeof stanzas)[number]; index: nu
 
 export function ManifestoSection() {
   return (
-    <section id="manifesto" className="relative py-48 md:py-64 px-6 md:px-12">
-      <div className="max-w-2xl mx-auto">
+    <section id="manifesto" className="relative py-48 md:py-64 px-4 sm:px-6 md:px-12 overflow-x-hidden">
+      <div className="max-w-2xl mx-auto w-full min-w-0">
         {stanzas.map((stanza, i) => (
           <Stanza key={i} stanza={stanza} index={i} />
         ))}

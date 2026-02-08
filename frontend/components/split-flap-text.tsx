@@ -133,7 +133,7 @@ function SplitFlapTextInner({ text, className = "", speed = 50 }: SplitFlapTextP
 
   return (
     <div
-      className={`inline-flex gap-[0.08em] items-center ${className}`}
+      className={`inline-flex gap-[0.06em] sm:gap-[0.08em] items-center ${className}`}
       aria-label={text}
       style={{ perspective: "1000px" }}
     >
@@ -214,15 +214,16 @@ function SplitFlapChar({ char, index, speed, playClick }: SplitFlapCharProps) {
       if (intervalRef.current) clearInterval(intervalRef.current)
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (isSpace) {
     return (
       <div
+        className="split-flap-space"
         style={{
-          width: "0.3em",
-          fontSize: "clamp(2.8rem, 12vw, 14rem)",
+          width: "0.25em",
+          fontSize: "clamp(2.8rem, 13.5vw, 14rem)",
         }}
       />
     )
@@ -233,14 +234,15 @@ function SplitFlapChar({ char, index, speed, playClick }: SplitFlapCharProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: tileDelay, duration: 0.3, ease: "easeOut" }}
-      className="relative overflow-hidden flex items-center justify-center font-[family-name:var(--font-bebas)]"
+      className="relative overflow-hidden flex items-center justify-center font-[family-name:var(--font-bebas)] split-flap-char"
       style={{
-        fontSize: "clamp(2.8rem, 12vw, 14rem)",
-        width: "0.65em",
+        fontSize: "clamp(2.8rem, 13.5vw, 14rem)",
+        width: "0.62em",
         height: "1.05em",
         backgroundColor: bgColor,
         transformStyle: "preserve-3d",
         transition: "background-color 0.15s ease",
+        flexShrink: 0,
       }}
     >
       <div className="absolute inset-x-0 top-1/2 h-[1px] bg-black/20 pointer-events-none z-10" />
