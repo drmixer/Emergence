@@ -100,3 +100,7 @@ test-results/
 # Local development
 .local/
 tmp/
+
+# Docs: keep only viewer-facing platform info tracked.
+docs/*.md
+!docs/RESOURCES.md
