@@ -240,7 +240,14 @@ def _maybe_notify_kpi_alerts(*, alerts_payload: dict[str, Any], summary: dict[st
                 "last_sent_at": _KPI_ALERT_NOTIFY_LAST_SENT_AT.isoformat(),
             }
 
+    warning_count = int((counts or {}).get("warning") or 0)
+    text_summary = (
+        f"[{str(getattr(settings, 'ENVIRONMENT', 'development') or 'development')}] "
+        f"KPI critical alerts: {critical_count} critical, {warning_count} warning"
+        f"{f' (day {latest_day_key})' if latest_day_key else ''}"
+    )
     notification_payload = {
+        "text": text_summary,
         "source": "emergence.ops.kpi",
         "environment": str(getattr(settings, "ENVIRONMENT", "development") or "development"),
         "generated_at": now_ts.isoformat(),
