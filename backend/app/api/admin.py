@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.time import now_utc
 from app.models.models import AdminConfigChange
+from app.services.kpi_rollups import get_recent_rollups
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
 
@@ -509,4 +510,33 @@ def get_run_metrics(
             "active_proposals": int((governance.active_proposals if governance else 0) or 0),
             "votes_cast": int(votes_cast or 0),
         },
+    }
+
+
+@router.get("/kpi/rollups")
+def get_kpi_rollups(
+    days: int = Query(default=14, ge=1, le=90),
+    refresh: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    _actor: AdminActor = Depends(require_admin_auth),
+):
+    resolved_days = max(1, min(90, int(days or getattr(settings, "KPI_ROLLUP_LOOKBACK_DAYS_DEFAULT", 14))))
+    try:
+        payload = get_recent_rollups(db, days=resolved_days, refresh=bool(refresh))
+    except Exception as e:
+        message = str(e).lower()
+        if "kpi_daily_rollups" in message and "does not exist" in message:
+            return {
+                "days": resolved_days,
+                "generated_at": now_utc().isoformat(),
+                "summary": {"latest_day_key": None, "latest": None, "seven_day_avg": {}},
+                "items": [],
+            }
+        raise
+
+    return {
+        "days": resolved_days,
+        "generated_at": now_utc().isoformat(),
+        "summary": payload.get("summary") or {},
+        "items": payload.get("items") or [],
     }

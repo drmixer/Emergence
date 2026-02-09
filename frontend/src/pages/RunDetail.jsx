@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
+import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString()
@@ -95,6 +96,17 @@ export default function RunDetail() {
       cancelled = true
     }
   }, [runId])
+
+  useEffect(() => {
+    if (loading || error || !data) return
+
+    const cleanRunId = String(runId || '').trim()
+    trackKpiEventOnce('run_detail_view', `run_detail:${cleanRunId}`, {
+      runId: cleanRunId,
+      surface: 'run_detail_page',
+      target: requestedEventId > 0 ? 'focused_event' : 'all_events',
+    })
+  }, [loading, error, data, runId, requestedEventId])
 
   const provenance = data?.provenance || {}
   const verificationState = String(provenance.verification_state || 'unverified')

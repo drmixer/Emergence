@@ -6,8 +6,9 @@ import json
 from io import BytesIO
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from sqlalchemy import String, cast, text
+from pydantic import BaseModel, Field
 try:
     from PIL import Image, ImageDraw, ImageFont
 except Exception:  # pragma: no cover - runtime dependency guard
@@ -36,6 +37,7 @@ from app.services.summaries import (
 )
 from app.services.usage_budget import usage_budget
 from app.services.emergence_metrics import compute_emergence_metrics
+from app.services.kpi_rollups import record_kpi_event
 from app.core.database import SessionLocal
 from app.models.models import (
     Event,
@@ -1300,6 +1302,39 @@ def wealth_distribution():
             "p75": pct(75),
             "max": float(wealth_sorted[-1]) if wealth_sorted else 0.0,
         }
+    finally:
+        db.close()
+
+
+class KpiEventRequest(BaseModel):
+    event_name: str = Field(..., min_length=2, max_length=64)
+    visitor_id: str = Field(..., min_length=8, max_length=128)
+    session_id: str | None = Field(default=None, max_length=128)
+    run_id: str | None = Field(default=None, max_length=64)
+    event_id: int | None = Field(default=None, ge=1)
+    surface: str | None = Field(default=None, max_length=64)
+    target: str | None = Field(default=None, max_length=64)
+    path: str | None = Field(default=None, max_length=255)
+    referrer: str | None = Field(default=None, max_length=255)
+    metadata: dict[str, Any] | None = None
+
+
+@router.post("/kpi/events")
+def ingest_kpi_event(request: KpiEventRequest):
+    """
+    Public ingestion endpoint for Milestone 4 growth KPI instrumentation.
+    """
+    db = SessionLocal()
+    try:
+        result = record_kpi_event(db, payload=request.model_dump())
+        return {"ok": True, "event": result}
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        logger.warning("KPI event ingest failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to record KPI event") from e
     finally:
         db.close()
 

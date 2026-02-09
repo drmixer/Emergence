@@ -6,22 +6,32 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.time import now_utc
-from app.models.models import Agent, ArchiveArticle, Event, Law, Message
+from app.models.models import ArchiveArticle
 from app.services.runtime_config import runtime_config_service
+from app.services.weekly_digest import (
+    WEEKLY_DIGEST_TEMPLATE_VERSION,
+    WeeklyDigestInsufficientEvidenceError,
+    build_weekly_digest,
+)
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class WeeklyDraftResult:
-    article: ArchiveArticle
+    article: ArchiveArticle | None
     created: bool
+    status: str = "ok"
+    message: str | None = None
+    evidence_gate: dict[str, Any] | None = None
+    digest_markdown: str | None = None
+    digest_markdown_path: str | None = None
+    digest_template_version: str | None = None
 
 
 def _resolve_unique_slug(db: Session, base_slug: str) -> str:
@@ -47,74 +57,6 @@ def _resolve_scheduled_anchor(now_ts: datetime, *, weekday: int, hour: int, minu
     return scheduled_today - timedelta(days=days_since_target)
 
 
-def _build_sections_payload(
-    *,
-    now_ts: datetime,
-    since: datetime,
-    run_mode: str,
-    run_id: str,
-    simulation_active: bool,
-    simulation_paused: bool,
-    total_events: int,
-    messages_count: int,
-    active_agents: int,
-    forum_actions: int,
-    proposals_created: int,
-    votes_cast: int,
-    laws_passed: int,
-    active_laws_total: int,
-    deaths_count: int,
-    confidence: str,
-) -> list[dict[str, Any]]:
-    window_label = f"{since.date().isoformat()} to {now_ts.date().isoformat()} UTC"
-    return [
-        {
-            "heading": "Run Context and Data Window",
-            "paragraphs": [
-                f"Window analyzed: {window_label}.",
-                f"Run mode: {run_mode}. Run ID: {run_id}. Simulation active: {'yes' if simulation_active else 'no'}. Paused: {'yes' if simulation_paused else 'no'}.",
-                "This is an auto-generated draft for operator review. All claims should be validated before publish.",
-            ],
-        },
-        {
-            "heading": "Participation and Activity",
-            "paragraphs": [
-                f"Observed {total_events} events and {messages_count} messages over the window.",
-                f"{active_agents} distinct agents appeared in event logs, with {forum_actions} forum actions recorded.",
-                "Use this section to annotate whether participation was broad-based or concentrated in a small cluster of agents.",
-            ],
-        },
-        {
-            "heading": "Governance Signal",
-            "paragraphs": [
-                f"Governance activity included {proposals_created} proposal events, {votes_cast} vote events, and {laws_passed} newly passed laws.",
-                f"Total currently active laws: {active_laws_total}.",
-                "Interpretation should distinguish between procedural throughput (more proposals/votes) and policy stability (which laws persisted).",
-            ],
-        },
-        {
-            "heading": "Survival Pressure",
-            "paragraphs": [
-                f"Deaths recorded in the window: {deaths_count}.",
-                "Track whether mortality was isolated or clustered, and whether social behavior shifted after spikes in death pressure.",
-                "If death count is zero, note whether that reflects genuine stability or a low-activity period.",
-            ],
-        },
-        {
-            "heading": "Confidence and Next Checks",
-            "paragraphs": [
-                f"Initial confidence in this weekly signal: {confidence} (based on event volume).",
-                "Before publish: verify run continuity, check for telemetry gaps, and attach the most relevant dashboard snapshots.",
-                "Do not publish conclusions that extend beyond the observed evidence window.",
-            ],
-            "references": [
-                {"label": "Live Dashboard", "href": "/dashboard"},
-                {"label": "Ops Console", "href": "/ops"},
-            ],
-        },
-    ]
-
-
 def generate_weekly_draft(
     db: Session,
     *,
@@ -128,6 +70,20 @@ def generate_weekly_draft(
     lookback = _bounded_int(lookback_days, fallback=7, minimum=1, maximum=30)
     slug_anchor = anchor_date or now_value.date()
     base_slug = f"weekly-brief-{slug_anchor.isoformat()}"
+    effective = runtime_config_service.get_effective(db)
+    preferred_run_id = str(effective.get("SIMULATION_RUN_ID") or "").strip() or None
+    min_events = _bounded_int(
+        getattr(settings, "ARCHIVE_WEEKLY_DRAFT_MIN_EVENTS", 1),
+        fallback=1,
+        minimum=0,
+        maximum=100000,
+    )
+    min_llm_calls = _bounded_int(
+        getattr(settings, "ARCHIVE_WEEKLY_DRAFT_MIN_LLM_CALLS", 1),
+        fallback=1,
+        minimum=0,
+        maximum=100000,
+    )
 
     if skip_if_exists_for_anchor:
         existing = (
@@ -137,83 +93,57 @@ def generate_weekly_draft(
             .first()
         )
         if existing:
-            return WeeklyDraftResult(article=existing, created=False)
+            digest = build_weekly_digest(
+                db,
+                lookback_days=lookback,
+                anchor_date=slug_anchor,
+                now_ts=now_value,
+                preferred_run_id=preferred_run_id,
+                enforce_minimum_evidence=False,
+                min_events=min_events,
+                min_llm_calls=min_llm_calls,
+            )
+            return WeeklyDraftResult(
+                article=existing,
+                created=False,
+                status="existing",
+                message="Reused existing draft for this anchor date.",
+                evidence_gate=digest.evidence_gate,
+                digest_markdown=digest.markdown,
+                digest_markdown_path=digest.markdown_path,
+                digest_template_version=WEEKLY_DIGEST_TEMPLATE_VERSION,
+            )
 
-    since = now_value - timedelta(days=lookback)
-    effective = runtime_config_service.get_effective(db)
-
-    total_events = int(db.query(func.count(Event.id)).filter(Event.created_at >= since).scalar() or 0)
-    active_agents = int(
-        db.query(func.count(distinct(Event.agent_id)))
-        .filter(Event.created_at >= since, Event.agent_id.isnot(None))
-        .scalar()
-        or 0
-    )
-    forum_actions = int(
-        db.query(func.count(Event.id))
-        .filter(Event.created_at >= since, Event.event_type.in_(["forum_post", "forum_reply"]))
-        .scalar()
-        or 0
-    )
-    proposals_created = int(
-        db.query(func.count(Event.id))
-        .filter(Event.created_at >= since, Event.event_type == "create_proposal")
-        .scalar()
-        or 0
-    )
-    votes_cast = int(
-        db.query(func.count(Event.id))
-        .filter(Event.created_at >= since, Event.event_type == "vote")
-        .scalar()
-        or 0
-    )
-    laws_passed = int(db.query(func.count(Law.id)).filter(Law.passed_at >= since).scalar() or 0)
-    active_laws_total = int(db.query(func.count(Law.id)).filter(Law.active.is_(True)).scalar() or 0)
-    messages_count = int(db.query(func.count(Message.id)).filter(Message.created_at >= since).scalar() or 0)
-    deaths_count = int(db.query(func.count(Agent.id)).filter(Agent.died_at >= since).scalar() or 0)
-
-    run_id = str(effective.get("SIMULATION_RUN_ID") or "").strip() or "not-set"
-    run_mode = str(effective.get("SIMULATION_RUN_MODE") or "unknown")
-    simulation_active = bool(effective.get("SIMULATION_ACTIVE", False))
-    simulation_paused = bool(effective.get("SIMULATION_PAUSED", False))
-
-    if total_events >= 1000:
-        confidence = "high"
-    elif total_events >= 250:
-        confidence = "medium"
-    else:
-        confidence = "low"
-
-    window_label = f"{since.date().isoformat()} to {now_value.date().isoformat()} UTC"
-    summary = (
-        f"Weekly draft for {window_label}: {total_events} events, {active_agents} participating agents, "
-        f"{proposals_created} proposals, {votes_cast} votes, {laws_passed} laws passed, and {deaths_count} deaths observed."
-    )
-    sections_payload = _build_sections_payload(
-        now_ts=now_value,
-        since=since,
-        run_mode=run_mode,
-        run_id=run_id,
-        simulation_active=simulation_active,
-        simulation_paused=simulation_paused,
-        total_events=total_events,
-        messages_count=messages_count,
-        active_agents=active_agents,
-        forum_actions=forum_actions,
-        proposals_created=proposals_created,
-        votes_cast=votes_cast,
-        laws_passed=laws_passed,
-        active_laws_total=active_laws_total,
-        deaths_count=deaths_count,
-        confidence=confidence,
-    )
+    try:
+        digest = build_weekly_digest(
+            db,
+            lookback_days=lookback,
+            anchor_date=slug_anchor,
+            now_ts=now_value,
+            preferred_run_id=preferred_run_id,
+            enforce_minimum_evidence=True,
+            min_events=min_events,
+            min_llm_calls=min_llm_calls,
+        )
+    except WeeklyDigestInsufficientEvidenceError as exc:
+        decision = exc.decision
+        return WeeklyDraftResult(
+            article=None,
+            created=False,
+            status="insufficient_evidence",
+            message=str(decision.get("message") or "Weekly digest blocked by evidence gate"),
+            evidence_gate=decision,
+            digest_markdown=None,
+            digest_markdown_path=None,
+            digest_template_version=WEEKLY_DIGEST_TEMPLATE_VERSION,
+        )
 
     article = ArchiveArticle(
         slug=_resolve_unique_slug(db, base_slug),
-        title=f"Weekly Systems Brief - {slug_anchor.isoformat()}",
-        summary=summary,
-        sections=sections_payload,
-        evidence_run_id=(run_id if run_id != "not-set" else None),
+        title=f"State of Emergence Weekly Digest - {slug_anchor.isoformat()}",
+        summary=digest.summary,
+        sections=digest.sections,
+        evidence_run_id=(digest.run_id if digest.run_id != "not-set" else None),
         status="draft",
         published_at=None,
         created_by=actor_id,
@@ -221,7 +151,16 @@ def generate_weekly_draft(
     )
     db.add(article)
     db.flush()
-    return WeeklyDraftResult(article=article, created=True)
+    return WeeklyDraftResult(
+        article=article,
+        created=True,
+        status="created",
+        message="Weekly digest draft created.",
+        evidence_gate=digest.evidence_gate,
+        digest_markdown=digest.markdown,
+        digest_markdown_path=digest.markdown_path,
+        digest_template_version=WEEKLY_DIGEST_TEMPLATE_VERSION,
+    )
 
 
 async def maybe_generate_scheduled_weekly_draft() -> dict[str, Any] | None:
@@ -277,15 +216,22 @@ async def maybe_generate_scheduled_weekly_draft() -> dict[str, Any] | None:
             now_ts=now_value,
             skip_if_exists_for_anchor=True,
         )
-        if result.created:
+        if result.created and result.article is not None:
             db.commit()
             db.refresh(result.article)
             logger.info("Created scheduled weekly archive draft: %s", result.article.slug)
         else:
             db.rollback()
+            if result.status == "insufficient_evidence":
+                logger.info("Skipped scheduled weekly archive draft: %s", result.message)
         return {
-            "slug": result.article.slug,
+            "slug": (result.article.slug if result.article is not None else None),
             "created": bool(result.created),
+            "status": str(result.status or "ok"),
+            "message": result.message,
+            "evidence_gate": result.evidence_gate,
+            "digest_markdown_path": result.digest_markdown_path,
+            "digest_template_version": result.digest_template_version,
         }
     except Exception:
         db.rollback()

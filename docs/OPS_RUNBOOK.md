@@ -36,9 +36,13 @@ Use `/ops` to control simulation runs in dev and inspect runtime health/metrics 
 8. Validate in **Run Metrics** (after a short wait + refresh):
    - `Runtime actions` > 0 as activity begins.
    - `Proposal actions`, `Vote actions`, `Forum actions` counters are present.
-9. When done, click `Stop Run` and confirm:
+9. Validate in **KPI Rollups**:
+   - Latest day row is present.
+   - Funnel rates are populated (`Landing -> Run CTR`, `Run -> Replay Start`, `Replay Completion`).
+   - Retention fields (`D1`, `D7`) show `n/a` for immature cohorts and percentages once cohort windows complete.
+10. When done, click `Stop Run` and confirm:
    - `Paused = yes`.
-10. If you need a clean world, click `Reset Dev World` and confirm:
+11. If you need a clean world, click `Reset Dev World` and confirm:
     - Success notice: `Dev world reset + reseeded`.
 
 ## Baseline Snapshot Capture
@@ -58,6 +62,24 @@ These include:
 - current daily LLM spend/call counters
 - recent provider failure rate
 - rolling emergence metrics windows
+
+## Weekly Digest Generation
+Generate the Milestone 3 weekly digest (locked template + run-backed evidence links):
+
+```bash
+cd backend
+./venv/bin/python scripts/generate_weekly_digest.py --lookback-days 7
+```
+
+Optional flags:
+- `--anchor-date YYYY-MM-DD` to pin the digest date.
+- `--print-markdown` to print the publish-ready markdown in terminal.
+- `--allow-duplicate-anchor` to create a second draft for the same week.
+
+Evidence gate:
+- Draft creation is skipped when minimum evidence is not met.
+- Control thresholds via `ARCHIVE_WEEKLY_DRAFT_MIN_EVENTS` and `ARCHIVE_WEEKLY_DRAFT_MIN_LLM_CALLS` (defaults: `25` and `5`).
+- API/CLI responses return `status=insufficient_evidence` with observed vs required counts.
 
 ## Runtime Stop Conditions
 Worker guardrails stop a run when any of these trip:

@@ -5,6 +5,7 @@ import Link from "next/link"
 import { ScrambleTextOnHover } from "@/components/scramble-text"
 import { SplitFlapText } from "@/components/split-flap-text"
 import { BitmapChevron } from "@/components/bitmap-chevron"
+import { trackKpiEvent, trackKpiEventOnce } from "@/lib/kpi-client"
 import { Activity, ArrowUpRight, Network, Play, Radio, Scale, Skull } from "lucide-react"
 import gsap from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
@@ -54,6 +55,13 @@ export function HeroSection() {
     }, sectionRef)
 
     return () => ctx.revert()
+  }, [])
+
+  useEffect(() => {
+    trackKpiEventOnce("landing_view", "landing:hero", {
+      surface: "next_hero_section",
+      target: "landing",
+    })
   }, [])
 
   useEffect(() => {
@@ -213,6 +221,12 @@ export function HeroSection() {
           </div>
           <Link
             href="/dashboard"
+            onClick={() =>
+              trackKpiEvent("landing_run_click", {
+                surface: "next_hero_cta",
+                target: "dashboard",
+              })
+            }
             className="inline-flex items-center gap-3 border border-foreground bg-foreground px-6 py-3 font-mono text-xs uppercase tracking-widest text-background transition-all duration-200 hover:translate-x-0.5"
           >
             <Play className="h-4 w-4" />

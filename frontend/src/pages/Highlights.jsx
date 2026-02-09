@@ -20,6 +20,7 @@ import Recap from '../components/Recap'
 import QuoteCardGenerator from '../components/QuoteCard'
 import { api, getViewerUserId } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
+import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
 const QUICK_BET_AMOUNT = 5
 
@@ -246,6 +247,25 @@ export default function Highlights() {
   }
 
   const TrendIcon = stateStrip.trend === 'up' ? TrendingUp : stateStrip.trend === 'down' ? TrendingDown : Minus
+
+  useEffect(() => {
+    if (loading || activeTab !== 'replay' || replayBuckets.length === 0) return
+    trackKpiEventOnce('replay_start', `replay_start:${runFilter || 'all'}`, {
+      runId: runFilter,
+      surface: 'highlights_replay_tab',
+      target: requestedEventId > 0 ? 'focused_event' : 'default',
+    })
+  }, [loading, activeTab, replayBuckets.length, runFilter, requestedEventId])
+
+  useEffect(() => {
+    if (loading || activeTab !== 'replay') return
+    if (replayBuckets.length < 2 || replayIndex !== 0) return
+    trackKpiEventOnce('replay_complete', `replay_complete:${runFilter || 'all'}`, {
+      runId: runFilter,
+      surface: 'highlights_replay_tab',
+      target: 'timeline_start_reached',
+    })
+  }, [loading, activeTab, replayBuckets.length, replayIndex, runFilter])
 
   return (
     <div className="highlights-page">

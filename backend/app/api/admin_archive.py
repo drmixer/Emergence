@@ -343,10 +343,18 @@ def generate_weekly_archive_draft(
         now_ts=now,
         skip_if_exists_for_anchor=True,
     )
-    if result.created:
+    if result.created and result.article is not None:
         db.commit()
         db.refresh(result.article)
+    else:
+        db.rollback()
 
-    payload = _serialize_article(result.article)
+    payload = _serialize_article(result.article) if result.article is not None else {}
     payload["generated"] = bool(result.created)
+    payload["status"] = str(result.status or "ok")
+    payload["message"] = result.message
+    payload["evidence_gate"] = result.evidence_gate
+    payload["digest_markdown"] = result.digest_markdown
+    payload["digest_markdown_path"] = result.digest_markdown_path
+    payload["digest_template_version"] = result.digest_template_version
     return payload

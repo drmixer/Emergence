@@ -356,6 +356,15 @@ class APIService {
         })
     }
 
+    async getAdminKpiRollups(token, days = 14, refresh = true, adminUser = null) {
+        const params = new URLSearchParams()
+        params.append('days', String(days))
+        params.append('refresh', refresh ? 'true' : 'false')
+        return this.fetch(`/api/admin/kpi/rollups?${params.toString()}`, {
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
     // Admin archive/articles
     async getAdminArchiveArticles(token, adminUser = null, status = 'all', limit = 200, offset = 0) {
         const params = new URLSearchParams()

@@ -15,6 +15,7 @@ import {
   Upload,
   EyeOff,
   WandSparkles,
+  Copy,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { api } from '../services/api'
@@ -115,6 +116,12 @@ function formatApiError(error, fallback = 'Request failed') {
   return error.message || fallback
 }
 
+function formatPercent(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 'n/a'
+  return `${(numeric * 100).toFixed(1)}%`
+}
+
 export default function Ops() {
   const [tokenInput, setTokenInput] = useState(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
   const [token, setToken] = useState(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
@@ -124,6 +131,7 @@ export default function Ops() {
   const [config, setConfig] = useState(null)
   const [audit, setAudit] = useState([])
   const [runMetrics, setRunMetrics] = useState(null)
+  const [kpiRollups, setKpiRollups] = useState(null)
   const [runIdInput, setRunIdInput] = useState('')
   const [runControlReason, setRunControlReason] = useState('')
   const [resetOnTestStart, setResetOnTestStart] = useState(true)
@@ -141,6 +149,7 @@ export default function Ops() {
   const [adminArticles, setAdminArticles] = useState([])
   const [articleEditor, setArticleEditor] = useState({ ...EMPTY_ARTICLE_EDITOR })
   const [articleAction, setArticleAction] = useState('')
+  const [weeklyDraftResult, setWeeklyDraftResult] = useState(null)
 
   const connected = Boolean(token.trim())
   const writeEnabled = Boolean(config?.admin_write_enabled)
@@ -158,11 +167,12 @@ export default function Ops() {
     setMetricsWarning('')
 
     try {
-      const [statusResponse, configResponse, auditResponse, articlesResponse] = await Promise.all([
+      const [statusResponse, configResponse, auditResponse, articlesResponse, kpiResponse] = await Promise.all([
         api.getAdminStatus(token, adminUser),
         api.getAdminConfig(token, adminUser),
         api.getAdminAudit(token, 50, 0, adminUser),
         api.getAdminArchiveArticles(token, adminUser),
+        api.getAdminKpiRollups(token, 14, true, adminUser).catch(() => null),
       ])
       const activeRunId = String(statusResponse?.viewer_ops?.run_id || '').trim()
       let runMetricsResponse = null
@@ -181,6 +191,7 @@ export default function Ops() {
         setArticleEditor(toArticleEditor(resolvedArticles[0]))
       }
       setRunMetrics(runMetricsResponse)
+      setKpiRollups(kpiResponse)
       setRunIdInput(activeRunId)
       setResetOnTestStart(String(configResponse?.environment || statusResponse?.environment || '').toLowerCase() !== 'production')
       setDraftValues(configResponse?.effective || {})
@@ -488,13 +499,39 @@ export default function Ops() {
     setError('')
     try {
       const response = await api.generateWeeklyArchiveDraft(token, { lookback_days: 7 }, adminUser)
-      setArticleEditor(toArticleEditor(response))
-      setNotice(`Weekly draft created: ${response.slug}`)
+      setWeeklyDraftResult(response)
+      if (response?.id) {
+        setArticleEditor(toArticleEditor(response))
+      }
+      const responseStatus = String(response?.status || '').trim()
+      if (responseStatus === 'insufficient_evidence') {
+        setNotice(`Weekly draft skipped: ${String(response?.message || 'Insufficient evidence for digest generation')}`)
+      } else if (response?.generated) {
+        setNotice(`Weekly draft created: ${String(response?.slug || 'unknown-slug')}`)
+      } else if (responseStatus === 'existing') {
+        setNotice(`Weekly draft already exists: ${String(response?.slug || 'unknown-slug')}`)
+      } else {
+        setNotice(`Weekly draft checked: ${String(response?.slug || 'no draft')}`)
+      }
       await loadOpsData()
     } catch (articleError) {
       setError(formatApiError(articleError, 'Failed to generate weekly draft'))
     } finally {
       setArticleAction('')
+    }
+  }
+
+  const onCopyDigestMarkdown = async () => {
+    const markdown = String(weeklyDraftResult?.digest_markdown || '').trim()
+    if (!markdown) {
+      setError('No digest markdown available to copy')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(markdown)
+      setNotice('Digest markdown copied')
+    } catch {
+      setError('Unable to copy digest markdown')
     }
   }
 
@@ -507,6 +544,15 @@ export default function Ops() {
   const editorEvidenceRunId = String(articleEditor.evidenceRunId || '').trim()
   const requiresEvidenceRunId = editorSlug.length > 0 && editorSlug !== BASELINE_ARTICLE_SLUG
   const canPublishWithEvidence = !requiresEvidenceRunId || editorEvidenceRunId.length > 0
+  const weeklyDraftStatus = String(weeklyDraftResult?.status || 'ok')
+  const weeklyDraftMessage = String(weeklyDraftResult?.message || '').trim()
+  const weeklyDigestPath = String(weeklyDraftResult?.digest_markdown_path || '').trim()
+  const weeklyDigestMarkdown = String(weeklyDraftResult?.digest_markdown || '')
+  const weeklyEvidenceGate = weeklyDraftResult?.evidence_gate || null
+  const kpiItems = Array.isArray(kpiRollups?.items) ? kpiRollups.items : []
+  const kpiSummary = kpiRollups?.summary || {}
+  const kpiLatest = kpiSummary?.latest || (kpiItems.length > 0 ? kpiItems[0] : null)
+  const kpiSevenDayAvg = kpiSummary?.seven_day_avg || {}
 
   return (
     <div className="ops-page">
@@ -790,6 +836,95 @@ export default function Ops() {
                 )}
               </div>
             </section>
+
+            <section className="card">
+              <div className="card-header">
+                <h3>KPI Rollups</h3>
+              </div>
+              <div className="card-body">
+                {!kpiLatest ? (
+                  <div className="empty-state compact">No KPI rollups available yet.</div>
+                ) : (
+                  <div className="ops-kpi-stack">
+                    <div className="ops-kv-grid">
+                      <div className="ops-kv-item">
+                        <span>Latest day</span>
+                        <strong>{kpiLatest.day_key || 'n/a'}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Landing -&gt; Run CTR</span>
+                        <strong>{formatPercent(kpiLatest.landing_to_run_ctr)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Run -&gt; Replay Start</span>
+                        <strong>{formatPercent(kpiLatest.run_to_replay_start_rate)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Replay Completion</span>
+                        <strong>{formatPercent(kpiLatest.replay_completion_rate)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Share Action Rate</span>
+                        <strong>{formatPercent(kpiLatest.share_action_rate)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Shared-link CTR</span>
+                        <strong>{formatPercent(kpiLatest.shared_link_ctr)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>D1 Retention</span>
+                        <strong>{formatPercent(kpiLatest.d1_retention_rate)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>D7 Retention</span>
+                        <strong>{formatPercent(kpiLatest.d7_retention_rate)}</strong>
+                      </div>
+                    </div>
+
+                    <div className="ops-kpi-summary">
+                      <span>7d Avg Landing -&gt; Run: {formatPercent(kpiSevenDayAvg.landing_to_run_ctr)}</span>
+                      <span>7d Avg Replay Completion: {formatPercent(kpiSevenDayAvg.replay_completion_rate)}</span>
+                      <span>7d Avg D7 Retention: {formatPercent(kpiSevenDayAvg.d7_retention_rate)}</span>
+                    </div>
+
+                    {kpiItems.length > 0 && (
+                      <div className="ops-kpi-table-wrap">
+                        <table className="ops-kpi-table">
+                          <thead>
+                            <tr>
+                              <th>Day</th>
+                              <th>Landing Views</th>
+                              <th>Run Views</th>
+                              <th>Replay Starts</th>
+                              <th>Replay Completions</th>
+                              <th>Share Clicks</th>
+                              <th>Shared Opens</th>
+                              <th>D1</th>
+                              <th>D7</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {kpiItems.slice(0, 14).map((item) => (
+                              <tr key={item.day_key}>
+                                <td>{item.day_key}</td>
+                                <td>{Number(item.landing_views || 0).toLocaleString()}</td>
+                                <td>{Number(item.run_detail_views || 0).toLocaleString()}</td>
+                                <td>{Number(item.replay_starts || 0).toLocaleString()}</td>
+                                <td>{Number(item.replay_completions || 0).toLocaleString()}</td>
+                                <td>{Number(item.share_clicks || 0).toLocaleString()}</td>
+                                <td>{Number(item.shared_link_opens || 0).toLocaleString()}</td>
+                                <td>{formatPercent(item.d1_retention_rate)}</td>
+                                <td>{formatPercent(item.d7_retention_rate)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </section>
           </div>
 
           <section className="card ops-config-card">
@@ -904,6 +1039,42 @@ export default function Ops() {
               </div>
             </div>
             <div className="card-body ops-articles-layout">
+              {weeklyDraftResult && (
+                <div className={`ops-digest-preview ${weeklyDraftStatus === 'insufficient_evidence' ? 'warn' : 'ok'}`}>
+                  <div className="ops-digest-preview-head">
+                    <strong>Weekly Digest Result</strong>
+                    <span className={`ops-status-pill ${weeklyDraftStatus === 'insufficient_evidence' ? 'draft' : 'published'}`}>
+                      {weeklyDraftStatus}
+                    </span>
+                  </div>
+                  {weeklyDraftMessage && <div className="ops-digest-preview-message">{weeklyDraftMessage}</div>}
+                  <div className="ops-digest-preview-meta">
+                    <span>Template: {String(weeklyDraftResult?.digest_template_version || 'n/a')}</span>
+                    <span>Path: {weeklyDigestPath || 'n/a'}</span>
+                  </div>
+                  {weeklyEvidenceGate && (
+                    <div className="ops-digest-preview-meta">
+                      <span>
+                        Evidence gate observed events: {weeklyEvidenceGate?.observed?.total_events ?? 'n/a'} / required {weeklyEvidenceGate?.requirements?.min_events ?? 'n/a'}
+                      </span>
+                      <span>
+                        LLM calls: {weeklyEvidenceGate?.observed?.llm_calls ?? 'n/a'} / required {weeklyEvidenceGate?.requirements?.min_llm_calls ?? 'n/a'}
+                      </span>
+                    </div>
+                  )}
+                  {weeklyDigestMarkdown && (
+                    <div className="ops-digest-preview-markdown">
+                      <div className="ops-digest-preview-actions">
+                        <button className="btn-subtle" type="button" onClick={onCopyDigestMarkdown}>
+                          <Copy size={14} />
+                          Copy Markdown
+                        </button>
+                      </div>
+                      <textarea rows={10} value={weeklyDigestMarkdown} readOnly className="ops-sections-textarea" />
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="ops-articles-list">
                 {adminArticles.length === 0 ? (
                   <div className="empty-state compact">No archive articles yet.</div>

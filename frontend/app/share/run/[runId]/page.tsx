@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
+import { ShareRedirect } from "@/components/share-redirect"
 import { resolvePublicApiBase, resolveSiteBase, withDeployVersion } from "@/lib/share"
 
 type ShareRunPageProps = {
@@ -46,11 +47,11 @@ export async function generateMetadata({ params }: ShareRunPageProps): Promise<M
 export default async function ShareRunPage({ params }: ShareRunPageProps) {
   const { runId } = await params
   const safeRunId = encodeURIComponent(String(runId || "").trim())
-  const targetPath = `/runs/${safeRunId}`
+  const targetPath = `/runs/${safeRunId}?kpi_src=share_run`
 
   return (
     <main className="relative min-h-screen px-4 py-20 md:pl-24 md:pr-12">
-      <meta httpEquiv="refresh" content={`0; url=${targetPath}`} />
+      <ShareRedirect targetPath={targetPath} kpiSource="share_run" runId={String(runId || "").trim()} />
       <div className="mx-auto max-w-2xl border border-border/60 bg-card/60 p-8">
         <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">Share Redirect</p>
         <h1 className="mt-4 font-[var(--font-bebas)] text-5xl tracking-tight">Run {runId}</h1>

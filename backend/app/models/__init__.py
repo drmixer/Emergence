@@ -15,6 +15,8 @@ from app.models.models import (
     RuntimeConfigOverride,
     AdminConfigChange,
     ArchiveArticle,
+    KpiEvent,
+    KpiDailyRollup,
 )
 
 __all__ = [
@@ -33,4 +35,6 @@ __all__ = [
     "RuntimeConfigOverride",
     "AdminConfigChange",
     "ArchiveArticle",
+    "KpiEvent",
+    "KpiDailyRollup",
 ]

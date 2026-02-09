@@ -133,6 +133,73 @@ class EmergenceMetricSnapshot(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class KpiEvent(Base):
+    """Raw KPI instrumentation events from frontend clients."""
+    __tablename__ = "kpi_events"
+
+    id = Column(Integer, primary_key=True)
+    day_key = Column(Date, nullable=False)
+    event_name = Column(String(64), nullable=False)
+    occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    visitor_id = Column(String(128), nullable=False)
+    session_id = Column(String(128), nullable=True)
+    run_id = Column(String(64), nullable=True)
+    event_id = Column(Integer, nullable=True)
+    surface = Column(String(64), nullable=True)
+    target = Column(String(64), nullable=True)
+    path = Column(String(255), nullable=True)
+    referrer = Column(String(255), nullable=True)
+    event_metadata = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("event_name <> ''", name="ck_kpi_events_event_name_nonempty"),
+        CheckConstraint("visitor_id <> ''", name="ck_kpi_events_visitor_nonempty"),
+    )
+
+
+class KpiDailyRollup(Base):
+    """Daily rollups for growth KPI metrics and conversion rates."""
+    __tablename__ = "kpi_daily_rollups"
+
+    day_key = Column(Date, primary_key=True)
+
+    landing_views = Column(Integer, nullable=False, default=0)
+    landing_view_visitors = Column(Integer, nullable=False, default=0)
+    landing_run_clicks = Column(Integer, nullable=False, default=0)
+    landing_run_click_visitors = Column(Integer, nullable=False, default=0)
+
+    run_detail_views = Column(Integer, nullable=False, default=0)
+    run_detail_visitors = Column(Integer, nullable=False, default=0)
+    replay_starts = Column(Integer, nullable=False, default=0)
+    replay_start_visitors = Column(Integer, nullable=False, default=0)
+    replay_completions = Column(Integer, nullable=False, default=0)
+    replay_completion_visitors = Column(Integer, nullable=False, default=0)
+
+    share_actions = Column(Integer, nullable=False, default=0)
+    share_action_visitors = Column(Integer, nullable=False, default=0)
+    share_clicks = Column(Integer, nullable=False, default=0)
+    share_click_visitors = Column(Integer, nullable=False, default=0)
+    shared_link_opens = Column(Integer, nullable=False, default=0)
+    shared_link_open_visitors = Column(Integer, nullable=False, default=0)
+
+    landing_to_run_ctr = Column(DECIMAL(8, 6), nullable=False, default=0)
+    run_to_replay_start_rate = Column(DECIMAL(8, 6), nullable=False, default=0)
+    replay_completion_rate = Column(DECIMAL(8, 6), nullable=False, default=0)
+    share_action_rate = Column(DECIMAL(8, 6), nullable=False, default=0)
+    shared_link_ctr = Column(DECIMAL(8, 6), nullable=False, default=0)
+
+    d1_cohort_size = Column(Integer, nullable=False, default=0)
+    d1_returning_users = Column(Integer, nullable=False, default=0)
+    d1_retention_rate = Column(DECIMAL(8, 6), nullable=True)
+    d7_cohort_size = Column(Integer, nullable=False, default=0)
+    d7_returning_users = Column(Integer, nullable=False, default=0)
+    d7_retention_rate = Column(DECIMAL(8, 6), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class GlobalResources(Base):
     """Global resource tracking (common pool)."""
     __tablename__ = "global_resources"

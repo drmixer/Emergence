@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Play, ChevronDown, Users, MessageSquare, Scale, Sparkles, Zap, Brain, Clock, Loader } from 'lucide-react'
 import { api } from '../services/api'
+import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 
 // Pre-launch teaser quotes
 const TEASER_QUOTES = [
@@ -201,6 +202,10 @@ export default function Landing() {
     // Fade in effect
     useEffect(() => {
         setTimeout(() => setIsVisible(true), 100)
+        trackKpiEventOnce('landing_view', 'landing:vite', {
+            surface: 'vite_landing_page',
+            target: 'landing',
+        })
     }, [])
 
     // Generate random nodes for background animation
@@ -309,7 +314,16 @@ export default function Landing() {
                 )}
 
                 {/* CTA Button */}
-                <button className="cta-button" onClick={() => navigate('/dashboard')}>
+                <button
+                    className="cta-button"
+                    onClick={() => {
+                        trackKpiEvent('landing_run_click', {
+                            surface: 'vite_landing_cta',
+                            target: 'dashboard',
+                        })
+                        navigate('/dashboard')
+                    }}
+                >
                     <div className="cta-pulse" />
                     <Play size={20} />
                     <span>{isPreLaunch ? 'Preview Dashboard' : 'Watch Live'}</span>

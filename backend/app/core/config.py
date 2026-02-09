@@ -95,6 +95,10 @@ class Settings(BaseSettings):
     LLM_MEMORY_UPDATE_EVERY_N_CHECKPOINTS: int = 3
     LLM_MEMORY_MAX_CHARS: int = 1200
 
+    # Growth KPI instrumentation + rollups.
+    KPI_EVENT_INGEST_ENABLED: bool = True
+    KPI_ROLLUP_LOOKBACK_DAYS_DEFAULT: int = 14
+
     # Security
     SECRET_KEY: str = "development-secret-key-change-in-production"
 
@@ -145,6 +149,9 @@ class Settings(BaseSettings):
     # How often scheduler checks whether draft is due.
     ARCHIVE_WEEKLY_DRAFT_CHECK_INTERVAL_MINUTES: int = 60
     ARCHIVE_WEEKLY_DRAFT_ACTOR: str = "archive-weekly-bot"
+    # Minimum evidence thresholds before creating a new digest draft.
+    ARCHIVE_WEEKLY_DRAFT_MIN_EVENTS: int = 25
+    ARCHIVE_WEEKLY_DRAFT_MIN_LLM_CALLS: int = 5
 
     # Rate limiting
     MAX_ACTIONS_PER_HOUR: int = 20
