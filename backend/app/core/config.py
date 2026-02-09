@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     # Growth KPI instrumentation + rollups.
     KPI_EVENT_INGEST_ENABLED: bool = True
     KPI_ROLLUP_LOOKBACK_DAYS_DEFAULT: int = 14
+    KPI_ALERT_WEBHOOK_ENABLED: bool = False
+    KPI_ALERT_WEBHOOK_URL: str = ""
+    KPI_ALERT_NOTIFY_COOLDOWN_MINUTES: int = 60
 
     # Security
     SECRET_KEY: str = "development-secret-key-change-in-production"

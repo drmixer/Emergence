@@ -557,6 +557,7 @@ export default function Ops() {
   const kpiAlertItems = Array.isArray(kpiAlerts?.items) ? kpiAlerts.items : []
   const kpiAlertCounts = kpiAlerts?.counts || {}
   const kpiAlertStatus = String(kpiAlerts?.status || 'ok')
+  const kpiAlertDelivery = kpiRollups?.alert_notification || {}
 
   return (
     <div className="ops-page">
@@ -870,6 +871,9 @@ export default function Ops() {
                     ) : (
                       <div className="ops-kpi-alert-empty">No active KPI alerts for current thresholds.</div>
                     )}
+                    <div className="ops-kpi-delivery">
+                      Alert delivery: {kpiAlertDelivery.sent ? 'sent' : 'not sent'} ({kpiAlertDelivery.reason || 'n/a'})
+                    </div>
 
                     <div className="ops-kv-grid">
                       <div className="ops-kv-item">

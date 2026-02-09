@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import timedelta
 from pathlib import Path
 import subprocess
 import sys
+from threading import Lock
 from typing import Any
+from urllib import error as urlerror
+from urllib import request as urlrequest
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -23,6 +27,11 @@ from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+_KPI_ALERT_NOTIFY_LOCK = Lock()
+_KPI_ALERT_NOTIFY_LAST_SENT_AT = None
+_KPI_ALERT_NOTIFY_LAST_FINGERPRINT = ""
 
 _KPI_ALERT_RULES = (
     {
@@ -164,6 +173,126 @@ def _build_kpi_alerts(summary: dict[str, Any]) -> dict[str, Any]:
             "warning": warning_count,
         },
         "items": alerts,
+    }
+
+
+def _kpi_alert_fingerprint(alerts_payload: dict[str, Any], *, latest_day_key: str | None) -> str:
+    items = alerts_payload.get("items") if isinstance(alerts_payload, dict) else None
+    normalized_items = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        normalized_items.append(
+            {
+                "metric": item.get("metric"),
+                "severity": item.get("severity"),
+                "day_key": item.get("day_key"),
+                "latest_value": round(float(item.get("latest_value") or 0.0), 6),
+                "seven_day_avg_value": (
+                    None if item.get("seven_day_avg_value") is None else round(float(item.get("seven_day_avg_value") or 0.0), 6)
+                ),
+                "sample_size": int(item.get("sample_size") or 0),
+                "reasons": sorted([str(reason) for reason in (item.get("reasons") or [])]),
+            }
+        )
+    normalized_items.sort(key=lambda row: (str(row.get("severity")), str(row.get("metric"))))
+    return json.dumps(
+        {
+            "latest_day_key": latest_day_key,
+            "alerts": normalized_items,
+        },
+        sort_keys=True,
+    )
+
+
+def _maybe_notify_kpi_alerts(*, alerts_payload: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    webhook_url = str(getattr(settings, "KPI_ALERT_WEBHOOK_URL", "") or "").strip()
+    notify_enabled = bool(getattr(settings, "KPI_ALERT_WEBHOOK_ENABLED", False))
+    cooldown_minutes = max(1, int(getattr(settings, "KPI_ALERT_NOTIFY_COOLDOWN_MINUTES", 60) or 60))
+    if not notify_enabled:
+        return {"enabled": False, "attempted": False, "sent": False, "reason": "disabled"}
+    if not webhook_url:
+        return {"enabled": True, "attempted": False, "sent": False, "reason": "missing_webhook_url"}
+
+    counts = alerts_payload.get("counts") if isinstance(alerts_payload, dict) else None
+    critical_count = int((counts or {}).get("critical") or 0)
+    if critical_count <= 0:
+        return {"enabled": True, "attempted": False, "sent": False, "reason": "no_critical_alerts"}
+
+    latest_day_key = (summary or {}).get("latest_day_key")
+    fingerprint = _kpi_alert_fingerprint(alerts_payload, latest_day_key=latest_day_key)
+    now_ts = now_utc()
+
+    global _KPI_ALERT_NOTIFY_LAST_SENT_AT
+    global _KPI_ALERT_NOTIFY_LAST_FINGERPRINT
+    with _KPI_ALERT_NOTIFY_LOCK:
+        if (
+            _KPI_ALERT_NOTIFY_LAST_SENT_AT is not None
+            and _KPI_ALERT_NOTIFY_LAST_FINGERPRINT == fingerprint
+            and (now_ts - _KPI_ALERT_NOTIFY_LAST_SENT_AT) < timedelta(minutes=cooldown_minutes)
+        ):
+            return {
+                "enabled": True,
+                "attempted": False,
+                "sent": False,
+                "reason": "cooldown_active",
+                "cooldown_minutes": cooldown_minutes,
+                "last_sent_at": _KPI_ALERT_NOTIFY_LAST_SENT_AT.isoformat(),
+            }
+
+    notification_payload = {
+        "source": "emergence.ops.kpi",
+        "environment": str(getattr(settings, "ENVIRONMENT", "development") or "development"),
+        "generated_at": now_ts.isoformat(),
+        "latest_day_key": latest_day_key,
+        "status": alerts_payload.get("status"),
+        "counts": alerts_payload.get("counts") or {},
+        "alerts": alerts_payload.get("items") or [],
+        "summary": {
+            "latest": (summary or {}).get("latest"),
+            "seven_day_avg": (summary or {}).get("seven_day_avg"),
+        },
+    }
+
+    body = json.dumps(notification_payload).encode("utf-8")
+    req = urlrequest.Request(
+        webhook_url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=10) as response:
+            status_code = int(response.getcode() or 0)
+    except urlerror.HTTPError as exc:
+        logger.warning("KPI alert webhook HTTP error: status=%s body=%s", exc.code, exc.read().decode("utf-8", "ignore")[:250])
+        return {
+            "enabled": True,
+            "attempted": True,
+            "sent": False,
+            "reason": "http_error",
+            "status_code": int(exc.code),
+        }
+    except Exception as exc:
+        logger.warning("KPI alert webhook failed: %s", exc)
+        return {
+            "enabled": True,
+            "attempted": True,
+            "sent": False,
+            "reason": str(exc),
+        }
+
+    with _KPI_ALERT_NOTIFY_LOCK:
+        _KPI_ALERT_NOTIFY_LAST_SENT_AT = now_ts
+        _KPI_ALERT_NOTIFY_LAST_FINGERPRINT = fingerprint
+
+    return {
+        "enabled": True,
+        "attempted": True,
+        "sent": 200 <= status_code < 300,
+        "status_code": status_code,
+        "cooldown_minutes": cooldown_minutes,
+        "last_sent_at": now_ts.isoformat(),
     }
 
 
@@ -668,20 +797,27 @@ def get_kpi_rollups(
     except Exception as e:
         message = str(e).lower()
         if "kpi_daily_rollups" in message and "does not exist" in message:
+            empty_alerts = {"status": "ok", "counts": {"critical": 0, "warning": 0}, "items": []}
             return {
                 "days": resolved_days,
                 "generated_at": now_utc().isoformat(),
                 "summary": {"latest_day_key": None, "latest": None, "seven_day_avg": {}},
-                "alerts": {"status": "ok", "counts": {"critical": 0, "warning": 0}, "items": []},
+                "alerts": empty_alerts,
+                "alert_notification": _maybe_notify_kpi_alerts(
+                    alerts_payload=empty_alerts,
+                    summary={"latest_day_key": None, "latest": None, "seven_day_avg": {}},
+                ),
                 "items": [],
             }
         raise
 
     summary = payload.get("summary") or {}
+    alerts = _build_kpi_alerts(summary)
     return {
         "days": resolved_days,
         "generated_at": now_utc().isoformat(),
         "summary": summary,
-        "alerts": _build_kpi_alerts(summary),
+        "alerts": alerts,
+        "alert_notification": _maybe_notify_kpi_alerts(alerts_payload=alerts, summary=summary),
         "items": payload.get("items") or [],
     }

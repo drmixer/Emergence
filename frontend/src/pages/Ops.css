@@ -542,6 +542,12 @@
   font-size: 0.8rem;
 }
 
+.ops-kpi-delivery {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
 .ops-kpi-summary {
   display: flex;
   flex-wrap: wrap;
