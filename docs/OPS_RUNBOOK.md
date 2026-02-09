@@ -39,6 +39,10 @@ Use `/ops` to control simulation runs in dev and inspect runtime health/metrics 
 9. Validate in **KPI Rollups**:
    - Latest day row is present.
    - Funnel rates are populated (`Landing -> Run CTR`, `Run -> Replay Start`, `Replay Completion`).
+   - Alert panel behavior:
+     - `KPI Alerts` shows `critical` / `warning` counts when drop-offs breach thresholds.
+     - Alerts are based on latest day values and 7-day averages for `Landing -> Run CTR`, `Replay Completion`, `D1`, `D7`.
+     - D1/D7 alerts are gated on mature cohorts (minimum cohort size) to avoid early false positives.
    - Retention fields (`D1`, `D7`) show `n/a` for immature cohorts and percentages once cohort windows complete.
 10. When done, click `Stop Run` and confirm:
    - `Paused = yes`.

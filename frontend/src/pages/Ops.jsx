@@ -553,6 +553,10 @@ export default function Ops() {
   const kpiSummary = kpiRollups?.summary || {}
   const kpiLatest = kpiSummary?.latest || (kpiItems.length > 0 ? kpiItems[0] : null)
   const kpiSevenDayAvg = kpiSummary?.seven_day_avg || {}
+  const kpiAlerts = kpiRollups?.alerts || {}
+  const kpiAlertItems = Array.isArray(kpiAlerts?.items) ? kpiAlerts.items : []
+  const kpiAlertCounts = kpiAlerts?.counts || {}
+  const kpiAlertStatus = String(kpiAlerts?.status || 'ok')
 
   return (
     <div className="ops-page">
@@ -846,6 +850,27 @@ export default function Ops() {
                   <div className="empty-state compact">No KPI rollups available yet.</div>
                 ) : (
                   <div className="ops-kpi-stack">
+                    {kpiAlertItems.length > 0 ? (
+                      <div className={`ops-kpi-alert-panel ${kpiAlertStatus}`}>
+                        <div className="ops-kpi-alert-head">
+                          <strong>
+                            KPI Alerts: {Number(kpiAlertCounts.critical || 0)} critical, {Number(kpiAlertCounts.warning || 0)} warning
+                          </strong>
+                          <span>Triggered from latest day thresholds and 7-day drop-offs.</span>
+                        </div>
+                        <div className="ops-kpi-alert-list">
+                          {kpiAlertItems.map((alert) => (
+                            <div className={`ops-kpi-alert ${alert.severity || 'warning'}`} key={`${alert.metric || 'metric'}-${alert.day_key || 'latest'}`}>
+                              <span className="ops-kpi-alert-label">{alert.label || alert.metric || 'KPI'}</span>
+                              <span>{alert.message || 'Alert triggered'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="ops-kpi-alert-empty">No active KPI alerts for current thresholds.</div>
+                    )}
+
                     <div className="ops-kv-grid">
                       <div className="ops-kv-item">
                         <span>Latest day</span>

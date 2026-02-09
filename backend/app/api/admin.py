@@ -24,6 +24,148 @@ from app.services.usage_budget import usage_budget
 
 router = APIRouter()
 
+_KPI_ALERT_RULES = (
+    {
+        "metric": "landing_to_run_ctr",
+        "label": "Landing -> Run CTR",
+        "warning_floor": 0.12,
+        "critical_floor": 0.08,
+        "drop_warning_ratio": 0.20,
+        "drop_critical_ratio": 0.35,
+        "sample_field": "landing_view_visitors",
+        "min_sample": 40,
+    },
+    {
+        "metric": "replay_completion_rate",
+        "label": "Replay Completion Rate",
+        "warning_floor": 0.50,
+        "critical_floor": 0.35,
+        "drop_warning_ratio": 0.20,
+        "drop_critical_ratio": 0.35,
+        "sample_field": "replay_start_visitors",
+        "min_sample": 25,
+    },
+    {
+        "metric": "d1_retention_rate",
+        "label": "D1 Retention",
+        "warning_floor": 0.20,
+        "critical_floor": 0.12,
+        "drop_warning_ratio": 0.25,
+        "drop_critical_ratio": 0.40,
+        "sample_field": "d1_cohort_size",
+        "min_sample": 25,
+    },
+    {
+        "metric": "d7_retention_rate",
+        "label": "D7 Retention",
+        "warning_floor": 0.10,
+        "critical_floor": 0.06,
+        "drop_warning_ratio": 0.25,
+        "drop_critical_ratio": 0.40,
+        "sample_field": "d7_cohort_size",
+        "min_sample": 25,
+    },
+)
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_rate(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value * 100:.1f}%"
+
+
+def _build_kpi_alerts(summary: dict[str, Any]) -> dict[str, Any]:
+    latest = summary.get("latest") if isinstance(summary, dict) else None
+    seven_day_avg = summary.get("seven_day_avg") if isinstance(summary, dict) else None
+    latest = latest if isinstance(latest, dict) else {}
+    seven_day_avg = seven_day_avg if isinstance(seven_day_avg, dict) else {}
+
+    alerts: list[dict[str, Any]] = []
+    for rule in _KPI_ALERT_RULES:
+        metric = str(rule["metric"])
+        label = str(rule["label"])
+        latest_value = _safe_float(latest.get(metric))
+        if latest_value is None:
+            continue
+
+        sample_field = str(rule["sample_field"])
+        min_sample = int(rule["min_sample"])
+        sample_size = _safe_int(latest.get(sample_field))
+        if sample_size < min_sample:
+            continue
+
+        severity = ""
+        reasons: list[str] = []
+        if latest_value < float(rule["critical_floor"]):
+            severity = "critical"
+            reasons.append("below_critical_floor")
+        elif latest_value < float(rule["warning_floor"]):
+            severity = "warning"
+            reasons.append("below_warning_floor")
+
+        baseline_value = _safe_float(seven_day_avg.get(metric))
+        drop_ratio = None
+        if baseline_value is not None and baseline_value > 0 and latest_value < baseline_value:
+            drop_ratio = (baseline_value - latest_value) / baseline_value
+            if drop_ratio >= float(rule["drop_critical_ratio"]):
+                severity = "critical"
+                reasons.append("drop_vs_7d_critical")
+            elif drop_ratio >= float(rule["drop_warning_ratio"]):
+                if severity != "critical":
+                    severity = "warning"
+                reasons.append("drop_vs_7d_warning")
+
+        if not severity:
+            continue
+
+        message = (
+            f"{label} is {_format_rate(latest_value)} "
+            f"(7d avg {_format_rate(baseline_value)}; sample={sample_size})."
+        )
+        alerts.append(
+            {
+                "metric": metric,
+                "label": label,
+                "severity": severity,
+                "message": message,
+                "day_key": latest.get("day_key"),
+                "latest_value": latest_value,
+                "seven_day_avg_value": baseline_value,
+                "drop_ratio": drop_ratio,
+                "sample_field": sample_field,
+                "sample_size": sample_size,
+                "minimum_sample_size": min_sample,
+                "reasons": reasons,
+            }
+        )
+
+    critical_count = sum(1 for item in alerts if item.get("severity") == "critical")
+    warning_count = sum(1 for item in alerts if item.get("severity") == "warning")
+    status = "critical" if critical_count > 0 else ("warning" if warning_count > 0 else "ok")
+
+    return {
+        "status": status,
+        "counts": {
+            "critical": critical_count,
+            "warning": warning_count,
+        },
+        "items": alerts,
+    }
+
 
 class ConfigPatchRequest(BaseModel):
     updates: dict[str, Any] = Field(default_factory=dict)
@@ -530,13 +672,16 @@ def get_kpi_rollups(
                 "days": resolved_days,
                 "generated_at": now_utc().isoformat(),
                 "summary": {"latest_day_key": None, "latest": None, "seven_day_avg": {}},
+                "alerts": {"status": "ok", "counts": {"critical": 0, "warning": 0}, "items": []},
                 "items": [],
             }
         raise
 
+    summary = payload.get("summary") or {}
     return {
         "days": resolved_days,
         "generated_at": now_utc().isoformat(),
-        "summary": payload.get("summary") or {},
+        "summary": summary,
+        "alerts": _build_kpi_alerts(summary),
         "items": payload.get("items") or [],
     }

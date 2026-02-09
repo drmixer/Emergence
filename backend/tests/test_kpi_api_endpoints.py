@@ -158,8 +158,58 @@ def test_admin_kpi_rollups_returns_payload(monkeypatch):
     assert body["days"] == 7
     assert body["summary"]["latest_day_key"] == "2026-02-09"
     assert body["items"] == [{"day_key": "2026-02-09", "landing_views": 25}]
+    assert body["alerts"]["status"] == "ok"
+    assert body["alerts"]["counts"] == {"critical": 0, "warning": 0}
+    assert body["alerts"]["items"] == []
     assert body["generated_at"]
     assert captured == {"db": fake_db, "days": 7, "refresh": False}
+
+
+def test_admin_kpi_rollups_returns_critical_alerts_for_dropoffs(monkeypatch):
+    fake_db = SimpleNamespace(name="fake-db")
+
+    monkeypatch.setattr(
+        admin_api,
+        "get_recent_rollups",
+        lambda *_args, **_kwargs: {
+            "summary": {
+                "latest_day_key": "2026-02-09",
+                "latest": {
+                    "day_key": "2026-02-09",
+                    "landing_to_run_ctr": 0.06,
+                    "landing_view_visitors": 200,
+                    "replay_completion_rate": 0.28,
+                    "replay_start_visitors": 55,
+                    "d1_retention_rate": 0.09,
+                    "d1_cohort_size": 42,
+                    "d7_retention_rate": 0.04,
+                    "d7_cohort_size": 31,
+                },
+                "seven_day_avg": {
+                    "landing_to_run_ctr": 0.18,
+                    "replay_completion_rate": 0.62,
+                    "d1_retention_rate": 0.27,
+                    "d7_retention_rate": 0.14,
+                },
+            },
+            "items": [],
+        },
+    )
+
+    with _make_admin_client(fake_db) as client:
+        response = client.get("/api/admin/kpi/rollups?days=14&refresh=true")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["alerts"]["status"] == "critical"
+    assert body["alerts"]["counts"] == {"critical": 4, "warning": 0}
+    metrics = {item["metric"] for item in body["alerts"]["items"]}
+    assert metrics == {
+        "landing_to_run_ctr",
+        "replay_completion_rate",
+        "d1_retention_rate",
+        "d7_retention_rate",
+    }
 
 
 def test_admin_kpi_rollups_returns_empty_payload_when_table_missing(monkeypatch):
@@ -182,3 +232,6 @@ def test_admin_kpi_rollups_returns_empty_payload_when_table_missing(monkeypatch)
     assert body["summary"]["latest_day_key"] is None
     assert body["summary"]["latest"] is None
     assert body["summary"]["seven_day_avg"] == {}
+    assert body["alerts"]["status"] == "ok"
+    assert body["alerts"]["counts"] == {"critical": 0, "warning": 0}
+    assert body["alerts"]["items"] == []
