@@ -1,0 +1,42 @@
+name: Share Metadata Smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/app/share/**"
+      - "frontend/lib/share.ts"
+      - "frontend/scripts/smoke-share-metadata.mjs"
+      - "frontend/package.json"
+      - ".github/workflows/share-metadata-smoke.yml"
+  schedule:
+    - cron: "15 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run deployed share metadata smoke
+        working-directory: frontend
+        env:
+          SMOKE_SITE_BASE: https://emergence.quest
+          SMOKE_RUN_ID: ci-smoke-run
+        run: npm run smoke:share-metadata
