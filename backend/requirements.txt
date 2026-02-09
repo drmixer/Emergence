@@ -24,6 +24,7 @@ asyncio==3.4.3
 # Utilities
 python-dotenv==1.0.0
 python-multipart==0.0.6
+Pillow==11.1.0
 
 # Development
 pytest==7.4.4

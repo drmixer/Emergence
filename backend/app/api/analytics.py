@@ -3,10 +3,17 @@ Analytics & Highlights API Router
 """
 import logging
 import json
+from io import BytesIO
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from sqlalchemy import String, cast, text
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except Exception:  # pragma: no cover - runtime dependency guard
+    Image = None
+    ImageDraw = None
+    ImageFont = None
 
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
@@ -212,6 +219,150 @@ def _social_card_svg(*, kicker: str, title: str, subtitle: str, stat_pairs: list
   <text x="80" y="574" font-size="18" font-family="Inter, Arial, sans-serif" fill="#9aa3bc">{safe_footer}</text>
   <text x="1080" y="574" font-size="18" text-anchor="end" font-family="Inter, Arial, sans-serif" fill="#e2e7ff">EMERGENCE</text>
 </svg>"""
+
+
+def _load_social_font(size: int, *, bold: bool = False):
+    if ImageFont is None:
+        return None
+    candidates = (
+        ["DejaVuSans-Bold.ttf", "Arial Bold.ttf", "Arial.ttf"]
+        if bold
+        else ["DejaVuSans.ttf", "Arial.ttf"]
+    )
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _text_width(draw, text: str, font) -> int:
+    bbox = draw.textbbox((0, 0), str(text or ""), font=font)
+    return max(0, int(bbox[2] - bbox[0]))
+
+
+def _line_height(draw, font, extra: int = 8) -> int:
+    bbox = draw.textbbox((0, 0), "Ag", font=font)
+    return max(1, int(bbox[3] - bbox[1]) + extra)
+
+
+def _wrap_text_lines(draw, text: str, font, max_width: int, max_lines: int) -> list[str]:
+    words = str(text or "").split()
+    if not words:
+        return [""]
+
+    lines: list[str] = []
+    idx = 0
+    while idx < len(words) and len(lines) < max_lines:
+        current = words[idx]
+        idx += 1
+        while idx < len(words):
+            trial = f"{current} {words[idx]}"
+            if _text_width(draw, trial, font) <= max_width:
+                current = trial
+                idx += 1
+            else:
+                break
+        lines.append(current)
+
+    if idx < len(words) and lines:
+        trimmed = lines[-1].rstrip(". ") + "…"
+        while len(trimmed) > 1 and _text_width(draw, trimmed, font) > max_width:
+            trimmed = trimmed[:-2].rstrip() + "…"
+        lines[-1] = trimmed
+    return lines
+
+
+def _social_card_png_bytes(
+    *,
+    kicker: str,
+    title: str,
+    subtitle: str,
+    stat_pairs: list[tuple[str, str]],
+    footer: str,
+) -> bytes:
+    if Image is None or ImageDraw is None or ImageFont is None:
+        raise RuntimeError("Pillow is required for PNG social cards")
+
+    width = 1200
+    height = 630
+    image = Image.new("RGBA", (width, height), (9, 11, 18, 255))
+    draw = ImageDraw.Draw(image)
+
+    for y in range(height):
+        ratio = y / max(1, (height - 1))
+        r = int(8 + (14 - 8) * ratio)
+        g = int(10 + (20 - 10) * ratio)
+        b = int(20 + (44 - 20) * ratio)
+        draw.line((0, y, width, y), fill=(r, g, b, 255))
+
+    draw.rounded_rectangle(
+        (64, 52, 1136, 578),
+        radius=26,
+        fill=(7, 10, 18, 225),
+        outline=(146, 155, 190, 85),
+        width=2,
+    )
+    draw.rounded_rectangle((86, 82, 390, 122), radius=20, fill=(255, 255, 255, 22))
+    draw.rectangle((86, 144, 1114, 146), fill=(114, 139, 255, 170))
+
+    font_kicker = _load_social_font(20, bold=True)
+    font_title = _load_social_font(58, bold=True)
+    font_subtitle = _load_social_font(27)
+    font_stat_label = _load_social_font(16)
+    font_stat_value = _load_social_font(32, bold=True)
+    font_footer = _load_social_font(18)
+    font_brand = _load_social_font(18, bold=True)
+
+    safe_kicker = _truncate_text(kicker, 80)
+    safe_title = _truncate_text(title, 96)
+    safe_subtitle = _truncate_text(subtitle, 220)
+    safe_footer = _truncate_text(footer, 180)
+
+    draw.text((104, 91), safe_kicker, font=font_kicker, fill=(220, 223, 238, 255))
+    brand_top = "EMERGENCE"
+    brand_top_width = _text_width(draw, brand_top, font_brand)
+    draw.text((1100 - brand_top_width, 92), brand_top, font=font_brand, fill=(168, 177, 206, 255))
+
+    title_lines = _wrap_text_lines(draw, safe_title, font_title, max_width=1012, max_lines=2)
+    y = 176
+    title_line_height = _line_height(draw, font_title, extra=2)
+    for line in title_lines:
+        draw.text((88, y), line, font=font_title, fill=(245, 247, 255, 255))
+        y += title_line_height
+
+    subtitle_lines = _wrap_text_lines(draw, safe_subtitle, font_subtitle, max_width=1012, max_lines=2)
+    subtitle_y = min(322, y + 12)
+    subtitle_line_height = _line_height(draw, font_subtitle, extra=6)
+    for line in subtitle_lines:
+        draw.text((88, subtitle_y), line, font=font_subtitle, fill=(170, 177, 198, 255))
+        subtitle_y += subtitle_line_height
+
+    rendered_stats = stat_pairs[:3]
+    stat_count = max(1, len(rendered_stats))
+    stat_area_width = 1024
+    stat_gap = 16
+    stat_box_width = int((stat_area_width - stat_gap * (stat_count - 1)) / stat_count)
+    stat_x = 88
+    for idx, (label, value) in enumerate(rendered_stats):
+        x0 = stat_x + idx * (stat_box_width + stat_gap)
+        x1 = x0 + stat_box_width
+        draw.rounded_rectangle(
+            (x0, 418, x1, 526),
+            radius=16,
+            fill=(255, 255, 255, 10),
+            outline=(255, 255, 255, 32),
+            width=1,
+        )
+        draw.text((x0 + 18, 438), _truncate_text(label, 22), font=font_stat_label, fill=(174, 181, 201, 255))
+        draw.text((x0 + 18, 468), _truncate_text(value, 28), font=font_stat_value, fill=(245, 247, 255, 255))
+
+    draw.text((88, 548), safe_footer, font=font_footer, fill=(148, 158, 187, 255))
+
+    buffer = BytesIO()
+    image.convert("RGB").save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
 
 
 def _estimate_affected_agents(db, effect: dict, living_agents: int) -> int:
@@ -1615,6 +1766,57 @@ def run_social_card(
     )
 
 
+@router.get("/runs/{run_id}/social-card.png")
+def run_social_card_png(
+    run_id: str = Path(..., max_length=64, pattern=r"^[A-Za-z0-9:_-]+$"),
+    hours_fallback: int = Query(48, ge=1, le=24 * 14),
+):
+    """
+    Dynamic PNG OG social card for a run detail.
+    """
+    payload = run_detail(
+        run_id=run_id,
+        hours_fallback=hours_fallback,
+        trace_limit=8,
+        min_salience=55,
+    )
+    provenance = payload.get("provenance") or {}
+    activity = payload.get("activity") or {}
+    llm = payload.get("llm") or {}
+    traces = payload.get("source_traces") or []
+    top_trace = traces[0] if traces else {}
+
+    verification_label = str(provenance.get("verification_state") or "unverified").replace("_", " ").title()
+    llm_calls = int(llm.get("calls") or 0)
+    if llm_calls > 0:
+        subtitle = f"{verification_label} evidence • {llm_calls} model calls"
+    else:
+        subtitle = f"{verification_label} evidence • awaiting model telemetry"
+    top_title = str(top_trace.get("title") or "No major trace yet")
+    footer = f"Top trace: {top_title}"
+
+    try:
+        png = _social_card_png_bytes(
+            kicker=f"Run {run_id}",
+            title=f"Simulation Run {run_id}",
+            subtitle=subtitle,
+            stat_pairs=[
+                ("Events", f"{int(activity.get('total_events') or 0):,}"),
+                ("Laws", f"{int(activity.get('laws_passed') or 0):,}"),
+                ("Deaths", f"{int(activity.get('deaths') or 0):,}"),
+            ],
+            footer=footer,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/moments/{event_id}/social-card.svg")
 def moment_social_card(
     event_id: int = Path(..., ge=1),
@@ -1672,6 +1874,72 @@ def moment_social_card(
         return Response(
             content=svg,
             media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
+    finally:
+        db.close()
+
+
+@router.get("/moments/{event_id}/social-card.png")
+def moment_social_card_png(
+    event_id: int = Path(..., ge=1),
+    run_id: str | None = Query(default=None, max_length=64),
+):
+    """
+    Dynamic PNG OG social card for a specific event moment.
+    """
+    db = SessionLocal()
+    try:
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        metadata = event.event_metadata or {}
+        runtime_meta = metadata.get("runtime") if isinstance(metadata, dict) else {}
+        runtime_meta = runtime_meta if isinstance(runtime_meta, dict) else {}
+        resolved_run_id = str(run_id or runtime_meta.get("run_id") or "").strip()
+
+        score = _score_plot_turn(event)
+        category = _plot_turn_category(event)
+        title = _plot_turn_title(event)
+
+        actor_label = None
+        if event.agent_id is not None:
+            actor = db.query(Agent).filter(Agent.id == int(event.agent_id)).first()
+            if actor:
+                actor_label = actor.display_name or f"Agent #{actor.agent_number}"
+
+        created = ensure_utc(event.created_at)
+        subtitle_parts = [f"Category: {category.title()}", f"Signal: {score}"]
+        if actor_label:
+            subtitle_parts.append(actor_label)
+        subtitle = " • ".join(subtitle_parts)
+
+        footer_parts = []
+        if resolved_run_id:
+            footer_parts.append(f"Run {resolved_run_id}")
+        if created:
+            footer_parts.append(created.strftime("%Y-%m-%d %H:%M UTC"))
+        footer = " • ".join(footer_parts) or "Emergence event trace"
+
+        try:
+            png = _social_card_png_bytes(
+                kicker=f"Moment #{event_id}",
+                title=title,
+                subtitle=subtitle,
+                stat_pairs=[
+                    ("Type", str(event.event_type or "unknown").replace("_", " ").title()),
+                    ("Signal", str(score)),
+                    ("Run", resolved_run_id or "Unknown"),
+                ],
+                footer=footer,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        return Response(
+            content=png,
+            media_type="image/png",
             headers={"Cache-Control": "public, max-age=300"},
         )
     finally:

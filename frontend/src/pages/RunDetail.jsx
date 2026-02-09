@@ -152,7 +152,7 @@ export default function RunDetail() {
     const safeRunId = encodeURIComponent(cleanRunId)
     if (!safeRunId) return
     const apiBase = String(api?.baseUrl || '').replace(/\/$/, '')
-    const ogUrl = `${apiBase}/api/analytics/runs/${safeRunId}/social-card.svg`
+    const ogUrl = `${apiBase}/api/analytics/runs/${safeRunId}/social-card.png`
     trackShareAction('share_clicked', {
       runId: cleanRunId,
       surface: 'run_detail_topbar',
@@ -227,8 +227,8 @@ export default function RunDetail() {
 
     const apiBase = String(api?.baseUrl || '').replace(/\/$/, '')
     const ogUrl = safeRunId
-      ? `${apiBase}/api/analytics/moments/${safeEventId}/social-card.svg?run_id=${safeRunId}`
-      : `${apiBase}/api/analytics/moments/${safeEventId}/social-card.svg`
+      ? `${apiBase}/api/analytics/moments/${safeEventId}/social-card.png?run_id=${safeRunId}`
+      : `${apiBase}/api/analytics/moments/${safeEventId}/social-card.png`
     trackShareAction('share_clicked', {
       runId: cleanRunId,
       eventId,

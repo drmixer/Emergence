@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import { resolvePublicApiBase, resolveSiteBase } from "@/lib/share"
+import { resolvePublicApiBase, resolveSiteBase, withDeployVersion } from "@/lib/share"
 
 type ShareRunMomentPageProps = {
   params: Promise<{ runId: string; eventId: string }>
@@ -14,7 +14,9 @@ export async function generateMetadata({ params }: ShareRunMomentPageProps): Pro
   const safeEventId = encodeURIComponent(String(eventId || "").trim())
   const apiBase = resolvePublicApiBase()
   const siteBase = resolveSiteBase()
-  const imageUrl = `${apiBase}/api/analytics/moments/${safeEventId}/social-card.svg?run_id=${safeRunId}`
+  const imageUrl = withDeployVersion(
+    `${apiBase}/api/analytics/moments/${safeEventId}/social-card.png?run_id=${safeRunId}`
+  )
   const pageUrl = `${siteBase}/share/run/${safeRunId}/moment/${safeEventId}`
 
   return {
