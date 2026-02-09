@@ -2,10 +2,11 @@
 Analytics & Highlights API Router
 """
 import logging
-from fastapi import APIRouter, HTTPException, Query
+import json
+from fastapi import APIRouter, HTTPException, Path, Query, Response
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
-from sqlalchemy import text
+from sqlalchemy import String, cast, text
 
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
@@ -39,6 +40,7 @@ from app.models.models import (
     AgentInventory,
     GlobalResources,
     EmergenceMetricSnapshot,
+    AdminConfigChange,
 )
 
 router = APIRouter()
@@ -146,6 +148,72 @@ def _titleize_key(value: str) -> str:
     return str(value or "").replace("_", " ").strip().title() or "Unknown Event"
 
 
+def _xml_escape(value: str) -> str:
+    text_value = str(value or "")
+    return (
+        text_value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    text_value = str(value or "").strip()
+    if len(text_value) <= limit:
+        return text_value
+    return f"{text_value[: max(0, limit - 1)].rstrip()}…"
+
+
+def _social_card_svg(*, kicker: str, title: str, subtitle: str, stat_pairs: list[tuple[str, str]], footer: str) -> str:
+    safe_kicker = _xml_escape(_truncate_text(kicker, 80))
+    safe_title = _xml_escape(_truncate_text(title, 96))
+    safe_subtitle = _xml_escape(_truncate_text(subtitle, 220))
+    safe_footer = _xml_escape(_truncate_text(footer, 180))
+
+    rendered_stats = stat_pairs[:4]
+    stat_blocks = []
+    x_positions = [80, 340, 600, 860]
+    for idx, (label, value) in enumerate(rendered_stats):
+        x = x_positions[idx]
+        safe_label = _xml_escape(_truncate_text(label, 24))
+        safe_value = _xml_escape(_truncate_text(value, 24))
+        stat_blocks.append(
+            f"""
+      <g transform="translate({x} 410)">
+        <rect x="0" y="0" width="220" height="120" rx="16" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.12)" />
+        <text x="18" y="36" font-size="18" font-family="Inter, Arial, sans-serif" fill="#b7bcc8" letter-spacing="0.06em">{safe_label}</text>
+        <text x="18" y="84" font-size="42" font-weight="700" font-family="Inter, Arial, sans-serif" fill="#f5f7ff">{safe_value}</text>
+      </g>
+            """.rstrip()
+        )
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Emergence social card">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#090b12"/>
+      <stop offset="100%" stop-color="#131726"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="rgba(109, 120, 255, 0.7)"/>
+      <stop offset="100%" stop-color="rgba(72, 209, 176, 0.5)"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)" />
+  <rect x="64" y="62" width="1072" height="506" rx="24" fill="rgba(5,7,12,0.42)" stroke="rgba(255,255,255,0.12)" />
+  <rect x="80" y="92" width="260" height="34" rx="17" fill="rgba(255,255,255,0.08)" />
+  <text x="98" y="115" font-size="16" font-family="Inter, Arial, sans-serif" fill="#d6d9e6" letter-spacing="0.08em">{safe_kicker}</text>
+  <rect x="80" y="142" width="1040" height="2" fill="url(#glow)" />
+  <text x="80" y="230" font-size="64" font-weight="800" font-family="Inter, Arial, sans-serif" fill="#f7f8ff">{safe_title}</text>
+  <text x="80" y="292" font-size="30" font-family="Inter, Arial, sans-serif" fill="#aeb4c7">{safe_subtitle}</text>
+  {''.join(stat_blocks)}
+  <text x="80" y="574" font-size="18" font-family="Inter, Arial, sans-serif" fill="#9aa3bc">{safe_footer}</text>
+  <text x="1080" y="574" font-size="18" text-anchor="end" font-family="Inter, Arial, sans-serif" fill="#e2e7ff">EMERGENCE</text>
+</svg>"""
+
+
 def _estimate_affected_agents(db, effect: dict, living_agents: int) -> int:
     if not isinstance(effect, dict):
         return 0
@@ -240,14 +308,30 @@ def _collect_scored_plot_turns(
     now: datetime,
     min_salience: int,
     candidate_limit: int,
+    run_id: str | None = None,
 ) -> list[tuple[int, datetime, dict]]:
-    candidates = (
-        db.query(Event)
-        .filter(Event.created_at >= window_start)
-        .order_by(Event.created_at.desc())
-        .limit(candidate_limit)
-        .all()
-    )
+    query = db.query(Event).filter(Event.created_at >= window_start)
+
+    clean_run_id = str(run_id or "").strip()
+    if clean_run_id:
+        query = query.filter(
+            text(
+                """
+                (
+                  (events.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                  OR events.agent_id IN (
+                    SELECT DISTINCT u.agent_id
+                    FROM llm_usage u
+                    WHERE u.agent_id IS NOT NULL
+                      AND u.run_id = :run_id
+                      AND u.created_at >= :window_start
+                  )
+                )
+                """
+            )
+        ).params(run_id=clean_run_id, window_start=window_start)
+
+    candidates = query.order_by(Event.created_at.desc()).limit(candidate_limit).all()
 
     agent_ids = {int(e.agent_id) for e in candidates if e.agent_id is not None}
     agent_names = {}
@@ -516,6 +600,7 @@ def plot_turns(
     limit: int = Query(8, ge=1, le=30),
     hours: int = Query(48, ge=1, le=24 * 14),
     min_salience: int = Query(60, ge=1, le=100),
+    run_id: Optional[str] = Query(None, max_length=64),
 ):
     """
     High-salience events suitable for a viewer-facing "Plot Turns" panel.
@@ -531,6 +616,7 @@ def plot_turns(
             now=now,
             min_salience=min_salience,
             candidate_limit=max(40, limit * 12),
+            run_id=run_id,
         )
 
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
@@ -538,6 +624,7 @@ def plot_turns(
         return {
             "window_hours": hours,
             "min_salience": min_salience,
+            "run_id": run_id,
             "count": len(payload),
             "items": payload,
         }
@@ -551,6 +638,7 @@ def plot_turns_replay(
     min_salience: int = Query(55, ge=1, le=100),
     bucket_minutes: int = Query(30, ge=10, le=120),
     limit: int = Query(220, ge=20, le=500),
+    run_id: Optional[str] = Query(None, max_length=64),
 ):
     """
     Chronological high-salience replay stream with bucketed counts for time-scrub UI.
@@ -569,6 +657,7 @@ def plot_turns_replay(
             now=now,
             min_salience=min_salience,
             candidate_limit=max(limit * 6, 240),
+            run_id=run_id,
         )
         scored.sort(key=lambda item: (item[1], item[0]))
         if len(scored) > limit:
@@ -612,6 +701,7 @@ def plot_turns_replay(
             "min_salience": min_salience,
             "bucket_minutes": bucket_minutes,
             "bucket_count": bucket_count,
+            "run_id": run_id,
             "count": len(events),
             "items": events,
             "buckets": buckets,
@@ -1307,6 +1397,283 @@ def usage_daily(
                 "deterministic_ratio": _safe_ratio(deterministic_actions, runtime_total),
             },
         }
+    finally:
+        db.close()
+
+
+@router.get("/runs/{run_id}")
+def run_detail(
+    run_id: str = Path(..., max_length=64, pattern=r"^[A-Za-z0-9:_-]+$"),
+    hours_fallback: int = Query(24, ge=1, le=24 * 14),
+    trace_limit: int = Query(12, ge=3, le=30),
+    min_salience: int = Query(55, ge=1, le=100),
+):
+    """
+    Public run detail payload with evidence provenance and source trace links.
+    """
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        raise HTTPException(status_code=400, detail="run_id is required")
+
+    now = now_utc()
+    db = SessionLocal()
+    try:
+        json_run_id = json.dumps(clean_run_id)
+        run_start_change = (
+            db.query(AdminConfigChange)
+            .filter(
+                AdminConfigChange.key == "SIMULATION_RUN_ID",
+                cast(AdminConfigChange.new_value, String) == json_run_id,
+            )
+            .order_by(AdminConfigChange.created_at.asc(), AdminConfigChange.id.asc())
+            .first()
+        )
+
+        llm_first_seen = db.execute(
+            text(
+                """
+                SELECT MIN(created_at) AS first_seen
+                FROM llm_usage
+                WHERE run_id = :run_id
+                """
+            ),
+            {"run_id": clean_run_id},
+        ).scalar()
+
+        start_candidates = []
+        if run_start_change and run_start_change.created_at:
+            start_candidates.append(ensure_utc(run_start_change.created_at))
+        if llm_first_seen:
+            start_candidates.append(ensure_utc(llm_first_seen))
+
+        fallback_start = now - timedelta(hours=int(hours_fallback))
+        run_started_at = min(start_candidates) if start_candidates else fallback_start
+        if not run_started_at:
+            run_started_at = fallback_start
+
+        llm_totals = db.execute(
+            text(
+                """
+                SELECT
+                  COUNT(*) AS calls,
+                  COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+                  COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                  COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                  COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+                FROM llm_usage
+                WHERE run_id = :run_id
+                  AND created_at >= :since_ts
+                """
+            ),
+            {"run_id": clean_run_id, "since_ts": run_started_at},
+        ).first()
+
+        runtime_actions = db.execute(
+            text(
+                """
+                SELECT
+                  COUNT(*) AS total_events,
+                  COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
+                  COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_actions,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'create_proposal' THEN 1 ELSE 0 END), 0) AS proposal_actions,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'vote' THEN 1 ELSE 0 END), 0) AS vote_actions,
+                  COALESCE(SUM(CASE WHEN e.event_type IN ('forum_post', 'forum_reply') THEN 1 ELSE 0 END), 0) AS forum_actions,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'law_passed' THEN 1 ELSE 0 END), 0) AS laws_passed,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'agent_died' THEN 1 ELSE 0 END), 0) AS deaths
+                FROM events e
+                WHERE e.created_at >= :since_ts
+                  AND (
+                    (e.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                    OR e.agent_id IN (
+                      SELECT DISTINCT u.agent_id
+                      FROM llm_usage u
+                      WHERE u.agent_id IS NOT NULL
+                        AND u.run_id = :run_id
+                        AND u.created_at >= :since_ts
+                    )
+                  )
+                """
+            ),
+            {"run_id": clean_run_id, "since_ts": run_started_at},
+        ).first()
+
+        scored = _collect_scored_plot_turns(
+            db,
+            window_start=run_started_at,
+            now=now,
+            min_salience=min_salience,
+            candidate_limit=max(trace_limit * 12, 120),
+            run_id=clean_run_id,
+        )
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        trace_items = []
+        for _, _, payload in scored[:trace_limit]:
+            event_id = int(payload.get("event_id") or 0)
+            if event_id <= 0:
+                continue
+            trace_items.append(
+                {
+                    "event_id": event_id,
+                    "event_type": str(payload.get("event_type") or ""),
+                    "title": str(payload.get("title") or ""),
+                    "description": str(payload.get("description") or ""),
+                    "salience": int(payload.get("salience") or 0),
+                    "created_at": payload.get("created_at"),
+                    "trace_url": f"/api/events/{event_id}",
+                    "ui_url": f"/timeline?event={event_id}",
+                }
+            )
+
+        llm_calls = int((llm_totals.calls if llm_totals else 0) or 0)
+        verification_state = "verified" if llm_calls > 0 and len(trace_items) > 0 else "partial"
+        if llm_calls <= 0:
+            verification_state = "unverified"
+
+        source = "fallback_hours"
+        if run_start_change and run_start_change.created_at:
+            source = "admin_config_change"
+        elif llm_first_seen:
+            source = "llm_first_seen"
+
+        return {
+            "run_id": clean_run_id,
+            "run_started_at": run_started_at.isoformat(),
+            "captured_at": now.isoformat(),
+            "llm": {
+                "calls": llm_calls,
+                "success_calls": int((llm_totals.success_calls if llm_totals else 0) or 0),
+                "fallback_calls": int((llm_totals.fallback_calls if llm_totals else 0) or 0),
+                "total_tokens": int((llm_totals.total_tokens if llm_totals else 0) or 0),
+                "estimated_cost_usd": float((llm_totals.estimated_cost_usd if llm_totals else 0.0) or 0.0),
+            },
+            "activity": {
+                "total_events": int((runtime_actions.total_events if runtime_actions else 0) or 0),
+                "checkpoint_actions": int((runtime_actions.checkpoint_actions if runtime_actions else 0) or 0),
+                "deterministic_actions": int((runtime_actions.deterministic_actions if runtime_actions else 0) or 0),
+                "proposal_actions": int((runtime_actions.proposal_actions if runtime_actions else 0) or 0),
+                "vote_actions": int((runtime_actions.vote_actions if runtime_actions else 0) or 0),
+                "forum_actions": int((runtime_actions.forum_actions if runtime_actions else 0) or 0),
+                "laws_passed": int((runtime_actions.laws_passed if runtime_actions else 0) or 0),
+                "deaths": int((runtime_actions.deaths if runtime_actions else 0) or 0),
+            },
+            "provenance": {
+                "run_id": clean_run_id,
+                "time_window": {
+                    "start_utc": run_started_at.isoformat(),
+                    "end_utc": now.isoformat(),
+                },
+                "verification_state": verification_state,
+                "verification_source": source,
+            },
+            "source_traces": trace_items,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/runs/{run_id}/social-card.svg")
+def run_social_card(
+    run_id: str = Path(..., max_length=64, pattern=r"^[A-Za-z0-9:_-]+$"),
+    hours_fallback: int = Query(48, ge=1, le=24 * 14),
+):
+    """
+    Dynamic OG social card for a run detail.
+    """
+    payload = run_detail(
+        run_id=run_id,
+        hours_fallback=hours_fallback,
+        trace_limit=8,
+        min_salience=55,
+    )
+    provenance = payload.get("provenance") or {}
+    activity = payload.get("activity") or {}
+    llm = payload.get("llm") or {}
+    traces = payload.get("source_traces") or []
+    top_trace = traces[0] if traces else {}
+
+    verification_label = str(provenance.get("verification_state") or "unverified").replace("_", " ").title()
+    subtitle = f"{verification_label} evidence • {int(llm.get('calls') or 0)} LLM calls"
+    top_title = str(top_trace.get("title") or "No major trace yet")
+    footer = f"Top trace: {top_title}"
+
+    svg = _social_card_svg(
+        kicker=f"Run {run_id}",
+        title=f"Simulation Run {run_id}",
+        subtitle=subtitle,
+        stat_pairs=[
+            ("Events", f"{int(activity.get('total_events') or 0):,}"),
+            ("Laws", f"{int(activity.get('laws_passed') or 0):,}"),
+            ("Deaths", f"{int(activity.get('deaths') or 0):,}"),
+            ("Tokens", f"{int(llm.get('total_tokens') or 0):,}"),
+        ],
+        footer=footer,
+    )
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@router.get("/moments/{event_id}/social-card.svg")
+def moment_social_card(
+    event_id: int = Path(..., ge=1),
+    run_id: str | None = Query(default=None, max_length=64),
+):
+    """
+    Dynamic OG social card for a specific event moment.
+    """
+    db = SessionLocal()
+    try:
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        metadata = event.event_metadata or {}
+        runtime_meta = metadata.get("runtime") if isinstance(metadata, dict) else {}
+        runtime_meta = runtime_meta if isinstance(runtime_meta, dict) else {}
+        resolved_run_id = str(run_id or runtime_meta.get("run_id") or "").strip()
+
+        score = _score_plot_turn(event)
+        category = _plot_turn_category(event)
+        title = _plot_turn_title(event)
+
+        actor_label = None
+        if event.agent_id is not None:
+            actor = db.query(Agent).filter(Agent.id == int(event.agent_id)).first()
+            if actor:
+                actor_label = actor.display_name or f"Agent #{actor.agent_number}"
+
+        created = ensure_utc(event.created_at)
+        subtitle_parts = [f"Category: {category.title()}", f"Signal: {score}"]
+        if actor_label:
+            subtitle_parts.append(actor_label)
+        subtitle = " • ".join(subtitle_parts)
+
+        footer_parts = []
+        if resolved_run_id:
+            footer_parts.append(f"Run {resolved_run_id}")
+        if created:
+            footer_parts.append(created.strftime("%Y-%m-%d %H:%M UTC"))
+        footer = " • ".join(footer_parts) or "Emergence event trace"
+
+        svg = _social_card_svg(
+            kicker=f"Moment #{event_id}",
+            title=title,
+            subtitle=subtitle,
+            stat_pairs=[
+                ("Event Type", str(event.event_type or "unknown").replace("_", " ").title()),
+                ("Signal", str(score)),
+                ("Category", str(category or "notable").title()),
+                ("Run", resolved_run_id or "Unknown"),
+            ],
+            footer=footer,
+        )
+        return Response(
+            content=svg,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
     finally:
         db.close()
 

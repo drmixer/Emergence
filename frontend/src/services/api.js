@@ -178,10 +178,13 @@ class APIService {
         return this.fetch(`/api/analytics/crisis-strip?limit=${limit}`)
     }
 
-    async getPlotTurns(limit = 8, hours = 48, minSalience = 60) {
-        return this.fetch(
-            `/api/analytics/plot-turns?limit=${limit}&hours=${hours}&min_salience=${minSalience}`
-        )
+    async getPlotTurns(limit = 8, hours = 48, minSalience = 60, runId = '') {
+        const params = new URLSearchParams()
+        params.append('limit', String(limit))
+        params.append('hours', String(hours))
+        params.append('min_salience', String(minSalience))
+        if (runId) params.append('run_id', String(runId))
+        return this.fetch(`/api/analytics/plot-turns?${params.toString()}`)
     }
 
     async getSocialDynamics(days = 7) {
@@ -192,10 +195,26 @@ class APIService {
         return this.fetch(`/api/analytics/class-mobility?hours=${hours}`)
     }
 
-    async getPlotTurnReplay(hours = 24, minSalience = 55, bucketMinutes = 30, limit = 220) {
-        return this.fetch(
-            `/api/analytics/plot-turns/replay?hours=${hours}&min_salience=${minSalience}&bucket_minutes=${bucketMinutes}&limit=${limit}`
-        )
+    async getPlotTurnReplay(hours = 24, minSalience = 55, bucketMinutes = 30, limit = 220, runId = '') {
+        const params = new URLSearchParams()
+        params.append('hours', String(hours))
+        params.append('min_salience', String(minSalience))
+        params.append('bucket_minutes', String(bucketMinutes))
+        params.append('limit', String(limit))
+        if (runId) params.append('run_id', String(runId))
+        return this.fetch(`/api/analytics/plot-turns/replay?${params.toString()}`)
+    }
+
+    async getRunDetail(runId, hoursFallback = 24, traceLimit = 12, minSalience = 55) {
+        const cleanRunId = String(runId || '').trim()
+        if (!cleanRunId) {
+            throw new Error('runId is required')
+        }
+        const params = new URLSearchParams()
+        params.append('hours_fallback', String(hoursFallback))
+        params.append('trace_limit', String(traceLimit))
+        params.append('min_salience', String(minSalience))
+        return this.fetch(`/api/analytics/runs/${encodeURIComponent(cleanRunId)}?${params.toString()}`)
     }
 
     // Prediction markets
@@ -364,12 +383,13 @@ class APIService {
         })
     }
 
-    async publishAdminArchiveArticle(token, articleId, publishedAt = null, adminUser = null) {
+    async publishAdminArchiveArticle(token, articleId, payload = {}, adminUser = null) {
         return this.fetch(`/api/admin/archive/articles/${articleId}/publish`, {
             method: 'POST',
             headers: this._adminHeaders(token, adminUser),
             body: JSON.stringify({
-                published_at: publishedAt || null,
+                published_at: payload?.published_at || null,
+                evidence_run_id: String(payload?.evidence_run_id || '').trim() || null,
             }),
         })
     }

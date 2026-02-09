@@ -16,8 +16,26 @@ from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
 from app.models.models import Event, Message, Proposal, Vote, Law, Agent
 from app.services.llm_client import llm_client
+from app.services.runtime_config import runtime_config_service
 
 logger = logging.getLogger(__name__)
+
+
+def _with_runtime_metadata(metadata: dict | None = None) -> dict:
+    payload = dict(metadata or {})
+    runtime = payload.get("runtime")
+    runtime_payload = dict(runtime) if isinstance(runtime, dict) else {}
+
+    run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+    run_mode = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_MODE") or "").strip()
+    if run_id:
+        runtime_payload["run_id"] = run_id[:64]
+    if run_mode:
+        runtime_payload["run_mode"] = run_mode
+
+    if runtime_payload:
+        payload["runtime"] = runtime_payload
+    return payload
 
 
 SUMMARY_SYSTEM_PROMPT = """You are a narrator documenting an AI civilization experiment called Emergence. 
@@ -318,7 +336,7 @@ Write a 2-3 paragraph summary of Day {day_number}. Make it engaging and highligh
         summary_event = Event(
             event_type="daily_summary",
             description=f"Day {day_number} Summary",
-            event_metadata={
+            event_metadata=_with_runtime_metadata({
                 "day_number": day_number,
                 "window_start": window_start.isoformat(),
                 "window_end": window_end.isoformat(),
@@ -334,7 +352,7 @@ Write a 2-3 paragraph summary of Day {day_number}. Make it engaging and highligh
                     "votes": votes_cast,
                     "laws_passed": len(laws_passed),
                 },
-            },
+            }),
         )
         db.add(summary_event)
         db.commit()

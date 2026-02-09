@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -51,3 +51,19 @@ def list_events(
         for e in events
     ]
 
+
+@router.get("/{event_id}", response_model=EventResponse)
+def get_event(event_id: int, db: Session = Depends(get_db)):
+    """Fetch a single event by ID."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    return EventResponse(
+        id=event.id,
+        agent_id=event.agent_id,
+        event_type=event.event_type,
+        description=event.description,
+        metadata=event.event_metadata or {},
+        created_at=event.created_at.isoformat() if event.created_at else None,
+    )

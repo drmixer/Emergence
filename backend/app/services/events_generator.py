@@ -13,8 +13,26 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.models.models import Event, GlobalResources
+from app.services.runtime_config import runtime_config_service
 
 logger = logging.getLogger(__name__)
+
+
+def _with_runtime_metadata(metadata: dict | None = None) -> dict:
+    payload = dict(metadata or {})
+    runtime = payload.get("runtime")
+    runtime_payload = dict(runtime) if isinstance(runtime, dict) else {}
+
+    run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+    run_mode = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_MODE") or "").strip()
+    if run_id:
+        runtime_payload["run_id"] = run_id[:64]
+    if run_mode:
+        runtime_payload["run_mode"] = run_mode
+
+    if runtime_payload:
+        payload["runtime"] = runtime_payload
+    return payload
 
 
 # Event definitions with weights and effects
@@ -186,11 +204,11 @@ class EventGenerator:
             event = Event(
                 event_type="world_event",
                 description=event_def["message"],
-                event_metadata={
+                event_metadata=_with_runtime_metadata({
                     "event_id": event_def["id"],
                     "event_name": event_def["name"],
                     "effect": event_def.get("effect", {}),
-                }
+                }),
             )
             db.add(event)
             

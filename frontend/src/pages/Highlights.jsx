@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Star,
   Zap,
@@ -10,12 +10,16 @@ import {
   MessageCircle,
   Flame,
   TrendingUp,
+  TrendingDown,
+  Minus,
+  Share2,
   TimerReset,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import Recap from '../components/Recap'
 import QuoteCardGenerator from '../components/QuoteCard'
 import { api, getViewerUserId } from '../services/api'
+import { trackShareAction } from '../services/shareAnalytics'
 
 const QUICK_BET_AMOUNT = 5
 
@@ -36,8 +40,24 @@ const eventTypeIcons = {
 }
 
 const pct = (value) => `${Math.round(Number(value || 0) * 100)}%`
+const getTurnRunId = (turn) => String(turn?.metadata?.runtime?.run_id || '').trim()
+const VALID_TABS = new Set(['recap', 'highlights', 'summary', 'plotTurns', 'predictions', 'replay', 'quotes'])
+const MAJOR_CATEGORIES = new Set(['crisis', 'conflict', 'governance'])
+
+function getMomentTier(turn) {
+  const salience = Number(turn?.salience || 0)
+  const category = String(turn?.category || '')
+  if (salience >= 85) return 'major'
+  if (salience >= 72 && MAJOR_CATEGORIES.has(category)) return 'major'
+  return 'minor'
+}
 
 export default function Highlights() {
+  const [searchParams] = useSearchParams()
+  const requestedTab = String(searchParams.get('tab') || '').trim()
+  const requestedEventId = Number(searchParams.get('event') || 0)
+  const runFilter = String(searchParams.get('run') || '').trim()
+
   const [featured, setFeatured] = useState([])
   const [summary, setSummary] = useState(null)
   const [plotTurns, setPlotTurns] = useState([])
@@ -49,21 +69,32 @@ export default function Highlights() {
   const [predictionNotice, setPredictionNotice] = useState(null)
   const [predictionError, setPredictionError] = useState(null)
   const [placingMarketKey, setPlacingMarketKey] = useState(null)
+  const [overview, setOverview] = useState(null)
+  const [emergenceMetrics, setEmergenceMetrics] = useState(null)
+  const [shareNotice, setShareNotice] = useState('')
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('recap')
+  const [activeTab, setActiveTab] = useState(VALID_TABS.has(requestedTab) ? requestedTab : 'recap')
+
+  useEffect(() => {
+    if (VALID_TABS.has(requestedTab)) {
+      setActiveTab(requestedTab)
+    }
+  }, [requestedTab])
 
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
         const userId = getViewerUserId()
-        const [featuredEvents, latestSummary, turns, replay, openMarkets, me] = await Promise.all([
+        const [featuredEvents, latestSummary, turns, replay, openMarkets, me, overviewPayload, metricsPayload] = await Promise.all([
           api.fetch('/api/analytics/featured?limit=20'),
           api.fetch('/api/analytics/summaries/latest'),
-          api.getPlotTurns(16, 72, 60).catch(() => ({ items: [] })),
-          api.getPlotTurnReplay(24, 55, 30, 240).catch(() => ({ items: [], buckets: [] })),
+          api.getPlotTurns(16, 72, 60, runFilter).catch(() => ({ items: [] })),
+          api.getPlotTurnReplay(24, 55, 30, 240, runFilter).catch(() => ({ items: [], buckets: [] })),
           api.getPredictionMarkets('open', 8).catch(() => []),
           api.getPredictionMe(userId).catch(() => null),
+          api.getAnalyticsOverview().catch(() => null),
+          api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
         ])
 
         setFeatured(Array.isArray(featuredEvents) ? featuredEvents : [])
@@ -77,6 +108,8 @@ export default function Highlights() {
 
         setPredictionMarkets(Array.isArray(openMarkets) ? openMarkets : [])
         setPredictionStats(me && typeof me === 'object' ? me : null)
+        setOverview(overviewPayload && typeof overviewPayload === 'object' ? overviewPayload : null)
+        setEmergenceMetrics(metricsPayload && typeof metricsPayload === 'object' ? metricsPayload : null)
       } catch {
         setFeatured([])
         setSummary(null)
@@ -86,12 +119,14 @@ export default function Highlights() {
         setReplayIndex(-1)
         setPredictionMarkets([])
         setPredictionStats(null)
+        setOverview(null)
+        setEmergenceMetrics(null)
       } finally {
         setLoading(false)
       }
     }
     load()
-  }, [])
+  }, [runFilter])
 
   const handleQuickPrediction = async (marketId, prediction) => {
     const key = `${marketId}-${prediction}`
@@ -144,6 +179,73 @@ export default function Highlights() {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, 8)
   }, [replayTurns, activeReplayBucket])
+
+  const stateStrip = useMemo(() => {
+    const day = Number(overview?.day_number || 0)
+    const deaths = Number(overview?.agents?.dead || 0)
+    const laws = Number(overview?.laws?.total || 0)
+    const coalitionIndex = Number(emergenceMetrics?.metrics?.coalition_edge_count || 0)
+    const cooperationRate = Number(emergenceMetrics?.metrics?.cooperation_rate || 0)
+    const conflictRate = Number(emergenceMetrics?.metrics?.conflict_rate || 0)
+    let trend = 'flat'
+    let trendLabel = 'Balanced'
+    if (cooperationRate - conflictRate >= 0.08) {
+      trend = 'up'
+      trendLabel = 'Cooperation rising'
+    } else if (conflictRate - cooperationRate >= 0.08) {
+      trend = 'down'
+      trendLabel = 'Conflict rising'
+    }
+    return { day, deaths, laws, coalitionIndex, trend, trendLabel }
+  }, [overview, emergenceMetrics])
+
+  const shareMoment = async (turn, surface = 'highlights_plot_turn') => {
+    const eventId = Number(turn?.event_id || 0)
+    if (!eventId) return
+    const runId = getTurnRunId(turn)
+    const origin = window.location.origin
+    const shareUrl = runId
+      ? `${origin}/share/run/${encodeURIComponent(runId)}/moment/${eventId}`
+      : `${origin}/share/moment/${eventId}`
+    const shareTitle = turn?.title || 'Emergence moment'
+    const shareText = String(turn?.description || '').slice(0, 200)
+    trackShareAction('share_clicked', {
+      runId,
+      eventId,
+      surface,
+      target: 'moment_link',
+    })
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: shareTitle, text: shareText, url: shareUrl })
+        trackShareAction('share_native_success', {
+          runId,
+          eventId,
+          surface,
+          target: 'moment_link',
+        })
+        setShareNotice('Moment shared.')
+      } else {
+        await navigator.clipboard.writeText(shareUrl)
+        trackShareAction('share_copied', {
+          runId,
+          eventId,
+          surface,
+          target: 'moment_link',
+        })
+        setShareNotice('Moment link copied.')
+      }
+      setTimeout(() => setShareNotice(''), 2000)
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        setShareNotice('Unable to share right now.')
+        setTimeout(() => setShareNotice(''), 2000)
+      }
+    }
+  }
+
+  const TrendIcon = stateStrip.trend === 'up' ? TrendingUp : stateStrip.trend === 'down' ? TrendingDown : Minus
 
   return (
     <div className="highlights-page">
@@ -208,6 +310,33 @@ export default function Highlights() {
           Quote Cards
         </button>
       </div>
+
+      {(activeTab === 'plotTurns' || activeTab === 'replay') && (
+        <div className="state-strip">
+          <div className="state-item">
+            <span>Day</span>
+            <strong>{stateStrip.day}</strong>
+          </div>
+          <div className="state-item">
+            <span>Deaths</span>
+            <strong>{stateStrip.deaths}</strong>
+          </div>
+          <div className="state-item">
+            <span>Laws</span>
+            <strong>{stateStrip.laws}</strong>
+          </div>
+          <div className="state-item">
+            <span>Coalition Index</span>
+            <strong>{stateStrip.coalitionIndex}</strong>
+          </div>
+          <div className={`state-item trend ${stateStrip.trend}`}>
+            <span>Trend</span>
+            <strong><TrendIcon size={14} /> {stateStrip.trendLabel}</strong>
+          </div>
+        </div>
+      )}
+
+      {shareNotice && <div className="feed-notice success">{shareNotice}</div>}
 
       {activeTab === 'recap' && (
         <Recap />
@@ -321,21 +450,41 @@ export default function Highlights() {
           {!loading && plotTurns.length === 0 && (
             <div className="empty-state">No major plot turns yet.</div>
           )}
-          {plotTurns.map((turn) => (
-            <div key={turn.event_id} className={`plot-turn-card category-${turn.category || 'notable'}`}>
-              <div className="plot-turn-row">
-                <h3>{turn.title}</h3>
-                <span className="plot-turn-salience">{turn.salience}</span>
+          {plotTurns.map((turn) => {
+            const turnRunId = getTurnRunId(turn)
+            const tier = getMomentTier(turn)
+            const isFocused = requestedEventId > 0 && Number(turn.event_id) === requestedEventId
+            return (
+              <div
+                key={turn.event_id}
+                className={`plot-turn-card category-${turn.category || 'notable'} tier-${tier} ${isFocused ? 'focused' : ''}`}
+              >
+                <div className="plot-turn-row">
+                  <h3>
+                    {turn.title}
+                    <span className={`moment-tier-badge ${tier}`}>{tier === 'major' ? 'Major Moment' : 'Minor Moment'}</span>
+                  </h3>
+                  <span className="plot-turn-salience">Signal {turn.salience}</span>
+                </div>
+                <p>{turn.description}</p>
+                <div className="plot-turn-meta">
+                  <span className="plot-turn-category">{(turn.category || 'notable').replace(/_/g, ' ')}</span>
+                  <span>
+                    {turn.created_at ? formatDistanceToNow(new Date(turn.created_at), { addSuffix: true }) : ''}
+                  </span>
+                  {turnRunId && (
+                    <Link to={`/runs/${encodeURIComponent(turnRunId)}`} className="plot-turn-run-link">
+                      Run {turnRunId}
+                    </Link>
+                  )}
+                  <button type="button" className="moment-share-btn" onClick={() => shareMoment(turn, 'highlights_plot_turn')}>
+                    <Share2 size={12} />
+                    Share this moment
+                  </button>
+                </div>
               </div>
-              <p>{turn.description}</p>
-              <div className="plot-turn-meta">
-                <span className="plot-turn-category">{(turn.category || 'notable').replace(/_/g, ' ')}</span>
-                <span>
-                  {turn.created_at ? formatDistanceToNow(new Date(turn.created_at), { addSuffix: true }) : ''}
-                </span>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -459,23 +608,43 @@ export default function Highlights() {
                     <div className="empty-state compact">No high-salience turns in this slice.</div>
                   ) : (
                     <div className="plot-turns-panel">
-                      {replayBucketEvents.map((turn) => (
-                        <div key={`slice-${turn.event_id}`} className={`plot-turn-card category-${turn.category || 'notable'}`}>
-                          <div className="plot-turn-row">
-                            <h3>{turn.title}</h3>
-                            <span className="plot-turn-salience">{turn.salience}</span>
+                      {replayBucketEvents.map((turn) => {
+                        const turnRunId = getTurnRunId(turn)
+                        const tier = getMomentTier(turn)
+                        const isFocused = requestedEventId > 0 && Number(turn.event_id) === requestedEventId
+                        return (
+                          <div
+                            key={`slice-${turn.event_id}`}
+                            className={`plot-turn-card category-${turn.category || 'notable'} tier-${tier} ${isFocused ? 'focused' : ''}`}
+                          >
+                            <div className="plot-turn-row">
+                              <h3>
+                                {turn.title}
+                                <span className={`moment-tier-badge ${tier}`}>{tier === 'major' ? 'Major Moment' : 'Minor Moment'}</span>
+                              </h3>
+                              <span className="plot-turn-salience">Signal {turn.salience}</span>
+                            </div>
+                            <p>{turn.description}</p>
+                            <div className="plot-turn-meta">
+                              <span>{(turn.category || 'notable').replace(/_/g, ' ')}</span>
+                              <span>
+                                {turn.created_at
+                                  ? formatDistanceToNow(new Date(turn.created_at), { addSuffix: true })
+                                  : ''}
+                              </span>
+                              {turnRunId && (
+                                <Link to={`/runs/${encodeURIComponent(turnRunId)}`} className="plot-turn-run-link">
+                                  Run {turnRunId}
+                                </Link>
+                              )}
+                              <button type="button" className="moment-share-btn" onClick={() => shareMoment(turn, 'highlights_replay_slice')}>
+                                <Share2 size={12} />
+                                Share this moment
+                              </button>
+                            </div>
                           </div>
-                          <p>{turn.description}</p>
-                          <div className="plot-turn-meta">
-                            <span>{(turn.category || 'notable').replace(/_/g, ' ')}</span>
-                            <span>
-                              {turn.created_at
-                                ? formatDistanceToNow(new Date(turn.created_at), { addSuffix: true })
-                                : ''}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -490,10 +659,12 @@ export default function Highlights() {
                         <button
                           key={`recent-${turn.event_id}`}
                           type="button"
-                          className={`replay-recent-item category-${turn.category || 'notable'}`}
+                          className={`replay-recent-item category-${turn.category || 'notable'} ${requestedEventId > 0 && Number(turn.event_id) === requestedEventId ? 'focused' : ''}`}
+                          onClick={() => shareMoment(turn, 'highlights_replay_recent')}
                         >
                           <span>{turn.title}</span>
                           <strong>{turn.salience}</strong>
+                          <em><Share2 size={12} /> Share</em>
                         </button>
                       ))}
                     </div>
@@ -536,6 +707,53 @@ export default function Highlights() {
           background: var(--gradient-primary);
           color: white;
           border-color: transparent;
+        }
+
+        .state-strip {
+          position: sticky;
+          top: -1px;
+          z-index: 12;
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: var(--spacing-sm);
+          margin-bottom: var(--spacing-lg);
+          padding: var(--spacing-sm);
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-lg);
+          background: rgba(6, 6, 10, 0.92);
+          backdrop-filter: blur(12px);
+        }
+
+        .state-item {
+          display: flex;
+          flex-direction: column;
+          gap: 0.2rem;
+          padding: 0.35rem 0.55rem;
+          border-radius: var(--radius-md);
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .state-item span {
+          color: var(--text-muted);
+          font-size: 0.68rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .state-item strong {
+          font-size: 0.92rem;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+        }
+
+        .state-item.trend.up strong {
+          color: #86efac;
+        }
+
+        .state-item.trend.down strong {
+          color: #fca5a5;
         }
 
         .featured-events {
@@ -703,6 +921,18 @@ export default function Highlights() {
           padding: var(--spacing-lg);
         }
 
+        .plot-turn-card.tier-major {
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+        }
+
+        .plot-turn-card.tier-minor {
+          opacity: 0.92;
+        }
+
+        .plot-turn-card.focused {
+          outline: 1px solid rgba(255, 255, 255, 0.35);
+        }
+
         .plot-turn-card.category-crisis { border-left-color: #f97316; }
         .plot-turn-card.category-conflict { border-left-color: #ef4444; }
         .plot-turn-card.category-alliance { border-left-color: #3b82f6; }
@@ -721,6 +951,10 @@ export default function Highlights() {
         .plot-turn-row h3 {
           margin: 0;
           font-size: 1.1rem;
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          flex-wrap: wrap;
         }
 
         .plot-turn-salience {
@@ -737,11 +971,64 @@ export default function Highlights() {
         .plot-turn-meta {
           margin-top: var(--spacing-sm);
           display: flex;
-          justify-content: space-between;
+          flex-wrap: wrap;
           color: var(--text-muted);
           font-size: 0.78rem;
           text-transform: capitalize;
           gap: var(--spacing-sm);
+        }
+
+        .plot-turn-run-link {
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-full);
+          padding: 0.12rem 0.55rem;
+          font-size: 0.74rem;
+          color: var(--text-secondary);
+          text-transform: none;
+        }
+
+        .plot-turn-run-link:hover {
+          color: var(--text-primary);
+          border-color: var(--border-light);
+        }
+
+        .moment-tier-badge {
+          font-size: 0.66rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          border: 1px solid transparent;
+          border-radius: var(--radius-full);
+          padding: 0.14rem 0.45rem;
+        }
+
+        .moment-tier-badge.major {
+          background: rgba(255, 255, 255, 0.12);
+          border-color: rgba(255, 255, 255, 0.25);
+          color: var(--text-primary);
+        }
+
+        .moment-tier-badge.minor {
+          background: rgba(255, 255, 255, 0.05);
+          border-color: rgba(255, 255, 255, 0.1);
+          color: var(--text-secondary);
+        }
+
+        .moment-share-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.28rem;
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-full);
+          padding: 0.14rem 0.5rem;
+          background: rgba(255, 255, 255, 0.03);
+          color: var(--text-secondary);
+          font-size: 0.72rem;
+          cursor: pointer;
+        }
+
+        .moment-share-btn:hover {
+          color: var(--text-primary);
+          border-color: var(--border-light);
         }
 
         .prediction-panel {
@@ -946,6 +1233,19 @@ export default function Highlights() {
           color: var(--text-muted);
         }
 
+        .replay-recent-item em {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.25rem;
+          font-size: 0.7rem;
+          color: var(--text-muted);
+          font-style: normal;
+        }
+
+        .replay-recent-item.focused {
+          outline: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
         .replay-recent-item.category-crisis { border-left-color: #f97316; }
         .replay-recent-item.category-conflict { border-left-color: #ef4444; }
         .replay-recent-item.category-alliance { border-left-color: #3b82f6; }
@@ -964,6 +1264,10 @@ export default function Highlights() {
         @media (max-width: 900px) {
           .replay-grid {
             grid-template-columns: 1fr;
+          }
+
+          .state-strip {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
         }
 

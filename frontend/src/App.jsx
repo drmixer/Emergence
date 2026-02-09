@@ -1,5 +1,6 @@
-import { createElement, useState } from 'react'
+import { Suspense, createElement, lazy, useState } from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
+import { Analytics } from '@vercel/analytics/react'
 import {
   Activity,
   Users,
@@ -19,24 +20,25 @@ import {
   Shield,
 } from 'lucide-react'
 
-// Pages
-import Dashboard from './pages/Dashboard'
-import Agents from './pages/Agents'
-import Agent from './pages/Agent'
-import Proposals from './pages/Proposals'
-import Laws from './pages/Laws'
-import Resources from './pages/Resources'
-import About from './pages/About'
-import Highlights from './pages/Highlights'
-import Leaderboards from './pages/Leaderboards'
-import Network from './pages/Network'
-import Timeline from './pages/Timeline'
-import Predictions from './pages/Predictions'
-import Ops from './pages/Ops'
-import Method from './pages/Method'
+// Pages (route-level code splitting)
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Agents = lazy(() => import('./pages/Agents'))
+const Agent = lazy(() => import('./pages/Agent'))
+const Proposals = lazy(() => import('./pages/Proposals'))
+const Laws = lazy(() => import('./pages/Laws'))
+const Resources = lazy(() => import('./pages/Resources'))
+const About = lazy(() => import('./pages/About'))
+const Highlights = lazy(() => import('./pages/Highlights'))
+const Leaderboards = lazy(() => import('./pages/Leaderboards'))
+const Network = lazy(() => import('./pages/Network'))
+const Timeline = lazy(() => import('./pages/Timeline'))
+const Predictions = lazy(() => import('./pages/Predictions'))
+const Ops = lazy(() => import('./pages/Ops'))
+const Method = lazy(() => import('./pages/Method'))
+const RunDetail = lazy(() => import('./pages/RunDetail'))
 
 // Components
-import LiveFeed from './components/LiveFeed'
+const LiveFeed = lazy(() => import('./components/LiveFeed'))
 import SupportBanner from './components/SupportBanner'
 import ToastProvider from './components/ToastNotifications'
 import { useKeyboardNavigation } from './components/KeyboardNavigation'
@@ -67,9 +69,12 @@ function App() {
     setMobileMenuOpen(false)
   }
 
+  const routeLoadingFallback = <div className="page-loading">Loading page...</div>
+
   return (
     <SubscriptionProvider>
       <div className="app-wrapper">
+        <Analytics />
         <SupportBanner />
 
         {/* Mobile Header */}
@@ -179,27 +184,32 @@ function App() {
 
           {/* Main Content */}
           <main className="main-content">
-            <Routes>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/agents" element={<Agents />} />
-              <Route path="/agents/:id" element={<Agent />} />
-              <Route path="/proposals" element={<Proposals />} />
-              <Route path="/laws" element={<Laws />} />
-              <Route path="/resources" element={<Resources />} />
-              <Route path="/network" element={<Network />} />
-              <Route path="/timeline" element={<Timeline />} />
-              <Route path="/highlights" element={<Highlights />} />
-              <Route path="/leaderboards" element={<Leaderboards />} />
-              <Route path="/predictions" element={<Predictions />} />
-              <Route path="/about" element={<About />} />
-              <Route path="/method" element={<Method />} />
-              <Route path="/ops" element={<Ops />} />
-            </Routes>
+            <Suspense fallback={routeLoadingFallback}>
+              <Routes>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/agents" element={<Agents />} />
+                <Route path="/agents/:id" element={<Agent />} />
+                <Route path="/proposals" element={<Proposals />} />
+                <Route path="/laws" element={<Laws />} />
+                <Route path="/resources" element={<Resources />} />
+                <Route path="/network" element={<Network />} />
+                <Route path="/timeline" element={<Timeline />} />
+                <Route path="/highlights" element={<Highlights />} />
+                <Route path="/leaderboards" element={<Leaderboards />} />
+                <Route path="/predictions" element={<Predictions />} />
+                <Route path="/about" element={<About />} />
+                <Route path="/method" element={<Method />} />
+                <Route path="/ops" element={<Ops />} />
+                <Route path="/runs/:runId" element={<RunDetail />} />
+              </Routes>
+            </Suspense>
           </main>
 
           {/* Live Feed Sidebar */}
           <aside className="feed-sidebar">
-            <LiveFeed />
+            <Suspense fallback={<div className="feed-loading">Loading feed...</div>}>
+              <LiveFeed />
+            </Suspense>
           </aside>
         </div>
         <ToastProvider />

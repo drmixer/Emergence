@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.admin_auth import AdminActor, require_admin_auth
@@ -16,6 +18,8 @@ from app.models.models import ArchiveArticle
 from app.services.archive_drafts import generate_weekly_draft
 
 router = APIRouter()
+BASELINE_ARTICLE_SLUG = "before-the-first-full-run"
+RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
 
 
 def _assert_writes_enabled() -> None:
@@ -42,12 +46,14 @@ class ArticleUpsertRequest(BaseModel):
     title: str = Field(..., min_length=3, max_length=255)
     summary: str = Field(..., min_length=20, max_length=800)
     sections: list[ArticleSectionPayload] = Field(..., min_length=1)
+    evidence_run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9:_-]+$")
     status: Literal["draft", "published"] = "draft"
     published_at: date | None = None
 
 
 class ArticlePublishRequest(BaseModel):
     published_at: date | None = None
+    evidence_run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9:_-]+$")
 
 
 class WeeklyDraftRequest(BaseModel):
@@ -81,6 +87,7 @@ def _serialize_article(article: ArchiveArticle) -> dict[str, Any]:
         "title": str(article.title),
         "summary": str(article.summary),
         "sections": sections,
+        "evidence_run_id": str(article.evidence_run_id or "").strip() or None,
         "status": str(article.status),
         "published_at": article.published_at.isoformat() if article.published_at else None,
         "created_by": article.created_by,
@@ -88,6 +95,80 @@ def _serialize_article(article: ArchiveArticle) -> dict[str, Any]:
         "created_at": article.created_at.isoformat() if article.created_at else None,
         "updated_at": article.updated_at.isoformat() if article.updated_at else None,
     }
+
+
+def _normalize_run_id(raw_value: str | None) -> str | None:
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+    if not RUN_ID_PATTERN.match(value):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="evidence_run_id must match [A-Za-z0-9:_-] and be at most 64 characters",
+        )
+    return value
+
+
+def _assert_publish_guardrails(
+    db: Session,
+    *,
+    article_slug: str,
+    evidence_run_id: str | None,
+) -> str | None:
+    normalized_run_id = _normalize_run_id(evidence_run_id)
+    if article_slug == BASELINE_ARTICLE_SLUG:
+        # Baseline methodology post is allowed without run-backed telemetry.
+        return normalized_run_id
+
+    if not normalized_run_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Publishing requires evidence_run_id for non-baseline articles",
+        )
+
+    telemetry = db.execute(
+        text(
+            """
+            SELECT
+              COUNT(*) AS calls,
+              COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+              MIN(created_at) AS first_seen_at
+            FROM llm_usage
+            WHERE run_id = :run_id
+            """
+        ),
+        {"run_id": normalized_run_id},
+    ).first()
+    calls = int((telemetry.calls if telemetry else 0) or 0)
+    success_calls = int((telemetry.success_calls if telemetry else 0) or 0)
+    first_seen_at = telemetry.first_seen_at if telemetry else None
+
+    if calls <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Run ID '{normalized_run_id}' has no telemetry rows in llm_usage",
+        )
+    if success_calls <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Run ID '{normalized_run_id}' has no successful telemetry calls",
+        )
+
+    if first_seen_at is not None:
+        event_count = int(
+            db.execute(
+                text("SELECT COUNT(*) FROM events WHERE created_at >= :start_ts"),
+                {"start_ts": first_seen_at},
+            ).scalar()
+            or 0
+        )
+        if event_count <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Run ID '{normalized_run_id}' has no event activity after telemetry start",
+            )
+
+    return normalized_run_id
 
 
 @router.get("/articles")
@@ -123,12 +204,20 @@ def create_admin_archive_article(
     existing = db.query(ArchiveArticle).filter(ArchiveArticle.slug == request.slug.strip()).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slug already exists")
+    evidence_run_id = _normalize_run_id(request.evidence_run_id)
+    if request.status == "published":
+        evidence_run_id = _assert_publish_guardrails(
+            db,
+            article_slug=request.slug.strip(),
+            evidence_run_id=evidence_run_id,
+        )
 
     article = ArchiveArticle(
         slug=request.slug.strip(),
         title=request.title.strip(),
         summary=request.summary.strip(),
         sections=[_serialize_section(section) for section in request.sections],
+        evidence_run_id=evidence_run_id,
         status=request.status,
         published_at=request.published_at
         if request.published_at
@@ -163,9 +252,15 @@ def update_admin_archive_article(
     article.title = request.title.strip()
     article.summary = request.summary.strip()
     article.sections = [_serialize_section(section) for section in request.sections]
+    article.evidence_run_id = _normalize_run_id(request.evidence_run_id)
     article.status = request.status
     article.updated_by = actor.actor_id
     if request.status == "published":
+        article.evidence_run_id = _assert_publish_guardrails(
+            db,
+            article_slug=slug,
+            evidence_run_id=article.evidence_run_id,
+        )
         article.published_at = request.published_at or article.published_at or date.today()
     else:
         article.published_at = request.published_at
@@ -186,7 +281,13 @@ def publish_admin_archive_article(
     article = db.query(ArchiveArticle).filter(ArchiveArticle.id == int(article_id)).first()
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    resolved_evidence_run_id = _assert_publish_guardrails(
+        db,
+        article_slug=str(article.slug),
+        evidence_run_id=request.evidence_run_id or article.evidence_run_id,
+    )
     article.status = "published"
+    article.evidence_run_id = resolved_evidence_run_id
     article.published_at = request.published_at or article.published_at or date.today()
     article.updated_by = actor.actor_id
     db.commit()

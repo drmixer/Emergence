@@ -428,6 +428,7 @@ class ArchiveArticle(Base):
     title = Column(String(255), nullable=False)
     summary = Column(Text, nullable=False)
     sections = Column(JSON, nullable=False, default=list)
+    evidence_run_id = Column(String(64), nullable=True)
     status = Column(String(20), nullable=False, default="draft")
     published_at = Column(Date, nullable=True)
     created_by = Column(String(120), nullable=True)

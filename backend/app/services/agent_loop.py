@@ -194,10 +194,16 @@ class AgentProcessor:
                 if checkpoint_reason:
                     self._apply_checkpoint_state(agent, checkpoint_reason, action_data or {})
 
+                current_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+                current_run_mode = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_MODE") or "").strip()
                 runtime_metadata = {
                     "mode": runtime_mode,
                     "checkpoint_reason": checkpoint_reason,
                 }
+                if current_run_id:
+                    runtime_metadata["run_id"] = current_run_id[:64]
+                if current_run_mode:
+                    runtime_metadata["run_mode"] = current_run_mode
                 parse_meta = (llm_meta or {}).get("parse") if isinstance(llm_meta, dict) else None
                 if isinstance(parse_meta, dict):
                     runtime_metadata["llm_parse_status"] = parse_meta.get("parse_status")

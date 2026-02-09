@@ -21,12 +21,14 @@ import { api } from '../services/api'
 
 const TOKEN_STORAGE_KEY = 'emergence_admin_token'
 const USER_STORAGE_KEY = 'emergence_admin_user'
+const BASELINE_ARTICLE_SLUG = 'before-the-first-full-run'
 
 const EMPTY_ARTICLE_EDITOR = {
   id: null,
   slug: '',
   title: '',
   summary: '',
+  evidenceRunId: '',
   publishedAt: '',
   status: 'draft',
   sectionsText: JSON.stringify(
@@ -57,6 +59,7 @@ function toArticleEditor(article) {
     slug: String(article.slug || ''),
     title: String(article.title || ''),
     summary: String(article.summary || ''),
+    evidenceRunId: String(article.evidence_run_id || ''),
     publishedAt: String(article.published_at || ''),
     status: String(article.status || 'draft'),
     sectionsText: JSON.stringify(Array.isArray(article.sections) ? article.sections : [], null, 2),
@@ -360,7 +363,7 @@ export default function Ops() {
   }
 
   const onNewArticle = () => {
-    setArticleEditor({ ...EMPTY_ARTICLE_EDITOR })
+    setArticleEditor((prev) => ({ ...EMPTY_ARTICLE_EDITOR, evidenceRunId: String(activeRunId || prev.evidenceRunId || '').trim() }))
   }
 
   const onSelectArticle = (article) => {
@@ -376,6 +379,7 @@ export default function Ops() {
     const title = String(articleEditor.title || '').trim()
     const slug = String(articleEditor.slug || '').trim()
     const summary = String(articleEditor.summary || '').trim()
+    const evidenceRunId = String(articleEditor.evidenceRunId || '').trim()
     const { error: sectionsError, sections } = validateAndParseSections(articleEditor.sectionsText)
 
     if (!title || !slug || !summary) {
@@ -391,6 +395,7 @@ export default function Ops() {
       slug,
       title,
       summary,
+      evidence_run_id: evidenceRunId || null,
       status: nextStatus,
       published_at: String(articleEditor.publishedAt || '').trim() || null,
       sections,
@@ -423,7 +428,10 @@ export default function Ops() {
       const response = await api.publishAdminArchiveArticle(
         token,
         articleEditor.id,
-        String(articleEditor.publishedAt || '').trim() || null,
+        {
+          published_at: String(articleEditor.publishedAt || '').trim() || null,
+          evidence_run_id: String(articleEditor.evidenceRunId || '').trim() || null,
+        },
         adminUser
       )
       setArticleEditor(toArticleEditor(response))
@@ -495,6 +503,10 @@ export default function Ops() {
   const paused = Boolean(status?.viewer_ops?.simulation_paused)
   const degraded = Boolean(status?.viewer_ops?.force_cheapest_route)
   const isRunning = simulationActive && !paused
+  const editorSlug = String(articleEditor.slug || '').trim()
+  const editorEvidenceRunId = String(articleEditor.evidenceRunId || '').trim()
+  const requiresEvidenceRunId = editorSlug.length > 0 && editorSlug !== BASELINE_ARTICLE_SLUG
+  const canPublishWithEvidence = !requiresEvidenceRunId || editorEvidenceRunId.length > 0
 
   return (
     <div className="ops-page">
@@ -913,7 +925,7 @@ export default function Ops() {
                         </div>
                         <div className="ops-article-row-bottom">
                           <span>{article.slug}</span>
-                          <span>{article.published_at || 'unpublished'}</span>
+                          <span>{article.evidence_run_id || article.published_at || 'unpublished'}</span>
                         </div>
                       </button>
                     )
@@ -949,6 +961,20 @@ export default function Ops() {
                     Autofill
                   </button>
                 </div>
+
+                <label className="ops-field">
+                  <span>Evidence Run ID</span>
+                  <input
+                    type="text"
+                    value={articleEditor.evidenceRunId}
+                    onChange={(event) => setArticleEditor((prev) => ({ ...prev, evidenceRunId: event.target.value }))}
+                    placeholder="run-20260207T015151Z"
+                    disabled={!writeEnabled}
+                  />
+                  <small className="ops-inline-help">
+                    Required to publish non-baseline articles. Must match telemetry in llm_usage.
+                  </small>
+                </label>
 
                 <label className="ops-field">
                   <span>Published date</span>
@@ -997,12 +1023,17 @@ export default function Ops() {
                     className="btn-primary"
                     type="button"
                     onClick={() => onSaveArticle('published')}
-                    disabled={!writeEnabled || articleAction === 'save' || articleAction === 'publish'}
+                    disabled={!writeEnabled || articleAction === 'save' || articleAction === 'publish' || !canPublishWithEvidence}
                   >
                     {(articleAction === 'publish' && <Loader2 size={14} className="spin" />) || <Upload size={14} />}
                     Save + Publish
                   </button>
                 </div>
+                {!canPublishWithEvidence && (
+                  <div className="ops-inline-error">
+                    Evidence Run ID is required before publishing non-baseline articles.
+                  </div>
+                )}
 
                 {articleEditor.id && (
                   <div className="ops-article-actions">
@@ -1010,7 +1041,7 @@ export default function Ops() {
                       className="btn-subtle"
                       type="button"
                       onClick={onPublishExistingArticle}
-                      disabled={!writeEnabled || articleAction === 'publish-existing'}
+                      disabled={!writeEnabled || articleAction === 'publish-existing' || !canPublishWithEvidence}
                     >
                       {(articleAction === 'publish-existing' && <Loader2 size={14} className="spin" />) || <Upload size={14} />}
                       Publish Existing

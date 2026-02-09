@@ -15,6 +15,7 @@ from app.core.database import SessionLocal
 from app.models.models import Agent, AgentInventory, Proposal, Law, Event, Transaction, GlobalResources, Message
 from app.services.archive_drafts import maybe_generate_scheduled_weekly_draft
 from app.services.emergence_metrics import persist_completed_day_snapshot
+from app.services.runtime_config import runtime_config_service
 
 # Twitter bot integration (optional)
 try:
@@ -95,6 +96,23 @@ QUOTE_STOPWORDS = {
 
 def _twitter_ready() -> bool:
     return bool(TWITTER_AVAILABLE and twitter_bot and getattr(twitter_bot, "enabled", False))
+
+
+def _with_runtime_metadata(metadata: dict | None = None) -> dict:
+    payload = dict(metadata or {})
+    runtime = payload.get("runtime")
+    runtime_payload = dict(runtime) if isinstance(runtime, dict) else {}
+
+    run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+    run_mode = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_MODE") or "").strip()
+    if run_id:
+        runtime_payload["run_id"] = run_id[:64]
+    if run_mode:
+        runtime_payload["run_mode"] = run_mode
+
+    if runtime_payload:
+        payload["runtime"] = runtime_payload
+    return payload
 
 
 def _score_quote_candidate(text: str) -> int:
@@ -339,7 +357,7 @@ async def tweet_high_salience_quote():
                 agent_id=author.id,
                 event_type="tweet_posted",
                 description=f"Twitter notable quote posted for Agent #{author.agent_number}",
-                event_metadata={
+                event_metadata=_with_runtime_metadata({
                     "source": "notable_quote",
                     "status": "sent" if success else "queued",
                     "message_id": int(best.id),
@@ -348,7 +366,7 @@ async def tweet_high_salience_quote():
                     "day_number": int(day_number),
                     "quote_fingerprint": quote_fingerprint,
                     "quote_text": quote_text,
-                },
+                }),
             )
         )
         db.commit()
@@ -459,11 +477,11 @@ async def process_daily_consumption():
                         agent_id=agent.id,
                         event_type="became_dormant",
                         description=f"{agent_name} went dormant due to {reason}",
-                        event_metadata={
+                        event_metadata=_with_runtime_metadata({
                             "reason": reason, 
                             "food": float(food_amount), 
                             "energy": float(energy_amount)
-                        }
+                        }),
                     )
                     db.add(event)
                     
@@ -543,12 +561,12 @@ async def process_daily_consumption():
                             agent_id=agent.id,
                             event_type="agent_died",
                             description=f"☠️ {agent_name} has DIED from starvation after {agent.starvation_cycles} cycles without resources",
-                            event_metadata={
+                            event_metadata=_with_runtime_metadata({
                                 "cause": "starvation",
                                 "starvation_cycles": agent.starvation_cycles,
                                 "final_food": float(food_amount),
                                 "final_energy": float(energy_amount)
-                            }
+                            }),
                         )
                         db.add(event)
                         
@@ -569,12 +587,12 @@ async def process_daily_consumption():
                             agent_id=agent.id,
                             event_type="starvation_warning",
                             description=f"⚠️ {agent_name} is starving! Cycle {agent.starvation_cycles}/{DEATH_THRESHOLD} until death",
-                            event_metadata={
+                            event_metadata=_with_runtime_metadata({
                                 "starvation_cycles": agent.starvation_cycles,
                                 "cycles_until_death": DEATH_THRESHOLD - agent.starvation_cycles,
                                 "food": float(food_amount),
                                 "energy": float(energy_amount)
-                            }
+                            }),
                         )
                         db.add(event)
         
@@ -666,11 +684,11 @@ async def resolve_expired_proposals():
                     event = Event(
                         event_type="law_passed",
                         description=f"New law enacted: {proposal.title}",
-                        event_metadata={
+                        event_metadata=_with_runtime_metadata({
                             "proposal_id": proposal.id,
                             "votes_for": proposal.votes_for,
                             "votes_against": proposal.votes_against,
-                        }
+                        }),
                     )
                     db.add(event)
                     
@@ -694,13 +712,13 @@ async def resolve_expired_proposals():
             event = Event(
                 event_type="proposal_resolved",
                 description=f"Proposal '{proposal.title}' {result} ({proposal.votes_for}/{proposal.votes_against})",
-                event_metadata={
+                event_metadata=_with_runtime_metadata({
                     "proposal_id": proposal.id,
                     "result": result,
                     "votes_for": proposal.votes_for,
                     "votes_against": proposal.votes_against,
                     "votes_abstain": proposal.votes_abstain,
-                }
+                }),
             )
             db.add(event)
             

@@ -132,7 +132,7 @@ def generate_weekly_draft(
     if skip_if_exists_for_anchor:
         existing = (
             db.query(ArchiveArticle)
-            .filter(ArchiveArticle.slug.like(f"{base_slug}%"))
+            .filter(ArchiveArticle.slug.like(f"{base_slug}%"), ArchiveArticle.status == "draft")
             .order_by(ArchiveArticle.updated_at.desc(), ArchiveArticle.id.desc())
             .first()
         )
@@ -213,6 +213,7 @@ def generate_weekly_draft(
         title=f"Weekly Systems Brief - {slug_anchor.isoformat()}",
         summary=summary,
         sections=sections_payload,
+        evidence_run_id=(run_id if run_id != "not-set" else None),
         status="draft",
         published_at=None,
         created_by=actor_id,
