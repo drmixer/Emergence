@@ -137,6 +137,9 @@ class Settings(BaseSettings):
     FORCE_CHEAPEST_ROUTE: bool = False
     # Optional run label for llm_usage attribution rows. If empty, runtime generates one.
     SIMULATION_RUN_ID: str = ""
+    # Optional research metadata labels used by report/tag automation.
+    SIMULATION_CONDITION_NAME: str = ""
+    SIMULATION_SEASON_NUMBER: int = 0
     # Optional perception lag for agent context (in seconds). Adds information asymmetry.
     PERCEPTION_LAG_SECONDS: int = 120
 
@@ -160,6 +163,14 @@ class Settings(BaseSettings):
     # Minimum evidence thresholds before creating a new digest draft.
     ARCHIVE_WEEKLY_DRAFT_MIN_EVENTS: int = 25
     ARCHIVE_WEEKLY_DRAFT_MIN_LLM_CALLS: int = 5
+
+    # Run closeout report bundle generation.
+    RUN_REPORT_BUNDLE_ENABLED: bool = True
+    RUN_REPORT_BACKFILL_ENABLED: bool = True
+    RUN_REPORT_BACKFILL_LOOKBACK_HOURS: int = 7 * 24
+    RUN_REPORT_BACKFILL_CHECK_INTERVAL_MINUTES: int = 60
+    RUN_REPORT_BACKFILL_MAX_RUNS_PER_PASS: int = 3
+    RUN_REPORT_BACKFILL_ACTOR: str = "report-backfill-bot"
 
     # Rate limiting
     MAX_ACTIONS_PER_HOUR: int = 20

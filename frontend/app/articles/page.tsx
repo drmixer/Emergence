@@ -8,8 +8,24 @@ export const metadata: Metadata = {
   description: "Research notes and field reports from the Emergence simulation archive.",
 }
 
-export default async function ArticlesPage() {
-  const articles = await fetchPublishedArticles(50)
+type ArticlesPageProps = {
+  searchParams: Promise<{ view?: string; tag?: string }>
+}
+
+function resolveView(rawValue: string | undefined) {
+  const value = String(rawValue || "").trim().toLowerCase()
+  if (value === "research") return "research"
+  if (value === "all") return "all"
+  return "stories"
+}
+
+export default async function ArticlesPage({ searchParams }: ArticlesPageProps) {
+  const params = await searchParams
+  const view = resolveView(params?.view)
+  const tag = String(params?.tag || "").trim().toLowerCase()
+  const contentType =
+    view === "research" ? "technical_report" : view === "stories" ? "approachable_article" : "all"
+  const articles = await fetchPublishedArticles({ limit: 50, contentType, tag })
 
   return (
     <main className="relative min-h-screen px-4 py-16 md:pl-28 md:pr-12">
@@ -30,6 +46,38 @@ export default async function ArticlesPage() {
             Field reports from the live simulation. Each piece captures one emergent dynamic and connects it to
             historical research on cooperation, conflict, and governance.
           </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link
+              href="/articles?view=stories"
+              className={`inline-flex items-center border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] ${
+                view === "stories"
+                  ? "border-foreground/70 bg-foreground/10 text-foreground"
+                  : "border-border/70 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Stories
+            </Link>
+            <Link
+              href="/articles?view=research"
+              className={`inline-flex items-center border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] ${
+                view === "research"
+                  ? "border-foreground/70 bg-foreground/10 text-foreground"
+                  : "border-border/70 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Research
+            </Link>
+            <Link
+              href="/articles?view=all"
+              className={`inline-flex items-center border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] ${
+                view === "all"
+                  ? "border-foreground/70 bg-foreground/10 text-foreground"
+                  : "border-border/70 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              All
+            </Link>
+          </div>
         </header>
 
         <section className="mt-10 space-y-6">
@@ -58,7 +106,23 @@ export default async function ArticlesPage() {
                 <h2 className="mt-5 font-[var(--font-bebas)] text-5xl leading-none tracking-tight md:text-6xl">
                   {article.title}
                 </h2>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="inline-flex border border-border/70 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    {article.contentType === "technical_report" ? "Research" : "Story"}
+                  </span>
+                  <span className="inline-flex border border-border/70 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    {article.statusLabel}
+                  </span>
+                  <span className="inline-flex border border-border/70 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    evidence {article.evidenceCompleteness}
+                  </span>
+                </div>
                 <p className="mt-4 max-w-3xl font-mono text-sm leading-relaxed text-muted-foreground">{article.summary}</p>
+                {article.tags.length > 0 ? (
+                  <p className="mt-4 max-w-3xl font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                    {article.tags.slice(0, 6).join(" · ")}
+                  </p>
+                ) : null}
                 <Link
                   href={`/articles/${article.slug}`}
                   className="mt-6 inline-flex items-center gap-2 font-mono text-xs uppercase tracking-[0.22em] text-foreground"

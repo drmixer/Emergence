@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import String, cast
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.models import ArchiveArticle
 
 router = APIRouter()
+CONTENT_TYPES = ("technical_report", "approachable_article")
 
 
 def _normalize_references(raw_references: Any) -> list[dict[str, str]]:
@@ -54,6 +56,7 @@ def _normalize_sections(raw_sections: Any) -> list[dict[str, Any]]:
 
 def _serialize_article(article: ArchiveArticle) -> dict[str, Any]:
     published_at = article.published_at if isinstance(article.published_at, date) else None
+    tags = _normalize_tags(article.tags)
     return {
         "id": int(article.id),
         "slug": str(article.slug),
@@ -61,23 +64,80 @@ def _serialize_article(article: ArchiveArticle) -> dict[str, Any]:
         "summary": str(article.summary),
         "published_at": published_at.isoformat() if published_at else None,
         "status": str(article.status),
+        "content_type": str(article.content_type or "approachable_article"),
+        "status_label": str(article.status_label or "observational"),
+        "evidence_completeness": str(article.evidence_completeness or "partial"),
+        "tags": tags,
+        "linked_record_ids": _normalize_linked_record_ids(article.linked_record_ids),
+        "evidence_run_id": str(article.evidence_run_id or "").strip() or None,
         "sections": _normalize_sections(article.sections),
         "created_at": article.created_at.isoformat() if article.created_at else None,
         "updated_at": article.updated_at.isoformat() if article.updated_at else None,
     }
 
 
+def _normalize_tags(raw_value: Any) -> list[str]:
+    if not isinstance(raw_value, list):
+        return []
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in raw_value:
+        tag = str(item or "").strip().lower()
+        if not tag:
+            continue
+        if tag in seen:
+            continue
+        seen.add(tag)
+        deduped.append(tag)
+    return deduped
+
+
+def _normalize_linked_record_ids(raw_value: Any) -> list[int]:
+    if not isinstance(raw_value, list):
+        return []
+    deduped: list[int] = []
+    seen: set[int] = set()
+    for item in raw_value:
+        try:
+            value = int(item)
+        except (TypeError, ValueError):
+            continue
+        if value <= 0 or value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _normalize_tag_filters(raw_value: str | None) -> list[str]:
+    parts = [part.strip().lower() for part in str(raw_value or "").split(",")]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        if not part or part in seen:
+            continue
+        seen.add(part)
+        deduped.append(part)
+    return deduped
+
+
 @router.get("/articles")
 def list_archive_articles(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    content_type: Literal["technical_report", "approachable_article", "all"] = Query(default="all"),
+    tag: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     base_query = (
         db.query(ArchiveArticle)
         .filter(ArchiveArticle.status == "published")
-        .order_by(ArchiveArticle.published_at.desc(), ArchiveArticle.created_at.desc(), ArchiveArticle.id.desc())
     )
+    if content_type != "all":
+        base_query = base_query.filter(ArchiveArticle.content_type == content_type)
+    for tag_filter in _normalize_tag_filters(tag):
+        base_query = base_query.filter(cast(ArchiveArticle.tags, String).like(f'%"{tag_filter}"%'))
+    base_query = base_query.order_by(ArchiveArticle.published_at.desc(), ArchiveArticle.created_at.desc(), ArchiveArticle.id.desc())
     total = int(base_query.count())
     rows = base_query.offset(offset).limit(limit).all()
     return {

@@ -58,6 +58,25 @@ railway run -s backend -- venv/bin/python scripts/simulation_control.py status
 
 More details: `docs/DEPLOYMENT.md`.
 
+## Runtime + Report Controls
+
+From repo root:
+
+```bash
+# Simulation runtime controls
+make sim-status
+make sim-start RUN_MODE=real
+make sim-stop
+
+# Run-scoped research outputs
+make report-rebuild RUN_ID=run-20260210T120000Z
+make report-tech RUN_ID=run-20260210T120000Z
+make report-story RUN_ID=run-20260210T120000Z
+make report-plan RUN_ID=run-20260210T120000Z
+```
+
+Report artifacts are written under `output/reports/runs/<run_id>/` and indexed in `run_report_artifacts`.
+
 ## Tech Stack
 
 - **Backend:** Python, FastAPI, PostgreSQL, Redis

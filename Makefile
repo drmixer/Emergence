@@ -1,7 +1,9 @@
-.PHONY: sim-status sim-start sim-stop
+.PHONY: sim-status sim-start sim-stop report-rebuild report-tech report-story report-plan
 
 RUN_MODE ?= real
 RUN_ID ?=
+CONDITION ?=
+SEASON_NUMBER ?=
 
 sim-status:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/simulation_control.py status
@@ -11,8 +13,27 @@ sim-stop:
 
 sim-start:
 	@cd backend && \
-	if [ -n "$(RUN_ID)" ]; then \
-		railway run -s backend -- venv/bin/python scripts/simulation_control.py start --run-mode "$(RUN_MODE)" --run-id "$(RUN_ID)"; \
-	else \
-		railway run -s backend -- venv/bin/python scripts/simulation_control.py start --run-mode "$(RUN_MODE)"; \
-	fi
+	CMD="railway run -s backend -- venv/bin/python scripts/simulation_control.py start --run-mode \"$(RUN_MODE)\""; \
+	if [ -n "$(RUN_ID)" ]; then CMD="$$CMD --run-id \"$(RUN_ID)\""; fi; \
+	if [ -n "$(CONDITION)" ]; then CMD="$$CMD --condition \"$(CONDITION)\""; fi; \
+	if [ -n "$(SEASON_NUMBER)" ]; then CMD="$$CMD --season-number \"$(SEASON_NUMBER)\""; fi; \
+	eval $$CMD
+
+report-rebuild:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/rebuild_run_bundle.py --run-id "$(RUN_ID)" \
+		$(if $(CONDITION),--condition "$(CONDITION)",) \
+		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
+
+report-tech:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/generate_run_technical_report.py --run-id "$(RUN_ID)" \
+		$(if $(CONDITION),--condition "$(CONDITION)",) \
+		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
+
+report-story:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/generate_run_story_report.py --run-id "$(RUN_ID)" \
+		$(if $(CONDITION),--condition "$(CONDITION)",) \
+		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
+
+report-plan:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/generate_next_run_plan.py --run-id "$(RUN_ID)" \
+		$(if $(CONDITION),--condition "$(CONDITION)",)

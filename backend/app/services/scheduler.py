@@ -25,6 +25,7 @@ from app.models.models import (
 )
 from app.services.archive_drafts import maybe_generate_scheduled_weekly_draft
 from app.services.emergence_metrics import persist_completed_day_snapshot
+from app.services.run_reports import maybe_generate_scheduled_run_report_backfill
 from app.services.runtime_config import runtime_config_service
 
 # Twitter bot integration (optional)
@@ -893,6 +894,20 @@ class SchedulerRunner:
         )
         self.tasks.append(
             asyncio.create_task(self._run_periodic(maybe_generate_scheduled_weekly_draft, draft_check_minutes * 60))
+        )
+
+        # Scheduled run-report backfill for missing closeout bundles.
+        report_backfill_minutes = max(
+            5,
+            int(getattr(settings, "RUN_REPORT_BACKFILL_CHECK_INTERVAL_MINUTES", 60) or 60),
+        )
+        self.tasks.append(
+            asyncio.create_task(
+                self._run_periodic(
+                    maybe_generate_scheduled_run_report_backfill,
+                    report_backfill_minutes * 60,
+                )
+            )
         )
         
         logger.info(f"Scheduler started (day length: {day_length_minutes} minutes)")

@@ -23,6 +23,7 @@ from app.core.database import get_db
 from app.core.time import now_utc
 from app.models.models import AdminConfigChange
 from app.services.kpi_rollups import get_recent_rollups
+from app.services.run_reports import maybe_generate_run_closeout_bundle
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
 
@@ -320,6 +321,8 @@ class ControlRequest(BaseModel):
 class RunStartRequest(BaseModel):
     mode: str = Field(..., pattern="^(test|real)$")
     run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9:_-]*$")
+    condition_name: str | None = Field(default=None, max_length=120, pattern=r"^[A-Za-z0-9:_-]*$")
+    season_number: int | None = Field(default=None, ge=0, le=9999)
     reset_world: bool = Field(default=False)
     reason: str | None = Field(default=None, max_length=500)
 
@@ -400,6 +403,12 @@ def admin_status(
         "viewer_ops": {
             "run_mode": effective.get("SIMULATION_RUN_MODE"),
             "run_id": str(effective.get("SIMULATION_RUN_ID") or "").strip(),
+            "condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None,
+            "season_number": (
+                int(effective.get("SIMULATION_SEASON_NUMBER") or 0)
+                if int(effective.get("SIMULATION_SEASON_NUMBER") or 0) > 0
+                else None
+            ),
             "simulation_active": bool(effective.get("SIMULATION_ACTIVE", True)),
             "simulation_paused": bool(effective.get("SIMULATION_PAUSED", False)),
             "force_cheapest_route": bool(effective.get("FORCE_CHEAPEST_ROUTE", False)),
@@ -578,6 +587,8 @@ def start_simulation_run(
         updates={
             "SIMULATION_RUN_MODE": mode,
             "SIMULATION_RUN_ID": run_id,
+            "SIMULATION_CONDITION_NAME": str(request.condition_name or "").strip(),
+            "SIMULATION_SEASON_NUMBER": int(request.season_number or 0),
             "SIMULATION_ACTIVE": True,
             "SIMULATION_PAUSED": False,
         },
@@ -589,6 +600,8 @@ def start_simulation_run(
         "ok": True,
         "mode": mode,
         "run_id": run_id,
+        "condition_name": str(request.condition_name or "").strip() or None,
+        "season_number": int(request.season_number or 0) or None,
         "simulation_active": True,
         "simulation_paused": False,
         "reset_world": bool(request.reset_world),
@@ -603,10 +616,20 @@ def stop_simulation_run(
     actor: AdminActor = Depends(require_admin_auth),
 ):
     _assert_writes_enabled()
+    effective_before = runtime_config_service.get_effective(db)
+    run_id_before = str(effective_before.get("SIMULATION_RUN_ID") or "").strip()
+    condition_name_before = str(effective_before.get("SIMULATION_CONDITION_NAME") or "").strip() or None
+    season_number_before = (
+        int(effective_before.get("SIMULATION_SEASON_NUMBER") or 0)
+        if int(effective_before.get("SIMULATION_SEASON_NUMBER") or 0) > 0
+        else None
+    )
 
     updates: dict[str, Any] = {"SIMULATION_PAUSED": True}
     if request.clear_run_id:
         updates["SIMULATION_RUN_ID"] = ""
+        updates["SIMULATION_CONDITION_NAME"] = ""
+        updates["SIMULATION_SEASON_NUMBER"] = 0
 
     result = runtime_config_service.update_settings(
         db,
@@ -615,10 +638,17 @@ def stop_simulation_run(
         reason=request.reason or "run_stop",
     )
     effective = result.get("effective") or {}
+    report_bundle = maybe_generate_run_closeout_bundle(
+        run_id=run_id_before,
+        actor_id=f"admin:{actor.actor_id}",
+        condition_name=condition_name_before,
+        season_number=season_number_before,
+    )
     return {
         "ok": True,
         "simulation_paused": bool(effective.get("SIMULATION_PAUSED", True)),
         "run_id": str(effective.get("SIMULATION_RUN_ID") or "").strip(),
+        "report_bundle": report_bundle,
     }
 
 
@@ -654,6 +684,12 @@ def get_run_metrics(
         return {
             "run_id": "",
             "run_mode": str(effective.get("SIMULATION_RUN_MODE") or "test"),
+            "condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None,
+            "season_number": (
+                int(effective.get("SIMULATION_SEASON_NUMBER") or 0)
+                if int(effective.get("SIMULATION_SEASON_NUMBER") or 0) > 0
+                else None
+            ),
             "simulation_active": bool(effective.get("SIMULATION_ACTIVE", True)),
             "simulation_paused": bool(effective.get("SIMULATION_PAUSED", False)),
             "run_started_at": None,
@@ -766,6 +802,12 @@ def get_run_metrics(
     return {
         "run_id": resolved_run_id,
         "run_mode": str(effective.get("SIMULATION_RUN_MODE") or "test"),
+        "condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None,
+        "season_number": (
+            int(effective.get("SIMULATION_SEASON_NUMBER") or 0)
+            if int(effective.get("SIMULATION_SEASON_NUMBER") or 0) > 0
+            else None
+        ),
         "simulation_active": bool(effective.get("SIMULATION_ACTIVE", True)),
         "simulation_paused": bool(effective.get("SIMULATION_PAUSED", False)),
         "run_started_at": since_ts.isoformat() if since_ts else None,

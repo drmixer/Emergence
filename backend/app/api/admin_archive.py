@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import String, cast, text
 from sqlalchemy.orm import Session
 
 from app.core.admin_auth import AdminActor, require_admin_auth
@@ -16,10 +16,14 @@ from app.core.database import get_db
 from app.core.time import now_utc
 from app.models.models import ArchiveArticle
 from app.services.archive_drafts import generate_weekly_draft
+from app.services.run_reports import generate_run_bundle_for_run_id, normalize_report_tags
 
 router = APIRouter()
 BASELINE_ARTICLE_SLUG = "before-the-first-full-run"
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9:_-]{1,64}$")
+CONTENT_TYPES = ("technical_report", "approachable_article")
+STATUS_LABELS = ("observational", "replicated")
+EVIDENCE_COMPLETENESS = ("full", "partial")
 
 
 def _assert_writes_enabled() -> None:
@@ -47,6 +51,11 @@ class ArticleUpsertRequest(BaseModel):
     summary: str = Field(..., min_length=20, max_length=800)
     sections: list[ArticleSectionPayload] = Field(..., min_length=1)
     evidence_run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9:_-]+$")
+    content_type: Literal["technical_report", "approachable_article"] | None = None
+    status_label: Literal["observational", "replicated"] | None = None
+    evidence_completeness: Literal["full", "partial"] | None = None
+    tags: list[str] | None = None
+    linked_record_ids: list[int] | None = None
     status: Literal["draft", "published"] = "draft"
     published_at: date | None = None
 
@@ -58,6 +67,13 @@ class ArticlePublishRequest(BaseModel):
 
 class WeeklyDraftRequest(BaseModel):
     lookback_days: int = Field(default=7, ge=1, le=30)
+
+
+class RunBundleRebuildRequest(BaseModel):
+    run_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9:_-]+$")
+    condition_name: str | None = Field(default=None, max_length=120, pattern=r"^[A-Za-z0-9:_-]+$")
+    season_number: int | None = Field(default=None, ge=1, le=9999)
+    actor_id: str | None = Field(default=None, max_length=120)
 
 
 def _serialize_section(section: ArticleSectionPayload) -> dict[str, Any]:
@@ -81,12 +97,19 @@ def _serialize_article(article: ArchiveArticle) -> dict[str, Any]:
     for section in raw_sections:
         if isinstance(section, dict):
             sections.append(section)
+    tags = normalize_report_tags(article.tags if isinstance(article.tags, list) else [])
+    linked_record_ids = _normalize_linked_record_ids(article.linked_record_ids)
     return {
         "id": int(article.id),
         "slug": str(article.slug),
         "title": str(article.title),
         "summary": str(article.summary),
         "sections": sections,
+        "content_type": str(article.content_type or "approachable_article"),
+        "status_label": str(article.status_label or "observational"),
+        "evidence_completeness": str(article.evidence_completeness or "partial"),
+        "tags": tags,
+        "linked_record_ids": linked_record_ids,
         "evidence_run_id": str(article.evidence_run_id or "").strip() or None,
         "status": str(article.status),
         "published_at": article.published_at.isoformat() if article.published_at else None,
@@ -107,6 +130,43 @@ def _normalize_run_id(raw_value: str | None) -> str | None:
             detail="evidence_run_id must match [A-Za-z0-9:_-] and be at most 64 characters",
         )
     return value
+
+
+def _normalize_content_type(raw_value: str | None) -> str:
+    value = str(raw_value or "approachable_article").strip().lower()
+    return value if value in CONTENT_TYPES else "approachable_article"
+
+
+def _normalize_status_label(raw_value: str | None) -> str:
+    value = str(raw_value or "observational").strip().lower()
+    return value if value in STATUS_LABELS else "observational"
+
+
+def _normalize_evidence_completeness(raw_value: str | None) -> str:
+    value = str(raw_value or "partial").strip().lower()
+    return value if value in EVIDENCE_COMPLETENESS else "partial"
+
+
+def _normalize_linked_record_ids(raw_value: Any) -> list[int]:
+    if not isinstance(raw_value, list):
+        return []
+    deduped: list[int] = []
+    seen: set[int] = set()
+    for item in raw_value:
+        try:
+            value = int(item)
+        except (TypeError, ValueError):
+            continue
+        if value <= 0 or value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _normalize_tag_filters(raw_value: str | None) -> list[str]:
+    parts = [part.strip() for part in str(raw_value or "").split(",")]
+    return normalize_report_tags([part for part in parts if part])
 
 
 def _assert_publish_guardrails(
@@ -174,6 +234,10 @@ def _assert_publish_guardrails(
 @router.get("/articles")
 def list_admin_archive_articles(
     status_filter: Literal["draft", "published", "all"] = Query(default="all", alias="status"),
+    content_type_filter: Literal["technical_report", "approachable_article", "all"] = Query(
+        default="all", alias="content_type"
+    ),
+    tag_filter: str | None = Query(default=None, alias="tag"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -182,6 +246,10 @@ def list_admin_archive_articles(
     query = db.query(ArchiveArticle)
     if status_filter != "all":
         query = query.filter(ArchiveArticle.status == status_filter)
+    if content_type_filter != "all":
+        query = query.filter(ArchiveArticle.content_type == content_type_filter)
+    for tag in _normalize_tag_filters(tag_filter):
+        query = query.filter(cast(ArchiveArticle.tags, String).like(f'%"{tag}"%'))
     query = query.order_by(ArchiveArticle.published_at.desc(), ArchiveArticle.updated_at.desc(), ArchiveArticle.id.desc())
     total = int(query.count())
     rows = query.offset(offset).limit(limit).all()
@@ -217,6 +285,11 @@ def create_admin_archive_article(
         title=request.title.strip(),
         summary=request.summary.strip(),
         sections=[_serialize_section(section) for section in request.sections],
+        content_type=_normalize_content_type(request.content_type),
+        status_label=_normalize_status_label(request.status_label),
+        evidence_completeness=_normalize_evidence_completeness(request.evidence_completeness),
+        tags=normalize_report_tags(request.tags or []),
+        linked_record_ids=_normalize_linked_record_ids(request.linked_record_ids or []),
         evidence_run_id=evidence_run_id,
         status=request.status,
         published_at=request.published_at
@@ -252,6 +325,15 @@ def update_admin_archive_article(
     article.title = request.title.strip()
     article.summary = request.summary.strip()
     article.sections = [_serialize_section(section) for section in request.sections]
+    article.content_type = _normalize_content_type(request.content_type or article.content_type)
+    article.status_label = _normalize_status_label(request.status_label or article.status_label)
+    article.evidence_completeness = _normalize_evidence_completeness(
+        request.evidence_completeness or article.evidence_completeness
+    )
+    article.tags = normalize_report_tags(request.tags if request.tags is not None else (article.tags or []))
+    article.linked_record_ids = _normalize_linked_record_ids(
+        request.linked_record_ids if request.linked_record_ids is not None else (article.linked_record_ids or [])
+    )
     article.evidence_run_id = _normalize_run_id(request.evidence_run_id)
     article.status = request.status
     article.updated_by = actor.actor_id
@@ -358,3 +440,27 @@ def generate_weekly_archive_draft(
     payload["digest_markdown_path"] = result.digest_markdown_path
     payload["digest_template_version"] = result.digest_template_version
     return payload
+
+
+@router.post("/reports/rebuild")
+def rebuild_run_report_bundle(
+    request: RunBundleRebuildRequest,
+    db: Session = Depends(get_db),
+    actor: AdminActor = Depends(require_admin_auth),
+):
+    _assert_writes_enabled()
+    # Ensure request-side validation happens in this request's DB transaction context first.
+    _ = db
+    resolved_actor_id = str(request.actor_id or "").strip() or f"admin:{actor.actor_id}"
+    try:
+        result = generate_run_bundle_for_run_id(
+            run_id=str(request.run_id or "").strip(),
+            actor_id=resolved_actor_id,
+            condition_name=(str(request.condition_name or "").strip() or None),
+            season_number=request.season_number,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    result["status"] = "generated"
+    return result

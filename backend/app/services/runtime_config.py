@@ -33,6 +33,16 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         python_type=str,
         description="Run label for metrics attribution (max 64 chars). Empty value uses auto-generated id.",
     ),
+    "SIMULATION_CONDITION_NAME": MutableSettingSpec(
+        python_type=str,
+        description="Optional condition label for research tagging/reporting (max 120 chars).",
+    ),
+    "SIMULATION_SEASON_NUMBER": MutableSettingSpec(
+        python_type=int,
+        min_value=0,
+        max_value=9999,
+        description="Optional season number for research tagging/reporting.",
+    ),
     "SIMULATION_ACTIVE": MutableSettingSpec(
         python_type=bool,
         description="Global run switch for worker loops (idle when false).",
@@ -187,6 +197,14 @@ def _coerce_value(key: str, raw_value: Any, spec: MutableSettingSpec) -> Any:
         text = str(value or "").strip()
         if len(text) > 64:
             raise ValueError("must be <= 64 characters")
+        value = text
+
+    if key == "SIMULATION_CONDITION_NAME":
+        text = str(value or "").strip()
+        if len(text) > 120:
+            raise ValueError("must be <= 120 characters")
+        if text and any(ch for ch in text if not (ch.isalnum() or ch in "_:-")):
+            raise ValueError("must use only letters, digits, underscore, colon, or hyphen")
         value = text
 
     if isinstance(value, (int, float)):

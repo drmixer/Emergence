@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.core.database import SessionLocal, engine
 from app.core.time import now_utc
 from app.models.models import Event
+from app.services.run_reports import maybe_generate_run_closeout_bundle
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
 
@@ -203,10 +204,16 @@ class RunGuardrailService:
     def _enforce_stop(decision: StopDecision) -> None:
         reason = decision.reason or "unknown_stop_condition"
         reason_text = f"Stop condition tripped: {reason}"
+        run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+        condition_name = str(runtime_config_service.get_effective_value_cached("SIMULATION_CONDITION_NAME") or "").strip()
+        season_number = int(runtime_config_service.get_effective_value_cached("SIMULATION_SEASON_NUMBER") or 0)
         metadata = {
             "reason": reason,
             "details": decision.details or {},
             "triggered_at": now_utc().isoformat(),
+            "run_id": run_id or None,
+            "condition_name": condition_name or None,
+            "season_number": (season_number if season_number > 0 else None),
         }
 
         db = SessionLocal()
@@ -240,6 +247,14 @@ class RunGuardrailService:
             logger.error("Failed to persist guardrail stop event: %s", exc)
         finally:
             db.close()
+
+        if run_id:
+            maybe_generate_run_closeout_bundle(
+                run_id=run_id,
+                actor_id="system:guardrail",
+                condition_name=(condition_name or None),
+                season_number=(season_number if season_number > 0 else None),
+            )
 
         logger.error(
             "Simulation stop condition triggered (%s): %s",

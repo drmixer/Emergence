@@ -53,6 +53,18 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
             <CalendarDays className="h-3.5 w-3.5" />
             {formatArticleDateLong(article.publishedAt)}
           </div>
+          <div className="mt-4 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <span className="border border-border/70 px-2 py-1">
+              {article.contentType === "technical_report" ? "Research" : "Story"}
+            </span>
+            <span className="border border-border/70 px-2 py-1">{article.statusLabel}</span>
+            <span className="border border-border/70 px-2 py-1">evidence {article.evidenceCompleteness}</span>
+          </div>
+          {article.tags.length > 0 ? (
+            <p className="mt-4 max-w-2xl font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              {article.tags.join(" · ")}
+            </p>
+          ) : null}
           <p className="mt-6 max-w-2xl font-sans text-[1.03rem] leading-8 text-foreground">{article.summary}</p>
         </header>
 

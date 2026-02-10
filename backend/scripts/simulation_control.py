@@ -44,6 +44,8 @@ def _status_payload() -> dict[str, Any]:
             "simulation_paused": bool(effective.get("SIMULATION_PAUSED", False)),
             "simulation_run_mode": str(effective.get("SIMULATION_RUN_MODE") or ""),
             "simulation_run_id": str(effective.get("SIMULATION_RUN_ID") or ""),
+            "simulation_condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or ""),
+            "simulation_season_number": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
             "action_count": int((counts_row.action_count if counts_row else 0) or 0),
             "llm_usage_count": int((counts_row.llm_usage_count if counts_row else 0) or 0),
             "last_action_at": counts_row.last_action_at.isoformat() if counts_row and counts_row.last_action_at else None,
@@ -70,6 +72,8 @@ def _update_runtime(updates: dict[str, Any], reason: str) -> dict[str, Any]:
                 "SIMULATION_PAUSED": bool(effective.get("SIMULATION_PAUSED", False)),
                 "SIMULATION_RUN_MODE": str(effective.get("SIMULATION_RUN_MODE") or ""),
                 "SIMULATION_RUN_ID": str(effective.get("SIMULATION_RUN_ID") or ""),
+                "SIMULATION_CONDITION_NAME": str(effective.get("SIMULATION_CONDITION_NAME") or ""),
+                "SIMULATION_SEASON_NUMBER": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
             },
         }
     finally:
@@ -83,6 +87,8 @@ def main() -> None:
     start = sub.add_parser("start", help="Resume simulation processing.")
     start.add_argument("--run-mode", choices=("test", "real"), default=None)
     start.add_argument("--run-id", default=None)
+    start.add_argument("--condition", default=None)
+    start.add_argument("--season-number", type=int, default=None)
 
     sub.add_parser("stop", help="Pause simulation processing.")
     sub.add_parser("status", help="Show effective simulation runtime state.")
@@ -111,6 +117,10 @@ def main() -> None:
             updates["SIMULATION_RUN_MODE"] = args.run_mode
         if args.run_id is not None:
             updates["SIMULATION_RUN_ID"] = str(args.run_id)
+        if args.condition is not None:
+            updates["SIMULATION_CONDITION_NAME"] = str(args.condition or "").strip()
+        if args.season_number is not None:
+            updates["SIMULATION_SEASON_NUMBER"] = int(args.season_number or 0)
 
         result = _update_runtime(
             updates,

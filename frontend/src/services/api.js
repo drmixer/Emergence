@@ -319,6 +319,10 @@ class APIService {
             body: JSON.stringify({
                 mode: payload?.mode,
                 run_id: String(payload?.run_id || '').trim() || null,
+                condition_name: String(payload?.condition_name || '').trim() || null,
+                season_number: Number.isFinite(Number(payload?.season_number))
+                    ? Number(payload.season_number)
+                    : null,
                 reset_world: Boolean(payload?.reset_world),
                 reason: String(payload?.reason || '').trim() || null,
             }),
@@ -426,11 +430,31 @@ class APIService {
         })
     }
 
+    async rebuildRunReportBundle(token, payload = {}, adminUser = null) {
+        return this.fetch('/api/admin/archive/reports/rebuild', {
+            method: 'POST',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                run_id: String(payload?.run_id || '').trim(),
+                condition_name: String(payload?.condition_name || '').trim() || null,
+                season_number: Number.isFinite(Number(payload?.season_number))
+                    ? Number(payload.season_number)
+                    : null,
+                actor_id: String(payload?.actor_id || '').trim() || null,
+            }),
+        })
+    }
+
     // Public archive/articles
-    async getArchiveArticles(limit = 20, offset = 0) {
+    async getArchiveArticles(limit = 20, offset = 0, contentType = 'all', tag = '') {
         const params = new URLSearchParams()
         params.append('limit', String(limit))
         params.append('offset', String(offset))
+        if (contentType && String(contentType).toLowerCase() !== 'all') {
+            params.append('content_type', String(contentType))
+        }
+        const tagValue = String(tag || '').trim()
+        if (tagValue) params.append('tag', tagValue)
         return this.fetch(`/api/archive/articles?${params.toString()}`)
     }
 

@@ -15,6 +15,18 @@ export type Article = {
   summary: string
   publishedAt: string
   sections: ArticleSection[]
+  contentType: "technical_report" | "approachable_article"
+  statusLabel: "observational" | "replicated"
+  evidenceCompleteness: "full" | "partial"
+  tags: string[]
+  linkedRecordIds: number[]
+  evidenceRunId?: string | null
+}
+
+export type ArticleFilterOptions = {
+  limit?: number
+  contentType?: "technical_report" | "approachable_article" | "all"
+  tag?: string
 }
 
 const INITIAL_ARTICLE_SLUG = "before-the-first-full-run"
@@ -27,6 +39,18 @@ const fallbackArticles: Article[] = [
     summary:
       "Emergence is readying a controlled experiment in AI society formation. This first archive note documents the protocol, constraints, and evidence standards we will use before claiming any empirical findings.",
     publishedAt: "2026-02-08",
+    contentType: "approachable_article",
+    statusLabel: "observational",
+    evidenceCompleteness: "partial",
+    tags: [
+      "run_id:not-set",
+      "season:unknown",
+      "condition:baseline-methodology",
+      "topic:governance",
+      "status:observational",
+      "evidence:partial",
+    ],
+    linkedRecordIds: [],
     sections: [
       {
         heading: "Why This Entry Exists",
@@ -131,6 +155,26 @@ function normalizeArticle(rawValue: unknown): Article | null {
   const summary = String(entry.summary ?? "").trim()
   const publishedAt = String(entry.published_at ?? entry.publishedAt ?? "").trim()
   const sections = normalizeSections(entry.sections)
+  const contentTypeRaw = String(entry.content_type ?? entry.contentType ?? "approachable_article").trim().toLowerCase()
+  const contentType = contentTypeRaw === "technical_report" ? "technical_report" : "approachable_article"
+  const statusLabelRaw = String(entry.status_label ?? entry.statusLabel ?? "observational").trim().toLowerCase()
+  const statusLabel = statusLabelRaw === "replicated" ? "replicated" : "observational"
+  const evidenceRaw = String(entry.evidence_completeness ?? entry.evidenceCompleteness ?? "partial").trim().toLowerCase()
+  const evidenceCompleteness = evidenceRaw === "full" ? "full" : "partial"
+  const tags = Array.isArray(entry.tags)
+    ? entry.tags
+        .map((tag) => String(tag ?? "").trim().toLowerCase())
+        .filter(Boolean)
+        .filter((tag, index, source) => source.indexOf(tag) === index)
+    : []
+  const linkedIdsRaw = entry.linked_record_ids ?? entry.linkedRecordIds
+  const linkedRecordIds = Array.isArray(linkedIdsRaw)
+    ? linkedIdsRaw
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+        .filter((value, index, source) => source.indexOf(value) === index)
+    : []
+  const evidenceRunId = String(entry.evidence_run_id ?? entry.evidenceRunId ?? "").trim() || null
   if (!slug || !title || !summary || !publishedAt || sections.length === 0) return null
   return {
     slug,
@@ -138,6 +182,12 @@ function normalizeArticle(rawValue: unknown): Article | null {
     summary,
     publishedAt,
     sections,
+    contentType,
+    statusLabel,
+    evidenceCompleteness,
+    tags,
+    linkedRecordIds,
+    evidenceRunId,
   }
 }
 
@@ -172,22 +222,44 @@ export function formatArticleDateLong(publishedAt: string) {
   }).format(new Date(`${publishedAt}T00:00:00Z`))
 }
 
-export async function fetchPublishedArticles(limit = 20) {
+export async function fetchPublishedArticles(options: number | ArticleFilterOptions = 20) {
+  const resolvedOptions: ArticleFilterOptions =
+    typeof options === "number"
+      ? { limit: options }
+      : { ...(options || {}) }
+  const resolvedLimit = Math.max(1, Number(resolvedOptions.limit ?? 20))
+  const resolvedContentType = String(resolvedOptions.contentType || "all").trim().toLowerCase()
+  const contentType =
+    resolvedContentType === "technical_report" || resolvedContentType === "approachable_article"
+      ? resolvedContentType
+      : "all"
+  const tag = String(resolvedOptions.tag || "").trim().toLowerCase()
+
   const apiBase = resolveApiBase()
   if (!apiBase) {
-    return selectPublicArticles(getArticles()).slice(0, limit)
+    const local = selectPublicArticles(getArticles())
+      .filter((article) => (contentType === "all" ? true : article.contentType === contentType))
+      .filter((article) => (tag ? article.tags.includes(tag) : true))
+    return local.slice(0, resolvedLimit)
   }
 
   try {
-    const response = await fetch(`${apiBase}/api/archive/articles?limit=${Math.max(1, limit)}`, {
+    const params = new URLSearchParams()
+    params.append("limit", String(resolvedLimit))
+    if (contentType !== "all") params.append("content_type", contentType)
+    if (tag) params.append("tag", tag)
+    const response = await fetch(`${apiBase}/api/archive/articles?${params.toString()}`, {
       cache: "no-store",
     })
     if (!response.ok) throw new Error(`Failed to load archive articles (${response.status})`)
     const payload = (await response.json()) as { items?: unknown[] }
     const normalized = Array.isArray(payload?.items) ? payload.items.map(normalizeArticle).filter(Boolean) : []
-    return selectPublicArticles(normalized as Article[]).slice(0, limit)
+    return selectPublicArticles(normalized as Article[]).slice(0, resolvedLimit)
   } catch {
-    return selectPublicArticles(getArticles()).slice(0, limit)
+    const local = selectPublicArticles(getArticles())
+      .filter((article) => (contentType === "all" ? true : article.contentType === contentType))
+      .filter((article) => (tag ? article.tags.includes(tag) : true))
+    return local.slice(0, resolvedLimit)
   }
 }
 

@@ -150,6 +150,7 @@ export default function Ops() {
   const [articleEditor, setArticleEditor] = useState({ ...EMPTY_ARTICLE_EDITOR })
   const [articleAction, setArticleAction] = useState('')
   const [weeklyDraftResult, setWeeklyDraftResult] = useState(null)
+  const [runBundleResult, setRunBundleResult] = useState(null)
 
   const connected = Boolean(token.trim())
   const writeEnabled = Boolean(config?.admin_write_enabled)
@@ -521,6 +522,38 @@ export default function Ops() {
     }
   }
 
+  const onRebuildRunBundle = async () => {
+    if (!connected || !writeEnabled) return
+    const resolvedRunId = String(runIdInput || activeRunId || articleEditor.evidenceRunId || '').trim()
+    if (!resolvedRunId) {
+      setError('Run ID is required to rebuild a report bundle')
+      return
+    }
+    setArticleAction('rebuild-run-bundle')
+    setNotice('')
+    setError('')
+    try {
+      const conditionName = String(status?.viewer_ops?.condition_name || '').trim()
+      const seasonNumber = Number(status?.viewer_ops?.season_number || 0)
+      const response = await api.rebuildRunReportBundle(
+        token,
+        {
+          run_id: resolvedRunId,
+          condition_name: conditionName || null,
+          season_number: Number.isFinite(seasonNumber) && seasonNumber > 0 ? seasonNumber : null,
+        },
+        adminUser
+      )
+      setRunBundleResult(response)
+      setNotice(`Run bundle rebuilt: ${String(response?.run_id || resolvedRunId)}`)
+      await loadOpsData()
+    } catch (articleError) {
+      setError(formatApiError(articleError, 'Failed to rebuild run report bundle'))
+    } finally {
+      setArticleAction('')
+    }
+  }
+
   const onCopyDigestMarkdown = async () => {
     const markdown = String(weeklyDraftResult?.digest_markdown || '').trim()
     if (!markdown) {
@@ -549,6 +582,7 @@ export default function Ops() {
   const weeklyDigestPath = String(weeklyDraftResult?.digest_markdown_path || '').trim()
   const weeklyDigestMarkdown = String(weeklyDraftResult?.digest_markdown || '')
   const weeklyEvidenceGate = weeklyDraftResult?.evidence_gate || null
+  const runBundleStatus = String(runBundleResult?.status || '').trim()
   const kpiItems = Array.isArray(kpiRollups?.items) ? kpiRollups.items : []
   const kpiSummary = kpiRollups?.summary || {}
   const kpiLatest = kpiSummary?.latest || (kpiItems.length > 0 ? kpiItems[0] : null)
@@ -1061,6 +1095,15 @@ export default function Ops() {
                   {(articleAction === 'generate-weekly' && <Loader2 size={14} className="spin" />) || <WandSparkles size={14} />}
                   Weekly Draft
                 </button>
+                <button
+                  className="btn-subtle"
+                  type="button"
+                  onClick={onRebuildRunBundle}
+                  disabled={!writeEnabled || articleAction === 'rebuild-run-bundle'}
+                >
+                  {(articleAction === 'rebuild-run-bundle' && <Loader2 size={14} className="spin" />) || <FilePenLine size={14} />}
+                  Rebuild Run Bundle
+                </button>
                 <button className="btn-subtle" type="button" onClick={onNewArticle} disabled={!writeEnabled}>
                   <Plus size={14} />
                   New
@@ -1068,6 +1111,21 @@ export default function Ops() {
               </div>
             </div>
             <div className="card-body ops-articles-layout">
+              {runBundleResult && (
+                <div className={`ops-digest-preview ${runBundleStatus === 'failed' ? 'warn' : 'ok'}`}>
+                  <div className="ops-digest-preview-head">
+                    <strong>Run Bundle Result</strong>
+                    <span className={`ops-status-pill ${runBundleStatus === 'failed' ? 'draft' : 'published'}`}>
+                      {runBundleStatus || 'generated'}
+                    </span>
+                  </div>
+                  <div className="ops-digest-preview-meta">
+                    <span>Run: {String(runBundleResult?.run_id || 'n/a')}</span>
+                    <span>Condition: {String(runBundleResult?.condition_name || 'unknown')}</span>
+                    <span>Replicates: {String(runBundleResult?.replicate_count ?? 'n/a')}</span>
+                  </div>
+                </div>
+              )}
               {weeklyDraftResult && (
                 <div className={`ops-digest-preview ${weeklyDraftStatus === 'insufficient_evidence' ? 'warn' : 'ok'}`}>
                   <div className="ops-digest-preview-head">

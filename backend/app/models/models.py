@@ -497,6 +497,11 @@ class ArchiveArticle(Base):
     title = Column(String(255), nullable=False)
     summary = Column(Text, nullable=False)
     sections = Column(JSON, nullable=False, default=list)
+    content_type = Column(String(32), nullable=False, default="approachable_article")
+    status_label = Column(String(20), nullable=False, default="observational")
+    evidence_completeness = Column(String(20), nullable=False, default="partial")
+    tags = Column(JSON, nullable=False, default=list)
+    linked_record_ids = Column(JSON, nullable=False, default=list)
     evidence_run_id = Column(String(64), nullable=True)
     status = Column(String(20), nullable=False, default="draft")
     published_at = Column(Date, nullable=True)
@@ -507,4 +512,50 @@ class ArchiveArticle(Base):
 
     __table_args__ = (
         CheckConstraint("status IN ('draft', 'published')", name="valid_archive_article_status"),
+        CheckConstraint(
+            "content_type IN ('technical_report', 'approachable_article')",
+            name="valid_archive_article_content_type",
+        ),
+        CheckConstraint(
+            "status_label IN ('observational', 'replicated')",
+            name="valid_archive_article_status_label",
+        ),
+        CheckConstraint(
+            "evidence_completeness IN ('full', 'partial')",
+            name="valid_archive_article_evidence_completeness",
+        ),
+    )
+
+
+class RunReportArtifact(Base):
+    """Artifact registry for run-scoped report bundle outputs."""
+    __tablename__ = "run_report_artifacts"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String(64), nullable=False)
+    artifact_type = Column(String(32), nullable=False)
+    artifact_format = Column(String(16), nullable=False)
+    artifact_path = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="completed")
+    template_version = Column(String(64), nullable=True)
+    generator_version = Column(String(64), nullable=True)
+    metadata_json = Column(JSON, nullable=True, default=dict)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "artifact_type", "artifact_format", name="uq_run_report_artifacts_key"),
+        CheckConstraint(
+            "artifact_type IN ('technical_report', 'approachable_report', 'planner_report')",
+            name="valid_run_report_artifact_type",
+        ),
+        CheckConstraint(
+            "artifact_format IN ('json', 'markdown')",
+            name="valid_run_report_artifact_format",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'completed', 'failed')",
+            name="valid_run_report_artifact_status",
+        ),
     )
