@@ -56,7 +56,7 @@ railway run -s backend -- venv/bin/python scripts/simulation_control.py stop
 railway run -s backend -- venv/bin/python scripts/simulation_control.py status
 ```
 
-More details: `docs/DEPLOYMENT.md` and `docs/NEON_OPEN_SOURCE_APPLICATION_DRAFT.md`.
+More details: `docs/DEPLOYMENT.md`.
 
 ## Tech Stack
 
@@ -71,7 +71,6 @@ More details: `docs/DEPLOYMENT.md` and `docs/NEON_OPEN_SOURCE_APPLICATION_DRAFT.
 - [Architecture](docs/ARCHITECTURE.md) - How the system is built
 - [Design](docs/DESIGN.md) - Core mechanics and rationale
 - [Deployment](docs/DEPLOYMENT.md) - Production setup
-- [Neon OSS Draft](docs/NEON_OPEN_SOURCE_APPLICATION_DRAFT.md) - Application draft for Neon Open Source Program
 - [Resources](docs/RESOURCES.md) - Resource balancing details
 - [Prompts](docs/PROMPTS.md) - Runtime prompt and context design
 
