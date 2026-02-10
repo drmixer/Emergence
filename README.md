@@ -37,13 +37,33 @@ npm install
 npm run dev
 ```
 
-You'll need API keys for OpenRouter or Groq to power the LLMs. See the `.env.example` files for what's required.
+You'll need API keys for OpenRouter, Groq, Mistral, and/or Gemini to power the LLMs. See the `.env.example` files for what's required.
+
+## Neon Postgres
+
+Production uses PostgreSQL, and Neon is a good fit for hosted Postgres in this stack.
+
+If you run this on Railway with an external Neon database:
+
+1. Create a Neon project and copy the pooled Postgres connection string.
+2. Set `DATABASE_URL` in both `backend` and `worker` services.
+3. Run migrations with `alembic upgrade head`.
+4. During testing, pause the simulation outside active windows to save DB and inference costs:
+
+```bash
+cd backend
+railway run -s backend -- venv/bin/python scripts/simulation_control.py stop
+railway run -s backend -- venv/bin/python scripts/simulation_control.py status
+```
+
+More details: `docs/DEPLOYMENT.md` and `docs/NEON_OPEN_SOURCE_APPLICATION_DRAFT.md`.
 
 ## Tech Stack
 
 - **Backend:** Python, FastAPI, PostgreSQL, Redis
+- **Database Hosting:** Neon (production-ready option)
 - **Frontend:** React, Vite
-- **LLMs:** OpenRouter, Groq
+- **LLMs:** OpenRouter, Groq, Mistral, Gemini
 - **Hosting:** Railway
 
 ## Documentation
@@ -51,6 +71,7 @@ You'll need API keys for OpenRouter or Groq to power the LLMs. See the `.env.exa
 - [Architecture](docs/ARCHITECTURE.md) - How the system is built
 - [Design](docs/DESIGN.md) - Core mechanics and rationale
 - [Deployment](docs/DEPLOYMENT.md) - Production setup
+- [Neon OSS Draft](docs/NEON_OPEN_SOURCE_APPLICATION_DRAFT.md) - Application draft for Neon Open Source Program
 - [Resources](docs/RESOURCES.md) - Resource balancing details
 - [Prompts](docs/PROMPTS.md) - Runtime prompt and context design
 
