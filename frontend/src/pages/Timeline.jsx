@@ -1,5 +1,5 @@
 // Timeline Page - Visual history of simulation events
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import {
@@ -302,7 +302,7 @@ export default function Timeline() {
 
     const { grouped: groupedAll, sortedDays } = useMemo(() => groupEventsByDay(events), [events])
 
-    const matchesCategoryFilter = (event) => {
+    const matchesCategoryFilter = useCallback((event) => {
         switch (filter) {
             case 'major':
                 return Boolean(eventConfig[event.event_type]?.major)
@@ -324,9 +324,9 @@ export default function Timeline() {
             default:
                 return true
         }
-    }
+    }, [filter])
 
-    const isVisibleForDay = (day, eventType) => {
+    const isVisibleForDay = useCallback((day, eventType) => {
         const override = dayOverrides[day] || {}
         const allowBackground = showBackground || Boolean(override.background)
         const allowNoise = showSystemNoise || Boolean(override.system)
@@ -334,7 +334,7 @@ export default function Timeline() {
         if (backgroundEventTypes.has(eventType)) return allowBackground
         if (noisyEventTypes.has(eventType)) return allowNoise
         return sociallySalientEventTypes.has(eventType)
-    }
+    }, [dayOverrides, showBackground, showSystemNoise])
 
     const groupedVisible = useMemo(() => {
         const out = {}
@@ -346,7 +346,7 @@ export default function Timeline() {
             if (visible.length > 0) out[day] = visible
         }
         return out
-    }, [groupedAll, sortedDays, dayOverrides, showBackground, showSystemNoise, filter])
+    }, [groupedAll, sortedDays, isVisibleForDay, matchesCategoryFilter])
 
     const visibleDays = useMemo(() => {
         return sortedDays.filter((day) => (groupedVisible[day] || []).length > 0)

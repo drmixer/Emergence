@@ -18,13 +18,14 @@ export function useKeyboardNavigation() {
 
         // Global keyboard shortcuts
         switch (event.key) {
-            case 'Escape':
+            case 'Escape': {
                 // Close any open modals/overlays
                 const overlay = document.querySelector('.mobile-nav-overlay')
                 if (overlay) {
                     overlay.click()
                 }
                 break
+            }
 
             case 'g':
                 // Go shortcuts with modifier
@@ -62,7 +63,7 @@ export function useKeyboardNavigation() {
                 }
                 break
 
-            case '/':
+            case '/': {
                 // Focus search (if we add one)
                 const searchInput = document.querySelector('.search-input')
                 if (searchInput) {
@@ -70,6 +71,7 @@ export function useKeyboardNavigation() {
                     searchInput.focus()
                 }
                 break
+            }
 
             default:
                 break
@@ -100,18 +102,20 @@ export function useListKeyboardNavigation(
 
         switch (event.key) {
             case 'ArrowDown':
-            case 'j':
+            case 'j': {
                 event.preventDefault()
                 const nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0
                 items[nextIndex]?.focus()
                 break
+            }
 
             case 'ArrowUp':
-            case 'k':
+            case 'k': {
                 event.preventDefault()
                 const prevIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1
                 items[prevIndex]?.focus()
                 break
+            }
 
             case 'Enter':
             case ' ':

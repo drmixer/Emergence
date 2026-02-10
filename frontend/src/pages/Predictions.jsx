@@ -105,7 +105,7 @@ export default function Predictions() {
             setMarkets(Array.isArray(marketsData) ? marketsData : [])
             setLeaderboard(Array.isArray(leaderboardData) ? leaderboardData : [])
             if (me) setUserStats(me)
-        } catch (e) {
+        } catch (_error) {
             setMarkets([])
             setLeaderboard([])
         } finally {
@@ -165,7 +165,7 @@ export default function Predictions() {
                 const error = await response.json()
                 setBetError(error.detail || 'Failed to place bet')
             }
-        } catch (e) {
+        } catch (_error) {
             setBetError('Failed to place bet')
         }
 

@@ -19,7 +19,7 @@ export default function Proposals() {
                 setError(null)
                 const data = await api.fetch('/api/proposals?limit=200')
                 setProposals(Array.isArray(data) ? data : [])
-            } catch (e) {
+            } catch (_error) {
                 setError('Failed to load proposals.')
                 setProposals([])
             } finally {
@@ -311,4 +311,3 @@ export default function Proposals() {
         </div>
     )
 }
-

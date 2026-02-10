@@ -44,6 +44,7 @@ const pct = (value) => `${Math.round(Number(value || 0) * 100)}%`
 const getTurnRunId = (turn) => String(turn?.metadata?.runtime?.run_id || '').trim()
 const VALID_TABS = new Set(['recap', 'highlights', 'summary', 'plotTurns', 'predictions', 'replay', 'quotes'])
 const MAJOR_CATEGORIES = new Set(['crisis', 'conflict', 'governance'])
+const STORY_CHAPTERS = ['Trigger', 'Escalation', 'Turning Point', 'Outcome']
 
 function getMomentTier(turn) {
   const salience = Number(turn?.salience || 0)
@@ -51,6 +52,167 @@ function getMomentTier(turn) {
   if (salience >= 85) return 'major'
   if (salience >= 72 && MAJOR_CATEGORIES.has(category)) return 'major'
   return 'minor'
+}
+
+function getTurnTimestamp(turn) {
+  const timestamp = turn?.created_at ? new Date(turn.created_at).getTime() : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function pickReplayStoryMoments(turns, targetCount = 8) {
+  const cleanTurns = Array.isArray(turns)
+    ? turns.filter((turn) => Number(turn?.event_id || 0) > 0)
+    : []
+  if (cleanTurns.length === 0) return []
+
+  const maxAvailable = Math.min(10, cleanTurns.length)
+  const boundedTarget =
+    cleanTurns.length >= 6
+      ? Math.min(Math.max(targetCount, 6), maxAvailable)
+      : maxAvailable
+
+  const ranked = [...cleanTurns].sort((a, b) => {
+    const salienceDelta = Number(b?.salience || 0) - Number(a?.salience || 0)
+    if (salienceDelta !== 0) return salienceDelta
+    return getTurnTimestamp(b) - getTurnTimestamp(a)
+  })
+
+  const selected = []
+  const categoryCounts = {}
+  const maxPerCategory = Math.max(2, Math.ceil(boundedTarget / 3))
+
+  for (const turn of ranked) {
+    if (selected.length >= boundedTarget) break
+
+    const category = String(turn?.category || 'notable')
+    const currentCategoryCount = Number(categoryCounts[category] || 0)
+    if (currentCategoryCount >= maxPerCategory) continue
+
+    const turnTimestamp = getTurnTimestamp(turn)
+    const hasNearbySelected = selected.some((item) => {
+      const itemTimestamp = getTurnTimestamp(item)
+      return Math.abs(itemTimestamp - turnTimestamp) < 25 * 60 * 1000
+    })
+
+    if (hasNearbySelected && Number(turn?.salience || 0) < 85) continue
+
+    selected.push(turn)
+    categoryCounts[category] = currentCategoryCount + 1
+  }
+
+  if (selected.length < boundedTarget) {
+    for (const turn of ranked) {
+      if (selected.length >= boundedTarget) break
+      if (selected.some((item) => Number(item?.event_id || 0) === Number(turn?.event_id || 0))) continue
+      selected.push(turn)
+    }
+  }
+
+  return selected.sort((a, b) => getTurnTimestamp(a) - getTurnTimestamp(b))
+}
+
+function getStoryChapterLabel(index, total) {
+  if (total <= 1) return STORY_CHAPTERS[0]
+  const ratio = index / Math.max(1, total - 1)
+  if (ratio < 0.25) return STORY_CHAPTERS[0]
+  if (ratio < 0.55) return STORY_CHAPTERS[1]
+  if (ratio < 0.8) return STORY_CHAPTERS[2]
+  return STORY_CHAPTERS[3]
+}
+
+function buildMomentDeltas(turn) {
+  if (!turn || typeof turn !== 'object') return []
+
+  const metadata = turn?.metadata && typeof turn.metadata === 'object' ? turn.metadata : {}
+  const eventType = String(turn?.event_type || '')
+  const category = String(turn?.category || '')
+  const result = String(metadata?.result || '').trim().toLowerCase()
+  const deltas = []
+
+  if (eventType === 'law_passed') {
+    deltas.push({ label: 'Laws', value: '+1', tone: 'up' })
+  }
+
+  if (eventType === 'agent_died') {
+    deltas.push({ label: 'Deaths', value: '+1', tone: 'down' })
+  }
+
+  if (eventType === 'proposal_resolved') {
+    let value = 'Resolved'
+    let tone = 'neutral'
+    if (result === 'passed') {
+      value = 'Passed'
+      tone = 'up'
+    } else if (result === 'failed' || result === 'expired') {
+      value = result[0].toUpperCase() + result.slice(1)
+      tone = 'down'
+    }
+    deltas.push({ label: 'Proposal', value, tone })
+  }
+
+  if (category === 'alliance' || category === 'cooperation') {
+    deltas.push({ label: 'Coalitions', value: 'Alignment Shift', tone: 'up' })
+  }
+
+  if (category === 'conflict') {
+    deltas.push({ label: 'Conflict', value: 'Escalation', tone: 'alert' })
+  }
+
+  if (category === 'crisis') {
+    deltas.push({ label: 'Pressure', value: 'System Shock', tone: 'alert' })
+  }
+
+  const effect = metadata?.effect && typeof metadata.effect === 'object' ? metadata.effect : {}
+  const effectResource = String(effect?.resource || metadata?.resource || '').trim()
+  if (effectResource) {
+    deltas.push({
+      label: effectResource[0].toUpperCase() + effectResource.slice(1),
+      value: 'Resource Swing',
+      tone: 'neutral',
+    })
+  } else if (
+    effect?.reduce_all_agents !== undefined ||
+    effect?.disable_communication !== undefined ||
+    effect?.consumption_modifier !== undefined
+  ) {
+    deltas.push({ label: 'Resources', value: 'Global Shift', tone: 'alert' })
+  }
+
+  const impactedAgents = Number(metadata?.affected_agents || metadata?.impacted_agents || 0)
+  if (Number.isFinite(impactedAgents) && impactedAgents > 0) {
+    deltas.push({ label: 'Impacted', value: `${Math.round(impactedAgents)} agents`, tone: 'neutral' })
+  }
+
+  const deduped = []
+  const seenLabels = new Set()
+  for (const delta of deltas) {
+    const label = String(delta?.label || '')
+    if (!label || seenLabels.has(label)) continue
+    seenLabels.add(label)
+    deduped.push(delta)
+    if (deduped.length >= 4) break
+  }
+
+  return deduped
+}
+
+function getWhyThisMatters(turn) {
+  const category = String(turn?.category || '')
+  const eventType = String(turn?.event_type || '')
+
+  if (eventType === 'law_passed' || category === 'governance') {
+    return 'Governance changed the rule set, so incentives and downstream behavior likely shifted after this moment.'
+  }
+  if (category === 'crisis') {
+    return 'A system-level shock altered constraints for many agents at once and can redirect the entire run trajectory.'
+  }
+  if (category === 'conflict') {
+    return 'Conflict spikes coordination costs and can rapidly reorder faction trust, trade flow, and survival outcomes.'
+  }
+  if (category === 'alliance' || category === 'cooperation') {
+    return 'Coordination and alliances change who can execute strategy, absorb shocks, and control governance outcomes.'
+  }
+  return 'This high-salience event changed momentum and helps explain why subsequent actions unfolded the way they did.'
 }
 
 export default function Highlights() {
@@ -65,6 +227,10 @@ export default function Highlights() {
   const [replayTurns, setReplayTurns] = useState([])
   const [replayBuckets, setReplayBuckets] = useState([])
   const [replayIndex, setReplayIndex] = useState(-1)
+  const [replayMode, setReplayMode] = useState('timeline')
+  const [storyMomentIndex, setStoryMomentIndex] = useState(0)
+  const [selectedReplayEventId, setSelectedReplayEventId] = useState(0)
+  const [showSourceDetail, setShowSourceDetail] = useState(false)
   const [predictionMarkets, setPredictionMarkets] = useState([])
   const [predictionStats, setPredictionStats] = useState(null)
   const [predictionNotice, setPredictionNotice] = useState(null)
@@ -81,6 +247,11 @@ export default function Highlights() {
       setActiveTab(requestedTab)
     }
   }, [requestedTab])
+
+  useEffect(() => {
+    setReplayMode('timeline')
+    setShowSourceDetail(false)
+  }, [runFilter])
 
   useEffect(() => {
     async function load() {
@@ -181,6 +352,45 @@ export default function Highlights() {
       .slice(0, 8)
   }, [replayTurns, activeReplayBucket])
 
+  const replayStoryMoments = useMemo(() => {
+    const selected = pickReplayStoryMoments(replayTurns, 8)
+    return selected.map((turn, index) => ({
+      ...turn,
+      chapter: getStoryChapterLabel(index, selected.length),
+      why_this_matters: getWhyThisMatters(turn),
+      deltas: buildMomentDeltas(turn),
+    }))
+  }, [replayTurns])
+
+  const activeStoryMoment =
+    storyMomentIndex >= 0 && storyMomentIndex < replayStoryMoments.length
+      ? replayStoryMoments[storyMomentIndex]
+      : null
+
+  const activeTimelineMoment = useMemo(() => {
+    if (selectedReplayEventId > 0) {
+      const selected = replayTurns.find((turn) => Number(turn?.event_id || 0) === selectedReplayEventId)
+      if (selected) return selected
+    }
+    return replayBucketEvents[0] || replayRecent[0] || replayTurns[replayTurns.length - 1] || null
+  }, [selectedReplayEventId, replayTurns, replayBucketEvents, replayRecent])
+
+  const activeReplayMoment = replayMode === 'story60' ? activeStoryMoment : activeTimelineMoment
+
+  const activeReplayMomentDeltas = useMemo(() => buildMomentDeltas(activeReplayMoment), [activeReplayMoment])
+
+  const activeReplayEvidence = useMemo(() => {
+    const turn = activeReplayMoment
+    if (!turn) return { runDetailHref: '', evidenceApiHref: '' }
+    const runId = getTurnRunId(turn)
+    const eventId = Number(turn?.event_id || 0)
+    if (!runId) return { runDetailHref: '', evidenceApiHref: '' }
+    const safeRunId = encodeURIComponent(runId)
+    const runDetailHref = `/runs/${safeRunId}${eventId > 0 ? `?event=${eventId}` : ''}`
+    const evidenceApiHref = `/api/analytics/runs/${safeRunId}?trace_limit=20&min_salience=55`
+    return { runDetailHref, evidenceApiHref }
+  }, [activeReplayMoment])
+
   const stateStrip = useMemo(() => {
     const day = Number(overview?.day_number || 0)
     const deaths = Number(overview?.agents?.dead || 0)
@@ -199,6 +409,50 @@ export default function Highlights() {
     }
     return { day, deaths, laws, coalitionIndex, trend, trendLabel }
   }, [overview, emergenceMetrics])
+
+  useEffect(() => {
+    if (replayStoryMoments.length === 0) {
+      setStoryMomentIndex(0)
+      return
+    }
+
+    if (requestedEventId > 0) {
+      const requestedIndex = replayStoryMoments.findIndex(
+        (turn) => Number(turn?.event_id || 0) === requestedEventId
+      )
+      if (requestedIndex >= 0) {
+        setStoryMomentIndex(requestedIndex)
+        return
+      }
+    }
+
+    setStoryMomentIndex((prev) => {
+      if (prev < 0) return 0
+      if (prev >= replayStoryMoments.length) return replayStoryMoments.length - 1
+      return prev
+    })
+  }, [replayStoryMoments, requestedEventId])
+
+  useEffect(() => {
+    if (activeTab !== 'replay') return
+    if (requestedEventId > 0) {
+      setSelectedReplayEventId(requestedEventId)
+      return
+    }
+
+    setSelectedReplayEventId((prev) => {
+      if (prev > 0 && replayTurns.some((turn) => Number(turn?.event_id || 0) === prev)) {
+        return prev
+      }
+      const fallback = Number(
+        replayBucketEvents[0]?.event_id ||
+        replayRecent[0]?.event_id ||
+        replayTurns[replayTurns.length - 1]?.event_id ||
+        0
+      )
+      return fallback
+    })
+  }, [activeTab, requestedEventId, replayTurns, replayBucketEvents, replayRecent])
 
   const shareMoment = async (turn, surface = 'highlights_plot_turn') => {
     const eventId = Number(turn?.event_id || 0)
@@ -249,23 +503,35 @@ export default function Highlights() {
   const TrendIcon = stateStrip.trend === 'up' ? TrendingUp : stateStrip.trend === 'down' ? TrendingDown : Minus
 
   useEffect(() => {
-    if (loading || activeTab !== 'replay' || replayBuckets.length === 0) return
-    trackKpiEventOnce('replay_start', `replay_start:${runFilter || 'all'}`, {
+    const replayReady = replayMode === 'story60'
+      ? replayStoryMoments.length > 0
+      : replayBuckets.length > 0
+    if (loading || activeTab !== 'replay' || !replayReady) return
+    trackKpiEventOnce('replay_start', `replay_start:${runFilter || 'all'}:${replayMode}`, {
       runId: runFilter,
       surface: 'highlights_replay_tab',
-      target: requestedEventId > 0 ? 'focused_event' : 'default',
+      target: replayMode === 'story60'
+        ? 'story60'
+        : (requestedEventId > 0 ? 'focused_event' : 'default'),
     })
-  }, [loading, activeTab, replayBuckets.length, runFilter, requestedEventId])
+  }, [loading, activeTab, replayMode, replayBuckets.length, replayStoryMoments.length, runFilter, requestedEventId])
 
   useEffect(() => {
     if (loading || activeTab !== 'replay') return
-    if (replayBuckets.length < 2 || replayIndex !== 0) return
-    trackKpiEventOnce('replay_complete', `replay_complete:${runFilter || 'all'}`, {
+    const timelineCompleted = replayMode !== 'story60' && replayBuckets.length >= 2 && replayIndex === 0
+    const storyCompleted =
+      replayMode === 'story60' &&
+      replayStoryMoments.length >= 2 &&
+      storyMomentIndex === replayStoryMoments.length - 1
+
+    if (!timelineCompleted && !storyCompleted) return
+    const target = replayMode === 'story60' ? 'story60_last_moment' : 'timeline_start_reached'
+    trackKpiEventOnce('replay_complete', `replay_complete:${runFilter || 'all'}:${replayMode}`, {
       runId: runFilter,
       surface: 'highlights_replay_tab',
-      target: 'timeline_start_reached',
+      target,
     })
-  }, [loading, activeTab, replayBuckets.length, replayIndex, runFilter])
+  }, [loading, activeTab, replayMode, replayBuckets.length, replayIndex, replayStoryMoments.length, storyMomentIndex, runFilter])
 
   return (
     <div className="highlights-page">
@@ -588,109 +854,342 @@ export default function Highlights() {
 
           {replayBuckets.length > 0 && activeReplayBucket && (
             <>
-              <div className="replay-header">
-                <h3>Time Scrub</h3>
-                <span>
-                  Slice {replayIndex + 1}/{replayBuckets.length} · {activeReplayBucket.label} · {activeReplayBucket.event_count} event
-                  {activeReplayBucket.event_count === 1 ? '' : 's'}
-                </span>
+              <div className="replay-mode-toggle">
+                <button
+                  type="button"
+                  className={`tab-btn ${replayMode === 'timeline' ? 'active' : ''}`}
+                  onClick={() => setReplayMode('timeline')}
+                >
+                  Replay Timeline
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${replayMode === 'story60' ? 'active' : ''}`}
+                  onClick={() => setReplayMode('story60')}
+                >
+                  Replay in 60 Seconds
+                </button>
               </div>
 
-              <input
-                type="range"
-                min={0}
-                max={Math.max(0, replayBuckets.length - 1)}
-                step={1}
-                value={Math.max(0, replayIndex)}
-                onChange={(event) => setReplayIndex(Number(event.target.value))}
-              />
+              {replayMode === 'timeline' ? (
+                <>
+                  <div className="replay-header">
+                    <h3>Time Scrub</h3>
+                    <span>
+                      Slice {replayIndex + 1}/{replayBuckets.length} · {activeReplayBucket.label} · {activeReplayBucket.event_count} event
+                      {activeReplayBucket.event_count === 1 ? '' : 's'}
+                    </span>
+                  </div>
 
-              <div className="replay-buckets">
-                {replayBuckets.map((bucket, idx) => {
-                  const dominant = bucket.dominant_category || 'notable'
-                  return (
-                    <button
-                      key={`${bucket.index}-${bucket.bucket_start}`}
-                      type="button"
-                      className={`replay-bucket category-${dominant} ${idx === replayIndex ? 'active' : ''}`}
-                      style={{ height: `${Math.max(14, Math.min(72, Number(bucket.event_count || 0) * 8))}px` }}
-                      onClick={() => setReplayIndex(idx)}
-                      title={`${bucket.label} · ${bucket.event_count} events`}
-                    />
-                  )
-                })}
-              </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, replayBuckets.length - 1)}
+                    step={1}
+                    value={Math.max(0, replayIndex)}
+                    onChange={(event) => setReplayIndex(Number(event.target.value))}
+                  />
 
-              <div className="replay-grid">
-                <div>
-                  <h4>Events In This Slice</h4>
-                  {replayBucketEvents.length === 0 ? (
-                    <div className="empty-state compact">No high-salience turns in this slice.</div>
-                  ) : (
-                    <div className="plot-turns-panel">
-                      {replayBucketEvents.map((turn) => {
-                        const turnRunId = getTurnRunId(turn)
-                        const tier = getMomentTier(turn)
-                        const isFocused = requestedEventId > 0 && Number(turn.event_id) === requestedEventId
-                        return (
-                          <div
-                            key={`slice-${turn.event_id}`}
-                            className={`plot-turn-card category-${turn.category || 'notable'} tier-${tier} ${isFocused ? 'focused' : ''}`}
-                          >
-                            <div className="plot-turn-row">
-                              <h3>
-                                {turn.title}
-                                <span className={`moment-tier-badge ${tier}`}>{tier === 'major' ? 'Major Moment' : 'Minor Moment'}</span>
-                              </h3>
-                              <span className="plot-turn-salience">Signal {turn.salience}</span>
-                            </div>
-                            <p>{turn.description}</p>
-                            <div className="plot-turn-meta">
-                              <span>{(turn.category || 'notable').replace(/_/g, ' ')}</span>
-                              <span>
-                                {turn.created_at
-                                  ? formatDistanceToNow(new Date(turn.created_at), { addSuffix: true })
-                                  : ''}
-                              </span>
-                              {turnRunId && (
-                                <Link to={`/runs/${encodeURIComponent(turnRunId)}`} className="plot-turn-run-link">
-                                  Run {turnRunId}
-                                </Link>
-                              )}
-                              <button type="button" className="moment-share-btn" onClick={() => shareMoment(turn, 'highlights_replay_slice')}>
-                                <Share2 size={12} />
-                                Share this moment
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <h4>Latest Up To This Point</h4>
-                  {replayRecent.length === 0 ? (
-                    <div className="empty-state compact">No events yet.</div>
-                  ) : (
-                    <div className="replay-recent-list">
-                      {replayRecent.map((turn) => (
+                  <div className="replay-buckets">
+                    {replayBuckets.map((bucket, idx) => {
+                      const dominant = bucket.dominant_category || 'notable'
+                      return (
                         <button
-                          key={`recent-${turn.event_id}`}
+                          key={`${bucket.index}-${bucket.bucket_start}`}
                           type="button"
-                          className={`replay-recent-item category-${turn.category || 'notable'} ${requestedEventId > 0 && Number(turn.event_id) === requestedEventId ? 'focused' : ''}`}
-                          onClick={() => shareMoment(turn, 'highlights_replay_recent')}
-                        >
-                          <span>{turn.title}</span>
-                          <strong>{turn.salience}</strong>
-                          <em><Share2 size={12} /> Share</em>
-                        </button>
-                      ))}
+                          className={`replay-bucket category-${dominant} ${idx === replayIndex ? 'active' : ''}`}
+                          style={{ height: `${Math.max(14, Math.min(72, Number(bucket.event_count || 0) * 8))}px` }}
+                          onClick={() => setReplayIndex(idx)}
+                          title={`${bucket.label} · ${bucket.event_count} events`}
+                        />
+                      )
+                    })}
+                  </div>
+
+                  <div className="replay-focus-layout">
+                    <div className="replay-main">
+                      <div className="replay-grid">
+                        <div>
+                          <h4>Events In This Slice</h4>
+                          {replayBucketEvents.length === 0 ? (
+                            <div className="empty-state compact">No high-salience turns in this slice.</div>
+                          ) : (
+                            <div className="plot-turns-panel">
+                              {replayBucketEvents.map((turn) => {
+                                const turnRunId = getTurnRunId(turn)
+                                const tier = getMomentTier(turn)
+                                const isFocused = requestedEventId > 0 && Number(turn.event_id) === requestedEventId
+                                const isSelected = Number(turn?.event_id || 0) === Number(activeReplayMoment?.event_id || 0)
+                                return (
+                                  <div
+                                    key={`slice-${turn.event_id}`}
+                                    className={`plot-turn-card category-${turn.category || 'notable'} tier-${tier} ${isFocused ? 'focused' : ''} ${isSelected ? 'selected' : ''}`}
+                                  >
+                                    <div className="plot-turn-row">
+                                      <h3>
+                                        {turn.title}
+                                        <span className={`moment-tier-badge ${tier}`}>{tier === 'major' ? 'Major Moment' : 'Minor Moment'}</span>
+                                      </h3>
+                                      <span className="plot-turn-salience">Signal {turn.salience}</span>
+                                    </div>
+                                    <p>{turn.description}</p>
+                                    <div className="plot-turn-meta">
+                                      <span>{(turn.category || 'notable').replace(/_/g, ' ')}</span>
+                                      <span>
+                                        {turn.created_at
+                                          ? formatDistanceToNow(new Date(turn.created_at), { addSuffix: true })
+                                          : ''}
+                                      </span>
+                                      {turnRunId && (
+                                        <Link to={`/runs/${encodeURIComponent(turnRunId)}`} className="plot-turn-run-link">
+                                          Run {turnRunId}
+                                        </Link>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="moment-focus-btn"
+                                        onClick={() => setSelectedReplayEventId(Number(turn?.event_id || 0))}
+                                      >
+                                        Focus
+                                      </button>
+                                      <button type="button" className="moment-share-btn" onClick={() => shareMoment(turn, 'highlights_replay_slice')}>
+                                        <Share2 size={12} />
+                                        Share this moment
+                                      </button>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <h4>Latest Up To This Point</h4>
+                          {replayRecent.length === 0 ? (
+                            <div className="empty-state compact">No events yet.</div>
+                          ) : (
+                            <div className="replay-recent-list">
+                              {replayRecent.map((turn) => {
+                                const isSelected = Number(turn?.event_id || 0) === Number(activeReplayMoment?.event_id || 0)
+                                return (
+                                  <div
+                                    key={`recent-${turn.event_id}`}
+                                    className={`replay-recent-item category-${turn.category || 'notable'} ${isSelected ? 'focused' : ''}`}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="replay-recent-focus"
+                                      onClick={() => setSelectedReplayEventId(Number(turn?.event_id || 0))}
+                                    >
+                                      <span>{turn.title}</span>
+                                      <strong>{turn.salience}</strong>
+                                      <em>Focus</em>
+                                    </button>
+                                    <button type="button" className="moment-share-btn" onClick={() => shareMoment(turn, 'highlights_replay_recent')}>
+                                      <Share2 size={12} />
+                                      Share
+                                    </button>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  )}
+
+                    <aside className="why-panel">
+                      <h4>Why this matters</h4>
+                      {!activeReplayMoment ? (
+                        <div className="empty-state compact">Select a moment to inspect impact and evidence.</div>
+                      ) : (
+                        <>
+                          <p className="why-title">{activeReplayMoment.title}</p>
+                          <p className="why-copy">{getWhyThisMatters(activeReplayMoment)}</p>
+                          {activeReplayMomentDeltas.length > 0 && (
+                            <div className="delta-chip-row">
+                              {activeReplayMomentDeltas.map((delta) => (
+                                <span key={`${delta.label}-${delta.value}`} className={`delta-chip tone-${delta.tone || 'neutral'}`}>
+                                  <strong>{delta.label}</strong>
+                                  <em>{delta.value}</em>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="why-evidence">
+                            {activeReplayEvidence.runDetailHref ? (
+                              <Link to={activeReplayEvidence.runDetailHref}>Run Detail Evidence</Link>
+                            ) : (
+                              <span className="why-missing">Run evidence unavailable.</span>
+                            )}
+                            {activeReplayEvidence.evidenceApiHref && (
+                              <a href={activeReplayEvidence.evidenceApiHref} target="_blank" rel="noreferrer">
+                                Raw Evidence API
+                              </a>
+                            )}
+                          </div>
+                          <button type="button" className="why-source-toggle" onClick={() => setShowSourceDetail((prev) => !prev)}>
+                            {showSourceDetail ? 'Hide source detail' : 'Show source detail'}
+                          </button>
+                          {showSourceDetail && (
+                            <pre className="why-source-detail">
+                              {JSON.stringify(activeReplayMoment.metadata || {}, null, 2)}
+                            </pre>
+                          )}
+                        </>
+                      )}
+                    </aside>
+                  </div>
+                </>
+              ) : (
+                <div className="replay-focus-layout">
+                  <div className="replay-main">
+                    <div className="replay-header">
+                      <h3>Replay in 60 Seconds</h3>
+                      <span>
+                        {replayStoryMoments.length} curated moments · chaptered narrative
+                      </span>
+                    </div>
+
+                    {replayStoryMoments.length === 0 || !activeStoryMoment ? (
+                      <div className="empty-state compact">No curated moments available yet.</div>
+                    ) : (
+                      <>
+                        <div className="story60-controls">
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => {
+                              const nextIndex = Math.max(0, storyMomentIndex - 1)
+                              setStoryMomentIndex(nextIndex)
+                              setSelectedReplayEventId(Number(replayStoryMoments[nextIndex]?.event_id || 0))
+                            }}
+                            disabled={storyMomentIndex <= 0}
+                          >
+                            Previous
+                          </button>
+                          <span>
+                            Moment {storyMomentIndex + 1}/{replayStoryMoments.length} · {activeStoryMoment.chapter}
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => {
+                              const nextIndex = Math.min(replayStoryMoments.length - 1, storyMomentIndex + 1)
+                              setStoryMomentIndex(nextIndex)
+                              setSelectedReplayEventId(Number(replayStoryMoments[nextIndex]?.event_id || 0))
+                            }}
+                            disabled={storyMomentIndex >= replayStoryMoments.length - 1}
+                          >
+                            Next
+                          </button>
+                        </div>
+
+                        <div
+                          className={`plot-turn-card story60-card category-${activeStoryMoment.category || 'notable'} tier-${getMomentTier(activeStoryMoment)}`}
+                        >
+                          <div className="plot-turn-row">
+                            <h3>
+                              {activeStoryMoment.title}
+                              <span className="story-chapter-badge">{activeStoryMoment.chapter}</span>
+                            </h3>
+                            <span className="plot-turn-salience">Signal {activeStoryMoment.salience}</span>
+                          </div>
+                          <p>{activeStoryMoment.description}</p>
+                          <div className="plot-turn-meta">
+                            <span>{(activeStoryMoment.category || 'notable').replace(/_/g, ' ')}</span>
+                            <span>
+                              {activeStoryMoment.created_at
+                                ? formatDistanceToNow(new Date(activeStoryMoment.created_at), { addSuffix: true })
+                                : ''}
+                            </span>
+                            {getTurnRunId(activeStoryMoment) && (
+                              <Link to={`/runs/${encodeURIComponent(getTurnRunId(activeStoryMoment))}`} className="plot-turn-run-link">
+                                Run {getTurnRunId(activeStoryMoment)}
+                              </Link>
+                            )}
+                            <button type="button" className="moment-share-btn" onClick={() => shareMoment(activeStoryMoment, 'highlights_replay_story60')}>
+                              <Share2 size={12} />
+                              Share this moment
+                            </button>
+                          </div>
+                          {activeStoryMoment.deltas?.length > 0 && (
+                            <div className="delta-chip-row">
+                              {activeStoryMoment.deltas.map((delta) => (
+                                <span key={`${delta.label}-${delta.value}`} className={`delta-chip tone-${delta.tone || 'neutral'}`}>
+                                  <strong>{delta.label}</strong>
+                                  <em>{delta.value}</em>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="story-moment-list">
+                          {replayStoryMoments.map((turn, index) => (
+                            <button
+                              key={`story-${turn.event_id}`}
+                              type="button"
+                              className={`story-moment-item category-${turn.category || 'notable'} ${index === storyMomentIndex ? 'active' : ''}`}
+                              onClick={() => {
+                                setStoryMomentIndex(index)
+                                setSelectedReplayEventId(Number(turn?.event_id || 0))
+                              }}
+                            >
+                              <span>{turn.chapter}</span>
+                              <strong>{turn.title}</strong>
+                              <em>Signal {turn.salience}</em>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <aside className="why-panel">
+                    <h4>Why this matters</h4>
+                    {!activeReplayMoment ? (
+                      <div className="empty-state compact">Select a moment to inspect impact and evidence.</div>
+                    ) : (
+                      <>
+                        <p className="why-title">{activeReplayMoment.title}</p>
+                        <p className="why-copy">{activeStoryMoment?.why_this_matters || getWhyThisMatters(activeReplayMoment)}</p>
+                        {activeReplayMomentDeltas.length > 0 && (
+                          <div className="delta-chip-row">
+                            {activeReplayMomentDeltas.map((delta) => (
+                              <span key={`${delta.label}-${delta.value}`} className={`delta-chip tone-${delta.tone || 'neutral'}`}>
+                                <strong>{delta.label}</strong>
+                                <em>{delta.value}</em>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="why-evidence">
+                          {activeReplayEvidence.runDetailHref ? (
+                            <Link to={activeReplayEvidence.runDetailHref}>Run Detail Evidence</Link>
+                          ) : (
+                            <span className="why-missing">Run evidence unavailable.</span>
+                          )}
+                          {activeReplayEvidence.evidenceApiHref && (
+                            <a href={activeReplayEvidence.evidenceApiHref} target="_blank" rel="noreferrer">
+                              Raw Evidence API
+                            </a>
+                          )}
+                        </div>
+                        <button type="button" className="why-source-toggle" onClick={() => setShowSourceDetail((prev) => !prev)}>
+                          {showSourceDetail ? 'Hide source detail' : 'Show source detail'}
+                        </button>
+                        {showSourceDetail && (
+                          <pre className="why-source-detail">
+                            {JSON.stringify(activeReplayMoment.metadata || {}, null, 2)}
+                          </pre>
+                        )}
+                      </>
+                    )}
+                  </aside>
                 </div>
-              </div>
+              )}
             </>
           )}
         </div>
@@ -1167,6 +1666,12 @@ export default function Highlights() {
           gap: var(--spacing-md);
         }
 
+        .replay-mode-toggle {
+          display: flex;
+          flex-wrap: wrap;
+          gap: var(--spacing-sm);
+        }
+
         .replay-header {
           display: flex;
           justify-content: space-between;
@@ -1212,6 +1717,19 @@ export default function Highlights() {
         .replay-bucket.category-cooperation { background: #22c55e; }
         .replay-bucket.category-notable { background: #94a3b8; }
 
+        .replay-focus-layout {
+          display: grid;
+          grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+          gap: var(--spacing-lg);
+          align-items: start;
+        }
+
+        .replay-main {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-md);
+        }
+
         .replay-grid {
           display: grid;
           grid-template-columns: 2fr 1fr;
@@ -1241,6 +1759,19 @@ export default function Highlights() {
           background: var(--bg-card);
           color: var(--text-primary);
           text-align: left;
+        }
+
+        .replay-recent-focus {
+          flex: 1;
+          min-width: 0;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          text-align: left;
+          display: grid;
+          gap: 0.2rem;
+          padding: 0;
+          cursor: pointer;
         }
 
         .replay-recent-item span {
@@ -1273,6 +1804,225 @@ export default function Highlights() {
         .replay-recent-item.category-cooperation { border-left-color: #22c55e; }
         .replay-recent-item.category-notable { border-left-color: #94a3b8; }
 
+        .plot-turn-card.selected {
+          outline: 1px solid rgba(59, 130, 246, 0.45);
+        }
+
+        .moment-focus-btn {
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-full);
+          padding: 0.14rem 0.5rem;
+          background: rgba(59, 130, 246, 0.12);
+          color: #93c5fd;
+          font-size: 0.72rem;
+          cursor: pointer;
+        }
+
+        .moment-focus-btn:hover {
+          border-color: #3b82f6;
+          color: #bfdbfe;
+        }
+
+        .story60-controls {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: var(--spacing-sm);
+          padding: var(--spacing-sm);
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-md);
+          background: rgba(255, 255, 255, 0.03);
+          color: var(--text-secondary);
+          font-size: 0.82rem;
+        }
+
+        .story60-card {
+          margin: 0;
+        }
+
+        .story-chapter-badge {
+          font-size: 0.66rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          border-radius: var(--radius-full);
+          padding: 0.16rem 0.5rem;
+          color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.08);
+        }
+
+        .story-moment-list {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: var(--spacing-sm);
+        }
+
+        .story-moment-item {
+          border: 1px solid var(--border-color);
+          border-left-width: 4px;
+          border-radius: var(--radius-md);
+          background: var(--bg-card);
+          color: var(--text-primary);
+          text-align: left;
+          padding: var(--spacing-sm);
+          display: grid;
+          gap: 0.25rem;
+          cursor: pointer;
+        }
+
+        .story-moment-item span {
+          font-size: 0.68rem;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: var(--text-muted);
+        }
+
+        .story-moment-item strong {
+          font-size: 0.86rem;
+          line-height: 1.3;
+        }
+
+        .story-moment-item em {
+          font-size: 0.72rem;
+          color: var(--text-muted);
+          font-style: normal;
+        }
+
+        .story-moment-item.active {
+          outline: 1px solid rgba(255, 255, 255, 0.28);
+          background: rgba(255, 255, 255, 0.06);
+        }
+
+        .story-moment-item.category-crisis { border-left-color: #f97316; }
+        .story-moment-item.category-conflict { border-left-color: #ef4444; }
+        .story-moment-item.category-alliance { border-left-color: #3b82f6; }
+        .story-moment-item.category-governance { border-left-color: #a78bfa; }
+        .story-moment-item.category-cooperation { border-left-color: #22c55e; }
+        .story-moment-item.category-notable { border-left-color: #94a3b8; }
+
+        .why-panel {
+          position: sticky;
+          top: 76px;
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-lg);
+          background: var(--bg-card);
+          padding: var(--spacing-md);
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-sm);
+          min-height: 220px;
+        }
+
+        .why-panel h4 {
+          margin: 0;
+        }
+
+        .why-title {
+          margin: 0;
+          font-size: 1rem;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .why-copy {
+          margin: 0;
+          color: var(--text-secondary);
+          font-size: 0.88rem;
+          line-height: 1.5;
+        }
+
+        .why-evidence {
+          display: flex;
+          flex-wrap: wrap;
+          gap: var(--spacing-sm);
+          margin-top: 0.15rem;
+        }
+
+        .why-evidence a,
+        .why-evidence .why-missing {
+          font-size: 0.78rem;
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-full);
+          padding: 0.16rem 0.58rem;
+          color: var(--text-secondary);
+        }
+
+        .why-evidence a:hover {
+          color: var(--text-primary);
+          border-color: var(--border-light);
+        }
+
+        .why-source-toggle {
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-md);
+          padding: 0.35rem 0.55rem;
+          background: rgba(255, 255, 255, 0.03);
+          color: var(--text-secondary);
+          font-size: 0.78rem;
+          cursor: pointer;
+          text-align: left;
+        }
+
+        .why-source-toggle:hover {
+          color: var(--text-primary);
+        }
+
+        .why-source-detail {
+          margin: 0;
+          padding: var(--spacing-sm);
+          border-radius: var(--radius-md);
+          background: rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          color: #c7d2fe;
+          font-size: 0.72rem;
+          line-height: 1.45;
+          max-height: 180px;
+          overflow: auto;
+        }
+
+        .delta-chip-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.4rem;
+          margin-top: var(--spacing-sm);
+        }
+
+        .delta-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          border-radius: var(--radius-full);
+          padding: 0.18rem 0.56rem;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          font-size: 0.72rem;
+          background: rgba(255, 255, 255, 0.04);
+        }
+
+        .delta-chip strong {
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .delta-chip em {
+          color: var(--text-muted);
+          font-style: normal;
+        }
+
+        .delta-chip.tone-up {
+          border-color: rgba(34, 197, 94, 0.35);
+          background: rgba(34, 197, 94, 0.14);
+        }
+
+        .delta-chip.tone-down {
+          border-color: rgba(239, 68, 68, 0.35);
+          background: rgba(239, 68, 68, 0.14);
+        }
+
+        .delta-chip.tone-alert {
+          border-color: rgba(249, 115, 22, 0.4);
+          background: rgba(249, 115, 22, 0.14);
+        }
+
         .empty-state.compact {
           min-height: 0;
           padding: var(--spacing-md);
@@ -1284,6 +2034,14 @@ export default function Highlights() {
         @media (max-width: 900px) {
           .replay-grid {
             grid-template-columns: 1fr;
+          }
+
+          .replay-focus-layout {
+            grid-template-columns: 1fr;
+          }
+
+          .why-panel {
+            position: static;
           }
 
           .state-strip {

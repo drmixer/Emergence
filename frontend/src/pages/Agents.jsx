@@ -35,7 +35,7 @@ export default function Agents() {
                     personality_type: filters.personality || undefined,
                 })
                 setAgents(Array.isArray(data) ? data : [])
-            } catch (error) {
+            } catch (_error) {
                 setAgents([])
             } finally {
                 setLoading(false)

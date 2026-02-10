@@ -19,7 +19,7 @@ export default function Laws() {
                 setError(null)
                 const data = await api.fetch('/api/laws?limit=500')
                 setLaws(Array.isArray(data) ? data : [])
-            } catch (e) {
+            } catch (_error) {
                 setError('Failed to load laws.')
                 setLaws([])
             } finally {
@@ -210,4 +210,3 @@ export default function Laws() {
         </div>
     )
 }
-

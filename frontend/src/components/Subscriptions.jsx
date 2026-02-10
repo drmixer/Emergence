@@ -29,15 +29,9 @@ function saveSubscriptions(subscriptions) {
 
 // Subscription Provider Component
 export function SubscriptionProvider({ children }) {
-    const [subscriptions, setSubscriptions] = useState([])
+    const [subscriptions, setSubscriptions] = useState(() => getStoredSubscriptions())
     const [notifications, setNotifications] = useState([])
     const [unreadCount, setUnreadCount] = useState(0)
-
-    // Load subscriptions on mount
-    useEffect(() => {
-        const stored = getStoredSubscriptions()
-        setSubscriptions(stored)
-    }, [])
 
     // Subscribe to an agent
     const subscribe = useCallback((agent) => {
@@ -379,7 +373,7 @@ export function useSubscriptionEvents(eventSource) {
                         addNotification(notification)
                     }
                 }
-            } catch (e) {
+            } catch (_error) {
                 // Ignore parse errors
             }
         }

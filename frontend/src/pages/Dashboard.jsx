@@ -115,7 +115,7 @@ export default function Dashboard() {
                 setSocialSeries(Array.isArray(socialDynamics?.series) ? socialDynamics.series : [])
                 setSocialDeltas(socialDynamics?.deltas_vs_prev_day || null)
                 setClassMobility(mobility && typeof mobility === 'object' ? mobility : null)
-            } catch (e) {
+            } catch (_error) {
                 setError('Failed to load live data.')
                 setStats(null)
                 setProposals([])

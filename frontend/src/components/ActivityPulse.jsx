@@ -9,29 +9,33 @@ export default function ActivityPulse({
     messageCount = 0,
     dayNumber = 0
 }) {
-    const [pulseActive, setPulseActive] = useState(true)
+    const pulseActive = Boolean(isLive)
     const [displayCount, setDisplayCount] = useState(messageCount)
 
     // Animate the message count when it changes
     useEffect(() => {
-        if (messageCount > displayCount) {
-            const difference = messageCount - displayCount
-            const increment = Math.ceil(difference / 20)
-            const timer = setInterval(() => {
-                setDisplayCount(prev => {
-                    const next = prev + increment
-                    if (next >= messageCount) {
-                        clearInterval(timer)
-                        return messageCount
-                    }
-                    return next
-                })
-            }, 50)
-            return () => clearInterval(timer)
-        } else {
-            setDisplayCount(messageCount)
-        }
-    }, [messageCount])
+        if (messageCount === displayCount) return undefined
+
+        const direction = messageCount > displayCount ? 1 : -1
+        const difference = Math.abs(messageCount - displayCount)
+        const step = Math.max(1, Math.ceil(difference / 20)) * direction
+
+        const timer = setInterval(() => {
+            setDisplayCount(prev => {
+                const next = prev + step
+                const reachedTarget =
+                    (direction > 0 && next >= messageCount) ||
+                    (direction < 0 && next <= messageCount)
+                if (reachedTarget) {
+                    clearInterval(timer)
+                    return messageCount
+                }
+                return next
+            })
+        }, 50)
+
+        return () => clearInterval(timer)
+    }, [displayCount, messageCount])
 
     // Calculate time ago
     const timeAgo = lastActivity

@@ -47,7 +47,7 @@ export default function Agent() {
                 setActions(Array.isArray(actionsData) ? actionsData : [])
                 setMessages(Array.isArray(messagesData) ? messagesData : [])
                 setVotes(Array.isArray(votesData) ? votesData : [])
-            } catch (error) {
+            } catch (_error) {
                 setAgent(null)
                 setActions([])
                 setMessages([])

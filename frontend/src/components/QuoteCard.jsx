@@ -173,8 +173,8 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
                 }
 
                 setQuotes(combined)
-                if (!selectedQuote && combined.length > 0) {
-                    setSelectedQuote(combined[0])
+                if (combined.length > 0) {
+                    setSelectedQuote((prev) => prev || combined[0])
                 }
             } catch {
                 setQuotes([])
