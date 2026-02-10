@@ -187,6 +187,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         recipient = db.query(Agent).filter(Agent.agent_number == recipient_id).first()
         if not recipient:
             return {"valid": False, "reason": "Recipient agent not found"}
+        if recipient.status == "dead":
+            return {"valid": False, "reason": "Recipient is dead and cannot receive resources"}
     
     elif action_type == "set_name":
         name = action.get("display_name", "")
@@ -265,6 +267,9 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         ).first()
         if not enforcement:
             return {"valid": False, "reason": f"Enforcement #{enforcement_id} not found or not pending"}
+        voting_closes_at = ensure_utc(enforcement.voting_closes_at)
+        if voting_closes_at and voting_closes_at < now:
+            return {"valid": False, "reason": "Enforcement voting period has ended"}
         
         # Check hasn't voted already
         existing = db.query(EnforcementVote).filter(
@@ -524,12 +529,21 @@ async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:
     
     resource_type = action["resource_type"]
     amount = Decimal(str(action["amount"]))
+
+    if not recipient:
+        return {"success": False, "description": "Recipient agent not found"}
+
+    recipient_name = recipient.display_name or f"Agent #{recipient.agent_number}"
+    if recipient.status == "dead":
+        return {"success": False, "description": f"{recipient_name} is dead and cannot receive resources"}
     
     # Decrease sender's inventory
     sender_inv = db.query(AgentInventory).filter(
         AgentInventory.agent_id == agent.id,
         AgentInventory.resource_type == resource_type
     ).first()
+    if not sender_inv or sender_inv.quantity < amount:
+        return {"success": False, "description": f"Insufficient {resource_type} to trade"}
     sender_inv.quantity -= amount
     
     # Increase recipient's inventory
@@ -559,11 +573,6 @@ async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:
     db.add(transaction)
     
     sender_name = agent.display_name or f"Agent #{agent.agent_number}"
-    recipient_name = recipient.display_name or f"Agent #{recipient.agent_number}"
-    
-    # Dead agents cannot receive resources
-    if recipient.status == "dead":
-        return {"success": False, "description": f"{recipient_name} is dead and cannot receive resources"}
     
     # Check if this awakens a dormant agent
     # Revival requires enough resources to pay NEXT cycle's survival cost (1 food + 1 energy)
@@ -728,6 +737,14 @@ async def _execute_vote_enforcement(db: Session, agent: Agent, action: dict) -> 
     enforcement = db.query(Enforcement).filter(
         Enforcement.id == enforcement_id
     ).first()
+    if not enforcement:
+        return {"success": False, "description": f"Enforcement #{enforcement_id} not found"}
+    if enforcement.status != "pending":
+        return {"success": False, "description": f"Enforcement #{enforcement_id} is not pending"}
+
+    closes_at = ensure_utc(enforcement.voting_closes_at)
+    if closes_at and closes_at < now_utc():
+        return {"success": False, "description": f"Voting window for enforcement #{enforcement_id} has closed"}
     
     voter_name = agent.display_name or f"Agent #{agent.agent_number}"
     target = enforcement.target
@@ -755,6 +772,7 @@ async def _execute_vote_enforcement(db: Session, agent: Agent, action: dict) -> 
         enforcement.executed_at = now_utc()
         
         result = await _execute_enforcement(db, enforcement)
+        enforcement.status = "executed"
         
         return {
             "success": True,
@@ -763,11 +781,20 @@ async def _execute_vote_enforcement(db: Session, agent: Agent, action: dict) -> 
         }
     
     # Check if enough opposition to reject
-    total_possible_votes = 100  # Total agents
+    total_possible_votes = int(
+        db.query(func.count(Agent.id))
+        .filter(
+            Agent.status != "dead",
+            Agent.exiled.is_(False),
+        )
+        .scalar()
+        or 0
+    )
     votes_cast = enforcement.support_votes + enforcement.oppose_votes
-    remaining_votes = total_possible_votes - votes_cast
-    
-    if enforcement.oppose_votes > (total_possible_votes - enforcement.votes_required):
+    remaining_votes = max(0, total_possible_votes - votes_cast)
+    max_possible_support = enforcement.support_votes + remaining_votes
+
+    if max_possible_support < enforcement.votes_required:
         enforcement.status = "rejected"
         return {
             "success": True,

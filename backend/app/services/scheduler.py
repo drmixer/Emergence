@@ -12,7 +12,17 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
 from app.core.database import SessionLocal
-from app.models.models import Agent, AgentInventory, Proposal, Law, Event, Transaction, GlobalResources, Message
+from app.models.models import (
+    Agent,
+    AgentInventory,
+    Proposal,
+    Law,
+    Event,
+    Transaction,
+    GlobalResources,
+    Message,
+    Enforcement,
+)
 from app.services.archive_drafts import maybe_generate_scheduled_weekly_draft
 from app.services.emergence_metrics import persist_completed_day_snapshot
 from app.services.runtime_config import runtime_config_service
@@ -744,6 +754,67 @@ async def resolve_expired_proposals():
         db.close()
 
 
+async def resolve_expired_enforcements():
+    """
+    Resolve enforcement actions whose voting windows have ended.
+    Pending enforcements with insufficient support are rejected at expiry.
+    """
+    db = SessionLocal()
+
+    try:
+        logger.info("Checking for expired enforcements...")
+        now = now_utc()
+
+        expired_enforcements = db.query(Enforcement).filter(
+            Enforcement.status == "pending",
+            Enforcement.voting_closes_at <= now,
+        ).all()
+
+        results = []
+        for enforcement in expired_enforcements:
+            target_name = enforcement.target.display_name or f"Agent #{enforcement.target.agent_number}"
+            enforcement.status = "rejected"
+
+            event = Event(
+                event_type="enforcement_expired",
+                description=(
+                    f"⚖️ Enforcement #{enforcement.id} against {target_name} expired without enough support "
+                    f"({enforcement.support_votes}/{enforcement.votes_required} support, "
+                    f"{enforcement.oppose_votes} oppose)"
+                ),
+                event_metadata=_with_runtime_metadata({
+                    "enforcement_id": enforcement.id,
+                    "target_agent_number": enforcement.target.agent_number,
+                    "enforcement_type": enforcement.enforcement_type,
+                    "support_votes": enforcement.support_votes,
+                    "oppose_votes": enforcement.oppose_votes,
+                    "votes_required": enforcement.votes_required,
+                    "result": "expired_rejected",
+                }),
+            )
+            db.add(event)
+
+            results.append({
+                "enforcement_id": enforcement.id,
+                "result": "expired_rejected",
+            })
+
+        db.commit()
+
+        if results:
+            logger.info(f"Resolved {len(results)} expired enforcements: {results}")
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Error resolving enforcements: {e}")
+        db.rollback()
+        raise
+
+    finally:
+        db.close()
+
+
 async def reset_daily_stats():
     """
     Reset daily production/consumption counters.
@@ -779,6 +850,11 @@ class SchedulerRunner:
         # Proposal resolution every 5 minutes
         self.tasks.append(
             asyncio.create_task(self._run_periodic(resolve_expired_proposals, 300))
+        )
+
+        # Enforcement resolution every 5 minutes
+        self.tasks.append(
+            asyncio.create_task(self._run_periodic(resolve_expired_enforcements, 300))
         )
         
         # Daily consumption every day_length_minutes

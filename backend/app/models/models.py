@@ -457,6 +457,7 @@ class EnforcementVote(Base):
     agent = relationship("Agent")
     
     __table_args__ = (
+        UniqueConstraint("enforcement_id", "agent_id", name="uq_enforcement_votes_enforcement_agent"),
         CheckConstraint("vote IN ('support', 'oppose')", name="valid_enforcement_vote"),
     )
 
