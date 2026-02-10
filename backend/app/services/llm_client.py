@@ -64,6 +64,16 @@ MISTRAL_CONFIG = {
     },
 }
 
+GEMINI_CONFIG = {
+    "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "models": {
+        # Stable Gemini cohort keys (seeded explicitly in scripts/seed_agents.py)
+        "gm_gemini_2_5_flash": "gemini-2.5-flash",
+        "gm_gemini_2_0_flash": "gemini-2.0-flash",
+        "gm_gemini_2_0_flash_lite": "gemini-2.0-flash-lite",
+    },
+}
+
 _ACTION_FORMAT_RETRY_SUFFIX = (
     "\n\nFORMAT RETRY:\n"
     "- Your previous output could not be parsed.\n"
@@ -98,11 +108,16 @@ class LLMClient:
             base_url=(getattr(settings, "MISTRAL_BASE_URL", "") or MISTRAL_CONFIG["base_url"]),
             api_key=settings.MISTRAL_API_KEY,
         )
+        self.gemini_client = AsyncOpenAI(
+            base_url=(getattr(settings, "GEMINI_BASE_URL", "") or GEMINI_CONFIG["base_url"]),
+            api_key=settings.GEMINI_API_KEY,
+        )
 
         # Concurrency guards to reduce provider rate limits.
         self._groq_sem = asyncio.Semaphore(max(1, int(getattr(settings, "GROQ_MAX_CONCURRENCY", 2) or 2)))
         self._openrouter_sem = asyncio.Semaphore(max(1, int(getattr(settings, "OPENROUTER_MAX_CONCURRENCY", 6) or 6)))
         self._mistral_sem = asyncio.Semaphore(max(1, int(getattr(settings, "MISTRAL_MAX_CONCURRENCY", 4) or 4)))
+        self._gemini_sem = asyncio.Semaphore(max(1, int(getattr(settings, "GEMINI_MAX_CONCURRENCY", 4) or 4)))
 
         # Client-side RPM limiter to avoid tripping strict OpenRouter free-tier limits.
         # With 20 agents and a 150s loop, steady-state is ~8 RPM; retries can push higher.
@@ -247,6 +262,8 @@ class LLMClient:
             return "openrouter"
         if client is self.groq_client:
             return "groq"
+        if client is self.gemini_client:
+            return "gemini"
         return "mistral"
 
     async def _create_completion_with_budget(
@@ -304,6 +321,8 @@ class LLMClient:
             sem = self._openrouter_sem
         elif client is self.groq_client:
             sem = self._groq_sem
+        elif client is self.gemini_client:
+            sem = self._gemini_sem
         else:
             sem = self._mistral_sem
         started = time.monotonic()
@@ -368,6 +387,7 @@ class LLMClient:
     
     def _get_client_and_model(self, model_type: str):
         """Get the appropriate client and model name."""
+        gemini_default_model = GEMINI_CONFIG["models"]["gm_gemini_2_0_flash"]
         force_cheapest = bool(runtime_config_service.get_effective_value_cached("FORCE_CHEAPEST_ROUTE"))
         if force_cheapest:
             if settings.OPENROUTER_API_KEY:
@@ -382,6 +402,8 @@ class LLMClient:
                     or MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"]
                 ).strip()
                 return self.mistral_client, mistral_default_model
+            if settings.GEMINI_API_KEY:
+                return self.gemini_client, GEMINI_CONFIG["models"]["gm_gemini_2_0_flash_lite"]
 
         provider = (settings.LLM_PROVIDER or "auto").strip().lower()
         mistral_default_model = str(
@@ -392,6 +414,9 @@ class LLMClient:
         # Direct Mistral cohort mapping.
         if model_type in MISTRAL_CONFIG["models"]:
             return self.mistral_client, mistral_default_model
+        # Direct Gemini cohort mapping.
+        if model_type in GEMINI_CONFIG["models"]:
+            return self.gemini_client, GEMINI_CONFIG["models"][model_type]
 
         # Explicit mappings always take precedence for clean attribution.
         if model_type in OPENROUTER_CONFIG["models"]:
@@ -410,17 +435,28 @@ class LLMClient:
         if provider == "mistral":
             logger.warning("Unknown model type %s, forcing direct Mistral %s", model_type, mistral_default_model)
             return self.mistral_client, mistral_default_model
+        if provider == "gemini":
+            logger.warning("Unknown model type %s, forcing direct Gemini %s", model_type, gemini_default_model)
+            return self.gemini_client, gemini_default_model
 
-        # auto: prefer OpenRouter free fallback, else Groq default.
+        # auto: prefer OpenRouter free fallback, then Mistral, then Groq, then Gemini.
         if settings.OPENROUTER_API_KEY:
             logger.warning("Unknown model type %s, defaulting to OpenRouter gpt-oss-20b:free", model_type)
             return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
         if settings.MISTRAL_API_KEY:
             logger.warning("Unknown model type %s, defaulting to direct Mistral %s", model_type, mistral_default_model)
             return self.mistral_client, mistral_default_model
+        if settings.GROQ_API_KEY:
+            key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
+            model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
+            logger.warning("Unknown model type %s, defaulting to Groq %s", model_type, model_name)
+            return self.groq_client, model_name
+        if settings.GEMINI_API_KEY:
+            logger.warning("Unknown model type %s, defaulting to direct Gemini %s", model_type, gemini_default_model)
+            return self.gemini_client, gemini_default_model
         key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
         model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-        logger.warning("Unknown model type %s, defaulting to Groq %s", model_type, model_name)
+        logger.warning("Unknown model type %s, defaulting to Groq %s (no provider keys set)", model_type, model_name)
         return self.groq_client, model_name
     
     async def get_completion(
@@ -436,9 +472,14 @@ class LLMClient:
     ) -> Optional[str]:
         """Get a completion with retry logic."""
 
-        if not settings.OPENROUTER_API_KEY and not settings.GROQ_API_KEY and not settings.MISTRAL_API_KEY:
+        if (
+            not settings.OPENROUTER_API_KEY
+            and not settings.GROQ_API_KEY
+            and not settings.MISTRAL_API_KEY
+            and not settings.GEMINI_API_KEY
+        ):
             logger.error(
-                "No provider API keys are set (OPENROUTER_API_KEY/GROQ_API_KEY/MISTRAL_API_KEY); "
+                "No provider API keys are set (OPENROUTER_API_KEY/GROQ_API_KEY/MISTRAL_API_KEY/GEMINI_API_KEY); "
                 "returning no completion."
             )
             return None
@@ -452,6 +493,9 @@ class LLMClient:
             return None
         if client is self.mistral_client and not settings.MISTRAL_API_KEY:
             logger.error("Selected Mistral route for model_type=%s but MISTRAL_API_KEY is not set.", model_type)
+            return None
+        if client is self.gemini_client and not settings.GEMINI_API_KEY:
+            logger.error("Selected Gemini route for model_type=%s but GEMINI_API_KEY is not set.", model_type)
             return None
         
         attempt_max_tokens = max(64, int(max_tokens or 64))

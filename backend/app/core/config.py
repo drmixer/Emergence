@@ -43,13 +43,16 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     MISTRAL_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
     MISTRAL_BASE_URL: str = "https://api.mistral.ai/v1"
+    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     MISTRAL_SMALL_MODEL: str = "mistral-small-latest"
     # LLM routing
     # - "auto": use model mapping if known, otherwise prefer OpenRouter, then Mistral, then Groq
     # - "openrouter": force OpenRouter for all unknown models
     # - "groq": force Groq for all unknown models
     # - "mistral": force direct Mistral for all unknown models
+    # - "gemini": force direct Gemini for all unknown models
     LLM_PROVIDER: str = "auto"
     # When forcing Groq (or falling back), pick one of: llama-3.3-70b | llama-3.1-8b
     GROQ_DEFAULT_MODEL: str = "llama-3.1-8b"
@@ -65,6 +68,7 @@ class Settings(BaseSettings):
     GROQ_MAX_CONCURRENCY: int = 2
     OPENROUTER_MAX_CONCURRENCY: int = 6
     MISTRAL_MAX_CONCURRENCY: int = 4
+    GEMINI_MAX_CONCURRENCY: int = 4
     OPENROUTER_RPM_LIMIT: int = 6
     # Action-generation output controls (checkpoint decisions).
     LLM_ACTION_MAX_TOKENS: int = 350
@@ -78,6 +82,7 @@ class Settings(BaseSettings):
     LLM_MAX_CALLS_PER_DAY_TOTAL: int = 2200
     LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE: int = 900
     LLM_MAX_CALLS_PER_DAY_GROQ: int = 1800
+    LLM_MAX_CALLS_PER_DAY_GEMINI: int = 1800
 
     # Runtime stop conditions.
     # If enabled, worker halts the run when any stop condition is tripped.

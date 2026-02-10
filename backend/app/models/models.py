@@ -56,7 +56,8 @@ class Agent(Base):
             "'or_gpt_oss_120b', 'or_qwen3_235b_a22b_2507', 'or_deepseek_v3_2', 'or_deepseek_chat_v3_1', "
             "'or_gpt_oss_20b', 'or_qwen3_32b', 'or_mistral_small_3_1_24b', "
             "'or_gpt_oss_20b_free', 'or_qwen3_4b_free', 'or_mistral_small_3_1_24b_free', "
-            "'gr_llama_3_1_8b_instant'"
+            "'gr_llama_3_1_8b_instant', "
+            "'gm_gemini_2_5_flash', 'gm_gemini_2_0_flash', 'gm_gemini_2_0_flash_lite'"
             ")",
             name="valid_model"
         ),

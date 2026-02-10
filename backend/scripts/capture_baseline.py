@@ -36,6 +36,7 @@ def _runtime_thresholds() -> dict[str, Any]:
         "LLM_MAX_CALLS_PER_DAY_TOTAL",
         "LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE",
         "LLM_MAX_CALLS_PER_DAY_GROQ",
+        "LLM_MAX_CALLS_PER_DAY_GEMINI",
         "STOP_CONDITION_ENFORCEMENT_ENABLED",
         "STOP_PROVIDER_FAILURE_WINDOW_MINUTES",
         "STOP_PROVIDER_FAILURE_THRESHOLD",
@@ -165,6 +166,7 @@ def main() -> int:
             "calls_total": int(budget.calls_total),
             "calls_openrouter_free": int(budget.calls_openrouter_free),
             "calls_groq": int(budget.calls_groq),
+            "calls_gemini": int(budget.calls_gemini),
             "estimated_cost_usd": float(budget.estimated_cost_usd),
         },
         "provider_failure_window": _provider_failure_stats(

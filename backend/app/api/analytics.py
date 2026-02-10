@@ -1348,6 +1348,7 @@ def usage_budget_status():
     calls_total = int(snapshot.calls_total or 0)
     calls_or_free = int(snapshot.calls_openrouter_free or 0)
     calls_groq = int(snapshot.calls_groq or 0)
+    calls_gemini = int(snapshot.calls_gemini or 0)
     cost_usd = float(snapshot.estimated_cost_usd or 0.0)
 
     soft_budget = float(getattr(settings, "LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0)
@@ -1355,6 +1356,7 @@ def usage_budget_status():
     max_total = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_TOTAL", 0) or 0)
     max_or_free = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE", 0) or 0)
     max_groq = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_GROQ", 0) or 0)
+    max_gemini = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_GEMINI", 0) or 0)
 
     soft_budget_reached = bool(soft_budget > 0 and cost_usd >= soft_budget)
     hard_budget_reached = bool(hard_budget > 0 and cost_usd >= hard_budget)
@@ -1364,6 +1366,8 @@ def usage_budget_status():
     hard_or_free_reached = bool(max_or_free > 0 and calls_or_free >= max_or_free)
     soft_groq_reached = bool(max_groq > 0 and calls_groq >= int(max_groq * 0.85))
     hard_groq_reached = bool(max_groq > 0 and calls_groq >= max_groq)
+    soft_gemini_reached = bool(max_gemini > 0 and calls_gemini >= int(max_gemini * 0.85))
+    hard_gemini_reached = bool(max_gemini > 0 and calls_gemini >= max_gemini)
 
     return {
         "day_key_utc": snapshot.day_key.isoformat(),
@@ -1371,6 +1375,7 @@ def usage_budget_status():
             "calls_total": calls_total,
             "calls_openrouter_free": calls_or_free,
             "calls_groq": calls_groq,
+            "calls_gemini": calls_gemini,
             "estimated_cost_usd": cost_usd,
         },
         "limits": {
@@ -1379,6 +1384,7 @@ def usage_budget_status():
             "max_calls_per_day_total": max_total,
             "max_calls_per_day_openrouter_free": max_or_free,
             "max_calls_per_day_groq": max_groq,
+            "max_calls_per_day_gemini": max_gemini,
         },
         "utilization": {
             "budget_soft_pct": (_safe_ratio(cost_usd, soft_budget) * 100.0) if soft_budget > 0 else None,
@@ -1386,13 +1392,22 @@ def usage_budget_status():
             "calls_total_pct": (_safe_ratio(calls_total, max_total) * 100.0) if max_total > 0 else None,
             "calls_openrouter_free_pct": (_safe_ratio(calls_or_free, max_or_free) * 100.0) if max_or_free > 0 else None,
             "calls_groq_pct": (_safe_ratio(calls_groq, max_groq) * 100.0) if max_groq > 0 else None,
+            "calls_gemini_pct": (_safe_ratio(calls_gemini, max_gemini) * 100.0) if max_gemini > 0 else None,
         },
         "flags": {
             "soft_cap_active": bool(
-                soft_budget_reached or soft_total_reached or soft_or_free_reached or soft_groq_reached
+                soft_budget_reached
+                or soft_total_reached
+                or soft_or_free_reached
+                or soft_groq_reached
+                or soft_gemini_reached
             ),
             "hard_cap_reached": bool(
-                hard_budget_reached or hard_total_reached or hard_or_free_reached or hard_groq_reached
+                hard_budget_reached
+                or hard_total_reached
+                or hard_or_free_reached
+                or hard_groq_reached
+                or hard_gemini_reached
             ),
             "soft_budget_reached": soft_budget_reached,
             "hard_budget_reached": hard_budget_reached,
@@ -1402,6 +1417,8 @@ def usage_budget_status():
             "hard_calls_openrouter_free_reached": hard_or_free_reached,
             "soft_calls_groq_reached": soft_groq_reached,
             "hard_calls_groq_reached": hard_groq_reached,
+            "soft_calls_gemini_reached": soft_gemini_reached,
+            "hard_calls_gemini_reached": hard_gemini_reached,
         },
     }
 

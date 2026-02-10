@@ -409,6 +409,7 @@ def admin_status(
             "calls_total": int(budget.calls_total),
             "calls_openrouter_free": int(budget.calls_openrouter_free),
             "calls_groq": int(budget.calls_groq),
+            "calls_gemini": int(budget.calls_gemini),
             "estimated_cost_usd": float(budget.estimated_cost_usd),
             "soft_cap_usd": float(effective.get("LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0),
             "hard_cap_usd": float(effective.get("LLM_DAILY_BUDGET_USD_HARD", 0.0) or 0.0),

@@ -111,6 +111,12 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=50000,
         description="Daily cap for Groq-route calls.",
     ),
+    "LLM_MAX_CALLS_PER_DAY_GEMINI": MutableSettingSpec(
+        python_type=int,
+        min_value=0,
+        max_value=50000,
+        description="Daily cap for Gemini-route calls.",
+    ),
     "STOP_CONDITION_ENFORCEMENT_ENABLED": MutableSettingSpec(
         python_type=bool,
         description="Enable runtime stop conditions (budget/failures/DB pressure).",

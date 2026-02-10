@@ -23,17 +23,20 @@ from app.core.config import settings
 # Explicit model cohorts for attribution-safe research + show mode.
 # Keep deterministic assignment by seed order (agent numbers 1..50).
 MODEL_COHORT_PLAN = [
-    # High tier (10): 3 paid OpenRouter models
-    {"count": 4, "tier": 1, "model_type": "or_gpt_oss_120b", "resolved_model": "openai/gpt-oss-120b"},
-    {"count": 4, "tier": 1, "model_type": "or_qwen3_235b_a22b_2507", "resolved_model": "qwen/qwen3-235b-a22b-2507"},
-    {"count": 2, "tier": 1, "model_type": "or_deepseek_v3_2", "resolved_model": "deepseek/deepseek-v3.2"},
-    # Medium tier (25): cheap paid OpenRouter models plus one direct-Mistral cohort.
-    {"count": 6, "tier": 2, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
-    {"count": 4, "tier": 2, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
-    {"count": 2, "tier": 2, "model_type": "or_qwen3_32b", "resolved_model": "qwen/qwen3-32b"},
-    {"count": 6, "tier": 3, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
-    {"count": 4, "tier": 3, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
-    {"count": 3, "tier": 3, "model_type": "or_qwen3_32b", "resolved_model": "qwen/qwen3-32b"},
+    # High tier (10): strong paid cohorts + Gemini 2.5 Flash cohort (3 agents).
+    {"count": 3, "tier": 1, "model_type": "or_gpt_oss_120b", "resolved_model": "openai/gpt-oss-120b"},
+    {"count": 3, "tier": 1, "model_type": "or_qwen3_235b_a22b_2507", "resolved_model": "qwen/qwen3-235b-a22b-2507"},
+    {"count": 1, "tier": 1, "model_type": "or_deepseek_v3_2", "resolved_model": "deepseek/deepseek-v3.2"},
+    {"count": 3, "tier": 1, "model_type": "gm_gemini_2_5_flash", "resolved_model": "gemini-2.5-flash (direct gemini)"},
+    # Mid tiers include Gemini Flash cohorts with progressive strength by tier.
+    {"count": 4, "tier": 2, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
+    {"count": 3, "tier": 2, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
+    {"count": 1, "tier": 2, "model_type": "or_qwen3_32b", "resolved_model": "qwen/qwen3-32b"},
+    {"count": 4, "tier": 2, "model_type": "gm_gemini_2_0_flash", "resolved_model": "gemini-2.0-flash (direct gemini)"},
+    {"count": 5, "tier": 3, "model_type": "or_gpt_oss_20b", "resolved_model": "openai/gpt-oss-20b"},
+    {"count": 3, "tier": 3, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
+    {"count": 2, "tier": 3, "model_type": "or_qwen3_32b", "resolved_model": "qwen/qwen3-32b"},
+    {"count": 3, "tier": 3, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.0-flash-lite (direct gemini)"},
     # Basic tier (15): free OpenRouter cohorts + fixed Groq cohort.
     {"count": 5, "tier": 4, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
     {"count": 5, "tier": 4, "model_type": "or_qwen3_4b_free", "resolved_model": "qwen/qwen3-4b:free"},
