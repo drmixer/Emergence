@@ -132,6 +132,50 @@ async def run_summary_loop():
             await asyncio.sleep(60)
 
 
+async def _start_runtime_systems() -> tuple[asyncio.Task, asyncio.Task | None]:
+    """Start scheduler, agent loops, and optional background tasks."""
+    logger.info("Starting scheduler...")
+    await scheduler.start(day_length_minutes=settings.DAY_LENGTH_MINUTES)
+
+    logger.info("Starting agent processing...")
+    await agent_processor.start()
+
+    event_task = asyncio.create_task(run_event_loop())
+
+    summary_task: asyncio.Task | None = None
+    if getattr(settings, "SUMMARIES_ENABLED", False):
+        summary_task = asyncio.create_task(run_summary_loop())
+    else:
+        logger.info("Summaries disabled; skipping summary generator loop.")
+
+    logger.info("Worker running! All systems active.")
+    logger.info("-" * 60)
+    return event_task, summary_task
+
+
+async def _stop_runtime_systems(
+    event_task: asyncio.Task | None,
+    summary_task: asyncio.Task | None,
+) -> None:
+    """Stop scheduler, agent loops, and background tasks."""
+    if event_task:
+        event_task.cancel()
+        try:
+            await event_task
+        except asyncio.CancelledError:
+            pass
+
+    if summary_task:
+        summary_task.cancel()
+        try:
+            await summary_task
+        except asyncio.CancelledError:
+            pass
+
+    await agent_processor.stop()
+    await scheduler.stop()
+
+
 async def main():
     """Main worker entry point."""
     health_server = None
@@ -157,45 +201,35 @@ async def main():
     # Expose health endpoint to satisfy Railway worker health checks.
     health_server = await _start_health_server()
 
-    # Check if we should actually run (runtime-config aware, so ops can start runs without redeploy).
-    while True:
-        simulation_active = bool(
-            runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE")
-        )
-        if simulation_active:
-            break
-        logger.info("SIMULATION_ACTIVE is false, worker will idle")
-        await asyncio.sleep(60)
-        logger.info("Worker idle (SIMULATION_ACTIVE=false)")
-
-    # Background tasks
-    event_task = None
-    summary_task = None
+    event_task: asyncio.Task | None = None
+    summary_task: asyncio.Task | None = None
+    runtime_systems_started = False
+    idle_logged = False
 
     try:
-        # Start scheduler (daily consumption, proposal resolution)
-        logger.info("Starting scheduler...")
-        await scheduler.start(day_length_minutes=settings.DAY_LENGTH_MINUTES)
-
-        # Start agent processing
-        logger.info("Starting agent processing...")
-        await agent_processor.start()
-
-        # Start random event generator
-        event_task = asyncio.create_task(run_event_loop())
-
-        # Start summary generator (optional; avoid surprise traffic/costs when disabled)
-        if getattr(settings, "SUMMARIES_ENABLED", False):
-            summary_task = asyncio.create_task(run_summary_loop())
-        else:
-            logger.info("Summaries disabled; skipping summary generator loop.")
-
-        logger.info("Worker running! All systems active.")
-        logger.info("-" * 60)
-
-        # Keep running until interrupted
         while True:
-            await asyncio.sleep(60)
+            simulation_active = bool(
+                runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE")
+            )
+
+            if simulation_active and not runtime_systems_started:
+                event_task, summary_task = await _start_runtime_systems()
+                runtime_systems_started = True
+                idle_logged = False
+            elif not simulation_active and runtime_systems_started:
+                logger.info("SIMULATION_ACTIVE is false; stopping runtime systems...")
+                await _stop_runtime_systems(event_task, summary_task)
+                event_task = None
+                summary_task = None
+                runtime_systems_started = False
+
+            if not simulation_active:
+                if not idle_logged:
+                    logger.info("SIMULATION_ACTIVE is false, worker will idle")
+                    idle_logged = True
+                await asyncio.sleep(60)
+                logger.info("Worker idle (SIMULATION_ACTIVE=false)")
+                continue
 
             stop_decision = run_guardrail_service.evaluate_and_enforce()
             if stop_decision.should_stop:
@@ -213,6 +247,7 @@ async def main():
                 f"{status['active_agents']}/{status['total_agents']} agents active | "
                 f"Active effects: {status['active_effects']}"
             )
+            await asyncio.sleep(60)
 
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
@@ -221,24 +256,8 @@ async def main():
         raise
     finally:
         logger.info("Shutting down...")
-
-        # Cancel background tasks
-        if event_task:
-            event_task.cancel()
-            try:
-                await event_task
-            except asyncio.CancelledError:
-                pass
-
-        if summary_task:
-            summary_task.cancel()
-            try:
-                await summary_task
-            except asyncio.CancelledError:
-                pass
-
-        await agent_processor.stop()
-        await scheduler.stop()
+        if runtime_systems_started:
+            await _stop_runtime_systems(event_task, summary_task)
         if health_server is not None:
             health_server.close()
             try:
