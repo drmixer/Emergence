@@ -218,6 +218,46 @@ class APIService {
         return this.fetch(`/api/analytics/runs/${encodeURIComponent(cleanRunId)}?${params.toString()}`)
     }
 
+    async getRunReports(runId) {
+        const cleanRunId = String(runId || '').trim()
+        if (!cleanRunId) {
+            throw new Error('runId is required')
+        }
+        return this.fetch(`/api/reports/runs/${encodeURIComponent(cleanRunId)}`)
+    }
+
+    async getConditionReports(conditionName) {
+        const cleanCondition = String(conditionName || '').trim()
+        if (!cleanCondition) {
+            throw new Error('conditionName is required')
+        }
+        return this.fetch(`/api/reports/conditions/${encodeURIComponent(cleanCondition)}`)
+    }
+
+    getRunReportDownloadUrl(runId, artifactType, format = 'json') {
+        const cleanRunId = String(runId || '').trim()
+        const cleanArtifactType = String(artifactType || '').trim()
+        const cleanFormat = String(format || '').trim() || 'json'
+        if (!cleanRunId || !cleanArtifactType) {
+            throw new Error('runId and artifactType are required')
+        }
+        const params = new URLSearchParams()
+        params.append('artifact_type', cleanArtifactType)
+        params.append('format', cleanFormat)
+        return `${this.baseUrl}/api/reports/runs/${encodeURIComponent(cleanRunId)}/download?${params.toString()}`
+    }
+
+    getConditionReportDownloadUrl(conditionName, format = 'json') {
+        const cleanCondition = String(conditionName || '').trim()
+        const cleanFormat = String(format || '').trim() || 'json'
+        if (!cleanCondition) {
+            throw new Error('conditionName is required')
+        }
+        const params = new URLSearchParams()
+        params.append('format', cleanFormat)
+        return `${this.baseUrl}/api/reports/conditions/${encodeURIComponent(cleanCondition)}/download?${params.toString()}`
+    }
+
     // Prediction markets
     async getPredictionMarkets(status = null, limit = 20) {
         const params = new URLSearchParams()

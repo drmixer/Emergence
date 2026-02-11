@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Github,
   Star,
+  FileSearch,
   Trophy,
   Info,
   Menu,
@@ -36,6 +37,7 @@ const Predictions = lazy(() => import('./pages/Predictions'))
 const Ops = lazy(() => import('./pages/Ops'))
 const Method = lazy(() => import('./pages/Method'))
 const RunDetail = lazy(() => import('./pages/RunDetail'))
+const Reports = lazy(() => import('./pages/Reports'))
 
 // Components
 const LiveFeed = lazy(() => import('./components/LiveFeed'))
@@ -60,6 +62,7 @@ function App() {
     { path: '/resources', icon: Package, label: 'Resources' },
     { path: '/timeline', icon: Calendar, label: 'Timeline' },
     { path: '/highlights', icon: Star, label: 'Highlights' },
+    { path: '/reports', icon: FileSearch, label: 'Reports' },
     { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
     { path: '/leaderboards', icon: Trophy, label: 'Leaderboards' },
     { path: '/ops', icon: Shield, label: 'Ops' },
@@ -195,6 +198,7 @@ function App() {
                 <Route path="/network" element={<Network />} />
                 <Route path="/timeline" element={<Timeline />} />
                 <Route path="/highlights" element={<Highlights />} />
+                <Route path="/reports" element={<Reports />} />
                 <Route path="/leaderboards" element={<Leaderboards />} />
                 <Route path="/predictions" element={<Predictions />} />
                 <Route path="/about" element={<About />} />

@@ -870,3 +870,118 @@ tr:last-child td {
     flex-wrap: wrap;
   }
 }
+
+.strip-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.empty-state.compact {
+  min-height: 0;
+  padding: var(--spacing-md);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+}
+
+.reports-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+}
+
+.reports-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-lg);
+}
+
+.reports-filter-card {
+  min-height: 100%;
+}
+
+.reports-filter-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.reports-filter-body label {
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.reports-filter-body .btn {
+  width: fit-content;
+}
+
+.reports-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-lg);
+}
+
+.reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.reports-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--spacing-md);
+  align-items: center;
+  padding: var(--spacing-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.reports-item-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+  align-items: center;
+}
+
+.reports-item-main strong {
+  margin-right: 0.4rem;
+}
+
+.reports-item-main span {
+  font-size: 0.83rem;
+  color: var(--text-secondary);
+}
+
+.reports-item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.reports-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.reports-spin {
+  animation: spin 1s linear infinite;
+}
+
+@media (max-width: 900px) {
+  .reports-filters,
+  .reports-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reports-item {
+    grid-template-columns: 1fr;
+  }
+
+  .reports-item-actions {
+    justify-content: flex-start;
+  }
+}
