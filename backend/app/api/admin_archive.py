@@ -16,6 +16,7 @@ from app.core.database import get_db
 from app.core.time import now_utc
 from app.models.models import ArchiveArticle
 from app.services.archive_drafts import generate_weekly_draft
+from app.services.condition_reports import evaluate_run_claim_readiness
 from app.services.run_reports import generate_run_bundle_for_run_id, normalize_report_tags
 
 router = APIRouter()
@@ -174,8 +175,10 @@ def _assert_publish_guardrails(
     *,
     article_slug: str,
     evidence_run_id: str | None,
+    status_label: str | None = None,
 ) -> str | None:
     normalized_run_id = _normalize_run_id(evidence_run_id)
+    normalized_status_label = _normalize_status_label(status_label)
     if article_slug == BASELINE_ARTICLE_SLUG:
         # Baseline methodology post is allowed without run-backed telemetry.
         return normalized_run_id
@@ -228,6 +231,31 @@ def _assert_publish_guardrails(
                 detail=f"Run ID '{normalized_run_id}' has no event activity after telemetry start",
             )
 
+    if normalized_status_label == "replicated":
+        try:
+            readiness = evaluate_run_claim_readiness(db, run_id=normalized_run_id, min_replicates=3)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+        gate_reason = str(readiness.get("gate_reason") or "").strip() or "replicate_threshold_not_met"
+        if gate_reason == "exploratory_run_class":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Run ID '{normalized_run_id}' is special_exploratory; "
+                    "replicated status is blocked for exploratory runs"
+                ),
+            )
+        if not bool(readiness.get("meets_replicate_threshold")):
+            replicate_count = int(readiness.get("replicate_count") or 1)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Run ID '{normalized_run_id}' has only {replicate_count} comparable replicate(s); "
+                    "replicated status requires >= 3 with run_class/duration consistency"
+                ),
+            )
+
     return normalized_run_id
 
 
@@ -278,6 +306,7 @@ def create_admin_archive_article(
             db,
             article_slug=request.slug.strip(),
             evidence_run_id=evidence_run_id,
+            status_label=request.status_label,
         )
 
     article = ArchiveArticle(
@@ -342,6 +371,7 @@ def update_admin_archive_article(
             db,
             article_slug=slug,
             evidence_run_id=article.evidence_run_id,
+            status_label=article.status_label,
         )
         article.published_at = request.published_at or article.published_at or date.today()
     else:
@@ -367,6 +397,7 @@ def publish_admin_archive_article(
         db,
         article_slug=str(article.slug),
         evidence_run_id=request.evidence_run_id or article.evidence_run_id,
+        status_label=article.status_label,
     )
     article.status = "published"
     article.evidence_run_id = resolved_evidence_run_id

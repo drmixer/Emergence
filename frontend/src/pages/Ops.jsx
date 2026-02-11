@@ -689,6 +689,12 @@ export default function Ops() {
   const weeklyDigestMarkdown = String(weeklyDraftResult?.digest_markdown || '')
   const weeklyEvidenceGate = weeklyDraftResult?.evidence_gate || null
   const runBundleStatus = String(runBundleResult?.status || '').trim()
+  const reportPipeline = status?.report_pipeline && typeof status.report_pipeline === 'object' ? status.report_pipeline : {}
+  const reportCloseout = reportPipeline?.closeout && typeof reportPipeline.closeout === 'object' ? reportPipeline.closeout : {}
+  const reportBackfill = reportPipeline?.backfill && typeof reportPipeline.backfill === 'object' ? reportPipeline.backfill : {}
+  const reportBackfillGenerated = Array.isArray(reportBackfill?.last_generated) ? reportBackfill.last_generated : []
+  const reportBackfillSkipped = Array.isArray(reportBackfill?.last_skipped) ? reportBackfill.last_skipped : []
+  const reportBackfillErrors = Array.isArray(reportBackfill?.last_errors) ? reportBackfill.last_errors : []
   const kpiItems = Array.isArray(kpiRollups?.items) ? kpiRollups.items : []
   const kpiSummary = kpiRollups?.summary || {}
   const kpiLatest = kpiSummary?.latest || (kpiItems.length > 0 ? kpiItems[0] : null)
@@ -776,7 +782,8 @@ export default function Ops() {
                 {!status ? (
                   <div className="empty-state compact">No status loaded.</div>
                 ) : (
-                  <div className="ops-kv-grid">
+                  <>
+                    <div className="ops-kv-grid">
                     <div className="ops-kv-item">
                       <span>Server UTC</span>
                       <strong>{status.server_time_utc || 'n/a'}</strong>
@@ -853,7 +860,54 @@ export default function Ops() {
                       <span>Est. cost</span>
                       <strong>${Number(status.llm_budget?.estimated_cost_usd || 0).toFixed(4)}</strong>
                     </div>
-                  </div>
+                    </div>
+                  <div className="ops-report-pipeline">
+                    <div className="ops-report-pipeline-head">
+                      <strong>Report Pipeline</strong>
+                      <span>Closeout + scheduled backfill health</span>
+                    </div>
+                    <div className="ops-report-pipeline-grid">
+                      <div className="ops-kv-item">
+                        <span>Closeout status</span>
+                        <strong>{displayValue(reportCloseout?.last_status, 'idle')}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Closeout run</span>
+                        <strong>{displayValue(reportCloseout?.last_run_id, 'n/a')}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Closeout attempted</span>
+                        <strong>{displayValue(reportCloseout?.last_attempted_at, 'n/a')}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Backfill status</span>
+                        <strong>{displayValue(reportBackfill?.last_status, 'idle')}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Backfill attempted</span>
+                        <strong>{displayValue(reportBackfill?.last_attempted_at, 'n/a')}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Backfill generated</span>
+                        <strong>{reportBackfillGenerated.length}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Backfill skipped</span>
+                        <strong>{reportBackfillSkipped.length}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Backfill errors</span>
+                        <strong>{reportBackfillErrors.length}</strong>
+                      </div>
+                    </div>
+                    {(String(reportCloseout?.last_error || '').trim() || String(reportBackfill?.last_error || '').trim()) && (
+                      <div className="ops-alert warn compact">
+                        Report pipeline warning:{' '}
+                        {String(reportCloseout?.last_error || reportBackfill?.last_error || '').trim()}
+                      </div>
+                    )}
+                    </div>
+                  </>
                 )}
               </div>
             </section>

@@ -18,6 +18,14 @@ from app.models.models import RunReportArtifact, SimulationRun
 UNKNOWN_CONDITION = "unknown"
 REPORT_TEMPLATE_VERSION = "condition-report-v1"
 REPORT_GENERATOR_VERSION = "condition-report-v1"
+RUN_CLASS_STANDARD = "standard_72h"
+RUN_CLASS_DEEP = "deep_96h"
+RUN_CLASS_SPECIAL_EXPLORATORY = "special_exploratory"
+DURATION_BUCKET_HOURS = 12
+EXPECTED_DURATION_HOURS_BY_RUN_CLASS = {
+    RUN_CLASS_STANDARD: 72.0,
+    RUN_CLASS_DEEP: 96.0,
+}
 
 ARTIFACT_TYPE_RUN_SUMMARY = "run_summary"
 ARTIFACT_TYPE_CONDITION_COMPARISON = "condition_comparison"
@@ -67,6 +75,137 @@ def _coerce_condition_name(condition_name: str | None) -> str:
 
 def _resolve_run_registry_row(db: Session, *, run_id: str) -> SimulationRun | None:
     return db.query(SimulationRun).filter(SimulationRun.run_id == str(run_id)).first()
+
+
+def _coerce_run_class(run_class: str | None) -> str:
+    clean = str(run_class or "").strip().lower()
+    return clean or "unknown"
+
+
+def _run_duration_hours(run_row: SimulationRun | None) -> float | None:
+    if run_row is None or run_row.started_at is None or run_row.ended_at is None:
+        return None
+    if run_row.ended_at < run_row.started_at:
+        return None
+    delta = run_row.ended_at - run_row.started_at
+    return max(0.0, float(delta.total_seconds()) / 3600.0)
+
+
+def _duration_bucket_hours(run_row: SimulationRun | None) -> int | None:
+    if run_row is None:
+        return None
+    duration_hours = _run_duration_hours(run_row)
+    if duration_hours is not None and duration_hours > 0:
+        bucket = int(round(duration_hours / float(DURATION_BUCKET_HOURS)) * DURATION_BUCKET_HOURS)
+        return max(int(DURATION_BUCKET_HOURS), bucket)
+    expected = EXPECTED_DURATION_HOURS_BY_RUN_CLASS.get(_coerce_run_class(run_row.run_class))
+    if expected is None:
+        return None
+    return int(expected)
+
+
+def _started_at_sort_value(run_row: SimulationRun) -> float:
+    started_at = run_row.started_at if isinstance(run_row.started_at, datetime) else None
+    if started_at is None:
+        return 0.0
+    return float(started_at.timestamp())
+
+
+def evaluate_run_claim_readiness(
+    db: Session,
+    *,
+    run_id: str,
+    min_replicates: int = 3,
+) -> dict[str, Any]:
+    clean_run_id = _coerce_run_id(run_id)
+    run_row = _resolve_run_registry_row(db, run_id=clean_run_id)
+    if run_row is None:
+        raise ValueError(f"simulation run '{clean_run_id}' not found")
+
+    condition_name = _coerce_condition_name(run_row.condition_name)
+    run_class = _coerce_run_class(run_row.run_class)
+    duration_hours = _run_duration_hours(run_row)
+    duration_bucket_hours = _duration_bucket_hours(run_row)
+
+    if condition_name == UNKNOWN_CONDITION:
+        return {
+            "run_id": clean_run_id,
+            "condition_name": condition_name,
+            "run_class": run_class,
+            "duration_hours": duration_hours,
+            "duration_bucket_hours": duration_bucket_hours,
+            "replicate_count": 1,
+            "replicate_index": 1,
+            "min_replicates_required": int(min_replicates),
+            "meets_replicate_threshold": False,
+            "included_run_ids": [clean_run_id],
+            "excluded_run_ids": [],
+            "gate_reason": "unknown_condition",
+        }
+
+    if run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
+        return {
+            "run_id": clean_run_id,
+            "condition_name": condition_name,
+            "run_class": run_class,
+            "duration_hours": duration_hours,
+            "duration_bucket_hours": duration_bucket_hours,
+            "replicate_count": 1,
+            "replicate_index": 1,
+            "min_replicates_required": int(min_replicates),
+            "meets_replicate_threshold": False,
+            "included_run_ids": [clean_run_id],
+            "excluded_run_ids": [],
+            "gate_reason": "exploratory_run_class",
+        }
+
+    rows = (
+        db.query(SimulationRun)
+        .filter(SimulationRun.condition_name == condition_name)
+        .order_by(SimulationRun.started_at.asc(), SimulationRun.id.asc())
+        .all()
+    )
+    included_rows: list[SimulationRun] = []
+    excluded_run_ids: list[str] = []
+    for row in rows:
+        candidate_id = str(row.run_id or "").strip()
+        if not candidate_id:
+            continue
+        candidate_run_class = _coerce_run_class(row.run_class)
+        if candidate_run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
+            excluded_run_ids.append(candidate_id)
+            continue
+        if candidate_run_class != run_class:
+            excluded_run_ids.append(candidate_id)
+            continue
+        candidate_bucket = _duration_bucket_hours(row)
+        if duration_bucket_hours is not None and candidate_bucket is not None and candidate_bucket != duration_bucket_hours:
+            excluded_run_ids.append(candidate_id)
+            continue
+        included_rows.append(row)
+
+    included_run_ids = [str(row.run_id).strip() for row in included_rows if str(row.run_id or "").strip()]
+    if clean_run_id not in included_run_ids:
+        included_run_ids.append(clean_run_id)
+
+    replicate_count = max(1, len(included_run_ids))
+    replicate_index = included_run_ids.index(clean_run_id) + 1
+    meets_threshold = replicate_count >= int(min_replicates)
+
+    return {
+        "run_id": clean_run_id,
+        "condition_name": condition_name,
+        "run_class": run_class,
+        "duration_hours": duration_hours,
+        "duration_bucket_hours": duration_bucket_hours,
+        "replicate_count": replicate_count,
+        "replicate_index": replicate_index,
+        "min_replicates_required": int(min_replicates),
+        "meets_replicate_threshold": meets_threshold,
+        "included_run_ids": included_run_ids,
+        "excluded_run_ids": excluded_run_ids,
+        "gate_reason": "ready" if meets_threshold else "replicate_threshold_not_met",
+    }
 
 
 def _resolve_run_window(db: Session, *, run_id: str, run_row: SimulationRun | None) -> tuple[Any, Any]:
@@ -189,9 +328,20 @@ def _replicate_context(
     *,
     run_id: str,
     condition_name: str,
-) -> tuple[int, int]:
+    run_row: SimulationRun | None = None,
+) -> tuple[int, int, dict[str, Any] | None]:
     if condition_name == UNKNOWN_CONDITION:
-        return 1, 1
+        return 1, 1, None
+
+    if run_row is not None:
+        try:
+            readiness = evaluate_run_claim_readiness(db, run_id=run_id, min_replicates=3)
+        except ValueError:
+            readiness = None
+        if readiness is not None and str(readiness.get("condition_name") or UNKNOWN_CONDITION) == condition_name:
+            replicate_index = int(readiness.get("replicate_index") or 1)
+            replicate_count = int(readiness.get("replicate_count") or 1)
+            return max(1, replicate_index), max(1, replicate_count), readiness
 
     rows = (
         db.query(SimulationRun)
@@ -200,13 +350,13 @@ def _replicate_context(
         .all()
     )
     if not rows:
-        return 1, 1
+        return 1, 1, None
 
     replicate_count = len(rows)
     for idx, row in enumerate(rows, start=1):
         if str(row.run_id or "").strip() == run_id:
-            return idx, replicate_count
-    return 1, replicate_count
+            return idx, replicate_count, None
+    return 1, replicate_count, None
 
 
 def generate_run_report_summary(
@@ -234,11 +384,15 @@ def generate_run_report_summary(
     llm = _llm_totals_for_run(db, run_id=clean_run_id, started_at=started_at, ended_at=ended_at)
     events = _event_counts_for_run(db, run_id=clean_run_id, started_at=started_at, ended_at=ended_at)
 
-    replicate_index, replicate_count = _replicate_context(
+    replicate_index, replicate_count, readiness = _replicate_context(
         db,
         run_id=clean_run_id,
         condition_name=resolved_condition,
+        run_row=run_row,
     )
+    resolved_run_class = _coerce_run_class(run_row.run_class if run_row is not None else None)
+    resolved_duration_hours = _run_duration_hours(run_row)
+    resolved_duration_bucket_hours = _duration_bucket_hours(run_row)
 
     metrics = {
         "llm_calls": int(llm["calls"]),
@@ -262,6 +416,12 @@ def generate_run_report_summary(
     ]
     if run_row is None:
         caveats.append("No simulation_runs registry row found; condition/season metadata may be incomplete.")
+    if resolved_run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
+        caveats.append("Run class is special_exploratory; comparative condition claims remain observational by default.")
+    if readiness and int(len(readiness.get("excluded_run_ids") or [])) > 0:
+        caveats.append(
+            f"Replicate gate excluded {int(len(readiness.get('excluded_run_ids') or []))} run(s) due to run_class/duration mismatch."
+        )
 
     return {
         "run_id": clean_run_id,
@@ -272,6 +432,10 @@ def generate_run_report_summary(
         "replicate_count": int(replicate_count),
         "run_started_at": started_at.isoformat() if started_at else None,
         "run_ended_at": ended_at.isoformat() if ended_at else None,
+        "run_class": (resolved_run_class if resolved_run_class != "unknown" else None),
+        "duration_hours": (float(resolved_duration_hours) if resolved_duration_hours is not None else None),
+        "duration_bucket_hours": resolved_duration_bucket_hours,
+        "claim_gate": readiness,
         "metrics": metrics,
         "caveats": caveats,
     }
@@ -324,7 +488,61 @@ def compare_condition_runs(
         query = query.filter(SimulationRun.season_number == int(season_number))
 
     runs = query.order_by(SimulationRun.started_at.asc(), SimulationRun.id.asc()).all()
-    run_ids = [str(row.run_id or "").strip() for row in runs if str(row.run_id or "").strip()]
+
+    grouped: dict[tuple[str, int | None], list[SimulationRun]] = {}
+    excluded_runs: list[dict[str, Any]] = []
+    for row in runs:
+        candidate_run_id = str(row.run_id or "").strip()
+        if not candidate_run_id:
+            continue
+        candidate_run_class = _coerce_run_class(row.run_class)
+        candidate_bucket = _duration_bucket_hours(row)
+        if candidate_run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
+            excluded_runs.append(
+                {
+                    "run_id": candidate_run_id,
+                    "run_class": candidate_run_class,
+                    "duration_bucket_hours": candidate_bucket,
+                    "reason": "special_exploratory_excluded",
+                }
+            )
+            continue
+        grouped.setdefault((candidate_run_class, candidate_bucket), []).append(row)
+
+    selected_key: tuple[str, int | None] | None = None
+    selected_rows: list[SimulationRun] = []
+    if grouped:
+        selected_key = max(
+            grouped.items(),
+            key=lambda item: (
+                len(item[1]),
+                max((_started_at_sort_value(row) for row in item[1]), default=0.0),
+            ),
+        )[0]
+        selected_rows = grouped.get(selected_key, [])
+        selected_run_class = selected_key[0]
+        selected_bucket = selected_key[1]
+        for key, cohort_rows in grouped.items():
+            if key == selected_key:
+                continue
+            for row in cohort_rows:
+                candidate_run_id = str(row.run_id or "").strip()
+                if not candidate_run_id:
+                    continue
+                reason = "run_class_mismatch" if key[0] != selected_run_class else "duration_bucket_mismatch"
+                excluded_runs.append(
+                    {
+                        "run_id": candidate_run_id,
+                        "run_class": _coerce_run_class(row.run_class),
+                        "duration_bucket_hours": _duration_bucket_hours(row),
+                        "reason": reason,
+                    }
+                )
+    else:
+        selected_run_class = None
+        selected_bucket = None
+
+    run_ids = [str(row.run_id or "").strip() for row in selected_rows if str(row.run_id or "").strip()]
 
     run_summaries = [
         generate_run_report_summary(
@@ -375,17 +593,23 @@ def compare_condition_runs(
         "condition_name": clean_condition,
         "artifact_run_id": condition_artifact_run_id(clean_condition),
         "season_number": (int(season_number) if season_number else None),
+        "selected_run_class": selected_run_class,
+        "selected_duration_bucket_hours": selected_bucket,
         "min_replicates_required": int(min_replicates),
         "replicate_count": len(run_summaries),
         "meets_replicate_threshold": (len(run_summaries) >= int(min_replicates)),
         "run_ids": run_ids,
+        "excluded_runs": excluded_runs,
         "core_metric_aggregates": aggregates,
         "run_summaries": run_summaries,
         "caveats": [
             "Comparative output is observational unless replicate threshold is met.",
             "Spread is max-min across included replicates.",
+            "Comparison enforces run_class + duration consistency and excludes special_exploratory runs by default.",
         ],
     }
+    if len(excluded_runs) > 0:
+        comparison["caveats"].append(f"{len(excluded_runs)} run(s) were excluded by consistency gates.")
     return comparison
 
 
@@ -394,6 +618,8 @@ def render_condition_comparison_markdown(payload: dict[str, Any]) -> str:
         f"# Condition Comparison: {payload.get('condition_name')}",
         "",
         f"- Generated at (UTC): {payload.get('generated_at_utc')}",
+        f"- Selected run class: {payload.get('selected_run_class')}",
+        f"- Selected duration bucket (hours): {payload.get('selected_duration_bucket_hours')}",
         f"- Replicate count: {payload.get('replicate_count')}",
         f"- Minimum replicates required: {payload.get('min_replicates_required')}",
         f"- Threshold met: {'yes' if payload.get('meets_replicate_threshold') else 'no'}",
@@ -416,6 +642,15 @@ def render_condition_comparison_markdown(payload: dict[str, Any]) -> str:
     rows.extend(["", "## Included Runs"])
     for run_id in payload.get("run_ids") or []:
         rows.append(f"- {run_id}")
+    excluded_runs = payload.get("excluded_runs") or []
+    if excluded_runs:
+        rows.extend(["", "## Excluded Runs"])
+        for row in excluded_runs:
+            rows.append(
+                "- "
+                + f"{row.get('run_id')} "
+                + f"(class={row.get('run_class')}, duration_bucket={row.get('duration_bucket_hours')}, reason={row.get('reason')})"
+            )
     rows.extend(["", "## Caveats"])
     for caveat in payload.get("caveats") or []:
         rows.append(f"- {str(caveat)}")
@@ -557,9 +792,12 @@ def record_condition_comparison_artifacts(
     metadata = {
         "condition_name": condition_name,
         "season_number": payload.get("season_number"),
+        "selected_run_class": payload.get("selected_run_class"),
+        "selected_duration_bucket_hours": payload.get("selected_duration_bucket_hours"),
         "replicate_count": int(payload.get("replicate_count") or 0),
         "meets_replicate_threshold": bool(payload.get("meets_replicate_threshold")),
         "run_ids": list(payload.get("run_ids") or []),
+        "excluded_runs": list(payload.get("excluded_runs") or []),
     }
     _record_artifact(
         db,

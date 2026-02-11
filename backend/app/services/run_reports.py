@@ -8,6 +8,7 @@ import json
 import logging
 from pathlib import Path
 import re
+from threading import Lock
 from typing import Any
 
 from sqlalchemy import String, cast, text
@@ -16,9 +17,11 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.time import ensure_utc, now_utc
-from app.models.models import AdminConfigChange, ArchiveArticle, RunReportArtifact
+from app.models.models import AdminConfigChange, ArchiveArticle, RunReportArtifact, SimulationRun
 from app.services.condition_reports import (
+    RUN_CLASS_SPECIAL_EXPLORATORY,
     UNKNOWN_CONDITION as CONDITION_UNKNOWN,
+    evaluate_run_claim_readiness,
     generate_and_record_condition_comparison,
     generate_and_record_run_summary,
 )
@@ -56,6 +59,24 @@ DEFAULT_CONDITION_CANDIDATES = (
     "provider_mix_shift_v1",
 )
 
+_RUN_REPORT_STATUS_LOCK = Lock()
+_RUN_REPORT_PIPELINE_STATUS: dict[str, Any] = {
+    "closeout": {
+        "last_attempted_at": None,
+        "last_status": "idle",
+        "last_run_id": None,
+        "last_error": None,
+    },
+    "backfill": {
+        "last_attempted_at": None,
+        "last_status": "idle",
+        "last_generated": [],
+        "last_skipped": [],
+        "last_errors": [],
+        "last_error": None,
+    },
+}
+
 
 @dataclass
 class RunBundleResult:
@@ -68,6 +89,19 @@ class RunBundleResult:
     artifact_paths: dict[str, str]
     technical_article_id: int | None
     approachable_article_id: int | None
+
+
+def _mark_pipeline_status(channel: str, **updates: Any) -> None:
+    now_iso = now_utc().isoformat()
+    with _RUN_REPORT_STATUS_LOCK:
+        payload = _RUN_REPORT_PIPELINE_STATUS.setdefault(channel, {})
+        payload["last_attempted_at"] = now_iso
+        payload.update(updates)
+
+
+def get_run_report_pipeline_status() -> dict[str, Any]:
+    with _RUN_REPORT_STATUS_LOCK:
+        return json.loads(json.dumps(_RUN_REPORT_PIPELINE_STATUS))
 
 
 def _safe_ratio(numerator: int | float, denominator: int | float) -> float:
@@ -301,16 +335,32 @@ def _evaluate_evidence_completeness(snapshot: dict[str, Any]) -> str:
     return EVIDENCE_PARTIAL
 
 
-def _resolve_status_label(*, condition_name: str, replicate_count: int) -> str:
+def _resolve_status_label(*, condition_name: str, replicate_count: int, run_class: str | None = None) -> str:
+    if str(run_class or "").strip().lower() == RUN_CLASS_SPECIAL_EXPLORATORY:
+        return STATUS_OBSERVATIONAL
     if _clean_condition_name(condition_name) != UNKNOWN_CONDITION and int(replicate_count) >= 3:
         return STATUS_REPLICATED
     return STATUS_OBSERVATIONAL
 
 
-def _count_condition_replicates(db: Session, *, condition_name: str, run_id: str) -> int:
+def _resolve_run_claim_gate(db: Session, *, run_id: str) -> dict[str, Any] | None:
+    try:
+        return evaluate_run_claim_readiness(db, run_id=run_id, min_replicates=3)
+    except Exception:
+        return None
+
+
+def _count_condition_replicates(db: Session, *, condition_name: str, run_id: str) -> tuple[int, str | None, dict[str, Any] | None]:
     clean_condition = _clean_condition_name(condition_name)
+    claim_gate = _resolve_run_claim_gate(db, run_id=run_id)
+    if claim_gate is not None:
+        gate_condition = _clean_condition_name(str(claim_gate.get("condition_name") or UNKNOWN_CONDITION))
+        gate_run_class = str(claim_gate.get("run_class") or "").strip().lower() or None
+        if gate_condition == clean_condition:
+            return max(1, int(claim_gate.get("replicate_count") or 1)), gate_run_class, claim_gate
+
     if clean_condition == UNKNOWN_CONDITION:
-        return 1
+        return 1, None, claim_gate
 
     condition_fragment = f'%\"condition:{clean_condition}\"%'
     try:
@@ -330,10 +380,10 @@ def _count_condition_replicates(db: Session, *, condition_name: str, run_id: str
             },
         ).fetchall()
     except Exception:
-        return 1
+        return 1, None, claim_gate
     run_ids = {str(row.evidence_run_id or "").strip() for row in rows if str(row.evidence_run_id or "").strip()}
     run_ids.add(run_id)
-    return max(1, len(run_ids))
+    return max(1, len(run_ids)), None, claim_gate
 
 
 def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -> tuple[Any, Any, str]:
@@ -399,6 +449,7 @@ def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -
 
 
 def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
+    run_row = db.query(SimulationRun).filter(SimulationRun.run_id == str(run_id)).first()
     run_started_at, run_ended_at, source = _resolve_run_window(db, run_id=run_id)
 
     llm_totals = db.execute(
@@ -630,6 +681,9 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "generated_at_utc": now_utc().isoformat(),
         "run_started_at": run_started_at.isoformat() if run_started_at else None,
         "run_ended_at": run_ended_at.isoformat() if run_ended_at else None,
+        "run_class": (str(run_row.run_class).strip() if run_row and run_row.run_class else None),
+        "condition_name": (str(run_row.condition_name).strip() if run_row and run_row.condition_name else None),
+        "season_number": (int(run_row.season_number) if run_row and run_row.season_number else None),
         "verification_state": verification_state,
         "verification_source": source,
         "llm": llm_payload,
@@ -843,7 +897,13 @@ def _build_story_sections(
         ),
     ]
 
-    if status_label == STATUS_REPLICATED:
+    run_class = str(snapshot.get("run_class") or "").strip().lower()
+    if run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
+        claim_text = (
+            "This run is labeled special_exploratory; comparative baseline claims remain gated unless "
+            "separately replicated under non-exploratory conditions."
+        )
+    elif status_label == STATUS_REPLICATED:
         claim_text = (
             f"Across {replicate_count} replicates for condition `{condition_name}`, this run can be used for "
             "comparative condition summaries."
@@ -902,6 +962,16 @@ def _build_technical_payload(
     season_number: int | None,
     replicate_count: int,
 ) -> dict[str, Any]:
+    caveats = [
+        "Observations are simulation-scoped and assumption-dependent.",
+        "Comparative claims are gated until condition replicate count >= 3.",
+        "Inequality metric is a current-world snapshot, not a perfect per-run isolate.",
+    ]
+    if str(snapshot.get("run_class") or "").strip().lower() == RUN_CLASS_SPECIAL_EXPLORATORY:
+        caveats.append(
+            "Run class is special_exploratory; outputs are exploratory and excluded from baseline condition synthesis by default."
+        )
+
     return {
         **snapshot,
         "template_version": REPORT_TEMPLATE_VERSION,
@@ -911,11 +981,7 @@ def _build_technical_payload(
         "condition_name": condition_name,
         "season_number": season_number,
         "replicate_count": replicate_count,
-        "caveats": [
-            "Observations are simulation-scoped and assumption-dependent.",
-            "Comparative claims are gated until condition replicate count >= 3.",
-            "Inequality metric is a current-world snapshot, not a perfect per-run isolate.",
-        ],
+        "caveats": caveats,
     }
 
 
@@ -1173,9 +1239,17 @@ def generate_run_technical_artifact(
     clean_season_number = _clean_season_number(season_number)
 
     snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
-    replicate_count = _count_condition_replicates(db, condition_name=clean_condition, run_id=clean_run_id)
+    replicate_count, run_class, claim_gate = _count_condition_replicates(
+        db,
+        condition_name=clean_condition,
+        run_id=clean_run_id,
+    )
     evidence_completeness = _evaluate_evidence_completeness(snapshot)
-    status_label = _resolve_status_label(condition_name=clean_condition, replicate_count=replicate_count)
+    status_label = _resolve_status_label(
+        condition_name=clean_condition,
+        replicate_count=replicate_count,
+        run_class=run_class,
+    )
     topic_tags = _select_topic_tags(snapshot)
 
     payload = _build_technical_payload(
@@ -1186,6 +1260,12 @@ def generate_run_technical_artifact(
         season_number=clean_season_number,
         replicate_count=replicate_count,
     )
+    if claim_gate:
+        payload["claim_gate"] = claim_gate
+        if int(len(claim_gate.get("excluded_run_ids") or [])) > 0:
+            payload.setdefault("caveats", []).append(
+                f"Replicate gate excluded {int(len(claim_gate.get('excluded_run_ids') or []))} run(s) by run_class/duration."
+            )
     payload["tags"] = build_required_report_tags(
         run_id=clean_run_id,
         condition_name=clean_condition,
@@ -1213,6 +1293,7 @@ def generate_run_technical_artifact(
             "season_number": clean_season_number,
             "status_label": status_label,
             "evidence_completeness": evidence_completeness,
+            "claim_gate": claim_gate,
         },
     )
     _record_artifact(
@@ -1238,9 +1319,17 @@ def generate_run_story_artifact(
     clean_season_number = _clean_season_number(season_number)
 
     snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
-    replicate_count = _count_condition_replicates(db, condition_name=clean_condition, run_id=clean_run_id)
+    replicate_count, run_class, claim_gate = _count_condition_replicates(
+        db,
+        condition_name=clean_condition,
+        run_id=clean_run_id,
+    )
     evidence_completeness = _evaluate_evidence_completeness(snapshot)
-    status_label = _resolve_status_label(condition_name=clean_condition, replicate_count=replicate_count)
+    status_label = _resolve_status_label(
+        condition_name=clean_condition,
+        replicate_count=replicate_count,
+        run_class=run_class,
+    )
 
     payload = _build_story_payload(
         snapshot=snapshot,
@@ -1250,6 +1339,8 @@ def generate_run_story_artifact(
         season_number=clean_season_number,
         replicate_count=replicate_count,
     )
+    if claim_gate:
+        payload["claim_gate"] = claim_gate
     outdir = _artifact_dir_for_run(clean_run_id)
     json_path = outdir / "approachable_report.json"
     markdown_path = outdir / "approachable_report.md"
@@ -1268,6 +1359,7 @@ def generate_run_story_artifact(
             "season_number": clean_season_number,
             "status_label": status_label,
             "evidence_completeness": evidence_completeness,
+            "claim_gate": claim_gate,
         },
     )
     _record_artifact(
@@ -1291,7 +1383,11 @@ def generate_next_run_plan_artifact(
     clean_condition = _clean_condition_name(condition_name)
     current_snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
     previous_snapshot = _collect_previous_run_snapshot(db, run_id=clean_run_id)
-    replicate_count = _count_condition_replicates(db, condition_name=clean_condition, run_id=clean_run_id)
+    replicate_count, _run_class, claim_gate = _count_condition_replicates(
+        db,
+        condition_name=clean_condition,
+        run_id=clean_run_id,
+    )
 
     payload = _build_planner_payload(
         current_snapshot=current_snapshot,
@@ -1299,6 +1395,8 @@ def generate_next_run_plan_artifact(
         condition_name=clean_condition,
         replicate_count=replicate_count,
     )
+    if claim_gate:
+        payload["claim_gate"] = claim_gate
     outdir = _artifact_dir_for_run(clean_run_id)
     json_path = outdir / "next_run_plan.json"
     markdown_path = outdir / "next_run_plan.md"
@@ -1315,6 +1413,7 @@ def generate_next_run_plan_artifact(
             "run_id": clean_run_id,
             "condition_name": clean_condition,
             "replicate_count": replicate_count,
+            "claim_gate": claim_gate,
         },
     )
     _record_artifact(
@@ -1531,12 +1630,15 @@ def maybe_generate_run_closeout_bundle(
     season_number: int | None = None,
 ) -> dict[str, Any] | None:
     if not bool(getattr(settings, "RUN_REPORT_BUNDLE_ENABLED", True)):
+        _mark_pipeline_status("closeout", last_status="disabled")
         return None
 
     clean_run_id = str(run_id or "").strip()
     if not clean_run_id:
+        _mark_pipeline_status("closeout", last_status="skipped", last_run_id=None, last_error="missing_run_id")
         return None
 
+    _mark_pipeline_status("closeout", last_status="started", last_run_id=clean_run_id, last_error=None)
     try:
         result = generate_run_bundle_for_run_id(
             run_id=clean_run_id,
@@ -1580,9 +1682,11 @@ def maybe_generate_run_closeout_bundle(
                 "error": str(exc),
             }
         result["status"] = "generated"
+        _mark_pipeline_status("closeout", last_status="generated", last_run_id=clean_run_id, last_error=None)
         return result
     except Exception as exc:
         logger.exception("Failed to generate run closeout bundle for run_id=%s", clean_run_id)
+        _mark_pipeline_status("closeout", last_status="failed", last_run_id=clean_run_id, last_error=str(exc))
         return {
             "run_id": clean_run_id,
             "status": "failed",
@@ -1592,6 +1696,7 @@ def maybe_generate_run_closeout_bundle(
 
 async def maybe_generate_scheduled_run_report_backfill() -> dict[str, Any] | None:
     if not bool(getattr(settings, "RUN_REPORT_BACKFILL_ENABLED", True)):
+        _mark_pipeline_status("backfill", last_status="disabled")
         return None
 
     lookback_hours = max(24, int(getattr(settings, "RUN_REPORT_BACKFILL_LOOKBACK_HOURS", 7 * 24) or 7 * 24))
@@ -1604,6 +1709,7 @@ async def maybe_generate_scheduled_run_report_backfill() -> dict[str, Any] | Non
     cutoff_ts = now_utc() - timedelta(hours=lookback_hours)
 
     db = SessionLocal()
+    _mark_pipeline_status("backfill", last_status="started", last_error=None)
     try:
         candidate_rows = db.execute(
             text(
@@ -1661,7 +1767,23 @@ async def maybe_generate_scheduled_run_report_backfill() -> dict[str, Any] | Non
                 break
 
         if not generated and not errors:
+            _mark_pipeline_status(
+                "backfill",
+                last_status="idle",
+                last_generated=[],
+                last_skipped=skipped,
+                last_errors=[],
+                last_error=None,
+            )
             return None
+        _mark_pipeline_status(
+            "backfill",
+            last_status=("failed" if errors and not generated else "generated"),
+            last_generated=generated,
+            last_skipped=skipped,
+            last_errors=errors,
+            last_error=(errors[0]["error"] if errors else None),
+        )
         return {
             "generated": generated,
             "skipped": skipped,

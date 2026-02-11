@@ -149,3 +149,12 @@ def test_maybe_generate_scheduled_run_report_backfill_runs_generation(monkeypatc
     assert generated_runs == ["run-20260210T120000Z"]
     assert fake_db.committed is True
     assert fake_db.closed is True
+
+
+def test_resolve_status_label_blocks_replicated_for_exploratory_run_class():
+    status_label = run_reports._resolve_status_label(
+        condition_name="baseline_v1",
+        replicate_count=9,
+        run_class="special_exploratory",
+    )
+    assert status_label == run_reports.STATUS_OBSERVATIONAL

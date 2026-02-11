@@ -287,6 +287,9 @@ def test_admin_status_surfaces_run_metadata_for_active_run(db_session, monkeypat
     assert metadata["run_class"] == "special_exploratory"
     assert metadata["start_reason"] == "status_meta_test"
     assert body["viewer_ops"]["run_id"] == "real-status-meta"
+    assert "report_pipeline" in body
+    assert "closeout" in (body.get("report_pipeline") or {})
+    assert "backfill" in (body.get("report_pipeline") or {})
 
 
 def test_run_metrics_empty_payload_includes_run_metadata_key(db_session, monkeypatch):

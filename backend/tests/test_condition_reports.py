@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.models.models import Agent, Event, RunReportArtifact, SimulationRun
 from app.services.condition_reports import (
     compare_condition_runs,
+    evaluate_run_claim_readiness,
     generate_and_record_condition_comparison,
     generate_and_record_run_summary,
     generate_run_report_summary,
@@ -308,5 +309,120 @@ def test_generate_and_record_reports_persists_artifact_rows():
             .count()
             == 2
         )
+    finally:
+        db_session.close()
+
+
+def test_compare_condition_runs_enforces_run_class_and_duration_consistency():
+    db_session = _build_session()
+    try:
+        agent = Agent(
+            agent_number=1,
+            display_name="Agent 1",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add(agent)
+        db_session.flush()
+
+        base_time = datetime(2026, 2, 11, 0, 0, tzinfo=timezone.utc)
+        # Cohort A (selected): standard_72h and matching duration bucket.
+        db_session.add_all(
+            [
+                SimulationRun(
+                    run_id="run-gate-a1",
+                    run_mode="real",
+                    protocol_version="protocol_v1",
+                    condition_name="baseline_v1",
+                    run_class="standard_72h",
+                    started_at=base_time,
+                    ended_at=base_time + timedelta(hours=72),
+                ),
+                SimulationRun(
+                    run_id="run-gate-a2",
+                    run_mode="real",
+                    protocol_version="protocol_v1",
+                    condition_name="baseline_v1",
+                    run_class="standard_72h",
+                    started_at=base_time + timedelta(hours=1),
+                    ended_at=base_time + timedelta(hours=73),
+                ),
+                # Same class, mismatched duration bucket.
+                SimulationRun(
+                    run_id="run-gate-b1",
+                    run_mode="real",
+                    protocol_version="protocol_v1",
+                    condition_name="baseline_v1",
+                    run_class="standard_72h",
+                    started_at=base_time + timedelta(hours=2),
+                    ended_at=base_time + timedelta(hours=98),
+                ),
+                # Exploratory run should always be excluded from baseline comparison.
+                SimulationRun(
+                    run_id="run-gate-exp",
+                    run_mode="real",
+                    protocol_version="protocol_v1",
+                    condition_name="baseline_v1",
+                    run_class="special_exploratory",
+                    started_at=base_time + timedelta(hours=3),
+                    ended_at=base_time + timedelta(hours=99),
+                ),
+            ]
+        )
+
+        for idx, run_id in enumerate(["run-gate-a1", "run-gate-a2", "run-gate-b1", "run-gate-exp"]):
+            _seed_llm_usage_rows(
+                db_session,
+                run_id=run_id,
+                agent_id=agent.id,
+                calls=3 + idx,
+                cost_per_call=0.1,
+                start_at=base_time + timedelta(hours=idx),
+            )
+            _seed_event_rows(
+                db_session,
+                run_id=run_id,
+                agent_id=agent.id,
+                event_type="create_proposal",
+                count=1 + idx,
+                start_at=base_time + timedelta(hours=idx),
+            )
+        db_session.commit()
+
+        payload = compare_condition_runs(db_session, condition_name="baseline_v1", min_replicates=2)
+        excluded_by_id = {str(item.get("run_id")): str(item.get("reason")) for item in (payload.get("excluded_runs") or [])}
+
+        assert payload["selected_run_class"] == "standard_72h"
+        assert payload["selected_duration_bucket_hours"] == 72
+        assert payload["run_ids"] == ["run-gate-a1", "run-gate-a2"]
+        assert payload["replicate_count"] == 2
+        assert excluded_by_id["run-gate-b1"] == "duration_bucket_mismatch"
+        assert excluded_by_id["run-gate-exp"] == "special_exploratory_excluded"
+    finally:
+        db_session.close()
+
+
+def test_evaluate_run_claim_readiness_blocks_exploratory_runs():
+    db_session = _build_session()
+    try:
+        run = SimulationRun(
+            run_id="run-exploratory-1",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            condition_name="baseline_v1",
+            run_class="special_exploratory",
+            started_at=datetime(2026, 2, 11, 0, 0, tzinfo=timezone.utc),
+            ended_at=datetime(2026, 2, 11, 12, 0, tzinfo=timezone.utc),
+        )
+        db_session.add(run)
+        db_session.commit()
+
+        readiness = evaluate_run_claim_readiness(db_session, run_id="run-exploratory-1", min_replicates=3)
+        assert readiness["gate_reason"] == "exploratory_run_class"
+        assert readiness["meets_replicate_threshold"] is False
+        assert readiness["replicate_count"] == 1
     finally:
         db_session.close()

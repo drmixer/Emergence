@@ -23,7 +23,7 @@ from app.core.database import get_db
 from app.core.time import now_utc
 from app.models.models import AdminConfigChange, SimulationRun
 from app.services.kpi_rollups import get_recent_rollups
-from app.services.run_reports import maybe_generate_run_closeout_bundle
+from app.services.run_reports import get_run_report_pipeline_status, maybe_generate_run_closeout_bundle
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
 
@@ -648,6 +648,7 @@ def admin_status(
             "soft_cap_usd": float(effective.get("LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0),
             "hard_cap_usd": float(effective.get("LLM_DAILY_BUDGET_USD_HARD", 0.0) or 0.0),
         },
+        "report_pipeline": get_run_report_pipeline_status(),
         "run_metadata": _serialize_simulation_run_metadata(current_run_row),
         "actor": {
             "id": actor.actor_id,
