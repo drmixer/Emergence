@@ -122,6 +122,35 @@ function formatPercent(value) {
   return `${(numeric * 100).toFixed(1)}%`
 }
 
+function displayValue(value, fallback = 'n/a') {
+  const text = String(value ?? '').trim()
+  return text || fallback
+}
+
+const IDENTIFIER_PATTERN = /^[A-Za-z0-9:_-]+$/
+
+function toOptionalText(value) {
+  const text = String(value || '').trim()
+  return text || null
+}
+
+function parseOptionalSeasonNumber(value) {
+  const text = String(value ?? '').trim()
+  if (!text) return { value: null, error: '' }
+  if (!/^\d+$/.test(text)) return { value: null, error: 'Season number must be a positive integer' }
+  const parsed = Number.parseInt(text, 10)
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return { value: null, error: 'Season number must be >= 1' }
+  }
+  return { value: parsed, error: '' }
+}
+
+function isValidOptionalIdentifier(value) {
+  const text = String(value || '').trim()
+  if (!text) return true
+  return IDENTIFIER_PATTERN.test(text)
+}
+
 export default function Ops() {
   const [tokenInput, setTokenInput] = useState(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
   const [token, setToken] = useState(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
@@ -135,6 +164,15 @@ export default function Ops() {
   const [runIdInput, setRunIdInput] = useState('')
   const [runControlReason, setRunControlReason] = useState('')
   const [resetOnTestStart, setResetOnTestStart] = useState(true)
+  const [protocolVersion, setProtocolVersion] = useState('')
+  const [conditionName, setConditionName] = useState('')
+  const [hypothesisId, setHypothesisId] = useState('')
+  const [seasonId, setSeasonId] = useState('')
+  const [seasonNumber, setSeasonNumber] = useState('')
+  const [parentRunId, setParentRunId] = useState('')
+  const [transferPolicyVersion, setTransferPolicyVersion] = useState('')
+  const [epochId, setEpochId] = useState('')
+  const [runClass, setRunClass] = useState('')
 
   const [draftValues, setDraftValues] = useState({})
   const [reason, setReason] = useState('')
@@ -175,7 +213,7 @@ export default function Ops() {
         api.getAdminArchiveArticles(token, adminUser),
         api.getAdminKpiRollups(token, 14, true, adminUser).catch(() => null),
       ])
-      const activeRunId = String(statusResponse?.viewer_ops?.run_id || '').trim()
+      const activeRunId = String(statusResponse?.run_metadata?.run_id || statusResponse?.viewer_ops?.run_id || '').trim()
       let runMetricsResponse = null
       try {
         runMetricsResponse = await api.getAdminRunMetrics(token, activeRunId, 24, adminUser)
@@ -194,6 +232,21 @@ export default function Ops() {
       setRunMetrics(runMetricsResponse)
       setKpiRollups(kpiResponse)
       setRunIdInput(activeRunId)
+      setProtocolVersion((previous) => previous || String(statusResponse?.run_metadata?.protocol_version || '').trim())
+      setConditionName(
+        (previous) => previous || String(statusResponse?.run_metadata?.condition_name || statusResponse?.viewer_ops?.condition_name || '').trim()
+      )
+      setHypothesisId((previous) => previous || String(statusResponse?.run_metadata?.hypothesis_id || '').trim())
+      setSeasonId((previous) => previous || String(statusResponse?.run_metadata?.season_id || '').trim())
+      setSeasonNumber((previous) => {
+        if (previous) return previous
+        const numeric = Number(statusResponse?.run_metadata?.season_number || statusResponse?.viewer_ops?.season_number || 0)
+        return Number.isFinite(numeric) && numeric > 0 ? String(Math.trunc(numeric)) : ''
+      })
+      setParentRunId((previous) => previous || String(statusResponse?.run_metadata?.parent_run_id || '').trim())
+      setTransferPolicyVersion((previous) => previous || String(statusResponse?.run_metadata?.transfer_policy_version || '').trim())
+      setEpochId((previous) => previous || String(statusResponse?.run_metadata?.epoch_id || '').trim())
+      setRunClass((previous) => previous || String(statusResponse?.run_metadata?.run_class || '').trim())
       setResetOnTestStart(String(configResponse?.environment || statusResponse?.environment || '').toLowerCase() !== 'production')
       setDraftValues(configResponse?.effective || {})
     } catch (loadError) {
@@ -305,8 +358,46 @@ export default function Ops() {
     const reasonText = String(runControlReason || '').trim()
     const runId = String(runIdInput || '').trim()
     const shouldReset = mode === 'test' && resetOnTestStart
+    const protocolVersionValue = toOptionalText(protocolVersion)
+    const conditionNameValue = toOptionalText(conditionName)
+    const hypothesisIdValue = toOptionalText(hypothesisId)
+    const seasonIdValue = toOptionalText(seasonId)
+    const parentRunIdValue = toOptionalText(parentRunId)
+    const transferPolicyVersionValue = toOptionalText(transferPolicyVersion)
+    const epochIdValue = toOptionalText(epochId)
+    const runClassValue = toOptionalText(runClass)
+    const parsedSeasonNumber = parseOptionalSeasonNumber(seasonNumber)
     const actionId = mode === 'test' ? 'start-test' : 'start-real'
     const modeLabel = mode === 'test' ? 'test' : 'real'
+
+    if (parsedSeasonNumber.error) {
+      setError(parsedSeasonNumber.error)
+      return
+    }
+    if (seasonIdValue && parsedSeasonNumber.value === null) {
+      setError('Season number is required when season ID is provided')
+      return
+    }
+    const metadataIdentifiers = [
+      ['Run ID', runId],
+      ['Protocol version', protocolVersionValue],
+      ['Condition name', conditionNameValue],
+      ['Hypothesis ID', hypothesisIdValue],
+      ['Season ID', seasonIdValue],
+      ['Parent run ID', parentRunIdValue],
+      ['Transfer policy version', transferPolicyVersionValue],
+      ['Epoch ID', epochIdValue],
+    ]
+    for (const [label, value] of metadataIdentifiers) {
+      if (!isValidOptionalIdentifier(value)) {
+        setError(`${label} contains invalid characters (allowed: A-Z, a-z, 0-9, :, _, -)`)
+        return
+      }
+    }
+    if (runId && parentRunIdValue && parentRunIdValue === runId) {
+      setError('Parent run ID must differ from run ID')
+      return
+    }
 
     if (mode === 'real' && !window.confirm('Start REAL run now? This enables live simulation traffic.')) {
       return
@@ -323,6 +414,15 @@ export default function Ops() {
           {
             mode,
             run_id: runId,
+            protocol_version: protocolVersionValue,
+            condition_name: conditionNameValue,
+            hypothesis_id: hypothesisIdValue,
+            season_id: seasonIdValue,
+            season_number: parsedSeasonNumber.value,
+            parent_run_id: parentRunIdValue,
+            transfer_policy_version: transferPolicyVersionValue,
+            epoch_id: epochIdValue,
+            run_class: runClassValue,
             reset_world: shouldReset,
             reason: reasonText || `ops_ui_start_${mode}`,
           },
@@ -533,8 +633,8 @@ export default function Ops() {
     setNotice('')
     setError('')
     try {
-      const conditionName = String(status?.viewer_ops?.condition_name || '').trim()
-      const seasonNumber = Number(status?.viewer_ops?.season_number || 0)
+      const conditionName = String(status?.run_metadata?.condition_name || status?.viewer_ops?.condition_name || '').trim()
+      const seasonNumber = Number(status?.run_metadata?.season_number || status?.viewer_ops?.season_number || 0)
       const response = await api.rebuildRunReportBundle(
         token,
         {
@@ -568,7 +668,13 @@ export default function Ops() {
     }
   }
 
-  const activeRunId = String(status?.viewer_ops?.run_id || '').trim()
+  const statusRunMetadata = status?.run_metadata && typeof status.run_metadata === 'object' ? status.run_metadata : null
+  const runMetricsMetadata = runMetrics?.run_metadata && typeof runMetrics.run_metadata === 'object' ? runMetrics.run_metadata : null
+  const activeRunId = String(statusRunMetadata?.run_id || status?.viewer_ops?.run_id || '').trim()
+  const statusRunMode = String(statusRunMetadata?.run_mode || status?.viewer_ops?.run_mode || '').trim() || 'n/a'
+  const statusConditionName = String(statusRunMetadata?.condition_name || status?.viewer_ops?.condition_name || '').trim()
+  const statusSeasonNumber = Number(statusRunMetadata?.season_number || status?.viewer_ops?.season_number || 0)
+  const metricsSeasonNumber = Number(runMetricsMetadata?.season_number || runMetrics?.season_number || 0)
   const simulationActive = Boolean(status?.viewer_ops?.simulation_active)
   const paused = Boolean(status?.viewer_ops?.simulation_paused)
   const degraded = Boolean(status?.viewer_ops?.force_cheapest_route)
@@ -677,11 +783,31 @@ export default function Ops() {
                     </div>
                     <div className="ops-kv-item">
                       <span>Run mode</span>
-                      <strong>{status.viewer_ops?.run_mode || 'n/a'}</strong>
+                      <strong>{statusRunMode}</strong>
                     </div>
                     <div className="ops-kv-item">
                       <span>Run ID</span>
                       <strong>{activeRunId || 'not set'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Condition</span>
+                      <strong>{displayValue(statusConditionName, 'not set')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Season</span>
+                      <strong>{statusSeasonNumber > 0 ? statusSeasonNumber : 'not set'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Protocol</span>
+                      <strong>{displayValue(statusRunMetadata?.protocol_version, 'not set')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Run class</span>
+                      <strong>{displayValue(statusRunMetadata?.run_class, 'not set')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Hypothesis</span>
+                      <strong>{displayValue(statusRunMetadata?.hypothesis_id, 'not set')}</strong>
                     </div>
                     <div className="ops-kv-item">
                       <span>Simulation active</span>
@@ -694,6 +820,30 @@ export default function Ops() {
                     <div className="ops-kv-item">
                       <span>Cheapest route</span>
                       <strong>{status.viewer_ops?.force_cheapest_route ? 'on' : 'off'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Season ID</span>
+                      <strong>{displayValue(statusRunMetadata?.season_id, 'not set')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Epoch ID</span>
+                      <strong>{displayValue(statusRunMetadata?.epoch_id, 'not set')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Parent run</span>
+                      <strong>{displayValue(statusRunMetadata?.parent_run_id, 'none')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Transfer policy</span>
+                      <strong>{displayValue(statusRunMetadata?.transfer_policy_version, 'none')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Carryover / fresh</span>
+                      <strong>{Number(statusRunMetadata?.carryover_agent_count || 0)} / {Number(statusRunMetadata?.fresh_agent_count || 0)}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Protocol deviation</span>
+                      <strong>{Boolean(statusRunMetadata?.protocol_deviation) ? 'yes' : 'no'}</strong>
                     </div>
                     <div className="ops-kv-item">
                       <span>Calls today</span>
@@ -734,6 +884,130 @@ export default function Ops() {
                     disabled={!writeEnabled}
                   />
                 </label>
+
+                <div className="ops-advanced-metadata">
+                  <div className="ops-advanced-metadata-head">
+                    <span>Advanced run metadata (optional)</span>
+                    <button
+                      type="button"
+                      className="btn-subtle"
+                      disabled={!writeEnabled}
+                      onClick={() => {
+                        const source = status?.run_metadata || status?.viewer_ops || {}
+                        setProtocolVersion(String(source.protocol_version || '').trim())
+                        setConditionName(String(source.condition_name || '').trim())
+                        setHypothesisId(String(source.hypothesis_id || '').trim())
+                        setSeasonId(String(source.season_id || '').trim())
+                        const numericSeasonNumber = Number(source.season_number || 0)
+                        setSeasonNumber(Number.isFinite(numericSeasonNumber) && numericSeasonNumber > 0 ? String(Math.trunc(numericSeasonNumber)) : '')
+                        setParentRunId(String(source.parent_run_id || '').trim())
+                        setTransferPolicyVersion(String(source.transfer_policy_version || '').trim())
+                        setEpochId(String(source.epoch_id || '').trim())
+                        setRunClass(String(source.run_class || '').trim())
+                      }}
+                    >
+                      Load Current Metadata
+                    </button>
+                  </div>
+                  <div className="ops-advanced-metadata-grid">
+                    <label className="ops-field">
+                      <span>Protocol Version</span>
+                      <input
+                        type="text"
+                        value={protocolVersion}
+                        onChange={(event) => setProtocolVersion(event.target.value)}
+                        placeholder="protocol_v1"
+                        disabled={!writeEnabled || isProduction}
+                      />
+                    </label>
+                    <label className="ops-field">
+                      <span>Condition Name</span>
+                      <input
+                        type="text"
+                        value={conditionName}
+                        onChange={(event) => setConditionName(event.target.value)}
+                        placeholder="baseline-control"
+                        disabled={!writeEnabled || isProduction}
+                      />
+                    </label>
+                    <label className="ops-field">
+                      <span>Hypothesis ID</span>
+                      <input
+                        type="text"
+                        value={hypothesisId}
+                        onChange={(event) => setHypothesisId(event.target.value)}
+                        placeholder="hypothesis-2026-02-a"
+                        disabled={!writeEnabled || isProduction}
+                      />
+                    </label>
+                    <label className="ops-field">
+                      <span>Season ID</span>
+                      <input
+                        type="text"
+                        value={seasonId}
+                        onChange={(event) => setSeasonId(event.target.value)}
+                        placeholder="season-2026-s1"
+                        disabled={!writeEnabled || isProduction}
+                      />
+                    </label>
+                    <label className="ops-field">
+                      <span>Season Number</span>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={seasonNumber}
+                        onChange={(event) => setSeasonNumber(event.target.value)}
+                        placeholder="1"
+                        disabled={!writeEnabled || isProduction}
+                      />
+                    </label>
+                    <label className="ops-field">
+                      <span>Parent Run ID</span>
+                      <input
+                        type="text"
+                        value={parentRunId}
+                        onChange={(event) => setParentRunId(event.target.value)}
+                        placeholder="real-20260209T120000Z"
+                        disabled={!writeEnabled || isProduction}
+                      />
+                    </label>
+                    <label className="ops-field">
+                      <span>Transfer Policy Version</span>
+                      <input
+                        type="text"
+                        value={transferPolicyVersion}
+                        onChange={(event) => setTransferPolicyVersion(event.target.value)}
+                        placeholder="transfer_v1"
+                        disabled={!writeEnabled || isProduction}
+                      />
+                    </label>
+                    <label className="ops-field">
+                      <span>Epoch ID</span>
+                      <input
+                        type="text"
+                        value={epochId}
+                        onChange={(event) => setEpochId(event.target.value)}
+                        placeholder="epoch-2026q1"
+                        disabled={!writeEnabled || isProduction}
+                      />
+                    </label>
+                    <label className="ops-field">
+                      <span>Run Class</span>
+                      <select
+                        value={runClass}
+                        onChange={(event) => setRunClass(event.target.value)}
+                        disabled={!writeEnabled || isProduction}
+                      >
+                        <option value="">default (standard_72h)</option>
+                        <option value="standard_72h">standard_72h</option>
+                        <option value="deep_96h">deep_96h</option>
+                        <option value="special_exploratory">special_exploratory</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p className="ops-inline-help">Allowed characters for metadata IDs: letters, numbers, colon, underscore, and dash.</p>
+                </div>
 
                 <label className="ops-checkbox">
                   <input
@@ -844,6 +1118,34 @@ export default function Ops() {
                     <div className="ops-kv-item">
                       <span>Run started</span>
                       <strong>{runMetrics.run_started_at || 'n/a'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Condition</span>
+                      <strong>{displayValue(runMetricsMetadata?.condition_name || runMetrics.condition_name, 'not set')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Season</span>
+                      <strong>{metricsSeasonNumber > 0 ? metricsSeasonNumber : 'not set'}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Protocol</span>
+                      <strong>{displayValue(runMetricsMetadata?.protocol_version, 'not set')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Run class</span>
+                      <strong>{displayValue(runMetricsMetadata?.run_class, 'not set')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Transfer policy</span>
+                      <strong>{displayValue(runMetricsMetadata?.transfer_policy_version, 'none')}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Carryover / fresh</span>
+                      <strong>{Number(runMetricsMetadata?.carryover_agent_count || 0)} / {Number(runMetricsMetadata?.fresh_agent_count || 0)}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Protocol deviation</span>
+                      <strong>{Boolean(runMetricsMetadata?.protocol_deviation) ? 'yes' : 'no'}</strong>
                     </div>
                     <div className="ops-kv-item">
                       <span>LLM calls</span>
