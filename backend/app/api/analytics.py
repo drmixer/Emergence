@@ -50,6 +50,7 @@ from app.models.models import (
     GlobalResources,
     EmergenceMetricSnapshot,
     AdminConfigChange,
+    SimulationRun,
 )
 
 router = APIRouter()
@@ -112,6 +113,32 @@ def _safe_ratio(numerator: int | float, denominator: int | float) -> float:
     if den <= 0:
         return 0.0
     return float(numerator or 0) / den
+
+
+def _serialize_run_registry_metadata(row: SimulationRun | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "run_id": str(row.run_id),
+        "run_mode": str(row.run_mode),
+        "protocol_version": str(row.protocol_version or ""),
+        "condition_name": str(row.condition_name or "").strip() or None,
+        "hypothesis_id": str(row.hypothesis_id or "").strip() or None,
+        "season_id": str(row.season_id or "").strip() or None,
+        "season_number": (int(row.season_number) if row.season_number else None),
+        "parent_run_id": str(row.parent_run_id or "").strip() or None,
+        "transfer_policy_version": str(row.transfer_policy_version or "").strip() or None,
+        "epoch_id": str(row.epoch_id or "").strip() or None,
+        "run_class": str(row.run_class or "").strip() or None,
+        "carryover_agent_count": int(row.carryover_agent_count or 0),
+        "fresh_agent_count": int(row.fresh_agent_count or 0),
+        "protocol_deviation": bool(row.protocol_deviation),
+        "deviation_reason": str(row.deviation_reason or "").strip() or None,
+        "start_reason": str(row.start_reason or "").strip() or None,
+        "end_reason": str(row.end_reason or "").strip() or None,
+        "started_at": (ensure_utc(row.started_at).isoformat() if row.started_at else None),
+        "ended_at": (ensure_utc(row.ended_at).isoformat() if row.ended_at else None),
+    }
 
 
 def _resolve_day_key(day: Optional[str]) -> date:
@@ -1621,6 +1648,12 @@ def run_detail(
     now = now_utc()
     db = SessionLocal()
     try:
+        run_row = (
+            db.query(SimulationRun)
+            .filter(SimulationRun.run_id == clean_run_id)
+            .first()
+        )
+        run_metadata = _serialize_run_registry_metadata(run_row)
         json_run_id = json.dumps(clean_run_id)
         run_start_change = (
             db.query(AdminConfigChange)
@@ -1644,6 +1677,8 @@ def run_detail(
         ).scalar()
 
         start_candidates = []
+        if run_row and run_row.started_at:
+            start_candidates.append(ensure_utc(run_row.started_at))
         if run_start_change and run_start_change.created_at:
             start_candidates.append(ensure_utc(run_start_change.created_at))
         if llm_first_seen:
@@ -1733,7 +1768,9 @@ def run_detail(
             verification_state = "unverified"
 
         source = "fallback_hours"
-        if run_start_change and run_start_change.created_at:
+        if run_row and run_row.started_at:
+            source = "simulation_runs_registry"
+        elif run_start_change and run_start_change.created_at:
             source = "admin_config_change"
         elif llm_first_seen:
             source = "llm_first_seen"
@@ -1741,6 +1778,21 @@ def run_detail(
         return {
             "run_id": clean_run_id,
             "run_started_at": run_started_at.isoformat(),
+            "run_metadata": run_metadata,
+            "condition_name": (run_metadata.get("condition_name") if isinstance(run_metadata, dict) else None),
+            "season_number": (run_metadata.get("season_number") if isinstance(run_metadata, dict) else None),
+            "transfer_policy_version": (
+                run_metadata.get("transfer_policy_version") if isinstance(run_metadata, dict) else None
+            ),
+            "carryover_agent_count": (
+                int(run_metadata.get("carryover_agent_count") or 0) if isinstance(run_metadata, dict) else None
+            ),
+            "fresh_agent_count": (
+                int(run_metadata.get("fresh_agent_count") or 0) if isinstance(run_metadata, dict) else None
+            ),
+            "protocol_deviation": (
+                bool(run_metadata.get("protocol_deviation")) if isinstance(run_metadata, dict) else None
+            ),
             "captured_at": now.isoformat(),
             "llm": {
                 "calls": llm_calls,

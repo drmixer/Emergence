@@ -1,4 +1,4 @@
-.PHONY: sim-status sim-start sim-stop report-rebuild report-tech report-story report-plan
+.PHONY: sim-status sim-start sim-stop report-rebuild report-tech report-story report-plan report-export compare-condition
 
 RUN_MODE ?= real
 RUN_ID ?=
@@ -37,3 +37,12 @@ report-story:
 report-plan:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/generate_next_run_plan.py --run-id "$(RUN_ID)" \
 		$(if $(CONDITION),--condition "$(CONDITION)",)
+
+report-export:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/export_run_report.py --run-id "$(RUN_ID)" \
+		$(if $(CONDITION),--condition "$(CONDITION)",) \
+		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
+
+compare-condition:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/compare_conditions.py --condition "$(CONDITION)" \
+		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)

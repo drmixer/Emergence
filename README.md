@@ -73,6 +73,8 @@ make report-rebuild RUN_ID=run-20260210T120000Z
 make report-tech RUN_ID=run-20260210T120000Z
 make report-story RUN_ID=run-20260210T120000Z
 make report-plan RUN_ID=run-20260210T120000Z
+make report-export RUN_ID=run-20260210T120000Z
+make compare-condition CONDITION=baseline_v1
 ```
 
 Report artifacts are written under `output/reports/runs/<run_id>/` and indexed in `run_report_artifacts`.
