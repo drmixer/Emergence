@@ -1,3 +1,5 @@
+import { resolveApiBase } from "@/lib/api-base"
+
 export type ArticleReference = {
   label: string
   href: string
@@ -189,12 +191,6 @@ function normalizeArticle(rawValue: unknown): Article | null {
     linkedRecordIds,
     evidenceRunId,
   }
-}
-
-function resolveApiBase() {
-  const configuredApiBase = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/+$/, "")
-  if (configuredApiBase) return configuredApiBase
-  return process.env.NODE_ENV === "development" ? "http://localhost:8000" : ""
 }
 
 export function getArticles() {

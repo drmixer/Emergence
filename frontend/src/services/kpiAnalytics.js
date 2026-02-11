@@ -1,3 +1,5 @@
+import { resolveApiBase } from '../../lib/api-base'
+
 const ALLOWED_EVENTS = new Set([
   'landing_view',
   'landing_run_click',
@@ -29,15 +31,6 @@ function cleanEventId(value) {
   const numeric = Number(value)
   if (!Number.isFinite(numeric) || numeric <= 0) return null
   return Math.trunc(numeric)
-}
-
-function resolveApiBase() {
-  const configured = cleanText(import.meta.env.VITE_API_URL, 400).replace(/\/+$/, '')
-  if (configured) return configured
-  if (typeof window !== 'undefined') {
-    return String(window.location.origin || '').replace(/\/+$/, '')
-  }
-  return 'http://localhost:8000'
 }
 
 function randomId(prefix) {
@@ -159,4 +152,3 @@ export function trackKpiEventOnce(eventName, key, payload = {}) {
 
   trackKpiEvent(cleanEventName, payload)
 }
-

@@ -1,5 +1,7 @@
 "use client"
 
+import { resolveApiBase } from "@/lib/api-base"
+
 type KpiPayload = {
   runId?: string | null
   eventId?: number | string | null
@@ -83,15 +85,6 @@ function getSessionId(): string {
   }
 }
 
-function resolveApiBase(): string {
-  const configured = cleanText(process.env.NEXT_PUBLIC_API_URL, 400).replace(/\/+$/, "")
-  if (configured) return configured
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return String(window.location.origin).replace(/\/+$/, "")
-  }
-  return "http://localhost:8000"
-}
-
 function defaultPath(): string {
   if (typeof window === "undefined") return ""
   return `${window.location.pathname || ""}${window.location.search || ""}`.slice(0, 255)
@@ -157,4 +150,3 @@ export function trackKpiEventOnce(eventName: string, key: string, payload: KpiPa
 
   trackKpiEvent(cleanEventName, payload)
 }
-

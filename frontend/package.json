@@ -15,7 +15,8 @@
     "preview:vite": "vite preview",
     "lint": "eslint .",
     "preview": "next start",
-    "smoke:share-metadata": "node scripts/smoke-share-metadata.mjs"
+    "smoke:share-metadata": "node scripts/smoke-share-metadata.mjs",
+    "smoke:dashboard-api": "node scripts/smoke-dashboard-api.mjs"
   },
   "dependencies": {
     "@vercel/analytics": "^1.5.0",

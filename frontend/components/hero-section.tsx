@@ -5,6 +5,7 @@ import Link from "next/link"
 import { ScrambleTextOnHover } from "@/components/scramble-text"
 import { SplitFlapText } from "@/components/split-flap-text"
 import { BitmapChevron } from "@/components/bitmap-chevron"
+import { resolveApiBase } from "@/lib/api-base"
 import { trackKpiEvent, trackKpiEventOnce } from "@/lib/kpi-client"
 import { Activity, ArrowUpRight, Network, Play, Radio, Scale, Skull } from "lucide-react"
 import gsap from "gsap"
@@ -66,17 +67,7 @@ export function HeroSection() {
 
   useEffect(() => {
     let cancelled = false
-    const configuredApiBase = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/+$/, "")
-    const apiBase = (() => {
-      if (configuredApiBase) {
-        // Prevent mixed-content warnings if an http URL is accidentally configured in prod.
-        if (window.location.protocol === "https:" && configuredApiBase.startsWith("http://")) {
-          return configuredApiBase.replace(/^http:\/\//, "https://")
-        }
-        return configuredApiBase
-      }
-      return process.env.NODE_ENV === "development" ? "http://localhost:8000" : ""
-    })()
+    const apiBase = resolveApiBase()
 
     async function loadPreview() {
       if (!apiBase) {
