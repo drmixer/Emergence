@@ -320,10 +320,17 @@ class APIService {
             body: JSON.stringify({
                 mode: payload?.mode,
                 run_id: String(payload?.run_id || '').trim() || null,
+                protocol_version: String(payload?.protocol_version || '').trim() || null,
                 condition_name: String(payload?.condition_name || '').trim() || null,
+                hypothesis_id: String(payload?.hypothesis_id || '').trim() || null,
+                season_id: String(payload?.season_id || '').trim() || null,
                 season_number: Number.isFinite(Number(payload?.season_number))
                     ? Number(payload.season_number)
                     : null,
+                parent_run_id: String(payload?.parent_run_id || '').trim() || null,
+                transfer_policy_version: String(payload?.transfer_policy_version || '').trim() || null,
+                epoch_id: String(payload?.epoch_id || '').trim() || null,
+                run_class: String(payload?.run_class || '').trim() || null,
                 reset_world: Boolean(payload?.reset_world),
                 reason: String(payload?.reason || '').trim() || null,
             }),

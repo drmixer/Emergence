@@ -3,7 +3,7 @@ SQLAlchemy models for Emergence.
 """
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DECIMAL, 
-    ForeignKey, Date, DateTime, JSON, CheckConstraint, UniqueConstraint
+    ForeignKey, Date, DateTime, JSON, CheckConstraint, UniqueConstraint, Index
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -557,5 +557,116 @@ class RunReportArtifact(Base):
         CheckConstraint(
             "status IN ('pending', 'completed', 'failed')",
             name="valid_run_report_artifact_status",
+        ),
+    )
+
+
+class SimulationRun(Base):
+    """Metadata registry for simulation runs and season associations."""
+    __tablename__ = "simulation_runs"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String(64), nullable=False, unique=True, index=True)
+    run_mode = Column(String(16), nullable=False)
+    protocol_version = Column(String(64), nullable=False, default="")
+    condition_name = Column(String(120), nullable=True)
+    hypothesis_id = Column(String(120), nullable=True)
+    season_id = Column(String(64), nullable=True, index=True)
+    season_number = Column(Integer, nullable=True, index=True)
+    parent_run_id = Column(String(64), ForeignKey("simulation_runs.run_id"), nullable=True)
+    transfer_policy_version = Column(String(64), nullable=True)
+    epoch_id = Column(String(64), nullable=True, index=True)
+    run_class = Column(String(32), nullable=False, default="standard_72h")
+    carryover_agent_count = Column(Integer, nullable=False, default=0)
+    fresh_agent_count = Column(Integer, nullable=False, default=0)
+    protocol_deviation = Column(Boolean, nullable=False, default=False)
+    deviation_reason = Column(Text, nullable=True)
+    start_reason = Column(Text, nullable=True)
+    end_reason = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("run_mode IN ('test', 'real')", name="ck_simulation_runs_run_mode"),
+        CheckConstraint(
+            "run_class IN ('standard_72h', 'deep_96h', 'special_exploratory')",
+            name="ck_simulation_runs_run_class",
+        ),
+        CheckConstraint(
+            "(season_id IS NULL) OR (season_number IS NOT NULL AND season_number >= 1)",
+            name="ck_simulation_runs_season_number_when_season_id",
+        ),
+        CheckConstraint(
+            "carryover_agent_count >= 0",
+            name="ck_simulation_runs_carryover_agent_count_nonnegative",
+        ),
+        CheckConstraint(
+            "fresh_agent_count >= 0",
+            name="ck_simulation_runs_fresh_agent_count_nonnegative",
+        ),
+    )
+
+
+class SeasonSnapshot(Base):
+    """Transfer snapshot payloads captured from completed season runs."""
+    __tablename__ = "season_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(
+        String(64),
+        ForeignKey("simulation_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    snapshot_type = Column(String(64), nullable=False)
+    payload_json = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("snapshot_type <> ''", name="ck_season_snapshots_snapshot_type_nonempty"),
+        Index(
+            "idx_season_snapshots_run_id_snapshot_type",
+            "run_id",
+            "snapshot_type",
+        ),
+    )
+
+
+class AgentLineage(Base):
+    """Lineage mapping between parent and child agents across seasons."""
+    __tablename__ = "agent_lineage"
+
+    id = Column(Integer, primary_key=True)
+    season_id = Column(String(64), nullable=False)
+    parent_agent_number = Column(Integer, nullable=True)
+    child_agent_number = Column(Integer, nullable=False)
+    origin = Column(String(20), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("season_id", "child_agent_number", name="uq_agent_lineage_season_child"),
+        CheckConstraint(
+            "parent_agent_number IS NULL OR parent_agent_number >= 1",
+            name="ck_agent_lineage_parent_agent_number_positive",
+        ),
+        CheckConstraint(
+            "child_agent_number >= 1",
+            name="ck_agent_lineage_child_agent_number_positive",
+        ),
+        CheckConstraint(
+            "origin IN ('carryover', 'fresh')",
+            name="ck_agent_lineage_origin",
+        ),
+        Index(
+            "idx_agent_lineage_season_id_parent_agent_number",
+            "season_id",
+            "parent_agent_number",
+        ),
+        Index(
+            "idx_agent_lineage_season_id_child_agent_number",
+            "season_id",
+            "child_agent_number",
         ),
     )

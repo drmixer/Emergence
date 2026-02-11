@@ -21,7 +21,12 @@ from sqlalchemy import text
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.database import SessionLocal
+from app.core.time import now_utc
+from app.models.models import SimulationRun
 from app.services.runtime_config import runtime_config_service
+
+_DEFAULT_PROTOCOL_VERSION = "protocol_v1"
+_DEFAULT_RUN_CLASS = "standard_72h"
 
 
 def _status_payload() -> dict[str, Any]:
@@ -80,6 +85,116 @@ def _update_runtime(updates: dict[str, Any], reason: str) -> dict[str, Any]:
         db.close()
 
 
+def _clean_optional_text(value: Any) -> str | None:
+    text_value = str(value or "").strip()
+    return text_value or None
+
+
+def _upsert_run_registry_start(
+    *,
+    run_id: str,
+    run_mode: str | None,
+    condition_name: str | None,
+    season_number: int | None,
+    reason: str,
+) -> dict[str, Any]:
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return {"updated": False, "reason": "missing_run_id"}
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(SimulationRun)
+            .filter(SimulationRun.run_id == clean_run_id)
+            .first()
+        )
+        started_at = now_utc()
+        clean_mode = str(run_mode or "").strip() or "test"
+        clean_condition = _clean_optional_text(condition_name)
+        clean_season_number = int(season_number or 0)
+        season_value = clean_season_number if clean_season_number > 0 else None
+        created = row is None
+
+        if row is None:
+            row = SimulationRun(
+                run_id=clean_run_id,
+                run_mode=clean_mode,
+                protocol_version=_DEFAULT_PROTOCOL_VERSION,
+                condition_name=clean_condition,
+                season_number=season_value,
+                run_class=_DEFAULT_RUN_CLASS,
+                started_at=started_at,
+                start_reason=reason,
+                end_reason=None,
+                ended_at=None,
+            )
+            db.add(row)
+        else:
+            row.run_mode = clean_mode
+            row.protocol_version = str(
+                row.protocol_version or _DEFAULT_PROTOCOL_VERSION
+            )
+            row.condition_name = clean_condition
+            row.season_number = season_value
+            row.run_class = str(row.run_class or _DEFAULT_RUN_CLASS)
+            row.started_at = started_at
+            row.start_reason = reason
+            row.end_reason = None
+            row.ended_at = None
+            db.add(row)
+
+        db.commit()
+        return {
+            "updated": True,
+            "created": created,
+            "run_id": clean_run_id,
+        }
+    except Exception as exc:
+        db.rollback()
+        return {
+            "updated": False,
+            "run_id": clean_run_id,
+            "error": str(exc),
+        }
+    finally:
+        db.close()
+
+
+def _mark_run_registry_stop(*, run_id: str, reason: str) -> dict[str, Any]:
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return {"updated": False, "reason": "missing_run_id"}
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(SimulationRun)
+            .filter(SimulationRun.run_id == clean_run_id)
+            .first()
+        )
+        if row is None:
+            return {
+                "updated": False,
+                "run_id": clean_run_id,
+                "reason": "not_found",
+            }
+        row.ended_at = now_utc()
+        row.end_reason = reason
+        db.add(row)
+        db.commit()
+        return {"updated": True, "run_id": clean_run_id}
+    except Exception as exc:
+        db.rollback()
+        return {
+            "updated": False,
+            "run_id": clean_run_id,
+            "error": str(exc),
+        }
+    finally:
+        db.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Start/stop/status control for simulation runtime config.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -100,9 +215,15 @@ def main() -> None:
         return
 
     if args.command == "stop":
+        status_before = _status_payload()
+        run_id_before = str(status_before.get("simulation_run_id") or "").strip()
         result = _update_runtime(
             {"SIMULATION_ACTIVE": False, "SIMULATION_PAUSED": True},
             "Operator stop via simulation_control.py",
+        )
+        result["run_registry"] = _mark_run_registry_stop(
+            run_id=run_id_before,
+            reason="Operator stop via simulation_control.py",
         )
         print(json.dumps(result, indent=2))
         print(json.dumps(_status_payload(), indent=2))
@@ -125,6 +246,16 @@ def main() -> None:
         result = _update_runtime(
             updates,
             "Operator start via simulation_control.py",
+        )
+        effective = result.get("effective", {})
+        result["run_registry"] = _upsert_run_registry_start(
+            run_id=str(effective.get("SIMULATION_RUN_ID") or "").strip(),
+            run_mode=str(effective.get("SIMULATION_RUN_MODE") or "").strip() or None,
+            condition_name=(
+                str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None
+            ),
+            season_number=int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
+            reason="Operator start via simulation_control.py",
         )
         print(json.dumps(result, indent=2))
         print(json.dumps(_status_payload(), indent=2))

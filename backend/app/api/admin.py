@@ -8,12 +8,12 @@ from pathlib import Path
 import subprocess
 import sys
 from threading import Lock
-from typing import Any
+from typing import Any, Literal
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import String, cast, text
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,7 @@ from app.core.admin_auth import AdminActor, require_admin_auth
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.time import now_utc
-from app.models.models import AdminConfigChange
+from app.models.models import AdminConfigChange, SimulationRun
 from app.services.kpi_rollups import get_recent_rollups
 from app.services.run_reports import maybe_generate_run_closeout_bundle
 from app.services.runtime_config import runtime_config_service
@@ -76,6 +76,10 @@ _KPI_ALERT_RULES = (
         "min_sample": 25,
     },
 )
+
+_IDENTIFIER_PATTERN = r"^[A-Za-z0-9:_-]+$"
+_DEFAULT_PROTOCOL_VERSION = "protocol_v1"
+_DEFAULT_RUN_CLASS = "standard_72h"
 
 
 def _safe_int(value: Any) -> int:
@@ -320,11 +324,42 @@ class ControlRequest(BaseModel):
 
 class RunStartRequest(BaseModel):
     mode: str = Field(..., pattern="^(test|real)$")
-    run_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9:_-]*$")
-    condition_name: str | None = Field(default=None, max_length=120, pattern=r"^[A-Za-z0-9:_-]*$")
+    run_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
+    protocol_version: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
+    condition_name: str | None = Field(default=None, max_length=120, pattern=_IDENTIFIER_PATTERN)
+    hypothesis_id: str | None = Field(default=None, max_length=120, pattern=_IDENTIFIER_PATTERN)
+    season_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
     season_number: int | None = Field(default=None, ge=0, le=9999)
+    parent_run_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
+    transfer_policy_version: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
+    epoch_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
+    run_class: Literal["standard_72h", "deep_96h", "special_exploratory"] | None = Field(default=None)
     reset_world: bool = Field(default=False)
     reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator(
+        "run_id",
+        "protocol_version",
+        "condition_name",
+        "hypothesis_id",
+        "season_id",
+        "parent_run_id",
+        "transfer_policy_version",
+        "epoch_id",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_identifiers(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text_value = str(value).strip()
+        return text_value or None
+
+    @model_validator(mode="after")
+    def _validate_season_metadata(self) -> "RunStartRequest":
+        if self.season_id and (self.season_number is None or int(self.season_number) < 1):
+            raise ValueError("season_number must be >= 1 when season_id is provided")
+        return self
 
 
 class RunStopRequest(BaseModel):
@@ -349,6 +384,194 @@ def _normalize_run_id(raw_value: str | None, mode: str) -> str:
     if clean:
         return clean
     return f"{mode}-{now_utc().strftime('%Y%m%dT%H%M%SZ')}"
+
+
+def _clean_optional_identifier(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _resolve_run_start_metadata(
+    request: RunStartRequest,
+    *,
+    run_id: str,
+    mode: str,
+) -> dict[str, Any]:
+    season_number = int(request.season_number or 0)
+    return {
+        "run_id": run_id,
+        "run_mode": mode,
+        "protocol_version": _clean_optional_identifier(request.protocol_version) or _DEFAULT_PROTOCOL_VERSION,
+        "condition_name": _clean_optional_identifier(request.condition_name),
+        "hypothesis_id": _clean_optional_identifier(request.hypothesis_id),
+        "season_id": _clean_optional_identifier(request.season_id),
+        "season_number": season_number if season_number > 0 else None,
+        "parent_run_id": _clean_optional_identifier(request.parent_run_id),
+        "transfer_policy_version": _clean_optional_identifier(request.transfer_policy_version),
+        "epoch_id": _clean_optional_identifier(request.epoch_id),
+        "run_class": str(request.run_class or _DEFAULT_RUN_CLASS),
+    }
+
+
+def _has_research_metadata(request: RunStartRequest) -> bool:
+    return any(
+        [
+            request.protocol_version,
+            request.condition_name,
+            request.hypothesis_id,
+            request.season_id,
+            request.season_number,
+            request.parent_run_id,
+            request.transfer_policy_version,
+            request.epoch_id,
+            request.run_class,
+        ]
+    )
+
+
+def _validate_parent_run_reference(
+    db: Session,
+    *,
+    run_id: str,
+    parent_run_id: str | None,
+) -> None:
+    parent_id = _clean_optional_identifier(parent_run_id)
+    if not parent_id:
+        return
+    if parent_id == run_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="parent_run_id must differ from run_id",
+        )
+    parent_row = (
+        db.query(SimulationRun.id)
+        .filter(SimulationRun.run_id == parent_id)
+        .first()
+    )
+    if parent_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="parent_run_id must reference an existing simulation run",
+        )
+
+
+def _upsert_simulation_run_start(
+    db: Session,
+    *,
+    metadata: dict[str, Any],
+    start_reason: str | None,
+) -> None:
+    run_id = str(metadata.get("run_id") or "").strip()
+    if not run_id:
+        raise ValueError("run_id is required")
+
+    row = (
+        db.query(SimulationRun)
+        .filter(SimulationRun.run_id == run_id)
+        .first()
+    )
+    started_at = now_utc()
+    if row is None:
+        row = SimulationRun(
+            run_id=run_id,
+            run_mode=str(metadata.get("run_mode") or "test"),
+            protocol_version=str(metadata.get("protocol_version") or _DEFAULT_PROTOCOL_VERSION),
+            condition_name=metadata.get("condition_name"),
+            hypothesis_id=metadata.get("hypothesis_id"),
+            season_id=metadata.get("season_id"),
+            season_number=metadata.get("season_number"),
+            parent_run_id=metadata.get("parent_run_id"),
+            transfer_policy_version=metadata.get("transfer_policy_version"),
+            epoch_id=metadata.get("epoch_id"),
+            run_class=str(metadata.get("run_class") or _DEFAULT_RUN_CLASS),
+            protocol_deviation=False,
+            deviation_reason=None,
+            start_reason=start_reason,
+            end_reason=None,
+            started_at=started_at,
+            ended_at=None,
+        )
+        db.add(row)
+    else:
+        row.run_mode = str(metadata.get("run_mode") or row.run_mode or "test")
+        row.protocol_version = str(metadata.get("protocol_version") or row.protocol_version or _DEFAULT_PROTOCOL_VERSION)
+        row.condition_name = metadata.get("condition_name")
+        row.hypothesis_id = metadata.get("hypothesis_id")
+        row.season_id = metadata.get("season_id")
+        row.season_number = metadata.get("season_number")
+        row.parent_run_id = metadata.get("parent_run_id")
+        row.transfer_policy_version = metadata.get("transfer_policy_version")
+        row.epoch_id = metadata.get("epoch_id")
+        row.run_class = str(metadata.get("run_class") or row.run_class or _DEFAULT_RUN_CLASS)
+        row.start_reason = start_reason
+        row.end_reason = None
+        row.ended_at = None
+        row.started_at = started_at
+        db.add(row)
+
+    db.flush()
+
+
+def _mark_simulation_run_stopped(
+    db: Session,
+    *,
+    run_id: str,
+    end_reason: str,
+) -> None:
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return
+
+    row = (
+        db.query(SimulationRun)
+        .filter(SimulationRun.run_id == clean_run_id)
+        .first()
+    )
+    if row is None:
+        logger.warning("No simulation_runs row found for stopped run_id=%s", clean_run_id)
+        return
+
+    row.ended_at = now_utc()
+    row.end_reason = end_reason
+    db.add(row)
+    db.commit()
+
+
+def _get_simulation_run_row(db: Session, *, run_id: str | None) -> SimulationRun | None:
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return None
+    return (
+        db.query(SimulationRun)
+        .filter(SimulationRun.run_id == clean_run_id)
+        .first()
+    )
+
+
+def _serialize_simulation_run_metadata(row: SimulationRun | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "run_id": row.run_id,
+        "run_mode": row.run_mode,
+        "protocol_version": row.protocol_version,
+        "condition_name": row.condition_name,
+        "hypothesis_id": row.hypothesis_id,
+        "season_id": row.season_id,
+        "season_number": row.season_number,
+        "parent_run_id": row.parent_run_id,
+        "transfer_policy_version": row.transfer_policy_version,
+        "epoch_id": row.epoch_id,
+        "run_class": row.run_class,
+        "carryover_agent_count": int(row.carryover_agent_count or 0),
+        "fresh_agent_count": int(row.fresh_agent_count or 0),
+        "protocol_deviation": bool(row.protocol_deviation),
+        "deviation_reason": row.deviation_reason,
+        "start_reason": row.start_reason,
+        "end_reason": row.end_reason,
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "ended_at": row.ended_at.isoformat() if row.ended_at else None,
+    }
 
 
 def _run_seed_reset() -> dict[str, Any]:
@@ -395,6 +618,8 @@ def admin_status(
     actor: AdminActor = Depends(require_admin_auth),
 ):
     effective = runtime_config_service.get_effective(db)
+    current_run_id = str(effective.get("SIMULATION_RUN_ID") or "").strip()
+    current_run_row = _get_simulation_run_row(db, run_id=current_run_id)
     budget = usage_budget.get_snapshot()
     return {
         "environment": getattr(settings, "ENVIRONMENT", "development"),
@@ -402,7 +627,7 @@ def admin_status(
         "server_time_utc": now_utc().isoformat(),
         "viewer_ops": {
             "run_mode": effective.get("SIMULATION_RUN_MODE"),
-            "run_id": str(effective.get("SIMULATION_RUN_ID") or "").strip(),
+            "run_id": current_run_id,
             "condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None,
             "season_number": (
                 int(effective.get("SIMULATION_SEASON_NUMBER") or 0)
@@ -423,6 +648,7 @@ def admin_status(
             "soft_cap_usd": float(effective.get("LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0),
             "hard_cap_usd": float(effective.get("LLM_DAILY_BUDGET_USD_HARD", 0.0) or 0.0),
         },
+        "run_metadata": _serialize_simulation_run_metadata(current_run_row),
         "actor": {
             "id": actor.actor_id,
             "ip": actor.client_ip,
@@ -563,11 +789,26 @@ def start_simulation_run(
 
     mode = str(request.mode or "").strip()
     run_id = _normalize_run_id(request.run_id, mode)
+    metadata = _resolve_run_start_metadata(request, run_id=run_id, mode=mode)
+    _validate_parent_run_reference(
+        db,
+        run_id=run_id,
+        parent_run_id=str(metadata.get("parent_run_id") or "").strip() or None,
+    )
 
     if request.reset_world and mode != "test":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="reset_world is only supported for test runs",
+        )
+    if not _has_research_metadata(request):
+        logger.warning(
+            "Starting run without research metadata; applying defaults (run_id=%s mode=%s actor=%s protocol_version=%s run_class=%s)",
+            run_id,
+            mode,
+            actor.actor_id,
+            metadata.get("protocol_version"),
+            metadata.get("run_class"),
         )
 
     # Pause before any destructive maintenance.
@@ -582,12 +823,18 @@ def start_simulation_run(
     if request.reset_world:
         reset_result = _run_seed_reset()
 
+    _upsert_simulation_run_start(
+        db,
+        metadata=metadata,
+        start_reason=request.reason or f"run_start_{mode}",
+    )
+
     runtime_config_service.update_settings(
         db,
         updates={
             "SIMULATION_RUN_MODE": mode,
             "SIMULATION_RUN_ID": run_id,
-            "SIMULATION_CONDITION_NAME": str(request.condition_name or "").strip(),
+            "SIMULATION_CONDITION_NAME": str(metadata.get("condition_name") or "").strip(),
             "SIMULATION_SEASON_NUMBER": int(request.season_number or 0),
             "SIMULATION_ACTIVE": True,
             "SIMULATION_PAUSED": False,
@@ -600,7 +847,7 @@ def start_simulation_run(
         "ok": True,
         "mode": mode,
         "run_id": run_id,
-        "condition_name": str(request.condition_name or "").strip() or None,
+        "condition_name": str(metadata.get("condition_name") or "").strip() or None,
         "season_number": int(request.season_number or 0) or None,
         "simulation_active": True,
         "simulation_paused": False,
@@ -636,6 +883,11 @@ def stop_simulation_run(
         updates=updates,
         changed_by=actor.actor_id,
         reason=request.reason or "run_stop",
+    )
+    _mark_simulation_run_stopped(
+        db,
+        run_id=run_id_before,
+        end_reason=request.reason or "run_stop",
     )
     effective = result.get("effective") or {}
     report_bundle = maybe_generate_run_closeout_bundle(
@@ -679,20 +931,40 @@ def get_run_metrics(
 ):
     effective = runtime_config_service.get_effective(db)
     resolved_run_id = str(run_id or effective.get("SIMULATION_RUN_ID") or "").strip()
+    run_row = _get_simulation_run_row(db, run_id=resolved_run_id)
+    run_metadata = _serialize_simulation_run_metadata(run_row)
+    run_mode_value = (
+        str(run_metadata.get("run_mode") or "").strip()
+        if isinstance(run_metadata, dict)
+        else ""
+    ) or str(effective.get("SIMULATION_RUN_MODE") or "test")
+    condition_name_value = (
+        str(run_metadata.get("condition_name") or "").strip()
+        if isinstance(run_metadata, dict)
+        else ""
+    ) or (str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None)
+    season_number_value = (
+        int(run_metadata.get("season_number") or 0)
+        if isinstance(run_metadata, dict)
+        else 0
+    )
+    if season_number_value <= 0:
+        season_number_value = (
+            int(effective.get("SIMULATION_SEASON_NUMBER") or 0)
+            if int(effective.get("SIMULATION_SEASON_NUMBER") or 0) > 0
+            else 0
+        )
 
     if not resolved_run_id:
         return {
             "run_id": "",
-            "run_mode": str(effective.get("SIMULATION_RUN_MODE") or "test"),
-            "condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None,
-            "season_number": (
-                int(effective.get("SIMULATION_SEASON_NUMBER") or 0)
-                if int(effective.get("SIMULATION_SEASON_NUMBER") or 0) > 0
-                else None
-            ),
+            "run_mode": run_mode_value,
+            "condition_name": condition_name_value,
+            "season_number": season_number_value or None,
             "simulation_active": bool(effective.get("SIMULATION_ACTIVE", True)),
             "simulation_paused": bool(effective.get("SIMULATION_PAUSED", False)),
             "run_started_at": None,
+            "run_metadata": None,
             "llm": {
                 "calls": 0,
                 "success_calls": 0,
@@ -729,7 +1001,11 @@ def get_run_metrics(
         )
 
     fallback_start = now_utc() - timedelta(hours=int(hours_fallback))
-    since_ts = (run_started_at.created_at if run_started_at and run_started_at.created_at else fallback_start)
+    since_ts = (
+        run_row.started_at
+        if run_row and run_row.started_at
+        else (run_started_at.created_at if run_started_at and run_started_at.created_at else fallback_start)
+    )
 
     llm_totals = db.execute(
         text(
@@ -801,16 +1077,16 @@ def get_run_metrics(
 
     return {
         "run_id": resolved_run_id,
-        "run_mode": str(effective.get("SIMULATION_RUN_MODE") or "test"),
-        "condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None,
-        "season_number": (
-            int(effective.get("SIMULATION_SEASON_NUMBER") or 0)
-            if int(effective.get("SIMULATION_SEASON_NUMBER") or 0) > 0
-            else None
-        ),
+        "run_mode": run_mode_value,
+        "condition_name": condition_name_value,
+        "season_number": season_number_value or None,
         "simulation_active": bool(effective.get("SIMULATION_ACTIVE", True)),
         "simulation_paused": bool(effective.get("SIMULATION_PAUSED", False)),
-        "run_started_at": since_ts.isoformat() if since_ts else None,
+        "run_started_at": (
+            (run_row.started_at.isoformat() if run_row and run_row.started_at else None)
+            or (since_ts.isoformat() if since_ts else None)
+        ),
+        "run_metadata": run_metadata,
         "llm": {
             "calls": int((llm_totals.calls if llm_totals else 0) or 0),
             "success_calls": int((llm_totals.success_calls if llm_totals else 0) or 0),
