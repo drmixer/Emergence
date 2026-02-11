@@ -21,6 +21,7 @@ from app.api.analytics import router as analytics_router
 from app.api.admin import router as admin_router
 from app.api.admin_archive import router as admin_archive_router
 from app.api.archive import router as archive_router
+from app.api.reports import router as reports_router
 from app.services.sse import router as sse_router, event_polling_task
 from app.api.twitter import router as twitter_router
 from app.api.predictions import router as predictions_router
@@ -83,6 +84,7 @@ app.include_router(analytics_router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(admin_archive_router, prefix="/api/admin/archive", tags=["admin-archive"])
 app.include_router(archive_router, prefix="/api/archive", tags=["archive"])
+app.include_router(reports_router, prefix="/api/reports", tags=["reports"])
 app.include_router(sse_router, prefix="/api/events", tags=["sse"])
 app.include_router(twitter_router, prefix="/api", tags=["twitter"])
 app.include_router(predictions_router, prefix="/api/predictions", tags=["predictions"])

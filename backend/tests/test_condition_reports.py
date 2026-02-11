@@ -6,9 +6,11 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.models.models import Agent, Event, SimulationRun
+from app.models.models import Agent, Event, RunReportArtifact, SimulationRun
 from app.services.condition_reports import (
     compare_condition_runs,
+    generate_and_record_condition_comparison,
+    generate_and_record_run_summary,
     generate_run_report_summary,
     render_condition_comparison_markdown,
     render_run_report_markdown,
@@ -86,6 +88,7 @@ def _build_session():
     SimulationRun.__table__.create(bind=engine)
     Agent.__table__.create(bind=engine)
     Event.__table__.create(bind=engine)
+    RunReportArtifact.__table__.create(bind=engine)
 
     with engine.begin() as conn:
         conn.execute(
@@ -248,5 +251,62 @@ def test_compare_condition_runs_computes_median_and_spread():
         assert _metric_spread(payload, "llm_calls") == 4.0
         assert _metric_value(payload, "proposal_actions") == 2.0
         assert "Core Metric Aggregates (Median + Spread)" in markdown
+    finally:
+        db_session.close()
+
+
+def test_generate_and_record_reports_persists_artifact_rows():
+    db_session = _build_session()
+    try:
+        agent = Agent(
+            agent_number=1,
+            display_name="Agent 1",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add(agent)
+        db_session.flush()
+
+        base_time = datetime(2026, 2, 11, 0, 0, tzinfo=timezone.utc)
+        db_session.add(
+            SimulationRun(
+                run_id="run-record-1",
+                run_mode="real",
+                protocol_version="protocol_v1",
+                condition_name="baseline_v1",
+                run_class="standard_72h",
+                started_at=base_time,
+            )
+        )
+        _seed_llm_usage_rows(
+            db_session,
+            run_id="run-record-1",
+            agent_id=agent.id,
+            calls=2,
+            cost_per_call=0.2,
+            start_at=base_time,
+        )
+        db_session.commit()
+
+        run_summary = generate_and_record_run_summary(db_session, run_id="run-record-1")
+        condition_summary = generate_and_record_condition_comparison(
+            db_session,
+            condition_name="baseline_v1",
+            min_replicates=1,
+        )
+        db_session.commit()
+
+        assert run_summary["payload"]["run_id"] == "run-record-1"
+        assert condition_summary["payload"]["condition_name"] == "baseline_v1"
+        assert db_session.query(RunReportArtifact).filter_by(artifact_type="run_summary").count() == 2
+        assert (
+            db_session.query(RunReportArtifact)
+            .filter_by(artifact_type="condition_comparison")
+            .count()
+            == 2
+        )
     finally:
         db_session.close()

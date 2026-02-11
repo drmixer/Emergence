@@ -12,8 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.database import SessionLocal
 from app.services.condition_reports import (
-    generate_run_report_summary,
-    write_run_summary_artifacts,
+    generate_and_record_run_summary,
 )
 
 
@@ -26,13 +25,15 @@ def main() -> int:
 
     db = SessionLocal()
     try:
-        payload = generate_run_report_summary(
+        result = generate_and_record_run_summary(
             db,
             run_id=str(args.run_id or "").strip(),
             condition_name=(str(args.condition or "").strip() or None),
             season_number=(int(args.season_number) if int(args.season_number or 0) > 0 else None),
         )
-        artifacts = write_run_summary_artifacts(payload)
+        db.commit()
+        payload = result.get("payload") or {}
+        artifacts = result.get("artifacts") or {}
         print(
             json.dumps(
                 {
@@ -46,6 +47,9 @@ def main() -> int:
             )
         )
         return 0
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

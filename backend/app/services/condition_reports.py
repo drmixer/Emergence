@@ -13,9 +13,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.time import now_utc
-from app.models.models import SimulationRun
+from app.models.models import RunReportArtifact, SimulationRun
 
 UNKNOWN_CONDITION = "unknown"
+REPORT_TEMPLATE_VERSION = "condition-report-v1"
+REPORT_GENERATOR_VERSION = "condition-report-v1"
+
+ARTIFACT_TYPE_RUN_SUMMARY = "run_summary"
+ARTIFACT_TYPE_CONDITION_COMPARISON = "condition_comparison"
 
 CORE_METRICS = (
     ("llm_calls", "LLM Calls"),
@@ -368,6 +373,7 @@ def compare_condition_runs(
     comparison = {
         "generated_at_utc": now_utc().isoformat(),
         "condition_name": clean_condition,
+        "artifact_run_id": condition_artifact_run_id(clean_condition),
         "season_number": (int(season_number) if season_number else None),
         "min_replicates_required": int(min_replicates),
         "replicate_count": len(run_summaries),
@@ -424,6 +430,53 @@ def _safe_slug(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in str(value or "").strip().lower()).strip("-") or "unknown"
 
 
+def condition_artifact_run_id(condition_name: str) -> str:
+    return f"condition-{_safe_slug(condition_name)}"[:64]
+
+
+def _record_artifact(
+    db: Session,
+    *,
+    run_id: str,
+    artifact_type: str,
+    artifact_format: str,
+    artifact_path: str,
+    metadata_json: dict[str, Any],
+) -> RunReportArtifact:
+    row = (
+        db.query(RunReportArtifact)
+        .filter(
+            RunReportArtifact.run_id == str(run_id),
+            RunReportArtifact.artifact_type == str(artifact_type),
+            RunReportArtifact.artifact_format == str(artifact_format),
+        )
+        .first()
+    )
+    if row is None:
+        row = RunReportArtifact(
+            run_id=str(run_id),
+            artifact_type=str(artifact_type),
+            artifact_format=str(artifact_format),
+            artifact_path=str(artifact_path),
+            status="completed",
+            template_version=REPORT_TEMPLATE_VERSION,
+            generator_version=REPORT_GENERATOR_VERSION,
+            metadata_json=dict(metadata_json),
+            error_message=None,
+        )
+        db.add(row)
+        return row
+
+    row.artifact_path = str(artifact_path)
+    row.status = "completed"
+    row.template_version = REPORT_TEMPLATE_VERSION
+    row.generator_version = REPORT_GENERATOR_VERSION
+    row.metadata_json = dict(metadata_json)
+    row.error_message = None
+    db.add(row)
+    return row
+
+
 def write_json_markdown_artifacts(
     *,
     outdir: Path,
@@ -450,6 +503,38 @@ def write_run_summary_artifacts(payload: dict[str, Any]) -> dict[str, str]:
     )
 
 
+def record_run_summary_artifacts(
+    db: Session,
+    *,
+    payload: dict[str, Any],
+    artifacts: dict[str, str],
+) -> None:
+    run_id = _coerce_run_id(str(payload.get("run_id") or ""))
+    metadata = {
+        "run_id": run_id,
+        "condition_name": str(payload.get("condition_name") or UNKNOWN_CONDITION),
+        "season_number": payload.get("season_number"),
+        "replicate_index": int(payload.get("replicate_index") or 1),
+        "replicate_count": int(payload.get("replicate_count") or 1),
+    }
+    _record_artifact(
+        db,
+        run_id=run_id,
+        artifact_type=ARTIFACT_TYPE_RUN_SUMMARY,
+        artifact_format="json",
+        artifact_path=str(artifacts.get("json") or ""),
+        metadata_json=metadata,
+    )
+    _record_artifact(
+        db,
+        run_id=run_id,
+        artifact_type=ARTIFACT_TYPE_RUN_SUMMARY,
+        artifact_format="markdown",
+        artifact_path=str(artifacts.get("markdown") or ""),
+        metadata_json=metadata,
+    )
+
+
 def write_condition_comparison_artifacts(payload: dict[str, Any]) -> dict[str, str]:
     condition = _safe_slug(str(payload.get("condition_name") or "unknown"))
     outdir = _repo_root() / "output" / "reports" / "conditions" / condition
@@ -459,3 +544,78 @@ def write_condition_comparison_artifacts(payload: dict[str, Any]) -> dict[str, s
         payload=payload,
         markdown=render_condition_comparison_markdown(payload),
     )
+
+
+def record_condition_comparison_artifacts(
+    db: Session,
+    *,
+    payload: dict[str, Any],
+    artifacts: dict[str, str],
+) -> None:
+    condition_name = _coerce_condition_name(str(payload.get("condition_name") or ""))
+    artifact_run_id = str(payload.get("artifact_run_id") or condition_artifact_run_id(condition_name))
+    metadata = {
+        "condition_name": condition_name,
+        "season_number": payload.get("season_number"),
+        "replicate_count": int(payload.get("replicate_count") or 0),
+        "meets_replicate_threshold": bool(payload.get("meets_replicate_threshold")),
+        "run_ids": list(payload.get("run_ids") or []),
+    }
+    _record_artifact(
+        db,
+        run_id=artifact_run_id,
+        artifact_type=ARTIFACT_TYPE_CONDITION_COMPARISON,
+        artifact_format="json",
+        artifact_path=str(artifacts.get("json") or ""),
+        metadata_json=metadata,
+    )
+    _record_artifact(
+        db,
+        run_id=artifact_run_id,
+        artifact_type=ARTIFACT_TYPE_CONDITION_COMPARISON,
+        artifact_format="markdown",
+        artifact_path=str(artifacts.get("markdown") or ""),
+        metadata_json=metadata,
+    )
+
+
+def generate_and_record_run_summary(
+    db: Session,
+    *,
+    run_id: str,
+    condition_name: str | None = None,
+    season_number: int | None = None,
+) -> dict[str, Any]:
+    payload = generate_run_report_summary(
+        db,
+        run_id=run_id,
+        condition_name=condition_name,
+        season_number=season_number,
+    )
+    artifacts = write_run_summary_artifacts(payload)
+    record_run_summary_artifacts(db, payload=payload, artifacts=artifacts)
+    return {
+        "payload": payload,
+        "artifacts": artifacts,
+    }
+
+
+def generate_and_record_condition_comparison(
+    db: Session,
+    *,
+    condition_name: str,
+    min_replicates: int = 3,
+    season_number: int | None = None,
+) -> dict[str, Any]:
+    payload = compare_condition_runs(
+        db,
+        condition_name=condition_name,
+        min_replicates=min_replicates,
+        season_number=season_number,
+    )
+    artifacts = write_condition_comparison_artifacts(payload)
+    record_condition_comparison_artifacts(db, payload=payload, artifacts=artifacts)
+    return {
+        "payload": payload,
+        "artifacts": artifacts,
+    }

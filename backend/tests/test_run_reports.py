@@ -127,6 +127,16 @@ def test_maybe_generate_scheduled_run_report_backfill_runs_generation(monkeypatc
     monkeypatch.setattr(run_reports, "_bundle_complete", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(run_reports, "rebuild_run_bundle", _fake_rebuild_run_bundle)
     monkeypatch.setattr(
+        run_reports,
+        "generate_and_record_run_summary",
+        lambda *_args, **_kwargs: {"payload": {"condition_name": "baseline_v1"}, "artifacts": {}},
+    )
+    monkeypatch.setattr(
+        run_reports,
+        "generate_and_record_condition_comparison",
+        lambda *_args, **_kwargs: {"payload": {"condition_name": "baseline_v1"}, "artifacts": {}},
+    )
+    monkeypatch.setattr(
         run_reports.runtime_config_service,
         "get_effective_value_cached",
         lambda key: {"SIMULATION_RUN_ID": "", "SIMULATION_ACTIVE": False, "SIMULATION_PAUSED": True}.get(key),

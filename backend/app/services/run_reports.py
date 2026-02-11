@@ -17,6 +17,11 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.time import ensure_utc, now_utc
 from app.models.models import AdminConfigChange, ArchiveArticle, RunReportArtifact
+from app.services.condition_reports import (
+    UNKNOWN_CONDITION as CONDITION_UNKNOWN,
+    generate_and_record_condition_comparison,
+    generate_and_record_run_summary,
+)
 from app.services.emergence_metrics import COOPERATION_EVENT_TYPES, CONFLICT_EVENT_TYPES
 from app.services.runtime_config import runtime_config_service
 
@@ -1539,6 +1544,41 @@ def maybe_generate_run_closeout_bundle(
             condition_name=condition_name,
             season_number=season_number,
         )
+        try:
+            db = SessionLocal()
+            try:
+                summary_result = generate_and_record_run_summary(
+                    db,
+                    run_id=clean_run_id,
+                    condition_name=condition_name,
+                    season_number=season_number,
+                )
+                summary_payload = summary_result.get("payload") or {}
+                resolved_condition = str(summary_payload.get("condition_name") or "").strip()
+                condition_comparison = None
+                if resolved_condition and resolved_condition != CONDITION_UNKNOWN:
+                    condition_comparison = generate_and_record_condition_comparison(
+                        db,
+                        condition_name=resolved_condition,
+                        min_replicates=3,
+                        season_number=season_number,
+                    )
+                db.commit()
+                result["viewer_reports"] = {
+                    "run_summary": summary_result,
+                    "condition_comparison": condition_comparison,
+                }
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.exception("Failed to generate viewer report artifacts for run_id=%s", clean_run_id)
+            result["viewer_reports"] = {
+                "status": "failed",
+                "error": str(exc),
+            }
         result["status"] = "generated"
         return result
     except Exception as exc:
@@ -1600,6 +1640,18 @@ async def maybe_generate_scheduled_run_report_backfill() -> dict[str, Any] | Non
                     run_id=run_id,
                     actor_id=actor_id,
                 )
+                summary_result = generate_and_record_run_summary(
+                    db,
+                    run_id=run_id,
+                )
+                summary_payload = summary_result.get("payload") or {}
+                resolved_condition = str(summary_payload.get("condition_name") or "").strip()
+                if resolved_condition and resolved_condition != CONDITION_UNKNOWN:
+                    generate_and_record_condition_comparison(
+                        db,
+                        condition_name=resolved_condition,
+                        min_replicates=3,
+                    )
                 db.commit()
                 generated.append(run_id)
             except Exception as exc:

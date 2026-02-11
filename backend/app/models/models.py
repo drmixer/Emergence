@@ -547,7 +547,7 @@ class RunReportArtifact(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "artifact_type", "artifact_format", name="uq_run_report_artifacts_key"),
         CheckConstraint(
-            "artifact_type IN ('technical_report', 'approachable_report', 'planner_report')",
+            "artifact_type IN ('technical_report', 'approachable_report', 'planner_report', 'run_summary', 'condition_comparison')",
             name="valid_run_report_artifact_type",
         ),
         CheckConstraint(

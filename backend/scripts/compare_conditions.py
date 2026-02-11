@@ -12,8 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.database import SessionLocal
 from app.services.condition_reports import (
-    compare_condition_runs,
-    write_condition_comparison_artifacts,
+    generate_and_record_condition_comparison,
 )
 
 
@@ -31,13 +30,15 @@ def main() -> int:
 
     db = SessionLocal()
     try:
-        payload = compare_condition_runs(
+        result = generate_and_record_condition_comparison(
             db,
             condition_name=str(args.condition or "").strip(),
             min_replicates=max(1, int(args.min_replicates or 1)),
             season_number=(int(args.season_number) if int(args.season_number or 0) > 0 else None),
         )
-        artifacts = write_condition_comparison_artifacts(payload)
+        db.commit()
+        payload = result.get("payload") or {}
+        artifacts = result.get("artifacts") or {}
         print(
             json.dumps(
                 {
@@ -50,6 +51,9 @@ def main() -> int:
             )
         )
         return 0
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
