@@ -2,10 +2,34 @@
  * API Service - Handles all communication with the backend
  */
 
-const API_BASE =
-    (typeof globalThis !== 'undefined' && globalThis?.process?.env?.NEXT_PUBLIC_API_URL) ||
-    ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ? import.meta.env.VITE_API_URL : '') ||
-    'http://localhost:8000'
+export function resolveApiBase() {
+    const configured =
+        String(
+            (typeof globalThis !== 'undefined' && globalThis?.process?.env?.NEXT_PUBLIC_API_URL) ||
+                ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ? import.meta.env.VITE_API_URL : '') ||
+                ''
+        )
+            .trim()
+            .replace(/\/+$/, '')
+
+    if (configured) {
+        if (typeof window !== 'undefined' && window.location.protocol === 'https:' && configured.startsWith('http://')) {
+            return configured.replace(/^http:\/\//, 'https://')
+        }
+        return configured
+    }
+
+    if (typeof window !== 'undefined') {
+        const host = String(window.location.hostname || '').toLowerCase()
+        if (host === 'emergence.quest' || host === 'www.emergence.quest') {
+            return 'https://backend-production-2f66.up.railway.app'
+        }
+    }
+
+    return 'http://localhost:8000'
+}
+
+const API_BASE = resolveApiBase()
 
 export function getViewerUserId() {
     let userId = localStorage.getItem('emergence_user_id')
