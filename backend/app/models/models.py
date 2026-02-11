@@ -574,6 +574,7 @@ class SimulationRun(Base):
     season_id = Column(String(64), nullable=True, index=True)
     season_number = Column(Integer, nullable=True, index=True)
     parent_run_id = Column(String(64), ForeignKey("simulation_runs.run_id"), nullable=True)
+    mirror_control_run_id = Column(String(64), ForeignKey("simulation_runs.run_id"), nullable=True, index=True)
     transfer_policy_version = Column(String(64), nullable=True)
     epoch_id = Column(String(64), nullable=True, index=True)
     run_class = Column(String(32), nullable=False, default="standard_72h")

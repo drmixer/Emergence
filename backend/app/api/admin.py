@@ -331,6 +331,7 @@ class RunStartRequest(BaseModel):
     season_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
     season_number: int | None = Field(default=None, ge=0, le=9999)
     parent_run_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
+    mirror_control_run_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
     transfer_policy_version: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
     epoch_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
     run_class: Literal["standard_72h", "deep_96h", "special_exploratory"] | None = Field(default=None)
@@ -344,6 +345,7 @@ class RunStartRequest(BaseModel):
         "hypothesis_id",
         "season_id",
         "parent_run_id",
+        "mirror_control_run_id",
         "transfer_policy_version",
         "epoch_id",
         mode="before",
@@ -407,6 +409,7 @@ def _resolve_run_start_metadata(
         "season_id": _clean_optional_identifier(request.season_id),
         "season_number": season_number if season_number > 0 else None,
         "parent_run_id": _clean_optional_identifier(request.parent_run_id),
+        "mirror_control_run_id": _clean_optional_identifier(request.mirror_control_run_id),
         "transfer_policy_version": _clean_optional_identifier(request.transfer_policy_version),
         "epoch_id": _clean_optional_identifier(request.epoch_id),
         "run_class": str(request.run_class or _DEFAULT_RUN_CLASS),
@@ -422,6 +425,7 @@ def _has_research_metadata(request: RunStartRequest) -> bool:
             request.season_id,
             request.season_number,
             request.parent_run_id,
+            request.mirror_control_run_id,
             request.transfer_policy_version,
             request.epoch_id,
             request.run_class,
@@ -429,29 +433,30 @@ def _has_research_metadata(request: RunStartRequest) -> bool:
     )
 
 
-def _validate_parent_run_reference(
+def _validate_run_reference(
     db: Session,
     *,
     run_id: str,
-    parent_run_id: str | None,
+    reference_run_id: str | None,
+    field_name: str,
 ) -> None:
-    parent_id = _clean_optional_identifier(parent_run_id)
-    if not parent_id:
+    reference_id = _clean_optional_identifier(reference_run_id)
+    if not reference_id:
         return
-    if parent_id == run_id:
+    if reference_id == run_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="parent_run_id must differ from run_id",
+            detail=f"{field_name} must differ from run_id",
         )
     parent_row = (
         db.query(SimulationRun.id)
-        .filter(SimulationRun.run_id == parent_id)
+        .filter(SimulationRun.run_id == reference_id)
         .first()
     )
     if parent_row is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="parent_run_id must reference an existing simulation run",
+            detail=f"{field_name} must reference an existing simulation run",
         )
 
 
@@ -481,6 +486,7 @@ def _upsert_simulation_run_start(
             season_id=metadata.get("season_id"),
             season_number=metadata.get("season_number"),
             parent_run_id=metadata.get("parent_run_id"),
+            mirror_control_run_id=metadata.get("mirror_control_run_id"),
             transfer_policy_version=metadata.get("transfer_policy_version"),
             epoch_id=metadata.get("epoch_id"),
             run_class=str(metadata.get("run_class") or _DEFAULT_RUN_CLASS),
@@ -500,6 +506,7 @@ def _upsert_simulation_run_start(
         row.season_id = metadata.get("season_id")
         row.season_number = metadata.get("season_number")
         row.parent_run_id = metadata.get("parent_run_id")
+        row.mirror_control_run_id = metadata.get("mirror_control_run_id")
         row.transfer_policy_version = metadata.get("transfer_policy_version")
         row.epoch_id = metadata.get("epoch_id")
         row.run_class = str(metadata.get("run_class") or row.run_class or _DEFAULT_RUN_CLASS)
@@ -560,6 +567,7 @@ def _serialize_simulation_run_metadata(row: SimulationRun | None) -> dict[str, A
         "season_id": row.season_id,
         "season_number": row.season_number,
         "parent_run_id": row.parent_run_id,
+        "mirror_control_run_id": row.mirror_control_run_id,
         "transfer_policy_version": row.transfer_policy_version,
         "epoch_id": row.epoch_id,
         "run_class": row.run_class,
@@ -791,10 +799,17 @@ def start_simulation_run(
     mode = str(request.mode or "").strip()
     run_id = _normalize_run_id(request.run_id, mode)
     metadata = _resolve_run_start_metadata(request, run_id=run_id, mode=mode)
-    _validate_parent_run_reference(
+    _validate_run_reference(
         db,
         run_id=run_id,
-        parent_run_id=str(metadata.get("parent_run_id") or "").strip() or None,
+        reference_run_id=str(metadata.get("parent_run_id") or "").strip() or None,
+        field_name="parent_run_id",
+    )
+    _validate_run_reference(
+        db,
+        run_id=run_id,
+        reference_run_id=str(metadata.get("mirror_control_run_id") or "").strip() or None,
+        field_name="mirror_control_run_id",
     )
 
     if request.reset_world and mode != "test":

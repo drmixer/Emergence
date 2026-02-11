@@ -1,9 +1,10 @@
-.PHONY: sim-status sim-start sim-stop report-rebuild report-tech report-story report-plan report-export compare-condition
+.PHONY: sim-status sim-start sim-stop report-rebuild report-tech report-story report-plan report-export compare-condition tournament-select
 
 RUN_MODE ?= real
 RUN_ID ?=
 CONDITION ?=
 SEASON_NUMBER ?=
+EPOCH_ID ?=
 
 sim-status:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/simulation_control.py status
@@ -46,3 +47,6 @@ report-export:
 compare-condition:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/compare_conditions.py --condition "$(CONDITION)" \
 		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
+
+tournament-select:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/select_epoch_tournament_candidates.py --epoch-id "$(EPOCH_ID)"

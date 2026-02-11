@@ -127,6 +127,7 @@ def _serialize_run_registry_metadata(row: SimulationRun | None) -> dict[str, Any
         "season_id": str(row.season_id or "").strip() or None,
         "season_number": (int(row.season_number) if row.season_number else None),
         "parent_run_id": str(row.parent_run_id or "").strip() or None,
+        "mirror_control_run_id": str(row.mirror_control_run_id or "").strip() or None,
         "transfer_policy_version": str(row.transfer_policy_version or "").strip() or None,
         "epoch_id": str(row.epoch_id or "").strip() or None,
         "run_class": str(row.run_class or "").strip() or None,

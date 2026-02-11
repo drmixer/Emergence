@@ -148,7 +148,15 @@ def test_run_start_and_stop_persist_research_metadata_and_end_reason(db_session,
         run_class="standard_72h",
         started_at=now_utc(),
     )
+    mirror_row = SimulationRun(
+        run_id="real-mirror-run",
+        run_mode="real",
+        protocol_version="protocol_v1",
+        run_class="standard_72h",
+        started_at=now_utc(),
+    )
     db_session.add(parent_row)
+    db_session.add(mirror_row)
     db_session.commit()
 
     client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
@@ -161,6 +169,7 @@ def test_run_start_and_stop_persist_research_metadata_and_end_reason(db_session,
         "season_id": "season_02",
         "season_number": 2,
         "parent_run_id": "real-parent-run",
+        "mirror_control_run_id": "real-mirror-run",
         "transfer_policy_version": "season_transfer_policy_v1",
         "epoch_id": "epoch_01",
         "run_class": "deep_96h",
@@ -182,6 +191,7 @@ def test_run_start_and_stop_persist_research_metadata_and_end_reason(db_session,
     assert started.season_id == "season_02"
     assert started.season_number == 2
     assert started.parent_run_id == "real-parent-run"
+    assert started.mirror_control_run_id == "real-mirror-run"
     assert started.transfer_policy_version == "season_transfer_policy_v1"
     assert started.epoch_id == "epoch_01"
     assert started.run_class == "deep_96h"
@@ -248,8 +258,35 @@ def test_run_start_rejects_missing_parent_run_reference(db_session, monkeypatch)
     assert response.json()["detail"] == "parent_run_id must reference an existing simulation run"
 
 
+def test_run_start_rejects_missing_mirror_control_run_reference(db_session, monkeypatch):
+    client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
+
+    with client:
+        response = client.post(
+            "/api/admin/control/run/start",
+            json={
+                "mode": "real",
+                "run_id": "real-child",
+                "mirror_control_run_id": "real-mirror-missing",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "mirror_control_run_id must reference an existing simulation run"
+
+
 def test_admin_status_surfaces_run_metadata_for_active_run(db_session, monkeypatch):
     _stub_budget(monkeypatch)
+    db_session.add(
+        SimulationRun(
+            run_id="real-status-mirror",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="standard_72h",
+            started_at=now_utc(),
+        )
+    )
+    db_session.commit()
     client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
 
     with client:
@@ -264,6 +301,7 @@ def test_admin_status_surfaces_run_metadata_for_active_run(db_session, monkeypat
                 "season_id": "season_10",
                 "season_number": 10,
                 "transfer_policy_version": "season_transfer_policy_v2",
+                "mirror_control_run_id": "real-status-mirror",
                 "epoch_id": "epoch_03",
                 "run_class": "special_exploratory",
                 "reason": "status_meta_test",
@@ -283,6 +321,7 @@ def test_admin_status_surfaces_run_metadata_for_active_run(db_session, monkeypat
     assert metadata["season_id"] == "season_10"
     assert metadata["season_number"] == 10
     assert metadata["transfer_policy_version"] == "season_transfer_policy_v2"
+    assert metadata["mirror_control_run_id"] == "real-status-mirror"
     assert metadata["epoch_id"] == "epoch_03"
     assert metadata["run_class"] == "special_exploratory"
     assert metadata["start_reason"] == "status_meta_test"

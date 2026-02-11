@@ -158,3 +158,22 @@ def test_resolve_status_label_blocks_replicated_for_exploratory_run_class():
         run_class="special_exploratory",
     )
     assert status_label == run_reports.STATUS_OBSERVATIONAL
+
+
+def test_story_payload_and_markdown_include_exploratory_claim_boundary():
+    snapshot = _sample_snapshot()
+    snapshot["run_class"] = "special_exploratory"
+
+    payload = run_reports._build_story_payload(
+        snapshot=snapshot,
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="baseline_v1",
+        season_number=2,
+        replicate_count=1,
+    )
+    markdown = run_reports._story_markdown(payload)
+
+    assert payload["run_class"] == "special_exploratory"
+    assert payload["exploratory_label"] == "exploratory"
+    assert "Tournament claim boundary" in markdown

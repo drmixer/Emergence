@@ -48,6 +48,7 @@ MANAGED_TAG_PREFIXES = (
     "run_id:",
     "season:",
     "condition:",
+    "run_class:",
     "topic:",
     "status:",
     "evidence:",
@@ -196,6 +197,7 @@ def build_required_report_tags(
     run_id: str,
     condition_name: str,
     season_number: int | None,
+    run_class: str | None = None,
     status_label: str,
     evidence_completeness: str,
     topic_tags: list[str] | None = None,
@@ -208,11 +210,14 @@ def build_required_report_tags(
 
     season_tag = f"season:{int(season_number)}" if season_number else "season:unknown"
     condition_tag = f"condition:{_clean_condition_name(condition_name)}"
+    run_class_clean = str(run_class or "").strip().lower() or "unknown"
+    run_class_tag = f"run_class:{_slug_fragment(run_class_clean, fallback='unknown')}"
     return normalize_report_tags(
         [
             f"run_id:{run_id}",
             season_tag,
             condition_tag,
+            run_class_tag,
             *normalized_topics,
             f"status:{status_label}",
             f"evidence:{evidence_completeness}",
@@ -755,15 +760,25 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
 
 
 def _story_markdown(payload: dict[str, Any]) -> str:
+    run_class = str(payload.get("run_class") or "").strip().lower()
     rows = [
         f"# Run {payload.get('run_id')} Story Report",
         "",
         f"- Generated at (UTC): {payload.get('generated_at_utc')}",
+        f"- Run class: {payload.get('run_class')}",
+        f"- Exploratory label: {payload.get('exploratory_label')}",
         f"- Status label: {payload.get('status_label')}",
         f"- Evidence completeness: {payload.get('evidence_completeness')}",
         f"- Condition: {payload.get('condition_name')}",
         "",
     ]
+    if run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
+        rows.extend(
+            [
+                "> Tournament claim boundary: special_exploratory outputs are exploratory and excluded from baseline condition synthesis by default.",
+                "",
+            ]
+        )
     for section in payload.get("sections") or []:
         heading = str(section.get("heading") or "").strip()
         if not heading:
@@ -976,6 +991,11 @@ def _build_technical_payload(
         **snapshot,
         "template_version": REPORT_TEMPLATE_VERSION,
         "generator_version": REPORT_GENERATOR_VERSION,
+        "exploratory_label": (
+            "exploratory"
+            if str(snapshot.get("run_class") or "").strip().lower() == RUN_CLASS_SPECIAL_EXPLORATORY
+            else "standard"
+        ),
         "status_label": status_label,
         "evidence_completeness": evidence_completeness,
         "condition_name": condition_name,
@@ -997,6 +1017,12 @@ def _build_story_payload(
     return {
         "run_id": snapshot.get("run_id"),
         "generated_at_utc": snapshot.get("generated_at_utc"),
+        "run_class": snapshot.get("run_class"),
+        "exploratory_label": (
+            "exploratory"
+            if str(snapshot.get("run_class") or "").strip().lower() == RUN_CLASS_SPECIAL_EXPLORATORY
+            else "standard"
+        ),
         "status_label": status_label,
         "evidence_completeness": evidence_completeness,
         "condition_name": condition_name,
@@ -1270,6 +1296,7 @@ def generate_run_technical_artifact(
         run_id=clean_run_id,
         condition_name=clean_condition,
         season_number=clean_season_number,
+        run_class=str(snapshot.get("run_class") or "").strip().lower() or None,
         status_label=status_label,
         evidence_completeness=evidence_completeness,
         topic_tags=topic_tags,

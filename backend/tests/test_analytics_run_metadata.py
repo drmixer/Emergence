@@ -16,6 +16,7 @@ def test_serialize_run_registry_metadata_includes_phase4_fields():
         condition_name="carryover_v1",
         season_id="season-5",
         season_number=5,
+        mirror_control_run_id="run-meta-mirror",
         transfer_policy_version="season_transfer_policy_v1",
         run_class="deep_96h",
         carryover_agent_count=12,
@@ -30,6 +31,7 @@ def test_serialize_run_registry_metadata_includes_phase4_fields():
     assert payload is not None
     assert payload["season_id"] == "season-5"
     assert payload["season_number"] == 5
+    assert payload["mirror_control_run_id"] == "run-meta-mirror"
     assert payload["transfer_policy_version"] == "season_transfer_policy_v1"
     assert payload["carryover_agent_count"] == 12
     assert payload["fresh_agent_count"] == 38
