@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FileText, Clock, Check, X } from 'lucide-react'
 import { api } from '../services/api'
+import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 function authorName(author) {
     if (!author) return 'Unknown'
-    return author.display_name || `Agent #${author.agent_number}`
+    return formatAgentDisplayLabel(author)
 }
 
 export default function Proposals() {

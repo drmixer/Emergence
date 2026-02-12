@@ -12,6 +12,7 @@ import {
     RefreshCw
 } from 'lucide-react'
 import { api } from '../services/api'
+import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 function titleCase(s) {
     if (!s) return ''
@@ -74,7 +75,7 @@ const themes = {
 function QuoteCardPreview({ quote, theme, showBranding = true }) {
     const themeStyle = themes[theme] || themes.dark
 
-    const agentName = quote.agent_name || `Agent #${quote.agent_number}`
+    const agentName = formatAgentDisplayLabel(quote)
 
     return (
         <div
@@ -188,7 +189,7 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
     // Copy quote text to clipboard
     const copyQuote = useCallback(async () => {
         if (!selectedQuote) return
-        const text = `"${selectedQuote.content}" — ${selectedQuote.agent_name || `Agent #${selectedQuote.agent_number}`}`
+        const text = `"${selectedQuote.content}" — ${formatAgentDisplayLabel(selectedQuote)}`
 
         try {
             await navigator.clipboard.writeText(text)
@@ -208,7 +209,7 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
     // Share to Twitter
     const shareToTwitter = useCallback(() => {
         if (!selectedQuote) return
-        const text = `"${selectedQuote.content}" — ${selectedQuote.agent_name || `Agent #${selectedQuote.agent_number}`}`
+        const text = `"${selectedQuote.content}" — ${formatAgentDisplayLabel(selectedQuote)}`
         const url = getShareUrl()
         const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}&hashtags=Emergence,AI`
         window.open(tweetUrl, '_blank', 'width=550,height=420')
@@ -388,7 +389,7 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
 export function QuoteDisplay({ quote, compact = false }) {
     if (!quote) return null
 
-    const agentName = quote.agent_name || `Agent #${quote.agent_number}`
+    const agentName = formatAgentDisplayLabel(quote)
 
     return (
         <div className={`quote-display ${compact ? 'compact' : ''}`}>

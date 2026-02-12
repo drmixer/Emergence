@@ -9,6 +9,7 @@ import {
   Layers,
 } from 'lucide-react'
 import { api } from '../services/api'
+import GlossaryTooltip from '../components/GlossaryTooltip'
 
 function formatTimestamp(value) {
   if (!value) return 'Unknown'
@@ -101,7 +102,15 @@ export default function Reports() {
           Reports
         </h1>
         <p className="page-description">
-          Viewer-facing artifact index for run summaries and condition comparisons.
+          Viewer-facing artifact index for
+          {' '}
+          <GlossaryTooltip termKey="run">run</GlossaryTooltip>
+          {' '}
+          summaries and
+          {' '}
+          <GlossaryTooltip termKey="condition">condition</GlossaryTooltip>
+          {' '}
+          comparisons.
         </p>
       </div>
 
@@ -112,7 +121,9 @@ export default function Reports() {
           <div className="card-header">
             <h3>
               <Hash size={16} />
-              Run Reports
+              <GlossaryTooltip termKey="run">Run</GlossaryTooltip>
+              {' '}
+              Reports
             </h3>
           </div>
           <div className="card-body reports-filter-body">
@@ -146,7 +157,9 @@ export default function Reports() {
           <div className="card-header">
             <h3>
               <Layers size={16} />
-              Condition Reports
+              <GlossaryTooltip termKey="condition">Condition</GlossaryTooltip>
+              {' '}
+              Reports
             </h3>
           </div>
           <div className="card-body reports-filter-body">
@@ -231,7 +244,10 @@ export default function Reports() {
                       <div key={item.id} className="reports-item">
                         <div className="reports-item-main">
                           <strong>{String(item.artifact_format || '').toUpperCase()}</strong>
-                          <span>Replicates: {Number(metadata.replicate_count || 0)}</span>
+                          <span>
+                            <GlossaryTooltip termKey="replicate">Replicates</GlossaryTooltip>
+                            : {Number(metadata.replicate_count || 0)}
+                          </span>
                           <span>
                             Threshold met: {metadata.meets_replicate_threshold ? 'yes' : 'no'}
                           </span>

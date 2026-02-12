@@ -165,10 +165,13 @@ def normalize_report_tags(raw_tags: list[str] | tuple[str, ...] | None) -> list[
 
 
 def _clean_condition_name(raw_condition: str | None) -> str:
-    clean = _slug_fragment(str(raw_condition or "").strip(), fallback=UNKNOWN_CONDITION)
-    if clean == "run":
+    clean = str(raw_condition or "").strip().lower()
+    if not clean:
         return UNKNOWN_CONDITION
-    return clean
+    clean = re.sub(r"\s+", "_", clean)
+    clean = re.sub(r"[^a-z0-9:_-]", "_", clean)
+    clean = re.sub(r"_+", "_", clean).strip("_")
+    return clean or UNKNOWN_CONDITION
 
 
 def _clean_season_number(raw_season_number: int | None) -> int | None:
@@ -367,27 +370,37 @@ def _count_condition_replicates(db: Session, *, condition_name: str, run_id: str
     if clean_condition == UNKNOWN_CONDITION:
         return 1, None, claim_gate
 
-    condition_fragment = f'%\"condition:{clean_condition}\"%'
+    condition_variants = {clean_condition}
+    legacy_slug = _slug_fragment(clean_condition, fallback=clean_condition)
+    if legacy_slug and legacy_slug != clean_condition:
+        condition_variants.add(legacy_slug)
+
+    run_ids = {run_id}
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT DISTINCT evidence_run_id
-                FROM archive_articles
-                WHERE content_type = :content_type
-                  AND evidence_run_id IS NOT NULL
-                  AND CAST(tags AS TEXT) LIKE :condition_fragment
-                """
-            ),
-            {
-                "content_type": CONTENT_TYPE_TECHNICAL,
-                "condition_fragment": condition_fragment,
-            },
-        ).fetchall()
+        for condition_variant in sorted(condition_variants):
+            condition_fragment = f'%\"condition:{condition_variant}\"%'
+            rows = db.execute(
+                text(
+                    """
+                    SELECT DISTINCT evidence_run_id
+                    FROM archive_articles
+                    WHERE content_type = :content_type
+                      AND evidence_run_id IS NOT NULL
+                      AND CAST(tags AS TEXT) LIKE :condition_fragment
+                    """
+                ),
+                {
+                    "content_type": CONTENT_TYPE_TECHNICAL,
+                    "condition_fragment": condition_fragment,
+                },
+            ).fetchall()
+            run_ids.update(
+                str(row.evidence_run_id or "").strip()
+                for row in rows
+                if str(row.evidence_run_id or "").strip()
+            )
     except Exception:
         return 1, None, claim_gate
-    run_ids = {str(row.evidence_run_id or "").strip() for row in rows if str(row.evidence_run_id or "").strip()}
-    run_ids.add(run_id)
     return max(1, len(run_ids)), None, claim_gate
 
 

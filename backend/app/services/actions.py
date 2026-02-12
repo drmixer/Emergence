@@ -3,6 +3,7 @@ Action Execution and Validation - Handles all agent actions.
 """
 from datetime import datetime, timedelta
 from decimal import Decimal
+from math import ceil
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -36,7 +37,6 @@ EFFICIENCY_CURVE = {
 ACTION_COSTS = {
     "idle": Decimal("0.0"),           # Free - conserving energy is valid strategy
     "work": Decimal("0.0"),           # Free - produces resources, no overhead
-    "set_name": Decimal("0.0"),       # Free - one-time identity action
     "forum_post": Decimal("0.2"),     # Talking is cheap, but not free
     "forum_reply": Decimal("0.1"),    # Replies are lighter than new posts
     "direct_message": Decimal("0.1"), # Private communication
@@ -50,29 +50,77 @@ ACTION_COSTS = {
     "vote_enforcement": Decimal("0.3"),    # Slightly more than regular vote
 }
 
+RATE_LIMIT_REASON = "Rate limit exceeded (max actions per hour)"
+SANCTIONED_RATE_LIMIT_REASON = "You are SANCTIONED - limited to 1 action per hour"
+
+
+def get_action_rate_limit_state(db: Session, agent: Agent, *, now: Optional[datetime] = None) -> dict:
+    """Return rolling-hour action budget state for an agent."""
+    current_time = now or now_utc()
+
+    sanctioned_until = ensure_utc(agent.sanctioned_until)
+    is_sanctioned = bool(sanctioned_until and sanctioned_until > current_time)
+    max_actions_per_hour = 1 if is_sanctioned else int(settings.MAX_ACTIONS_PER_HOUR)
+
+    hour_ago = current_time - timedelta(hours=1)
+    recent_actions_q = db.query(AgentAction).filter(
+        AgentAction.agent_id == agent.id,
+        AgentAction.created_at > hour_ago,
+    )
+    actions_used_this_hour = int(recent_actions_q.count() or 0)
+    actions_remaining_this_hour = max(0, max_actions_per_hour - actions_used_this_hour)
+
+    next_reset_at: Optional[datetime] = None
+    if actions_used_this_hour > 0:
+        oldest_recent_action = recent_actions_q.order_by(AgentAction.created_at.asc()).first()
+        oldest_created_at = ensure_utc(oldest_recent_action.created_at) if oldest_recent_action else None
+        if oldest_created_at:
+            next_reset_at = oldest_created_at + timedelta(hours=1)
+
+    return {
+        "is_sanctioned": is_sanctioned,
+        "max_actions_per_hour": max_actions_per_hour,
+        "actions_used_this_hour": actions_used_this_hour,
+        "actions_remaining_this_hour": actions_remaining_this_hour,
+        "next_reset_at": next_reset_at,
+    }
+
+
+def _rate_limit_retry_after_seconds(rate_limit_state: dict, *, now: datetime) -> int:
+    """Compute the suggested wait time before retrying another action."""
+    next_reset_at = ensure_utc(rate_limit_state.get("next_reset_at"))
+    if next_reset_at and next_reset_at > now:
+        return max(1, int(ceil((next_reset_at - now).total_seconds())))
+    # Fallback to one minute if reset cannot be computed.
+    return 60
+
 
 async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
     """Validate an action is allowed."""
     action_type = action.get("action", "")
     now = now_utc()
-    
-    # Check if agent is sanctioned (Phase 3: Teeth)
-    # Sanctioned agents have severely reduced action rate (1 per hour instead of normal limit)
-    sanctioned_until = ensure_utc(agent.sanctioned_until)
-    sanctioned = sanctioned_until and sanctioned_until > now
-    sanction_rate_limit = 1 if sanctioned else settings.MAX_ACTIONS_PER_HOUR
-    
-    # Check rate limiting
-    hour_ago = now - timedelta(hours=1)
-    recent_actions = db.query(AgentAction).filter(
-        AgentAction.agent_id == agent.id,
-        AgentAction.created_at > hour_ago
-    ).count()
-    
-    if recent_actions >= sanction_rate_limit:
-        if sanctioned:
-            return {"valid": False, "reason": "You are SANCTIONED - limited to 1 action per hour"}
-        return {"valid": False, "reason": "Rate limit exceeded (max actions per hour)"}
+
+    # Check rate limiting.
+    rate_limit_state = get_action_rate_limit_state(db, agent, now=now)
+    if rate_limit_state["actions_remaining_this_hour"] <= 0:
+        next_reset_at = ensure_utc(rate_limit_state.get("next_reset_at"))
+        reason = (
+            SANCTIONED_RATE_LIMIT_REASON
+            if rate_limit_state["is_sanctioned"]
+            else RATE_LIMIT_REASON
+        )
+        return {
+            "valid": False,
+            "reason": reason,
+            "reason_code": "rate_limit",
+            "retry_after_seconds": _rate_limit_retry_after_seconds(rate_limit_state, now=now),
+            "next_reset_at": next_reset_at.isoformat() if next_reset_at else None,
+            "rate_limit": {
+                "max_actions_per_hour": rate_limit_state["max_actions_per_hour"],
+                "actions_used_this_hour": rate_limit_state["actions_used_this_hour"],
+                "actions_remaining_this_hour": rate_limit_state["actions_remaining_this_hour"],
+            },
+        }
     
     # Check energy cost for action (Phase 2: Teeth)
     action_cost = ACTION_COSTS.get(action_type, Decimal("0.0"))
@@ -191,9 +239,9 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Recipient is dead and cannot receive resources"}
     
     elif action_type == "set_name":
-        name = action.get("display_name", "")
-        if len(name) < 1 or len(name) > 50:
-            return {"valid": False, "reason": "Name must be 1-50 characters"}
+        # Protocol-level no-op to preserve backward compatibility with older prompts.
+        # This avoids converting legacy set_name attempts into invalid_action churn.
+        return {"valid": True}
     
     elif action_type == "idle":
         pass  # Always valid
@@ -342,9 +390,6 @@ async def execute_action(db: Session, agent: Agent, action: dict) -> dict:
     elif action_type == "trade":
         result = await _execute_trade(db, agent, action)
     
-    elif action_type == "set_name":
-        result = await _execute_set_name(db, agent, action)
-    
     elif action_type == "idle":
         result = {"success": True, "description": "Agent chose to rest (conserving energy)"}
     
@@ -360,6 +405,12 @@ async def execute_action(db: Session, agent: Agent, action: dict) -> dict:
     
     elif action_type == "vote_enforcement":
         result = await _execute_vote_enforcement(db, agent, action)
+
+    elif action_type == "set_name":
+        result = {
+            "success": True,
+            "description": "Alias change ignored: aliases are immutable in this protocol",
+        }
     
     # Add cost info to result if applicable
     if action_cost > 0 and result.get("success"):
@@ -616,19 +667,6 @@ async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:
         description += f" (🌟 revived {recipient_name}!)"
     
     return {"success": True, "description": description}
-
-
-async def _execute_set_name(db: Session, agent: Agent, action: dict) -> dict:
-    """Set agent's display name."""
-    old_name = agent.display_name or f"Agent #{agent.agent_number}"
-    new_name = action["display_name"]
-    
-    agent.display_name = new_name
-    
-    return {
-        "success": True,
-        "description": f"{old_name} changed their name to {new_name}"
-    }
 
 
 # ============================================================================

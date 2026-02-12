@@ -101,12 +101,19 @@ class APIService {
     }
 
     // Messages
-    async getMessages(limit = 50) {
-        return this.fetch(`/api/messages?limit=${limit}`)
+    async getMessages(limit = 50, messageType = null) {
+        const params = new URLSearchParams()
+        params.append('limit', String(limit))
+        if (messageType) params.append('message_type', String(messageType))
+        return this.fetch(`/api/messages?${params.toString()}`)
     }
 
     async getMessage(id) {
         return this.fetch(`/api/messages/${id}`)
+    }
+
+    async getMessageThread(id) {
+        return this.fetch(`/api/messages/thread/${id}`)
     }
 
     // Proposals

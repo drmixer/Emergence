@@ -32,8 +32,8 @@ OPENROUTER_CONFIG = {
         "or_gpt_oss_20b": "openai/gpt-oss-20b",
         "or_qwen3_32b": "qwen/qwen3-32b",
         "or_gpt_oss_20b_free": "openai/gpt-oss-20b:free",
-        # Keep legacy key for DB compatibility; route to a more stable free model.
-        "or_qwen3_4b_free": "openai/gpt-oss-120b:free",
+        # Keep legacy key for DB compatibility; route to the default stable free model.
+        "or_qwen3_4b_free": "openai/gpt-oss-20b:free",
         "or_mistral_small_3_1_24b_free": "mistralai/mistral-small-3.1-24b-instruct:free",
         # Legacy model_type values kept for backward compatibility.
         "claude-sonnet-4": "deepseek/deepseek-r1-0528:free",

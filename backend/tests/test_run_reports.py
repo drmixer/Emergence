@@ -39,7 +39,8 @@ def test_build_required_report_tags_includes_required_keys():
     )
     assert "run_id:run-20260210t120000z" in tags
     assert "season:2" in tags
-    assert "condition:baseline-v1" in tags
+    assert "condition:baseline_v1" in tags
+    assert "run_class:unknown" in tags
     assert "topic:governance" in tags
     assert "topic:economy" in tags
     assert "status:observational" in tags

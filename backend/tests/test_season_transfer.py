@@ -25,6 +25,7 @@ from app.services.season_transfer import (
     export_season_snapshot,
     seed_next_season,
 )
+from app.services.agent_identity import immutable_alias_for_agent_number
 
 
 @pytest.fixture
@@ -240,7 +241,8 @@ def test_seed_next_season_confirmed_apply_normalizes_state_and_writes_lineage(db
     fresh_agent = db_session.query(Agent).filter_by(agent_number=10).one()
     assert carryover_agent.status == "active"
     assert fresh_agent.status == "active"
-    assert fresh_agent.display_name is None
+    assert carryover_agent.display_name == immutable_alias_for_agent_number(carryover_agent.agent_number)
+    assert fresh_agent.display_name == immutable_alias_for_agent_number(fresh_agent.agent_number)
 
     carryover_memory = db_session.query(AgentMemory).filter_by(agent_id=carryover_agent.id).one()
     fresh_memory = db_session.query(AgentMemory).filter_by(agent_id=fresh_agent.id).one()

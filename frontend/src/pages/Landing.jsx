@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Play, ChevronDown, Users, MessageSquare, Scale, Sparkles, Zap, Brain, Clock, Loader } from 'lucide-react'
 import { api } from '../services/api'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
+import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 // Pre-launch teaser quotes
 const TEASER_QUOTES = [
@@ -174,7 +175,7 @@ export default function Landing() {
                         recentMessages.map((m) => ({
                             agent: m?.author?.agent_number ?? '?',
                             text: (m?.content || '').trim(),
-                            role: m?.author?.display_name || (m?.author?.agent_number ? `Agent #${m.author.agent_number}` : 'Agent'),
+                            role: formatAgentDisplayLabel(m?.author || {}),
                         })).filter((q) => q.text.length > 0)
                     )
                 } else {
@@ -336,8 +337,7 @@ export default function Landing() {
                         <blockquote className="quote-text">"{currentQuote.text}"</blockquote>
                         <div className="quote-author">
                             {isPreLaunch ? <Clock size={14} /> : <Brain size={14} />}
-                            <span>{isPreLaunch ? 'System' : `Agent #${currentQuote.agent}`}</span>
-                            <span className="quote-role">{currentQuote.role}</span>
+                            <span>{isPreLaunch ? 'System' : currentQuote.role}</span>
                         </div>
                     </div>
                 </div>

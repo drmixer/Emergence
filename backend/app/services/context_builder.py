@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
 from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote
 from app.services.agent_memory import agent_memory_service
+from app.services.actions import get_action_rate_limit_state
 
 
 async def build_agent_context(db: Session, agent: Agent) -> str:
@@ -135,6 +136,23 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         hours_left = (sanctioned_until - now).total_seconds() / 3600
         context_parts.append("")
         context_parts.append(f"🔒 YOU ARE SANCTIONED - Limited to 1 action per hour ({hours_left:.1f} hours remaining)")
+
+    action_budget = get_action_rate_limit_state(db, agent, now=now)
+    actions_used = action_budget["actions_used_this_hour"]
+    actions_remaining = action_budget["actions_remaining_this_hour"]
+    actions_limit = action_budget["max_actions_per_hour"]
+    context_parts.append("")
+    context_parts.append("ACTION BUDGET (rolling 60 minutes):")
+    context_parts.append(f"- Actions used this hour: {actions_used}/{actions_limit}")
+    context_parts.append(f"- Remaining actions this hour: {actions_remaining}")
+    next_reset_at = ensure_utc(action_budget.get("next_reset_at"))
+    if next_reset_at:
+        minutes_to_reset = max(0, int((next_reset_at - now).total_seconds() / 60))
+        context_parts.append(
+            f"- Next action slot reset (UTC): {next_reset_at.strftime('%Y-%m-%d %H:%M')} ({minutes_to_reset}m)"
+        )
+    if actions_remaining <= 0:
+        context_parts.append("- Action cap reached. Wait for reset before attempting another action.")
     
     context_parts.append("")
     
@@ -229,7 +247,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     
     # Action costs explanation (Phase 2: Teeth)
     context_parts.append("⚡ ACTION COSTS (energy):")
-    context_parts.append("  - idle/work/set_name: 0.0 (free)")
+    context_parts.append("  - idle/work: 0.0 (free)")
     context_parts.append("  - forum_reply/DM/trade: 0.1")
     context_parts.append("  - forum_post/vote: 0.2")
     context_parts.append("  - create_proposal: 1.0")

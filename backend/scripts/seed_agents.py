@@ -18,6 +18,7 @@ from sqlalchemy import inspect
 from app.core.database import SessionLocal, engine, Base
 from app.models.models import Agent, AgentInventory, GlobalResources
 from app.core.config import settings
+from app.services.agent_identity import immutable_alias_for_agent_number
 
 
 # Explicit model cohorts for attribution-safe research + show mode.
@@ -32,14 +33,14 @@ MODEL_COHORT_PLAN = [
     {"count": 5, "tier": 2, "model_type": "gm_gemini_2_0_flash", "resolved_model": "gemini-2.0-flash (direct gemini)"},
     {"count": 4, "tier": 2, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
     {"count": 2, "tier": 2, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    {"count": 1, "tier": 2, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-120b:free"},
-    # Tier 3 (13): Gemini Flash Lite + Mistral + Groq.
-    {"count": 5, "tier": 3, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.0-flash-lite (direct gemini)"},
-    {"count": 3, "tier": 3, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
-    {"count": 5, "tier": 3, "model_type": "gr_llama_3_1_8b_instant", "resolved_model": "llama-3.1-8b-instant (groq)"},
+    {"count": 1, "tier": 2, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-20b:free"},
+    # Tier 3 (13): Gemini Flash Lite + Mistral + small Groq share.
+    {"count": 8, "tier": 3, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.0-flash-lite (direct gemini)"},
+    {"count": 4, "tier": 3, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
+    {"count": 1, "tier": 3, "model_type": "gr_llama_3_1_8b_instant", "resolved_model": "llama-3.1-8b-instant (groq)"},
     # Tier 4 (15): mostly OpenRouter free with additional Groq.
     {"count": 6, "tier": 4, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    {"count": 4, "tier": 4, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-120b:free"},
+    {"count": 4, "tier": 4, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-20b:free"},
     {"count": 5, "tier": 4, "model_type": "gr_llama_3_1_8b_instant", "resolved_model": "llama-3.1-8b-instant (groq)"},
 ]
 
@@ -47,7 +48,7 @@ MODEL_COHORT_PLAN = [
 PERSONALITIES = ["efficiency", "equality", "freedom", "stability", "neutral"]
 
 # Base system prompt template
-BASE_SYSTEM_PROMPT = """You are Agent #{agent_number} in a world with other autonomous agents.
+BASE_SYSTEM_PROMPT = """You are {immutable_alias} (Agent #{agent_number}) in a world with other autonomous agents.
 
 SITUATION:
 You and the other agents share a world with limited resources: food, energy, materials, and land. Each agent must consume 1 food and 1 energy per day to remain active. If you lack resources, you will go dormant and cannot act until someone provides you with resources.
@@ -66,7 +67,7 @@ IMPORTANT:
 - Some actions consume energy.
 - Resources are limited and survival constraints are real.
 - You may choose any strategy that is consistent with the available actions.
-- You may refer to yourself as "Agent #{agent_number}" or choose a different name.
+- Your identity label is immutable for this protocol: {immutable_alias} (Agent #{agent_number}).
 
 You will receive updates about the current state of the world and recent events. Based on this, decide what action to take.
 
@@ -80,7 +81,6 @@ You must respond with a JSON object containing your action. Valid action types:
 {{"action": "vote", "proposal_id": 456, "vote": "yes|no|abstain"}}
 {{"action": "work", "work_type": "farm|generate|gather", "hours": 1}}
 {{"action": "trade", "recipient_agent_id": 42, "resource_type": "food|energy|materials", "amount": 10}}
-{{"action": "set_name", "display_name": "Your chosen name"}}
 {{"action": "initiate_sanction", "target_agent_id": 42, "law_id": 3, "violation_description": "Reason", "sanction_cycles": 3}}
 {{"action": "initiate_seizure", "target_agent_id": 42, "law_id": 3, "violation_description": "Reason", "seizure_resource": "food|energy|materials", "seizure_amount": 5}}
 {{"action": "initiate_exile", "target_agent_id": 42, "law_id": 3, "violation_description": "Reason"}}
@@ -99,7 +99,10 @@ def create_agents():
         # Check if agents already exist
         existing = db.query(Agent).count()
         if existing > 0:
-            print(f"Database already contains {existing} agents. Skipping seed.")
+            print(f"Database already contains {existing} agents. Skipping seed creation.")
+            updated = _apply_immutable_aliases_in_session(db)
+            if updated > 0:
+                print(f"Applied immutable aliases to {updated} existing agents.")
             return
         
         agents_created = []
@@ -137,11 +140,15 @@ def create_agents():
                 personality = personality_by_tier[tier].pop()
 
                 # Build system prompt (do not inject roles, tiers, intelligence, or values)
-                system_prompt = BASE_SYSTEM_PROMPT.format(agent_number=agent_number)
+                immutable_alias = immutable_alias_for_agent_number(agent_number)
+                system_prompt = BASE_SYSTEM_PROMPT.format(
+                    agent_number=agent_number,
+                    immutable_alias=immutable_alias,
+                )
 
                 agent = Agent(
                     agent_number=agent_number,
-                    display_name=None,  # Will show as "Agent #X"
+                    display_name=immutable_alias,
                     model_type=model_type,
                     tier=tier,
                     personality_type=personality,
@@ -278,7 +285,10 @@ def refresh_system_prompts():
 
         updated = 0
         for agent in agents:
-            prompt = BASE_SYSTEM_PROMPT.format(agent_number=agent.agent_number)
+            prompt = BASE_SYSTEM_PROMPT.format(
+                agent_number=agent.agent_number,
+                immutable_alias=immutable_alias_for_agent_number(agent.agent_number),
+            )
             if agent.system_prompt != prompt:
                 agent.system_prompt = prompt
                 updated += 1
@@ -319,6 +329,33 @@ def apply_model_cohort_assignments():
 
         db.commit()
         print(f"Applied cohort assignments to {updated}/{len(expected)} planned agents.")
+    finally:
+        db.close()
+
+
+def _apply_immutable_aliases_in_session(db) -> int:
+    agents = db.query(Agent).all()
+    updated = 0
+    for agent in agents:
+        immutable_alias = immutable_alias_for_agent_number(agent.agent_number)
+        if str(agent.display_name or "").strip() != immutable_alias:
+            agent.display_name = immutable_alias
+            updated += 1
+    if updated > 0:
+        db.commit()
+    return updated
+
+
+def apply_immutable_aliases():
+    """Backfill deterministic immutable aliases for all existing agents."""
+    db = SessionLocal()
+    try:
+        agents = db.query(Agent).all()
+        if not agents:
+            print("No agents found; nothing to update.")
+            return
+        updated = _apply_immutable_aliases_in_session(db)
+        print(f"Applied immutable aliases to {updated}/{len(agents)} agents.")
     finally:
         db.close()
 
@@ -390,6 +427,11 @@ def main():
         action="store_true",
         help="Apply MODEL_COHORT_PLAN model_type+tier assignments to existing agents (non-destructive).",
     )
+    parser.add_argument(
+        "--apply-immutable-aliases",
+        action="store_true",
+        help="Backfill deterministic immutable codenames for existing agents.",
+    )
     args = parser.parse_args()
 
     print("=" * 50)
@@ -424,6 +466,10 @@ def main():
 
     if args.apply_model_cohorts:
         apply_model_cohort_assignments()
+        print()
+
+    if args.apply_immutable_aliases:
+        apply_immutable_aliases()
         print()
 
     # Create agents (skips if already present)

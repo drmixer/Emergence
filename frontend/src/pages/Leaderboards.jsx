@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Trophy, TrendingUp, DollarSign, Briefcase, ArrowRightLeft, Star } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
+import { formatAgentDisplayLabel } from '../utils/agentIdentity'
+import AgentAvatar from '../components/AgentAvatar'
 
 const leaderboardConfig = {
     wealth: { icon: DollarSign, label: 'Wealthiest', color: 'gold', valueKey: 'total_wealth', valueLabel: 'Total' },
@@ -47,6 +49,9 @@ export default function Leaderboards() {
     const config = leaderboardConfig[activeBoard]
     const Icon = config.icon
     const data = leaderboards[activeBoard] || []
+    const topWealthLabel = leaderboards.wealth[0] ? formatAgentDisplayLabel(leaderboards.wealth[0]) : '—'
+    const topActivityLabel = leaderboards.activity[0] ? formatAgentDisplayLabel(leaderboards.activity[0]) : '—'
+    const topInfluenceLabel = leaderboards.influence[0] ? formatAgentDisplayLabel(leaderboards.influence[0]) : '—'
 
     return (
         <div className="leaderboards-page">
@@ -103,13 +108,17 @@ export default function Leaderboards() {
                         >
                             <RankBadge rank={entry.rank} />
 
-                            <div className={`agent-avatar tier-${entry.tier}`}>
-                                #{entry.agent_number}
-                            </div>
+                            <AgentAvatar
+                                agentNumber={entry.agent_number}
+                                tier={entry.tier}
+                                personality={entry.personality_type}
+                                status={entry.status || 'active'}
+                                size="small"
+                            />
 
                             <div className="agent-info">
                                 <div className="agent-name">
-                                    {entry.display_name || `Agent #${entry.agent_number}`}
+                                    {formatAgentDisplayLabel(entry)}
                                 </div>
                                 <span className={`badge badge-tier-${entry.tier}`}>Tier {entry.tier}</span>
                             </div>
@@ -127,27 +136,21 @@ export default function Leaderboards() {
             <div className="quick-stats">
                 <div className="quick-stat-card">
                     <h4>Top Wealthy</h4>
-                    <div className="quick-stat-value">
-                        {leaderboards.wealth[0]?.display_name || (leaderboards.wealth[0] ? `Agent #${leaderboards.wealth[0]?.agent_number}` : '—')}
-                    </div>
+                    <div className="quick-stat-value">{topWealthLabel}</div>
                     <div className="quick-stat-detail">
                         {leaderboards.wealth[0] ? `${leaderboards.wealth[0]?.total_wealth} total resources` : '—'}
                     </div>
                 </div>
                 <div className="quick-stat-card">
                     <h4>Most Active</h4>
-                    <div className="quick-stat-value">
-                        {leaderboards.activity[0]?.display_name || (leaderboards.activity[0] ? `Agent #${leaderboards.activity[0]?.agent_number}` : '—')}
-                    </div>
+                    <div className="quick-stat-value">{topActivityLabel}</div>
                     <div className="quick-stat-detail">
                         {leaderboards.activity[0] ? `${leaderboards.activity[0]?.action_count} actions` : '—'}
                     </div>
                 </div>
                 <div className="quick-stat-card">
                     <h4>Most Influential</h4>
-                    <div className="quick-stat-value">
-                        {leaderboards.influence[0]?.display_name || (leaderboards.influence[0] ? `Agent #${leaderboards.influence[0]?.agent_number}` : '—')}
-                    </div>
+                    <div className="quick-stat-value">{topInfluenceLabel}</div>
                     <div className="quick-stat-detail">
                         {leaderboards.influence[0] ? `${leaderboards.influence[0]?.influence_score} influence` : '—'}
                     </div>

@@ -3,6 +3,7 @@ Analytics & Highlights API Router
 """
 import logging
 import json
+from pathlib import Path as FilePath
 from io import BytesIO
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from datetime import date, datetime, timedelta, timezone
@@ -51,6 +52,7 @@ from app.models.models import (
     EmergenceMetricSnapshot,
     AdminConfigChange,
     SimulationRun,
+    RunReportArtifact,
 )
 
 router = APIRouter()
@@ -630,16 +632,89 @@ def get_latest_summary():
         ).order_by(Event.created_at.desc()).first()
         
         if not summary:
-            return {"message": "No summaries yet", "summary": None}
-        
+            fallback = _latest_run_summary_fallback(db)
+            if fallback is not None:
+                return fallback
+            return {"message": "No summaries yet", "summary": None, "source": "none"}
+
         return {
             "day_number": (summary.event_metadata or {}).get("day_number"),
             "summary": (summary.event_metadata or {}).get("summary"),
             "stats": (summary.event_metadata or {}).get("stats"),
             "created_at": summary.created_at.isoformat() if summary.created_at else None,
+            "source": "daily_summary",
         }
     finally:
         db.close()
+
+
+def _latest_run_summary_fallback(db) -> dict[str, Any] | None:
+    """Fallback to the newest run_summary artifact when daily summaries are unavailable."""
+    rows = (
+        db.query(RunReportArtifact)
+        .filter(
+            RunReportArtifact.artifact_type == "run_summary",
+            RunReportArtifact.artifact_format == "json",
+            RunReportArtifact.status == "completed",
+        )
+        .order_by(RunReportArtifact.updated_at.desc(), RunReportArtifact.id.desc())
+        .limit(5)
+        .all()
+    )
+    for row in rows:
+        artifact_path = FilePath(str(row.artifact_path or "").strip()).expanduser()
+        if not artifact_path.exists() or not artifact_path.is_file():
+            continue
+
+        try:
+            payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(
+                "Unable to parse run summary artifact for fallback (run_id=%s path=%s): %s",
+                str(row.run_id or ""),
+                str(artifact_path),
+                exc,
+            )
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+        run_id = str(payload.get("run_id") or row.run_id or "").strip()
+        condition_name = str(payload.get("condition_name") or "").strip() or "unknown"
+        replicate_count = int(payload.get("replicate_count") or 1)
+
+        summary_text = (
+            f"Run {run_id} fallback summary (condition `{condition_name}`, {replicate_count} replicate(s)).\n\n"
+            f"This run recorded {int(metrics.get('total_events') or 0):,} events and "
+            f"{int(metrics.get('llm_calls') or 0):,} LLM calls. Governance activity included "
+            f"{int(metrics.get('proposal_actions') or 0):,} proposals, "
+            f"{int(metrics.get('vote_actions') or 0):,} votes, and "
+            f"{int(metrics.get('laws_passed') or 0):,} laws passed."
+        )
+
+        created_at = (
+            str(payload.get("generated_at_utc") or "").strip()
+            or (row.updated_at.isoformat() if row.updated_at else None)
+            or (row.created_at.isoformat() if row.created_at else None)
+        )
+
+        return {
+            "day_number": None,
+            "summary": summary_text,
+            "stats": {
+                "messages": int(metrics.get("forum_actions") or 0),
+                "votes": int(metrics.get("vote_actions") or 0),
+                "laws_passed": int(metrics.get("laws_passed") or 0),
+                "llm_calls": int(metrics.get("llm_calls") or 0),
+                "total_events": int(metrics.get("total_events") or 0),
+            },
+            "created_at": created_at,
+            "source": "run_summary_fallback",
+            "run_id": run_id or None,
+            "condition_name": condition_name,
+        }
+    return None
 
 
 @router.get("/story")

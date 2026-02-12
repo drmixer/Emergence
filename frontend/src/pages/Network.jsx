@@ -12,6 +12,7 @@ import ReactFlow, {
     Position
 } from 'reactflow'
 import { api } from '../services/api'
+import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 // Personality colors for nodes
 const personalityColors = {
@@ -431,10 +432,7 @@ export default function Network() {
 
                     {selectedNode && (
                         <Panel position="top-right" className="selected-panel">
-                            <h3>Agent #{selectedNode.data.agent_number}</h3>
-                            {selectedNode.data.display_name && (
-                                <p className="selected-name">{selectedNode.data.display_name}</p>
-                            )}
+                            <h3>{formatAgentDisplayLabel(selectedNode.data)}</h3>
                             <div className="selected-stats">
                                 <div className="stat-row">
                                     <span>Tier</span>

@@ -14,6 +14,7 @@ import ShareButton from '../components/ShareButton'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
 import { SubscribeButton } from '../components/Subscriptions'
 import { formatDistanceToNow } from 'date-fns'
+import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 const modelNames = {
     'claude-sonnet-4': 'Claude Sonnet 4',
@@ -67,7 +68,7 @@ export default function Agent() {
         return <div className="empty-state">Agent not found</div>
     }
 
-    const displayName = agent.display_name || `Agent #${agent.agent_number}`
+    const displayName = formatAgentDisplayLabel(agent)
 
     return (
         <div className="agent-detail">
@@ -100,6 +101,9 @@ export default function Agent() {
                         <span className={`badge badge-tier-${agent.tier}`}>Tier {agent.tier}</span>
                         <span className={`badge badge-${agent.status}`}>{agent.status}</span>
                         <PersonalityBadge personality={agent.personality_type} />
+                    </div>
+                    <div className="agent-identity-note" title={AGENT_ALIAS_HELP_TEXT}>
+                        Aliases are immutable codenames. Canonical identity is Agent #NN.
                     </div>
                     {agent.last_active_at && (
                         <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
@@ -272,6 +276,12 @@ export default function Agent() {
         
         .agent-profile-actions {
           margin-top: var(--spacing-md);
+        }
+
+        .agent-identity-note {
+          margin-top: var(--spacing-xs);
+          color: var(--text-muted);
+          font-size: 0.75rem;
         }
         
         .personality-text {

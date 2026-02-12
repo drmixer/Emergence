@@ -89,6 +89,7 @@ Report artifacts are written under `output/reports/runs/<run_id>/` and indexed i
 
 ## Documentation
 
+- [Run Lifecycle Protocol](docs/RUN_LIFECYCLE_PROTOCOL.md) - Canonical run/season/epoch/tournament policy
 - [Architecture](docs/ARCHITECTURE.md) - How the system is built
 - [Design](docs/DESIGN.md) - Core mechanics and rationale
 - [Deployment](docs/DEPLOYMENT.md) - Production setup

@@ -174,6 +174,9 @@ class Settings(BaseSettings):
 
     # Rate limiting
     MAX_ACTIONS_PER_HOUR: int = 20
+    # Additional safety padding applied to post-rejection cooldowns so agents retry
+    # slightly after the computed rolling-window reset boundary.
+    ACTION_RATE_LIMIT_COOLDOWN_BUFFER_SECONDS: int = 5
     MAX_PROPOSALS_PER_DAY: int = 3
 
     # Resource defaults

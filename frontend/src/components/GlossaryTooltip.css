@@ -1,0 +1,70 @@
+.glossary-inline {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.glossary-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: help;
+    font: inherit;
+    padding: 0;
+}
+
+.glossary-trigger-label {
+    text-decoration: underline dotted rgba(148, 163, 184, 0.85);
+    text-underline-offset: 2px;
+}
+
+.glossary-trigger svg {
+    color: rgba(148, 163, 184, 0.95);
+}
+
+.glossary-popover {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 8px);
+    z-index: 40;
+    width: min(320px, 75vw);
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(10, 12, 18, 0.98);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.glossary-popover.visible {
+    display: flex;
+}
+
+.glossary-popover-title {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgba(226, 232, 240, 0.95);
+    font-weight: 600;
+}
+
+.glossary-popover-body {
+    color: rgba(203, 213, 225, 0.95);
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+
+.glossary-popover-link {
+    font-size: 0.78rem;
+    color: rgba(147, 197, 253, 0.95);
+    font-weight: 600;
+}
+
+.glossary-popover-link:hover {
+    text-decoration: underline;
+}

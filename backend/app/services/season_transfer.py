@@ -22,6 +22,7 @@ from app.models.models import (
     SimulationRun,
     Vote,
 )
+from app.services.agent_identity import immutable_alias_for_agent_number
 
 SURVIVOR_SNAPSHOT_TYPE_V1 = "survivors_v1"
 TRANSFER_POLICY_VERSION_V1 = "season_transfer_policy_v1"
@@ -392,8 +393,9 @@ def seed_next_season(
         agent.next_checkpoint_at = None
         agent.last_active_at = now
 
+        agent.display_name = immutable_alias_for_agent_number(agent_number)
+
         if agent_number in fresh_numbers_set:
-            agent.display_name = None
             memory = memory_by_agent_id.get(int(agent.id))
             if memory is None:
                 memory = AgentMemory(

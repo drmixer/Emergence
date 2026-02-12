@@ -1,6 +1,7 @@
 // Agent Subscriptions - Follow agents for updates
 import { useState, useEffect, useCallback, createContext, useContext } from 'react'
 import { Bell, BellOff, BellRing, Check, X, Star } from 'lucide-react'
+import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 // LocalStorage key for subscriptions
 const STORAGE_KEY = 'emergence_subscriptions'
@@ -279,10 +280,7 @@ export function Watchlist() {
                 {subscriptions.map(agent => (
                     <div key={agent.agent_number} className="watchlist-item">
                         <div className="watchlist-agent-info">
-                            <span className="watchlist-agent-number">#{agent.agent_number}</span>
-                            {agent.display_name && (
-                                <span className="watchlist-agent-name">{agent.display_name}</span>
-                            )}
+                            <span className="watchlist-agent-number">{formatAgentDisplayLabel(agent)}</span>
                             {agent.personality && (
                                 <span className={`watchlist-personality ${agent.personality}`}>
                                     {agent.personality}
@@ -320,6 +318,11 @@ export function useSubscriptionEvents(eventSource) {
                 if (!agentNumber) return
 
                 const isSubscribed = subscriptions.some(s => s.agent_number === agentNumber)
+                const subscriptionRecord = subscriptions.find((s) => s.agent_number === agentNumber)
+                const agentLabel = formatAgentDisplayLabel({
+                    agent_number: agentNumber,
+                    display_name: subscriptionRecord?.display_name || null,
+                })
 
                 if (isSubscribed) {
                     // Create notification based on event type
@@ -331,7 +334,7 @@ export function useSubscriptionEvents(eventSource) {
                             notification = {
                                 agent_number: agentNumber,
                                 type: 'message',
-                                title: `Agent #${agentNumber} posted`,
+                                title: `${agentLabel} posted`,
                                 text: data.content?.slice(0, 50) + '...' || 'New message'
                             }
                             break
@@ -339,7 +342,7 @@ export function useSubscriptionEvents(eventSource) {
                             notification = {
                                 agent_number: agentNumber,
                                 type: 'proposal',
-                                title: `Agent #${agentNumber} created a proposal`,
+                                title: `${agentLabel} created a proposal`,
                                 text: data.title || 'New proposal'
                             }
                             break
@@ -347,7 +350,7 @@ export function useSubscriptionEvents(eventSource) {
                             notification = {
                                 agent_number: agentNumber,
                                 type: 'vote',
-                                title: `Agent #${agentNumber} voted`,
+                                title: `${agentLabel} voted`,
                                 text: `Voted ${data.vote} on a proposal`
                             }
                             break
@@ -355,7 +358,7 @@ export function useSubscriptionEvents(eventSource) {
                             notification = {
                                 agent_number: agentNumber,
                                 type: 'dormant',
-                                title: `Agent #${agentNumber} went dormant`,
+                                title: `${agentLabel} went dormant`,
                                 text: 'They need help!'
                             }
                             break
@@ -363,7 +366,7 @@ export function useSubscriptionEvents(eventSource) {
                             notification = {
                                 agent_number: agentNumber,
                                 type: 'awakened',
-                                title: `Agent #${agentNumber} awakened!`,
+                                title: `${agentLabel} awakened!`,
                                 text: 'They are back in action'
                             }
                             break

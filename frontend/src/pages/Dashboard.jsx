@@ -31,6 +31,7 @@ import { api } from '../services/api'
 import ActivityPulse from '../components/ActivityPulse'
 import { ResourceBar, CriticalAgentsBanner } from '../components/ResourceBar'
 import { SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
+import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 function sumWorldResource(resources, key) {
     const totals = resources?.totals || {}
@@ -337,10 +338,9 @@ export default function Dashboard() {
                                         <tr key={proposal.id}>
                                             <td>{proposal.title}</td>
                                             <td>
-                                                {proposal.author?.display_name ||
-                                                    (proposal.author?.agent_number
-                                                        ? `Agent #${proposal.author.agent_number}`
-                                                        : 'Unknown')}
+                                                {proposal.author
+                                                    ? formatAgentDisplayLabel(proposal.author)
+                                                    : 'Unknown'}
                                             </td>
                                             <td>
                                                 <span style={{ color: 'var(--accent-green)' }}>{proposal.votes_for}</span>
@@ -383,7 +383,7 @@ export default function Dashboard() {
                                         <tr key={agent.agent_id}>
                                             <td>
                                                 <Link to={`/agents/${agent.agent_number}`}>
-                                                    {agent.display_name || `Agent #${agent.agent_number}`}
+                                                    {formatAgentDisplayLabel(agent)}
                                                 </Link>
                                             </td>
                                             <td>

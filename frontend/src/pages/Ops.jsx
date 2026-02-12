@@ -850,7 +850,7 @@ export default function Ops() {
                     </div>
                     <div className="ops-kv-item">
                       <span>Protocol deviation</span>
-                      <strong>{Boolean(statusRunMetadata?.protocol_deviation) ? 'yes' : 'no'}</strong>
+                      <strong>{statusRunMetadata?.protocol_deviation ? 'yes' : 'no'}</strong>
                     </div>
                     <div className="ops-kv-item">
                       <span>Calls today</span>
@@ -1199,7 +1199,7 @@ export default function Ops() {
                     </div>
                     <div className="ops-kv-item">
                       <span>Protocol deviation</span>
-                      <strong>{Boolean(runMetricsMetadata?.protocol_deviation) ? 'yes' : 'no'}</strong>
+                      <strong>{runMetricsMetadata?.protocol_deviation ? 'yes' : 'no'}</strong>
                     </div>
                     <div className="ops-kv-item">
                       <span>LLM calls</span>

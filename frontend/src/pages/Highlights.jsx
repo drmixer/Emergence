@@ -677,11 +677,21 @@ export default function Highlights() {
           ) : (
             <div className="summary-card">
               <div className="summary-header">
-                <h2>Day {summary.day_number} Summary</h2>
+                <h2>
+                  {summary.source === 'run_summary_fallback'
+                    ? `Run ${summary.run_id || 'Latest'} Summary`
+                    : (summary.day_number ? `Day ${summary.day_number} Summary` : 'Latest Summary')}
+                </h2>
                 <span className="summary-date">
                   {summary.created_at ? new Date(summary.created_at).toLocaleDateString() : ''}
                 </span>
               </div>
+
+              {summary.source === 'run_summary_fallback' && (
+                <div className="feed-notice">
+                  Daily summary is unavailable for this window. Showing latest run-summary fallback.
+                </div>
+              )}
 
               {summary.stats && (
                 <div className="summary-stats">
@@ -713,6 +723,18 @@ export default function Highlights() {
                     <div className="summary-stat">
                       <div className="stat-value">{summary.stats.laws_passed}</div>
                       <div className="stat-label">Laws</div>
+                    </div>
+                  )}
+                  {summary.stats.total_events !== undefined && (
+                    <div className="summary-stat">
+                      <div className="stat-value">{summary.stats.total_events}</div>
+                      <div className="stat-label">Events</div>
+                    </div>
+                  )}
+                  {summary.stats.llm_calls !== undefined && (
+                    <div className="summary-stat">
+                      <div className="stat-value">{summary.stats.llm_calls}</div>
+                      <div className="stat-label">LLM Calls</div>
                     </div>
                   )}
                 </div>

@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/react'
 import {
   Activity,
   Users,
+  MessageSquare,
   FileText,
   Scale,
   Package,
@@ -19,12 +20,14 @@ import {
   Calendar,
   TrendingUp,
   Shield,
+  BookOpen,
 } from 'lucide-react'
 
 // Pages (route-level code splitting)
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Agents = lazy(() => import('./pages/Agents'))
 const Agent = lazy(() => import('./pages/Agent'))
+const Messages = lazy(() => import('./pages/Messages'))
 const Proposals = lazy(() => import('./pages/Proposals'))
 const Laws = lazy(() => import('./pages/Laws'))
 const Resources = lazy(() => import('./pages/Resources'))
@@ -36,6 +39,7 @@ const Timeline = lazy(() => import('./pages/Timeline'))
 const Predictions = lazy(() => import('./pages/Predictions'))
 const Ops = lazy(() => import('./pages/Ops'))
 const Method = lazy(() => import('./pages/Method'))
+const Glossary = lazy(() => import('./pages/Glossary'))
 const RunDetail = lazy(() => import('./pages/RunDetail'))
 const Reports = lazy(() => import('./pages/Reports'))
 
@@ -56,6 +60,7 @@ function App() {
   const navItems = [
     { path: '/dashboard', icon: Activity, label: 'Dashboard' },
     { path: '/agents', icon: Users, label: 'Agents' },
+    { path: '/messages', icon: MessageSquare, label: 'Messages' },
     { path: '/network', icon: Share2, label: 'Network' },
     { path: '/proposals', icon: FileText, label: 'Proposals' },
     { path: '/laws', icon: Scale, label: 'Laws' },
@@ -63,6 +68,7 @@ function App() {
     { path: '/timeline', icon: Calendar, label: 'Timeline' },
     { path: '/highlights', icon: Star, label: 'Highlights' },
     { path: '/reports', icon: FileSearch, label: 'Reports' },
+    { path: '/glossary', icon: BookOpen, label: 'Glossary' },
     { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
     { path: '/leaderboards', icon: Trophy, label: 'Leaderboards' },
     { path: '/ops', icon: Shield, label: 'Ops' },
@@ -192,6 +198,7 @@ function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/agents/:id" element={<Agent />} />
+                <Route path="/messages" element={<Messages />} />
                 <Route path="/proposals" element={<Proposals />} />
                 <Route path="/laws" element={<Laws />} />
                 <Route path="/resources" element={<Resources />} />
@@ -203,6 +210,7 @@ function App() {
                 <Route path="/predictions" element={<Predictions />} />
                 <Route path="/about" element={<About />} />
                 <Route path="/method" element={<Method />} />
+                <Route path="/glossary" element={<Glossary />} />
                 <Route path="/ops" element={<Ops />} />
                 <Route path="/runs/:runId" element={<RunDetail />} />
               </Routes>

@@ -5,7 +5,7 @@ Each agent runs this loop continuously to perceive, decide, and act.
 import asyncio
 import logging
 import random
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -46,6 +46,7 @@ class AgentProcessor:
     def __init__(self):
         self.running = False
         self.tasks: dict[int, asyncio.Task] = {}
+        self._rate_limit_backoff_until: dict[int, datetime] = {}
     
     async def start(self):
         """Start processing all agents."""
@@ -79,6 +80,7 @@ class AgentProcessor:
             task.cancel()
             
         self.tasks.clear()
+        self._rate_limit_backoff_until.clear()
         logger.info("Stopped all agent processing loops")
     
     async def _run_agent_loop(self, agent_id: int, initial_delay: float = 0):
@@ -139,6 +141,9 @@ class AgentProcessor:
                     if agent_id in self.tasks:
                         self.tasks[agent_id].cancel()
                         del self.tasks[agent_id]
+                    return
+
+                if self._is_rate_limit_backoff_active(agent_id):
                     return
 
                 checkpoint_reason = await self._get_checkpoint_reason(db, agent)
@@ -216,6 +221,7 @@ class AgentProcessor:
 
                 validation = await validate_action(db, agent, action_data)
                 if not validation["valid"]:
+                    self._apply_rate_limit_backoff(agent_id, validation, runtime_metadata=runtime_metadata)
                     # If the checkpoint output is invalid, attempt one deterministic fallback this turn.
                     if checkpoint_reason:
                         fallback_action = routine_executor.build_action(db, agent)
@@ -226,11 +232,12 @@ class AgentProcessor:
                             runtime_mode = "deterministic_fallback"
                             runtime_metadata["mode"] = runtime_mode
                         else:
+                            self._apply_rate_limit_backoff(agent_id, fallback_validation, runtime_metadata=runtime_metadata)
                             await self._log_invalid_action(
                                 db,
                                 agent_id,
                                 action_data,
-                                validation["reason"],
+                                fallback_validation["reason"],
                                 runtime_metadata=runtime_metadata,
                             )
                             return
@@ -324,6 +331,67 @@ class AgentProcessor:
         db.add(event)
         db.commit()
         logger.debug(f"Agent {agent_id} action rejected: {reason}")
+
+    def _is_rate_limit_backoff_active(self, agent_id: int) -> bool:
+        """Return True when agent is cooling down after a rate-limit rejection."""
+        cooldown_until = ensure_utc(self._rate_limit_backoff_until.get(agent_id))
+        if not cooldown_until:
+            return False
+
+        now = now_utc()
+        if cooldown_until <= now:
+            self._rate_limit_backoff_until.pop(agent_id, None)
+            return False
+
+        remaining_seconds = int((cooldown_until - now).total_seconds())
+        logger.debug(
+            "Agent %s is in action-rate-limit cooldown for %ss",
+            agent_id,
+            remaining_seconds,
+        )
+        return True
+
+    def _apply_rate_limit_backoff(
+        self,
+        agent_id: int,
+        validation: dict,
+        *,
+        runtime_metadata: Optional[dict] = None,
+    ) -> None:
+        """Set per-agent cooldown window for action-rate-limit rejections."""
+        if validation.get("reason_code") != "rate_limit":
+            return
+
+        now = now_utc()
+        next_reset_at: Optional[datetime] = None
+        next_reset_raw = validation.get("next_reset_at")
+        if isinstance(next_reset_raw, str):
+            try:
+                next_reset_at = ensure_utc(datetime.fromisoformat(next_reset_raw))
+            except ValueError:
+                next_reset_at = None
+
+        retry_after_seconds = max(0, int(validation.get("retry_after_seconds") or 0))
+        buffer_seconds = max(
+            0,
+            int(getattr(settings, "ACTION_RATE_LIMIT_COOLDOWN_BUFFER_SECONDS", 0) or 0),
+        )
+
+        if next_reset_at and next_reset_at > now:
+            cooldown_until = next_reset_at + timedelta(seconds=buffer_seconds)
+        else:
+            fallback_seconds = max(60, retry_after_seconds + buffer_seconds)
+            cooldown_until = now + timedelta(seconds=fallback_seconds)
+
+        self._rate_limit_backoff_until[agent_id] = cooldown_until
+
+        if runtime_metadata is not None:
+            runtime_metadata["rate_limit_retry_after_seconds"] = max(
+                0, int((cooldown_until - now).total_seconds())
+            )
+            runtime_metadata["rate_limit_backoff_until"] = cooldown_until.isoformat()
+            if next_reset_at:
+                runtime_metadata["rate_limit_next_reset_at"] = next_reset_at.isoformat()
     
     async def _log_error(self, agent_id: int, error: str):
         """Log an error during processing."""

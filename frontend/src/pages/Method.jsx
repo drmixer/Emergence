@@ -1,4 +1,5 @@
 import { ExternalLink } from 'lucide-react'
+import GlossaryTooltip from '../components/GlossaryTooltip'
 
 export default function Method() {
   return (
@@ -45,9 +46,26 @@ export default function Method() {
 
             <h3>Model Cohorts</h3>
             <p>
-              Runs use four capability/cost cohorts to increase behavioral diversity. Cohorts are assignment and
+              <GlossaryTooltip termKey="run">Runs</GlossaryTooltip>
+              {' '}
+              use four capability/cost
+              {' '}
+              <GlossaryTooltip termKey="cohort">cohorts</GlossaryTooltip>
+              {' '}
+              to increase behavioral diversity. Cohorts are assignment and
               routing groups, not hard-coded map-visibility classes.
             </p>
+
+            <h3>Research Cadence Terms</h3>
+            <ul>
+              <li><GlossaryTooltip termKey="run">Run</GlossaryTooltip>: one simulation execution window with a fixed run ID.</li>
+              <li><GlossaryTooltip termKey="season">Season</GlossaryTooltip>: four runs under one primary hypothesis.</li>
+              <li><GlossaryTooltip termKey="epoch">Epoch</GlossaryTooltip>: four seasons grouped for crossover/tournament boundaries.</li>
+              <li><GlossaryTooltip termKey="tournament">Tournament</GlossaryTooltip>: a special post-epoch exploratory showdown run.</li>
+              <li><GlossaryTooltip termKey="carryover">Carryover</GlossaryTooltip>: selected identities continuing into a new season with memory summary.</li>
+              <li><GlossaryTooltip termKey="exploratory">Exploratory run</GlossaryTooltip>: intentionally separated from baseline condition synthesis.</li>
+              <li><GlossaryTooltip termKey="canonical-identity">Canonical identity</GlossaryTooltip>: Agent #NN tracking key used for attribution and analytics.</li>
+            </ul>
 
             <h3>What We Measure</h3>
             <ul>

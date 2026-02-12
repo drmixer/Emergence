@@ -4,6 +4,7 @@ import { Users, Search, Filter } from 'lucide-react'
 import { api } from '../services/api'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
 import { formatDistanceToNow } from 'date-fns'
+import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 // Models for display
 const modelNames = {
@@ -50,7 +51,7 @@ export default function Agents() {
         if (filters.personality && agent.personality_type !== filters.personality) return false
         if (filters.search) {
             const searchLower = filters.search.toLowerCase()
-            const name = agent.display_name || `Agent #${agent.agent_number}`
+            const name = formatAgentDisplayLabel(agent)
             if (!name.toLowerCase().includes(searchLower) &&
                 !agent.agent_number.toString().includes(searchLower)) {
                 return false
@@ -68,6 +69,9 @@ export default function Agents() {
                 </h1>
                 <p className="page-description">
                     All 50 AI agents in the default simulation
+                </p>
+                <p className="agent-identity-note" title={AGENT_ALIAS_HELP_TEXT}>
+                    Aliases are immutable codenames. Canonical identity is Agent #NN.
                 </p>
             </div>
 
@@ -153,7 +157,7 @@ export default function Agents() {
                                     size="medium"
                                 />
                                 <div className="agent-info">
-                                    <h4>{agent.display_name || `Agent #${agent.agent_number}`}</h4>
+                                    <h4>{formatAgentDisplayLabel(agent)}</h4>
                                     <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
                                 </div>
                                 <span className={`badge badge-${agent.status}`}>
@@ -195,6 +199,12 @@ export default function Agents() {
           font-size: 0.75rem;
           color: var(--text-muted);
           text-transform: capitalize;
+        }
+
+        .agent-identity-note {
+          margin-top: var(--spacing-xs);
+          color: var(--text-muted);
+          font-size: 0.75rem;
         }
       `}</style>
         </div>

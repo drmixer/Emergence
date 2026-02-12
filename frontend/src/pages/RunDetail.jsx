@@ -14,6 +14,7 @@ import {
 import { api } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
+import GlossaryTooltip from '../components/GlossaryTooltip'
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString()
@@ -271,7 +272,11 @@ export default function RunDetail() {
           <ShieldCheck size={30} />
           Run Detail
         </h1>
-        <p className="page-description">Public metrics and evidence traces for a specific simulation run.</p>
+        <p className="page-description">
+          Public metrics and evidence traces for a specific simulation
+          {' '}
+          <GlossaryTooltip termKey="run">run</GlossaryTooltip>.
+        </p>
       </div>
 
       <div className="run-detail-topbar">
@@ -301,7 +306,9 @@ export default function RunDetail() {
         <>
           <div className="card run-provenance-card">
             <div className="card-header">
-              <h3>Evidence Provenance</h3>
+              <h3>
+                <GlossaryTooltip termKey="evidence-provenance">Evidence Provenance</GlossaryTooltip>
+              </h3>
               <span className={`verification-badge ${verificationMeta.className}`}>
                 <VerificationIcon size={14} />
                 {verificationMeta.label}
