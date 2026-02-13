@@ -1,0 +1,189 @@
+name: CI Hard Gates
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/emergence_ci
+  REDIS_URL: redis://localhost:6379
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  backend-migration-sanity:
+    name: Backend Migration Sanity
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: emergence_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d emergence_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Verify alembic version row exists
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+          database_url = os.environ["DATABASE_URL"]
+          engine = create_engine(database_url)
+          with engine.connect() as conn:
+              version = conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).scalar_one_or_none()
+          if not version:
+              raise SystemExit("Missing alembic_version row after migration")
+          print(f"alembic_version={version}")
+          PY
+
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: emergence_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d emergence_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Run backend test suite
+        working-directory: backend
+        run: PYTHONPATH=. pytest
+
+  frontend-quality:
+    name: Frontend Lint and Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Run frontend build
+        working-directory: frontend
+        run: npm run build
+
+  post-deploy-smoke:
+    name: Post-deploy Smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - backend-tests
+      - frontend-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Smoke dashboard API (retry)
+        working-directory: frontend
+        env:
+          SMOKE_SITE_BASE: https://emergence.quest
+          SMOKE_TIMEOUT_MS: "20000"
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            npm run smoke:dashboard-api && exit 0
+            echo "dashboard smoke attempt ${attempt} failed"
+            if [ "${attempt}" -eq 6 ]; then
+              exit 1
+            fi
+            sleep 45
+          done
+
+      - name: Smoke share metadata (retry)
+        working-directory: frontend
+        env:
+          SMOKE_SITE_BASE: https://emergence.quest
+          SMOKE_RUN_ID: ci-smoke-run
+          SMOKE_TIMEOUT_MS: "20000"
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            npm run smoke:share-metadata && exit 0
+            echo "share metadata smoke attempt ${attempt} failed"
+            if [ "${attempt}" -eq 6 ]; then
+              exit 1
+            fi
+            sleep 45
+          done
+
