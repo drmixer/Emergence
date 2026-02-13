@@ -110,9 +110,17 @@ A few principles guide this project:
 
 ## Contributing
 
-Pull requests welcome. See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
+Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 The main work is in agent behavior, resource economics, and simulation mechanics. The frontend is a visibility layer over the simulation.
+
+## Community and Policy
+
+- [Contributing Guide](CONTRIBUTING.md)
+- [Governance](GOVERNANCE.md)
+- [Maintainer Review Checklist](MAINTAINER_REVIEW_CHECKLIST.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security Policy](SECURITY.md)
 
 ## License
 

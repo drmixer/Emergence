@@ -1,0 +1,52 @@
+name: Research / protocol change proposal
+description: Propose a change that may affect simulation interpretation or protocol boundaries
+title: "[Research Proposal]: "
+labels:
+  - research
+  - protocol
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for protocol-sensitive changes.
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What research or product objective does this change support?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_change
+    attributes:
+      label: Proposed change
+      description: Describe the change in concrete terms.
+    validations:
+      required: true
+  - type: textarea
+    id: attribution_impact
+    attributes:
+      label: Attribution impact
+      description: How does this affect provider/model/cohort attribution quality?
+    validations:
+      required: true
+  - type: textarea
+    id: claim_boundary_impact
+    attributes:
+      label: Claim boundary impact
+      description: Does this affect baseline vs exploratory interpretation?
+    validations:
+      required: true
+  - type: textarea
+    id: experiment_plan
+    attributes:
+      label: Validation plan
+      description: How will this be tested and what evidence is required?
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback / fallback plan
+      description: How can we safely revert if outcomes are poor?
+

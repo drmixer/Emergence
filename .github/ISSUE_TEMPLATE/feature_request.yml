@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose a product or engineering improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the feature and why it matters.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should change?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks / tradeoffs
+      description: Include performance, reliability, or complexity risks.
+  - type: dropdown
+    id: protocol_sensitive
+    attributes:
+      label: Protocol-sensitive?
+      description: Does this affect core simulation mechanics or attribution policy?
+      options:
+        - "No"
+        - "Yes"
+    validations:
+      required: true
+
