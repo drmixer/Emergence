@@ -23,13 +23,41 @@ def _extract_token(request: Request) -> str:
 
 
 def _ip_allowed(client_ip: str) -> bool:
-    raw_allowlist = str(getattr(settings, "ADMIN_IP_ALLOWLIST", "") or "").strip()
-    if not raw_allowlist:
-        return True
-    allowed = {part.strip() for part in raw_allowlist.split(",") if part.strip()}
+    allowed = get_admin_ip_allowlist_entries()
     if not allowed:
         return True
     return client_ip in allowed
+
+
+def get_admin_ip_allowlist_entries() -> set[str]:
+    raw_allowlist = str(getattr(settings, "ADMIN_IP_ALLOWLIST", "") or "").strip()
+    if not raw_allowlist:
+        return set()
+    return {part.strip() for part in raw_allowlist.split(",") if part.strip()}
+
+
+def assert_admin_write_access(*, client_ip: str) -> None:
+    if not bool(getattr(settings, "ADMIN_ENABLED", False)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not bool(getattr(settings, "ADMIN_WRITE_ENABLED", False)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin write controls are disabled in this environment",
+        )
+
+    environment = str(getattr(settings, "ENVIRONMENT", "development") or "development").strip().lower()
+    if environment != "production":
+        return
+
+    allowlist = get_admin_ip_allowlist_entries()
+    if not allowlist:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin write IP allowlist is required in production",
+        )
+    if client_ip not in allowlist:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin write IP not allowed")
 
 
 def require_admin_auth(

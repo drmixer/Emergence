@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import String, cast, text
 from sqlalchemy.orm import Session
 
-from app.core.admin_auth import AdminActor, require_admin_auth
+from app.core.admin_auth import AdminActor, assert_admin_write_access, require_admin_auth
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.time import now_utc
@@ -369,12 +369,8 @@ class RunStopRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
-def _assert_writes_enabled() -> None:
-    if not bool(getattr(settings, "ADMIN_WRITE_ENABLED", False)):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin write controls are disabled in this environment",
-        )
+def _assert_writes_enabled(actor: AdminActor) -> None:
+    assert_admin_write_access(client_ip=actor.client_ip)
 
 
 def _effective_environment() -> str:
@@ -679,7 +675,7 @@ def patch_admin_config(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     try:
         result = runtime_config_service.update_settings(
             db,
@@ -714,7 +710,7 @@ def pause_simulation(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     runtime_config_service.update_settings(
         db,
         updates={"SIMULATION_PAUSED": True},
@@ -730,7 +726,7 @@ def resume_simulation(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     runtime_config_service.update_settings(
         db,
         updates={"SIMULATION_PAUSED": False},
@@ -746,7 +742,7 @@ def enable_degraded_routing(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     runtime_config_service.update_settings(
         db,
         updates={"FORCE_CHEAPEST_ROUTE": True},
@@ -762,7 +758,7 @@ def disable_degraded_routing(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     runtime_config_service.update_settings(
         db,
         updates={"FORCE_CHEAPEST_ROUTE": False},
@@ -778,7 +774,7 @@ def set_run_mode(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     runtime_config_service.update_settings(
         db,
         updates={"SIMULATION_RUN_MODE": request.mode},
@@ -794,7 +790,7 @@ def start_simulation_run(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
 
     mode = str(request.mode or "").strip()
     run_id = _normalize_run_id(request.run_id, mode)
@@ -878,7 +874,7 @@ def stop_simulation_run(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     effective_before = runtime_config_service.get_effective(db)
     run_id_before = str(effective_before.get("SIMULATION_RUN_ID") or "").strip()
     condition_name_before = str(effective_before.get("SIMULATION_CONDITION_NAME") or "").strip() or None
@@ -926,7 +922,7 @@ def reset_dev_world(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
 
     runtime_config_service.update_settings(
         db,

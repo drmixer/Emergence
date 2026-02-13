@@ -46,6 +46,7 @@ const Reports = lazy(() => import('./pages/Reports'))
 // Components
 const LiveFeed = lazy(() => import('./components/LiveFeed'))
 import SupportBanner from './components/SupportBanner'
+import FirstTimeOnboarding from './components/FirstTimeOnboarding'
 import ToastProvider from './components/ToastNotifications'
 import { useKeyboardNavigation } from './components/KeyboardNavigation'
 import { SubscriptionProvider, NotificationBell } from './components/Subscriptions'
@@ -85,6 +86,7 @@ function App() {
       <div className="app-wrapper">
         <Analytics />
         <SupportBanner />
+        <FirstTimeOnboarding />
 
         {/* Mobile Header */}
         <header className="mobile-header">

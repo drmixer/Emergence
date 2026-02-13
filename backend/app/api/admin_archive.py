@@ -10,8 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import String, cast, text
 from sqlalchemy.orm import Session
 
-from app.core.admin_auth import AdminActor, require_admin_auth
-from app.core.config import settings
+from app.core.admin_auth import AdminActor, assert_admin_write_access, require_admin_auth
 from app.core.database import get_db
 from app.core.time import now_utc
 from app.models.models import ArchiveArticle
@@ -27,12 +26,8 @@ STATUS_LABELS = ("observational", "replicated")
 EVIDENCE_COMPLETENESS = ("full", "partial")
 
 
-def _assert_writes_enabled() -> None:
-    if not bool(getattr(settings, "ADMIN_WRITE_ENABLED", False)):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin write controls are disabled in this environment",
-        )
+def _assert_writes_enabled(actor: AdminActor) -> None:
+    assert_admin_write_access(client_ip=actor.client_ip)
 
 
 class ArticleReferencePayload(BaseModel):
@@ -296,7 +291,7 @@ def create_admin_archive_article(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     existing = db.query(ArchiveArticle).filter(ArchiveArticle.slug == request.slug.strip()).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slug already exists")
@@ -340,7 +335,7 @@ def update_admin_archive_article(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     article = db.query(ArchiveArticle).filter(ArchiveArticle.id == int(article_id)).first()
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
@@ -389,7 +384,7 @@ def publish_admin_archive_article(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     article = db.query(ArchiveArticle).filter(ArchiveArticle.id == int(article_id)).first()
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
@@ -414,7 +409,7 @@ def unpublish_admin_archive_article(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     article = db.query(ArchiveArticle).filter(ArchiveArticle.id == int(article_id)).first()
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
@@ -431,7 +426,7 @@ def delete_admin_archive_article(
     db: Session = Depends(get_db),
     _actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     article = db.query(ArchiveArticle).filter(ArchiveArticle.id == int(article_id)).first()
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
@@ -446,7 +441,7 @@ def generate_weekly_archive_draft(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     now = now_utc()
     result = generate_weekly_draft(
         db,
@@ -479,7 +474,7 @@ def rebuild_run_report_bundle(
     db: Session = Depends(get_db),
     actor: AdminActor = Depends(require_admin_auth),
 ):
-    _assert_writes_enabled()
+    _assert_writes_enabled(actor)
     # Ensure request-side validation happens in this request's DB transaction context first.
     _ = db
     resolved_actor_id = str(request.actor_id or "").strip() or f"admin:{actor.actor_id}"

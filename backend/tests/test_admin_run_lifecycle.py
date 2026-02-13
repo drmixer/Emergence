@@ -68,9 +68,18 @@ def db_session():
         session.close()
 
 
-def _make_admin_client(db_session, monkeypatch, *, actor_id: str = "ops-phase2") -> tuple[TestClient, _RuntimeConfigStub]:
+def _make_admin_client(
+    db_session,
+    monkeypatch,
+    *,
+    actor_id: str = "ops-phase2",
+    client_ip: str = "127.0.0.1",
+) -> tuple[TestClient, _RuntimeConfigStub]:
     runtime_stub = _RuntimeConfigStub()
+    monkeypatch.setattr(admin_api.settings, "ADMIN_ENABLED", True, raising=False)
     monkeypatch.setattr(admin_api.settings, "ADMIN_WRITE_ENABLED", True, raising=False)
+    monkeypatch.setattr(admin_api.settings, "ENVIRONMENT", "development", raising=False)
+    monkeypatch.setattr(admin_api.settings, "ADMIN_IP_ALLOWLIST", "", raising=False)
     monkeypatch.setattr(admin_api.runtime_config_service, "update_settings", runtime_stub.update_settings)
     monkeypatch.setattr(admin_api.runtime_config_service, "get_effective", runtime_stub.get_effective)
     monkeypatch.setattr(
@@ -89,7 +98,7 @@ def _make_admin_client(db_session, monkeypatch, *, actor_id: str = "ops-phase2")
     app.dependency_overrides[admin_api.get_db] = lambda: db_session
     app.dependency_overrides[admin_api.require_admin_auth] = lambda: admin_api.AdminActor(
         actor_id=actor_id,
-        client_ip="127.0.0.1",
+        client_ip=client_ip,
     )
     return TestClient(app), runtime_stub
 
@@ -342,3 +351,41 @@ def test_run_metrics_empty_payload_includes_run_metadata_key(db_session, monkeyp
     assert body["run_id"] == ""
     assert "run_metadata" in body
     assert body["run_metadata"] is None
+
+
+def test_write_route_rejects_without_ip_allowlist_in_production(db_session, monkeypatch):
+    client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
+    monkeypatch.setattr(admin_api.settings, "ENVIRONMENT", "production", raising=False)
+    monkeypatch.setattr(admin_api.settings, "ADMIN_IP_ALLOWLIST", "", raising=False)
+
+    with client:
+        response = client.post("/api/admin/control/pause", json={"reason": "prod_block_check"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin write IP allowlist is required in production"
+
+
+def test_write_route_rejects_non_allowlisted_ip_in_production(db_session, monkeypatch):
+    client, _runtime_stub = _make_admin_client(db_session, monkeypatch, client_ip="127.0.0.2")
+    monkeypatch.setattr(admin_api.settings, "ENVIRONMENT", "production", raising=False)
+    monkeypatch.setattr(admin_api.settings, "ADMIN_IP_ALLOWLIST", "127.0.0.1", raising=False)
+
+    with client:
+        response = client.post("/api/admin/control/pause", json={"reason": "prod_ip_block_check"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin write IP not allowed"
+
+
+def test_write_route_allows_allowlisted_ip_in_production(db_session, monkeypatch):
+    client, _runtime_stub = _make_admin_client(db_session, monkeypatch, client_ip="127.0.0.1")
+    monkeypatch.setattr(admin_api.settings, "ENVIRONMENT", "production", raising=False)
+    monkeypatch.setattr(admin_api.settings, "ADMIN_IP_ALLOWLIST", "127.0.0.1,10.0.0.5", raising=False)
+
+    with client:
+        response = client.post("/api/admin/control/pause", json={"reason": "prod_ip_allowed"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["simulation_paused"] is True
