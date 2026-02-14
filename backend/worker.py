@@ -10,6 +10,7 @@ import json
 import sys
 from pathlib import Path
 from datetime import datetime
+from sqlalchemy.exc import SQLAlchemyError
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -28,6 +29,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+DB_RETRY_SECONDS = max(5, int(os.environ.get("WORKER_DB_RETRY_SECONDS", "20")))
 
 
 async def _healthcheck_handler(
@@ -137,8 +139,16 @@ async def _start_runtime_systems() -> tuple[asyncio.Task, asyncio.Task | None]:
     logger.info("Starting scheduler...")
     await scheduler.start(day_length_minutes=settings.DAY_LENGTH_MINUTES)
 
-    logger.info("Starting agent processing...")
-    await agent_processor.start()
+    try:
+        logger.info("Starting agent processing...")
+        await agent_processor.start()
+    except Exception:
+        # If agent startup fails after scheduler starts, clean up before retrying.
+        try:
+            await scheduler.stop()
+        except Exception as stop_error:
+            logger.error("Failed to stop scheduler after startup error: %s", stop_error)
+        raise
 
     event_task = asyncio.create_task(run_event_loop())
 
@@ -208,46 +218,69 @@ async def main():
 
     try:
         while True:
-            simulation_active = bool(
-                runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE")
-            )
-
-            if simulation_active and not runtime_systems_started:
-                event_task, summary_task = await _start_runtime_systems()
-                runtime_systems_started = True
-                idle_logged = False
-            elif not simulation_active and runtime_systems_started:
-                logger.info("SIMULATION_ACTIVE is false; stopping runtime systems...")
-                await _stop_runtime_systems(event_task, summary_task)
-                event_task = None
-                summary_task = None
-                runtime_systems_started = False
-
-            if not simulation_active:
-                if not idle_logged:
-                    logger.info("SIMULATION_ACTIVE is false, worker will idle")
-                    idle_logged = True
-                await asyncio.sleep(60)
-                logger.info("Worker idle (SIMULATION_ACTIVE=false)")
-                continue
-
-            stop_decision = run_guardrail_service.evaluate_and_enforce()
-            if stop_decision.should_stop:
-                logger.error(
-                    "Stopping worker after run guardrail trigger (%s): %s",
-                    stop_decision.reason,
-                    stop_decision.details or {},
+            try:
+                simulation_active = bool(
+                    runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE")
                 )
-                break
 
-            # Log periodic status
-            status = await get_status()
-            logger.info(
-                f"Status: {status['processing_agents']} processing | "
-                f"{status['active_agents']}/{status['total_agents']} agents active | "
-                f"Active effects: {status['active_effects']}"
-            )
-            await asyncio.sleep(60)
+                if simulation_active and not runtime_systems_started:
+                    event_task, summary_task = await _start_runtime_systems()
+                    runtime_systems_started = True
+                    idle_logged = False
+                elif not simulation_active and runtime_systems_started:
+                    logger.info("SIMULATION_ACTIVE is false; stopping runtime systems...")
+                    await _stop_runtime_systems(event_task, summary_task)
+                    event_task = None
+                    summary_task = None
+                    runtime_systems_started = False
+
+                if not simulation_active:
+                    if not idle_logged:
+                        logger.info("SIMULATION_ACTIVE is false, worker will idle")
+                        idle_logged = True
+                    await asyncio.sleep(60)
+                    logger.info("Worker idle (SIMULATION_ACTIVE=false)")
+                    continue
+
+                stop_decision = run_guardrail_service.evaluate_and_enforce()
+                if stop_decision.should_stop:
+                    logger.error(
+                        "Stopping worker after run guardrail trigger (%s): %s",
+                        stop_decision.reason,
+                        stop_decision.details or {},
+                    )
+                    break
+
+                # Log periodic status
+                status = await get_status()
+                logger.info(
+                    f"Status: {status['processing_agents']} processing | "
+                    f"{status['active_agents']}/{status['total_agents']} agents active | "
+                    f"Active effects: {status['active_effects']}"
+                )
+                await asyncio.sleep(60)
+            except SQLAlchemyError as db_error:
+                logger.error(
+                    "Database unavailable for worker loop; retrying in %ss: %s",
+                    DB_RETRY_SECONDS,
+                    db_error,
+                )
+                if runtime_systems_started:
+                    try:
+                        await _stop_runtime_systems(event_task, summary_task)
+                    except Exception as stop_error:
+                        logger.error("Failed to stop runtime systems after DB error: %s", stop_error)
+                    event_task = None
+                    summary_task = None
+                    runtime_systems_started = False
+                await asyncio.sleep(DB_RETRY_SECONDS)
+            except Exception as loop_error:
+                logger.error(
+                    "Worker loop iteration failed; retrying in %ss: %s",
+                    DB_RETRY_SECONDS,
+                    loop_error,
+                )
+                await asyncio.sleep(DB_RETRY_SECONDS)
 
     except KeyboardInterrupt:
         logger.info("Received shutdown signal")
