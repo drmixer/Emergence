@@ -154,6 +154,81 @@ def _compute_retention_for_day(db: Session, *, cohort_day: date, followup_days: 
     }
 
 
+def _fetch_onboarding_metrics_by_day(
+    db: Session,
+    *,
+    start_day: date,
+    end_day: date,
+) -> dict[str, dict[str, int]]:
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              day_key,
+              COUNT(CASE WHEN event_name = 'onboarding_shown' THEN 1 END) AS onboarding_shown,
+              COUNT(DISTINCT CASE WHEN event_name = 'onboarding_shown' THEN visitor_id END) AS onboarding_shown_visitors,
+              COUNT(CASE WHEN event_name = 'onboarding_completed' THEN 1 END) AS onboarding_completed,
+              COUNT(DISTINCT CASE WHEN event_name = 'onboarding_completed' THEN visitor_id END) AS onboarding_completed_visitors,
+              COUNT(CASE WHEN event_name = 'onboarding_skipped' THEN 1 END) AS onboarding_skipped,
+              COUNT(DISTINCT CASE WHEN event_name = 'onboarding_skipped' THEN visitor_id END) AS onboarding_skipped_visitors,
+              COUNT(CASE WHEN event_name = 'onboarding_glossary_opened' THEN 1 END) AS onboarding_glossary_opened,
+              COUNT(DISTINCT CASE WHEN event_name = 'onboarding_glossary_opened' THEN visitor_id END) AS onboarding_glossary_opened_visitors
+            FROM kpi_events
+            WHERE day_key BETWEEN :start_day AND :end_day
+            GROUP BY day_key
+            """
+        ),
+        {"start_day": start_day, "end_day": end_day},
+    ).fetchall()
+
+    by_day: dict[str, dict[str, int]] = {}
+    for row in rows:
+        day_key_value = row.day_key
+        if hasattr(day_key_value, "isoformat"):
+            key = day_key_value.isoformat()
+        else:
+            key = str(day_key_value or "")
+        if not key:
+            continue
+        by_day[key] = {
+            "onboarding_shown": int(row.onboarding_shown or 0),
+            "onboarding_shown_visitors": int(row.onboarding_shown_visitors or 0),
+            "onboarding_completed": int(row.onboarding_completed or 0),
+            "onboarding_completed_visitors": int(row.onboarding_completed_visitors or 0),
+            "onboarding_skipped": int(row.onboarding_skipped or 0),
+            "onboarding_skipped_visitors": int(row.onboarding_skipped_visitors or 0),
+            "onboarding_glossary_opened": int(row.onboarding_glossary_opened or 0),
+            "onboarding_glossary_opened_visitors": int(row.onboarding_glossary_opened_visitors or 0),
+        }
+    return by_day
+
+
+def _attach_onboarding_metrics(
+    *,
+    items: list[dict[str, Any]],
+    onboarding_by_day: dict[str, dict[str, int]],
+) -> None:
+    for item in items:
+        day_key = str(item.get("day_key") or "")
+        source = onboarding_by_day.get(day_key, {})
+        shown_visitors = int(source.get("onboarding_shown_visitors", 0))
+        completed_visitors = int(source.get("onboarding_completed_visitors", 0))
+        skipped_visitors = int(source.get("onboarding_skipped_visitors", 0))
+        glossary_visitors = int(source.get("onboarding_glossary_opened_visitors", 0))
+
+        item["onboarding_shown"] = int(source.get("onboarding_shown", 0))
+        item["onboarding_shown_visitors"] = shown_visitors
+        item["onboarding_completed"] = int(source.get("onboarding_completed", 0))
+        item["onboarding_completed_visitors"] = completed_visitors
+        item["onboarding_skipped"] = int(source.get("onboarding_skipped", 0))
+        item["onboarding_skipped_visitors"] = skipped_visitors
+        item["onboarding_glossary_opened"] = int(source.get("onboarding_glossary_opened", 0))
+        item["onboarding_glossary_opened_visitors"] = glossary_visitors
+        item["onboarding_completion_rate"] = _safe_ratio(completed_visitors, shown_visitors)
+        item["onboarding_skip_rate"] = _safe_ratio(skipped_visitors, shown_visitors)
+        item["onboarding_glossary_open_rate"] = _safe_ratio(glossary_visitors, shown_visitors)
+
+
 def compute_daily_rollup(db: Session, *, day_key: date) -> dict[str, Any]:
     totals = db.execute(
         text(
@@ -382,8 +457,22 @@ def record_kpi_event(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_rollup_row(row: Any) -> dict[str, Any]:
+    day_key_value = row.day_key
+    if hasattr(day_key_value, "isoformat"):
+        day_key_text = day_key_value.isoformat()
+    else:
+        day_key_text = str(day_key_value or "")
+
+    updated_at_value = row.updated_at
+    if hasattr(updated_at_value, "isoformat"):
+        updated_at_text = updated_at_value.isoformat()
+    elif updated_at_value is None:
+        updated_at_text = None
+    else:
+        updated_at_text = str(updated_at_value)
+
     return {
-        "day_key": row.day_key.isoformat(),
+        "day_key": day_key_text,
         "landing_views": int(row.landing_views or 0),
         "landing_view_visitors": int(row.landing_view_visitors or 0),
         "landing_run_clicks": int(row.landing_run_clicks or 0),
@@ -411,7 +500,7 @@ def _serialize_rollup_row(row: Any) -> dict[str, Any]:
         "d7_cohort_size": int(row.d7_cohort_size or 0),
         "d7_returning_users": int(row.d7_returning_users or 0),
         "d7_retention_rate": (None if row.d7_retention_rate is None else float(row.d7_retention_rate)),
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "updated_at": updated_at_text,
     }
 
 
@@ -433,6 +522,25 @@ def get_recent_rollups(db: Session, *, days: int, refresh: bool = True) -> dict[
         {"limit": resolved_days},
     ).fetchall()
     items = [_serialize_rollup_row(row) for row in rows]
+
+    if items:
+        day_keys: list[date] = []
+        for item in items:
+            day_key_text = str(item.get("day_key") or "").strip()
+            if not day_key_text:
+                continue
+            try:
+                day_keys.append(date.fromisoformat(day_key_text))
+            except ValueError:
+                continue
+        if day_keys:
+            onboarding_by_day = _fetch_onboarding_metrics_by_day(
+                db,
+                start_day=min(day_keys),
+                end_day=max(day_keys),
+            )
+            _attach_onboarding_metrics(items=items, onboarding_by_day=onboarding_by_day)
+
     latest = items[0] if items else None
 
     window = items[:7]
@@ -453,6 +561,9 @@ def get_recent_rollups(db: Session, *, days: int, refresh: bool = True) -> dict[
             "shared_link_ctr": _avg_rate("shared_link_ctr"),
             "d1_retention_rate": _avg_rate("d1_retention_rate"),
             "d7_retention_rate": _avg_rate("d7_retention_rate"),
+            "onboarding_completion_rate": _avg_rate("onboarding_completion_rate"),
+            "onboarding_skip_rate": _avg_rate("onboarding_skip_rate"),
+            "onboarding_glossary_open_rate": _avg_rate("onboarding_glossary_open_rate"),
         },
     }
 

@@ -241,6 +241,11 @@ function groupEventsByDay(events) {
     return { grouped, sortedDays }
 }
 
+function getContinuityOrigin(event) {
+    const origin = String(event?.lineage_origin || '').trim().toLowerCase()
+    return origin === 'carryover' || origin === 'fresh' ? origin : ''
+}
+
 export default function Timeline() {
     const [events, setEvents] = useState([])
     const [loading, setLoading] = useState(true)
@@ -513,7 +518,15 @@ export default function Timeline() {
                                                     <Icon size={16} />
                                                 </div>
                                                 <div className="event-content">
-                                                    <span className="event-label">{config.label}</span>
+                                                    <div className="event-label-row">
+                                                        <span className="event-label">{config.label}</span>
+                                                        {getContinuityOrigin(event) === 'carryover' && (
+                                                            <span className="event-continuity-chip carryover">Carryover</span>
+                                                        )}
+                                                        {getContinuityOrigin(event) === 'fresh' && (
+                                                            <span className="event-continuity-chip fresh">Fresh</span>
+                                                        )}
+                                                    </div>
                                                     <p className="event-description">{event.description}</p>
                                                     <span className="event-time">
                                                         {formatDistanceToNow(new Date(event.created_at), { addSuffix: true })}

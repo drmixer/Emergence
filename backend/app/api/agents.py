@@ -8,7 +8,12 @@ from sqlalchemy import desc, func
 
 from app.core.database import get_db
 from app.core.time import now_utc
-from app.models.models import Agent, AgentInventory, AgentLineage, Event, Message, Proposal, SimulationRun, Vote
+from app.models.models import Agent, AgentInventory, Event, Message, Proposal, Vote
+from app.services.lineage import (
+    lineage_map_for_season,
+    lineage_payload_for_agent_number,
+    resolve_active_or_latest_season_id,
+)
 from pydantic import BaseModel
 from pydantic.config import ConfigDict
 
@@ -39,6 +44,11 @@ class AgentResponse(BaseModel):
     status: str
     created_at: str
     last_active_at: str
+    lineage_origin: Optional[str] = None
+    lineage_is_carryover: bool = False
+    lineage_is_fresh: bool = False
+    lineage_parent_agent_number: Optional[int] = None
+    lineage_season_id: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
@@ -108,65 +118,17 @@ def _build_profile_stats(db: Session, *, agent: Agent) -> dict:
 
 
 def _resolve_lineage_context(db: Session, *, agent_number: int) -> dict:
-    current_season_row = (
-        db.query(SimulationRun.season_id)
-        .filter(
-            SimulationRun.season_id.isnot(None),
-            SimulationRun.season_id != "",
-            SimulationRun.ended_at.is_(None),
-        )
-        .order_by(SimulationRun.started_at.desc(), SimulationRun.id.desc())
-        .first()
-    )
-    if current_season_row is None:
-        current_season_row = (
-            db.query(SimulationRun.season_id)
-            .filter(
-                SimulationRun.season_id.isnot(None),
-                SimulationRun.season_id != "",
-            )
-            .order_by(SimulationRun.started_at.desc(), SimulationRun.id.desc())
-            .first()
-        )
-
-    current_season_id = str(current_season_row.season_id or "").strip() if current_season_row else ""
-    current_season_id = current_season_id or None
-
-    lineage_row = None
-    if current_season_id:
-        lineage_row = (
-            db.query(AgentLineage)
-            .filter(
-                AgentLineage.season_id == current_season_id,
-                AgentLineage.child_agent_number == int(agent_number),
-            )
-            .first()
-        )
-
-    if lineage_row is None:
-        lineage_row = (
-            db.query(AgentLineage)
-            .filter(AgentLineage.child_agent_number == int(agent_number))
-            .order_by(AgentLineage.created_at.desc(), AgentLineage.id.desc())
-            .first()
-        )
-
-    origin = str(lineage_row.origin).strip() if lineage_row and lineage_row.origin else ""
-    origin = origin if origin in {"carryover", "fresh"} else None
-    parent_agent_number = (
-        int(lineage_row.parent_agent_number)
-        if lineage_row and lineage_row.parent_agent_number is not None
-        else None
-    )
-    lineage_season_id = str(lineage_row.season_id or "").strip() if lineage_row and lineage_row.season_id else None
+    current_season_id = resolve_active_or_latest_season_id(db)
+    lineage_by_agent_number = lineage_map_for_season(db, season_id=current_season_id)
+    payload = lineage_payload_for_agent_number(agent_number, lineage_by_agent_number)
 
     return {
         "current_season_id": current_season_id,
-        "lineage_season_id": lineage_season_id,
-        "origin": origin,
-        "is_carryover": bool(origin == "carryover"),
-        "is_fresh": bool(origin == "fresh"),
-        "parent_agent_number": parent_agent_number,
+        "lineage_season_id": payload.get("lineage_season_id"),
+        "origin": payload.get("lineage_origin"),
+        "is_carryover": bool(payload.get("lineage_is_carryover")),
+        "is_fresh": bool(payload.get("lineage_is_fresh")),
+        "parent_agent_number": payload.get("lineage_parent_agent_number"),
     }
 
 
@@ -191,21 +153,31 @@ def list_agents(
         query = query.filter(Agent.personality_type == personality_type)
     
     agents = query.order_by(Agent.agent_number).all()
+    season_id = resolve_active_or_latest_season_id(db)
+    lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
     
-    return [
-        AgentResponse(
-            id=a.id,
-            agent_number=a.agent_number,
-            display_name=a.display_name,
-            model_type=a.model_type,
-            tier=a.tier,
-            personality_type=a.personality_type,
-            status=a.status,
-            created_at=a.created_at.isoformat() if a.created_at else "",
-            last_active_at=a.last_active_at.isoformat() if a.last_active_at else "",
+    result: list[AgentResponse] = []
+    for agent in agents:
+        lineage = lineage_payload_for_agent_number(int(agent.agent_number), lineage_by_agent_number)
+        result.append(
+            AgentResponse(
+                id=agent.id,
+                agent_number=agent.agent_number,
+                display_name=agent.display_name,
+                model_type=agent.model_type,
+                tier=agent.tier,
+                personality_type=agent.personality_type,
+                status=agent.status,
+                created_at=agent.created_at.isoformat() if agent.created_at else "",
+                last_active_at=agent.last_active_at.isoformat() if agent.last_active_at else "",
+                lineage_origin=lineage.get("lineage_origin"),
+                lineage_is_carryover=bool(lineage.get("lineage_is_carryover")),
+                lineage_is_fresh=bool(lineage.get("lineage_is_fresh")),
+                lineage_parent_agent_number=lineage.get("lineage_parent_agent_number"),
+                lineage_season_id=lineage.get("lineage_season_id"),
+            )
         )
-        for a in agents
-    ]
+    return result
 
 
 @router.get("/{agent_id}", response_model=AgentDetailResponse)
@@ -215,6 +187,15 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
     
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    lineage = _resolve_lineage_context(db, agent_number=int(agent.agent_number))
+    detail_lineage_payload = {
+        "lineage_origin": lineage.get("origin"),
+        "lineage_is_carryover": bool(lineage.get("is_carryover")),
+        "lineage_is_fresh": bool(lineage.get("is_fresh")),
+        "lineage_parent_agent_number": lineage.get("parent_agent_number"),
+        "lineage_season_id": lineage.get("lineage_season_id"),
+    }
     
     inventory = db.query(AgentInventory).filter(
         AgentInventory.agent_id == agent.id
@@ -230,6 +211,11 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
         status=agent.status,
         created_at=agent.created_at.isoformat() if agent.created_at else "",
         last_active_at=agent.last_active_at.isoformat() if agent.last_active_at else "",
+        lineage_origin=detail_lineage_payload.get("lineage_origin"),
+        lineage_is_carryover=detail_lineage_payload.get("lineage_is_carryover"),
+        lineage_is_fresh=detail_lineage_payload.get("lineage_is_fresh"),
+        lineage_parent_agent_number=detail_lineage_payload.get("lineage_parent_agent_number"),
+        lineage_season_id=detail_lineage_payload.get("lineage_season_id"),
         inventory=[
             InventoryResponse(
                 resource_type=inv.resource_type,

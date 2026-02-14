@@ -16,6 +16,11 @@ const modelNames = {
     'gemini-flash': 'Gemini Flash',
 }
 
+function getContinuityOrigin(agent) {
+    const origin = String(agent?.lineage_origin || '').trim().toLowerCase()
+    return origin === 'carryover' || origin === 'fresh' ? origin : ''
+}
+
 export default function Agents() {
     const [agents, setAgents] = useState([])
     const [loading, setLoading] = useState(true)
@@ -157,7 +162,15 @@ export default function Agents() {
                                     size="medium"
                                 />
                                 <div className="agent-info">
-                                    <h4>{formatAgentDisplayLabel(agent)}</h4>
+                                    <div className="agent-name-row">
+                                        <h4>{formatAgentDisplayLabel(agent)}</h4>
+                                        {getContinuityOrigin(agent) === 'carryover' && (
+                                            <span className="continuity-chip carryover">Carryover</span>
+                                        )}
+                                        {getContinuityOrigin(agent) === 'fresh' && (
+                                            <span className="continuity-chip fresh">Fresh</span>
+                                        )}
+                                    </div>
                                     <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
                                 </div>
                                 <span className={`badge badge-${agent.status}`}>
@@ -205,6 +218,40 @@ export default function Agents() {
           margin-top: var(--spacing-xs);
           color: var(--text-muted);
           font-size: 0.75rem;
+        }
+
+        .agent-name-row {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          flex-wrap: wrap;
+        }
+
+        .agent-name-row h4 {
+          margin: 0;
+        }
+
+        .continuity-chip {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.2rem 0.45rem;
+          border-radius: 999px;
+          font-size: 0.62rem;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          border: 1px solid transparent;
+        }
+
+        .continuity-chip.carryover {
+          color: #065f46;
+          background: rgba(16, 185, 129, 0.14);
+          border-color: rgba(16, 185, 129, 0.42);
+        }
+
+        .continuity-chip.fresh {
+          color: #0f3d7a;
+          background: rgba(59, 130, 246, 0.14);
+          border-color: rgba(59, 130, 246, 0.42);
         }
       `}</style>
         </div>

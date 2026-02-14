@@ -144,6 +144,89 @@ def test_agent_detail_includes_profile_stats_and_carryover_lineage():
     db.close()
 
 
+def test_list_agents_includes_lineage_fields_for_current_season():
+    db = _build_db_session()
+    now = now_utc()
+
+    agent_1 = Agent(
+        agent_number=1,
+        display_name="Alpha-01",
+        model_type="claude-sonnet-4",
+        tier=1,
+        personality_type="efficiency",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    agent_2 = Agent(
+        agent_number=2,
+        display_name="Beta-02",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    db.add_all([agent_1, agent_2])
+    db.flush()
+
+    db.add(
+        SimulationRun(
+            run_id="real-s1-r3",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="standard_72h",
+            season_id="season_01",
+            season_number=1,
+            started_at=now - timedelta(hours=3),
+            ended_at=None,
+        )
+    )
+    db.add_all(
+        [
+            AgentLineage(
+                season_id="season_01",
+                parent_agent_number=1,
+                child_agent_number=1,
+                origin="carryover",
+            ),
+            AgentLineage(
+                season_id="season_01",
+                parent_agent_number=None,
+                child_agent_number=2,
+                origin="fresh",
+            ),
+        ]
+    )
+    db.commit()
+
+    with _make_client(db) as client:
+        response = client.get("/api/agents")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 2
+    first = next(item for item in payload if int(item["agent_number"]) == 1)
+    second = next(item for item in payload if int(item["agent_number"]) == 2)
+
+    assert first["lineage_origin"] == "carryover"
+    assert first["lineage_is_carryover"] is True
+    assert first["lineage_is_fresh"] is False
+    assert first["lineage_parent_agent_number"] == 1
+    assert first["lineage_season_id"] == "season_01"
+
+    assert second["lineage_origin"] == "fresh"
+    assert second["lineage_is_carryover"] is False
+    assert second["lineage_is_fresh"] is True
+    assert second["lineage_parent_agent_number"] is None
+    assert second["lineage_season_id"] == "season_01"
+
+    db.close()
+
+
 def test_agent_detail_lineage_defaults_when_missing():
     db = _build_db_session()
     now = now_utc()

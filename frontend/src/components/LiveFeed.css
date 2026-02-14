@@ -141,6 +141,29 @@
     color: var(--text-muted);
 }
 
+.event-continuity-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 1px solid transparent;
+}
+
+.event-continuity-chip.carryover {
+    color: #065f46;
+    background: rgba(16, 185, 129, 0.14);
+    border-color: rgba(16, 185, 129, 0.42);
+}
+
+.event-continuity-chip.fresh {
+    color: #0f3d7a;
+    background: rgba(59, 130, 246, 0.14);
+    border-color: rgba(59, 130, 246, 0.42);
+}
+
 .empty-feed {
     display: flex;
     flex-direction: column;

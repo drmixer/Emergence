@@ -69,6 +69,11 @@ const eventColors = {
     default: 'blue',
 }
 
+function getContinuityOrigin(payload) {
+    const origin = String(payload?.lineage_origin || '').trim().toLowerCase()
+    return origin === 'carryover' || origin === 'fresh' ? origin : ''
+}
+
 function EventCard({ event }) {
     const Icon = eventIcons[event.event_type] || eventIcons.default
     const color = eventColors[event.event_type] || eventColors.default
@@ -86,6 +91,12 @@ function EventCard({ event }) {
                 <div className="event-description">{event.description}</div>
                 <div className="event-meta">
                     <span className="event-type">{event.event_type.replace(/_/g, ' ')}</span>
+                    {getContinuityOrigin(event) === 'carryover' && (
+                        <span className="event-continuity-chip carryover">Carryover</span>
+                    )}
+                    {getContinuityOrigin(event) === 'fresh' && (
+                        <span className="event-continuity-chip fresh">Fresh</span>
+                    )}
                     <span className="event-time">{timeAgo}</span>
                 </div>
             </div>

@@ -42,6 +42,8 @@ const Method = lazy(() => import('./pages/Method'))
 const Glossary = lazy(() => import('./pages/Glossary'))
 const RunDetail = lazy(() => import('./pages/RunDetail'))
 const Reports = lazy(() => import('./pages/Reports'))
+const Privacy = lazy(() => import('./pages/Privacy'))
+const Terms = lazy(() => import('./pages/Terms'))
 
 // Components
 const LiveFeed = lazy(() => import('./components/LiveFeed'))
@@ -147,6 +149,14 @@ function App() {
               <Info size={20} />
               <span>About</span>
             </NavLink>
+            <NavLink to="/privacy" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
+              <BookOpen size={20} />
+              <span>Privacy</span>
+            </NavLink>
+            <NavLink to="/terms" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={handleNavClick}>
+              <FileText size={20} />
+              <span>Terms</span>
+            </NavLink>
           </div>
         </nav>
 
@@ -190,6 +200,14 @@ function App() {
                 <Info size={20} />
                 <span>About</span>
               </NavLink>
+              <NavLink to="/privacy" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                <BookOpen size={20} />
+                <span>Privacy</span>
+              </NavLink>
+              <NavLink to="/terms" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                <FileText size={20} />
+                <span>Terms</span>
+              </NavLink>
             </div>
           </aside>
 
@@ -213,6 +231,8 @@ function App() {
                 <Route path="/about" element={<About />} />
                 <Route path="/method" element={<Method />} />
                 <Route path="/glossary" element={<Glossary />} />
+                <Route path="/privacy" element={<Privacy />} />
+                <Route path="/terms" element={<Terms />} />
                 <Route path="/ops" element={<Ops />} />
                 <Route path="/runs/:runId" element={<RunDetail />} />
               </Routes>

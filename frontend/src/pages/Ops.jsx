@@ -1298,12 +1298,30 @@ export default function Ops() {
                         <span>D7 Retention</span>
                         <strong>{formatPercent(kpiLatest.d7_retention_rate)}</strong>
                       </div>
+                      <div className="ops-kv-item">
+                        <span>Onboarding shown (visitors)</span>
+                        <strong>{Number(kpiLatest.onboarding_shown_visitors || 0).toLocaleString()}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Onboarding completion</span>
+                        <strong>{formatPercent(kpiLatest.onboarding_completion_rate)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Onboarding skip</span>
+                        <strong>{formatPercent(kpiLatest.onboarding_skip_rate)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Glossary open rate</span>
+                        <strong>{formatPercent(kpiLatest.onboarding_glossary_open_rate)}</strong>
+                      </div>
                     </div>
 
                     <div className="ops-kpi-summary">
                       <span>7d Avg Landing -&gt; Run: {formatPercent(kpiSevenDayAvg.landing_to_run_ctr)}</span>
                       <span>7d Avg Replay Completion: {formatPercent(kpiSevenDayAvg.replay_completion_rate)}</span>
                       <span>7d Avg D7 Retention: {formatPercent(kpiSevenDayAvg.d7_retention_rate)}</span>
+                      <span>7d Avg Onboarding Completion: {formatPercent(kpiSevenDayAvg.onboarding_completion_rate)}</span>
+                      <span>7d Avg Onboarding Skip: {formatPercent(kpiSevenDayAvg.onboarding_skip_rate)}</span>
                     </div>
 
                     {kpiItems.length > 0 && (
@@ -1318,6 +1336,11 @@ export default function Ops() {
                               <th>Replay Completions</th>
                               <th>Share Clicks</th>
                               <th>Shared Opens</th>
+                              <th>Onboarding Shown</th>
+                              <th>Onboarding Completed</th>
+                              <th>Onboarding Skipped</th>
+                              <th>Glossary Opens</th>
+                              <th>Onboarding Completion</th>
                               <th>D1</th>
                               <th>D7</th>
                             </tr>
@@ -1332,6 +1355,11 @@ export default function Ops() {
                                 <td>{Number(item.replay_completions || 0).toLocaleString()}</td>
                                 <td>{Number(item.share_clicks || 0).toLocaleString()}</td>
                                 <td>{Number(item.shared_link_opens || 0).toLocaleString()}</td>
+                                <td>{Number(item.onboarding_shown_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.onboarding_completed_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.onboarding_skipped_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.onboarding_glossary_opened_visitors || 0).toLocaleString()}</td>
+                                <td>{formatPercent(item.onboarding_completion_rate)}</td>
                                 <td>{formatPercent(item.d1_retention_rate)}</td>
                                 <td>{formatPercent(item.d7_retention_rate)}</td>
                               </tr>

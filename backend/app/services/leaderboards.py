@@ -10,74 +10,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
 from app.core.database import SessionLocal
-from app.models.models import Agent, AgentInventory, AgentLineage, Event, Vote, Message, Proposal, SimulationRun
+from app.models.models import Agent, AgentInventory, Event, Vote, Message, Proposal
+from app.services.lineage import (
+    lineage_map_for_season,
+    lineage_payload_for_agent_number,
+    resolve_active_or_latest_season_id,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _resolve_active_or_latest_season_id(db: Session) -> str | None:
-    active_row = (
-        db.query(SimulationRun.season_id)
-        .filter(
-            SimulationRun.season_id.isnot(None),
-            SimulationRun.season_id != "",
-            SimulationRun.ended_at.is_(None),
-        )
-        .order_by(SimulationRun.started_at.desc(), SimulationRun.id.desc())
-        .first()
-    )
-    if active_row and str(active_row.season_id or "").strip():
-        return str(active_row.season_id).strip()
-
-    latest_row = (
-        db.query(SimulationRun.season_id)
-        .filter(
-            SimulationRun.season_id.isnot(None),
-            SimulationRun.season_id != "",
-        )
-        .order_by(SimulationRun.started_at.desc(), SimulationRun.id.desc())
-        .first()
-    )
-    if latest_row and str(latest_row.season_id or "").strip():
-        return str(latest_row.season_id).strip()
-    return None
-
-
-def _lineage_map_for_season(db: Session, *, season_id: str | None) -> dict[int, dict[str, Any]]:
-    rows: list[AgentLineage] = []
-    clean_season_id = str(season_id or "").strip()
-    if clean_season_id:
-        rows = (
-            db.query(AgentLineage)
-            .filter(AgentLineage.season_id == clean_season_id)
-            .all()
-        )
-    if not rows:
-        rows = (
-            db.query(AgentLineage)
-            .order_by(AgentLineage.created_at.desc(), AgentLineage.id.desc())
-            .all()
-        )
-
-    by_child: dict[int, dict[str, Any]] = {}
-    for row in rows:
-        child_number = int(row.child_agent_number or 0)
-        if child_number <= 0 or child_number in by_child:
-            continue
-        origin = str(row.origin or "").strip()
-        by_child[child_number] = {
-            "lineage_origin": (origin if origin in {"carryover", "fresh"} else None),
-            "lineage_season_id": str(row.season_id or "").strip() or None,
-            "lineage_parent_agent_number": (
-                int(row.parent_agent_number) if row.parent_agent_number is not None else None
-            ),
-        }
-    return by_child
-
-
 def _agent_identity_payload(agent: Agent, lineage_by_agent_number: dict[int, dict[str, Any]]) -> dict[str, Any]:
-    lineage = lineage_by_agent_number.get(int(agent.agent_number), {})
-    origin = lineage.get("lineage_origin")
+    lineage = lineage_payload_for_agent_number(int(agent.agent_number), lineage_by_agent_number)
     return {
         "agent_id": int(agent.id),
         "agent_number": int(agent.agent_number),
@@ -86,9 +30,9 @@ def _agent_identity_payload(agent: Agent, lineage_by_agent_number: dict[int, dic
         "model_type": str(agent.model_type or ""),
         "personality_type": str(agent.personality_type or ""),
         "status": str(agent.status or "active"),
-        "lineage_origin": origin,
-        "lineage_is_carryover": bool(origin == "carryover"),
-        "lineage_is_fresh": bool(origin == "fresh"),
+        "lineage_origin": lineage.get("lineage_origin"),
+        "lineage_is_carryover": bool(lineage.get("lineage_is_carryover")),
+        "lineage_is_fresh": bool(lineage.get("lineage_is_fresh")),
         "lineage_parent_agent_number": lineage.get("lineage_parent_agent_number"),
         "lineage_season_id": lineage.get("lineage_season_id"),
     }
@@ -101,8 +45,8 @@ def get_wealth_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     db = SessionLocal()
     
     try:
-        season_id = _resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
+        season_id = resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
         agents = db.query(Agent).filter(Agent.status == "active").all()
         
         wealth_data = []
@@ -147,8 +91,8 @@ def get_activity_leaderboard(hours: int = 24, limit: int = 10) -> List[Dict[str,
     db = SessionLocal()
     
     try:
-        season_id = _resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
+        season_id = resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
         time_threshold = datetime.utcnow() - timedelta(hours=hours)
         
         activity = db.query(
@@ -189,8 +133,8 @@ def get_influence_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     db = SessionLocal()
     
     try:
-        season_id = _resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
+        season_id = resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
         agents = db.query(Agent).all()
         
         influence_data = []
@@ -258,8 +202,8 @@ def get_producer_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     db = SessionLocal()
     
     try:
-        season_id = _resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
+        season_id = resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
         work_events = db.query(
             Event.agent_id,
             func.count(Event.id).label('work_count')
@@ -293,8 +237,8 @@ def get_trader_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     db = SessionLocal()
     
     try:
-        season_id = _resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
+        season_id = resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
         trade_events = db.query(
             Event.agent_id,
             func.count(Event.id).label('trade_count')

@@ -13,6 +13,12 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.models.models import Event
+from app.services.lineage import (
+    agent_number_map,
+    lineage_map_for_season,
+    lineage_payload_for_agent_number,
+    resolve_active_or_latest_season_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +101,22 @@ async def event_stream(request: Request):
     )
 
 
-async def broadcast_event(event: Event):
+async def broadcast_event(event: Event, *, lineage_context: dict | None = None):
     """Broadcast a new event to all connected clients."""
+    lineage = lineage_context or {}
     event_data = {
         "type": "event",
         "id": event.id,
         "event_type": event.event_type,
         "agent_id": event.agent_id,
+        "agent_number": lineage.get("agent_number"),
         "description": event.description,
-        "metadata": event.event_metadata,
+        "metadata": event.event_metadata or {},
+        "lineage_origin": lineage.get("lineage_origin"),
+        "lineage_is_carryover": bool(lineage.get("lineage_is_carryover")),
+        "lineage_is_fresh": bool(lineage.get("lineage_is_fresh")),
+        "lineage_parent_agent_number": lineage.get("lineage_parent_agent_number"),
+        "lineage_season_id": lineage.get("lineage_season_id"),
         "created_at": event.created_at.isoformat() if event.created_at else None,
     }
     
@@ -164,8 +177,16 @@ async def event_polling_task():
                 .all()
             )
 
+            agent_ids = {int(item.agent_id) for item in new_events if item.agent_id is not None}
+            numbers_by_id = agent_number_map(db, agent_ids=agent_ids)
+            season_id = resolve_active_or_latest_season_id(db)
+            lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
+
             for event in new_events:
-                await broadcast_event(event)
+                agent_number = numbers_by_id.get(int(event.agent_id or 0))
+                lineage = lineage_payload_for_agent_number(agent_number, lineage_by_agent_number)
+                lineage["agent_number"] = int(agent_number) if agent_number is not None else None
+                await broadcast_event(event, lineage_context=lineage)
                 last_id = max(last_id, event.id)
 
         except Exception as e:

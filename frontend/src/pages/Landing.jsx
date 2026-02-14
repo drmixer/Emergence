@@ -400,6 +400,10 @@ export default function Landing() {
                         <a href="https://x.com/emergencequest" target="_blank" rel="noopener noreferrer">Twitter</a>
                         <span>•</span>
                         <a onClick={() => navigate('/about')}>About</a>
+                        <span>•</span>
+                        <a onClick={() => navigate('/privacy')}>Privacy</a>
+                        <span>•</span>
+                        <a onClick={() => navigate('/terms')}>Terms</a>
                     </div>
                 </div>
             </footer>
