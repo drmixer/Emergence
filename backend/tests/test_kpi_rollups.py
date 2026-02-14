@@ -35,6 +35,22 @@ def test_normalize_kpi_event_sanitizes_payload():
     assert isinstance(normalized["event_metadata"]["nested"], dict)
 
 
+def test_normalize_kpi_event_accepts_onboarding_events():
+    normalized = kpi_rollups.normalize_kpi_event(
+        {
+            "event_name": "ONBOARDING_COMPLETED",
+            "visitor_id": "visitor-onboarding-1",
+            "surface": "onboarding_modal",
+            "target": "open_dashboard",
+            "metadata": {"version": "v1"},
+        }
+    )
+    assert normalized["event_name"] == "onboarding_completed"
+    assert normalized["visitor_id"] == "visitor-onboarding-1"
+    assert normalized["surface"] == "onboarding_modal"
+    assert normalized["target"] == "open_dashboard"
+
+
 def test_normalize_kpi_event_rejects_unsupported_event():
     with pytest.raises(ValueError, match="unsupported event_name"):
         kpi_rollups.normalize_kpi_event(
@@ -49,4 +65,3 @@ def test_record_kpi_event_rejects_when_ingest_disabled(monkeypatch):
             db=SimpleNamespace(),
             payload={"event_name": "landing_view", "visitor_id": "visitor-1"},
         )
-

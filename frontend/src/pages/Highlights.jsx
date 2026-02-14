@@ -545,6 +545,10 @@ export default function Highlights() {
         </p>
       </div>
 
+      <div className="feed-notice">
+        Highlights are observational summaries from simulation data. For claim-level evidence, review run detail traces and the <Link to="/method">method notes</Link>.
+      </div>
+
       <div className="highlight-tabs">
         <button
           className={`tab-btn ${activeTab === 'recap' ? 'active' : ''}`}

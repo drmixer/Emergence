@@ -20,6 +20,17 @@ const RankBadge = ({ rank }) => {
     return <span className="rank-badge">{rank}</span>
 }
 
+const ContinuityBadge = ({ entry }) => {
+    const origin = String(entry?.lineage_origin || '').trim().toLowerCase()
+    if (origin === 'carryover') {
+        return <span className="continuity-chip carryover">Carryover</span>
+    }
+    if (origin === 'fresh') {
+        return <span className="continuity-chip fresh">Fresh</span>
+    }
+    return null
+}
+
 export default function Leaderboards() {
     const [leaderboards, setLeaderboards] = useState({ wealth: [], activity: [], influence: [], producers: [], traders: [] })
     const [activeBoard, setActiveBoard] = useState('wealth')
@@ -117,8 +128,11 @@ export default function Leaderboards() {
                             />
 
                             <div className="agent-info">
-                                <div className="agent-name">
-                                    {formatAgentDisplayLabel(entry)}
+                                <div className="agent-name-row">
+                                    <div className="agent-name">
+                                        {formatAgentDisplayLabel(entry)}
+                                    </div>
+                                    <ContinuityBadge entry={entry} />
                                 </div>
                                 <span className={`badge badge-tier-${entry.tier}`}>Tier {entry.tier}</span>
                             </div>
@@ -273,8 +287,38 @@ export default function Leaderboards() {
           gap: var(--spacing-md);
         }
         
+        .agent-name-row {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          flex-wrap: wrap;
+        }
+
         .agent-name {
           font-weight: 500;
+        }
+
+        .continuity-chip {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.2rem 0.45rem;
+          border-radius: 999px;
+          font-size: 0.62rem;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          border: 1px solid transparent;
+        }
+
+        .continuity-chip.carryover {
+          color: #065f46;
+          background: rgba(16, 185, 129, 0.14);
+          border-color: rgba(16, 185, 129, 0.42);
+        }
+
+        .continuity-chip.fresh {
+          color: #0f3d7a;
+          background: rgba(59, 130, 246, 0.14);
+          border-color: rgba(59, 130, 246, 0.42);
         }
         
         .value-display {

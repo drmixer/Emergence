@@ -20,6 +20,10 @@ ALLOWED_KPI_EVENT_NAMES = {
     "share_copied",
     "share_native_success",
     "shared_link_open",
+    "onboarding_shown",
+    "onboarding_completed",
+    "onboarding_skipped",
+    "onboarding_glossary_opened",
 }
 SHARE_EVENT_NAMES = {"share_clicked", "share_copied", "share_native_success"}
 RETENTION_EVENT_NAMES = {"run_detail_view", "replay_start"}
@@ -453,4 +457,3 @@ def get_recent_rollups(db: Session, *, days: int, refresh: bool = True) -> dict[
     }
 
     return {"items": items, "summary": summary}
-

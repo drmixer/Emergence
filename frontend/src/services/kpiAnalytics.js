@@ -10,6 +10,10 @@ const ALLOWED_EVENTS = new Set([
   'share_copied',
   'share_native_success',
   'shared_link_open',
+  'onboarding_shown',
+  'onboarding_completed',
+  'onboarding_skipped',
+  'onboarding_glossary_opened',
 ])
 
 const VISITOR_KEY = 'emergence_kpi_visitor_id'

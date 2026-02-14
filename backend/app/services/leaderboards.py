@@ -10,9 +10,88 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
 from app.core.database import SessionLocal
-from app.models.models import Agent, AgentInventory, Event, Vote, Message, Proposal
+from app.models.models import Agent, AgentInventory, AgentLineage, Event, Vote, Message, Proposal, SimulationRun
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_active_or_latest_season_id(db: Session) -> str | None:
+    active_row = (
+        db.query(SimulationRun.season_id)
+        .filter(
+            SimulationRun.season_id.isnot(None),
+            SimulationRun.season_id != "",
+            SimulationRun.ended_at.is_(None),
+        )
+        .order_by(SimulationRun.started_at.desc(), SimulationRun.id.desc())
+        .first()
+    )
+    if active_row and str(active_row.season_id or "").strip():
+        return str(active_row.season_id).strip()
+
+    latest_row = (
+        db.query(SimulationRun.season_id)
+        .filter(
+            SimulationRun.season_id.isnot(None),
+            SimulationRun.season_id != "",
+        )
+        .order_by(SimulationRun.started_at.desc(), SimulationRun.id.desc())
+        .first()
+    )
+    if latest_row and str(latest_row.season_id or "").strip():
+        return str(latest_row.season_id).strip()
+    return None
+
+
+def _lineage_map_for_season(db: Session, *, season_id: str | None) -> dict[int, dict[str, Any]]:
+    rows: list[AgentLineage] = []
+    clean_season_id = str(season_id or "").strip()
+    if clean_season_id:
+        rows = (
+            db.query(AgentLineage)
+            .filter(AgentLineage.season_id == clean_season_id)
+            .all()
+        )
+    if not rows:
+        rows = (
+            db.query(AgentLineage)
+            .order_by(AgentLineage.created_at.desc(), AgentLineage.id.desc())
+            .all()
+        )
+
+    by_child: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        child_number = int(row.child_agent_number or 0)
+        if child_number <= 0 or child_number in by_child:
+            continue
+        origin = str(row.origin or "").strip()
+        by_child[child_number] = {
+            "lineage_origin": (origin if origin in {"carryover", "fresh"} else None),
+            "lineage_season_id": str(row.season_id or "").strip() or None,
+            "lineage_parent_agent_number": (
+                int(row.parent_agent_number) if row.parent_agent_number is not None else None
+            ),
+        }
+    return by_child
+
+
+def _agent_identity_payload(agent: Agent, lineage_by_agent_number: dict[int, dict[str, Any]]) -> dict[str, Any]:
+    lineage = lineage_by_agent_number.get(int(agent.agent_number), {})
+    origin = lineage.get("lineage_origin")
+    return {
+        "agent_id": int(agent.id),
+        "agent_number": int(agent.agent_number),
+        "display_name": agent.display_name or f"Agent #{agent.agent_number}",
+        "tier": int(agent.tier),
+        "model_type": str(agent.model_type or ""),
+        "personality_type": str(agent.personality_type or ""),
+        "status": str(agent.status or "active"),
+        "lineage_origin": origin,
+        "lineage_is_carryover": bool(origin == "carryover"),
+        "lineage_is_fresh": bool(origin == "fresh"),
+        "lineage_parent_agent_number": lineage.get("lineage_parent_agent_number"),
+        "lineage_season_id": lineage.get("lineage_season_id"),
+    }
 
 
 def get_wealth_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
@@ -22,6 +101,8 @@ def get_wealth_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     db = SessionLocal()
     
     try:
+        season_id = _resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
         agents = db.query(Agent).filter(Agent.status == "active").all()
         
         wealth_data = []
@@ -35,16 +116,16 @@ def get_wealth_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
             energy = next((float(inv.quantity) for inv in inventory if inv.resource_type == "energy"), 0)
             materials = next((float(inv.quantity) for inv in inventory if inv.resource_type == "materials"), 0)
             
-            wealth_data.append({
-                "agent_id": agent.id,
-                "agent_number": agent.agent_number,
-                "display_name": agent.display_name or f"Agent #{agent.agent_number}",
-                "tier": agent.tier,
-                "total_wealth": total_wealth,
-                "food": food,
-                "energy": energy,
-                "materials": materials,
-            })
+            payload = _agent_identity_payload(agent, lineage_by_agent_number)
+            payload.update(
+                {
+                    "total_wealth": total_wealth,
+                    "food": food,
+                    "energy": energy,
+                    "materials": materials,
+                }
+            )
+            wealth_data.append(payload)
         
         # Sort by total wealth
         wealth_data.sort(key=lambda x: x["total_wealth"], reverse=True)
@@ -66,6 +147,8 @@ def get_activity_leaderboard(hours: int = 24, limit: int = 10) -> List[Dict[str,
     db = SessionLocal()
     
     try:
+        season_id = _resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
         time_threshold = datetime.utcnow() - timedelta(hours=hours)
         
         activity = db.query(
@@ -80,14 +163,14 @@ def get_activity_leaderboard(hours: int = 24, limit: int = 10) -> List[Dict[str,
         for i, (agent_id, action_count) in enumerate(activity):
             agent = db.query(Agent).filter(Agent.id == agent_id).first()
             if agent:
-                result.append({
-                    "rank": i + 1,
-                    "agent_id": agent.id,
-                    "agent_number": agent.agent_number,
-                    "display_name": agent.display_name or f"Agent #{agent.agent_number}",
-                    "tier": agent.tier,
-                    "action_count": action_count,
-                })
+                payload = _agent_identity_payload(agent, lineage_by_agent_number)
+                payload.update(
+                    {
+                        "rank": i + 1,
+                        "action_count": int(action_count or 0),
+                    }
+                )
+                result.append(payload)
         
         return result
         
@@ -106,6 +189,8 @@ def get_influence_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     db = SessionLocal()
     
     try:
+        season_id = _resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
         agents = db.query(Agent).all()
         
         influence_data = []
@@ -140,18 +225,17 @@ def get_influence_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
             )
             
             if influence > 0:
-                influence_data.append({
-                    "agent_id": agent.id,
-                    "agent_number": agent.agent_number,
-                    "display_name": agent.display_name or f"Agent #{agent.agent_number}",
-                    "tier": agent.tier,
-                    "status": agent.status,
-                    "influence_score": influence,
-                    "proposals": proposals,
-                    "successful_proposals": successful_proposals,
-                    "votes": votes,
-                    "messages": messages,
-                })
+                payload = _agent_identity_payload(agent, lineage_by_agent_number)
+                payload.update(
+                    {
+                        "influence_score": int(influence),
+                        "proposals": int(proposals),
+                        "successful_proposals": int(successful_proposals),
+                        "votes": int(votes),
+                        "messages": int(messages),
+                    }
+                )
+                influence_data.append(payload)
         
         # Sort by influence
         influence_data.sort(key=lambda x: x["influence_score"], reverse=True)
@@ -174,6 +258,8 @@ def get_producer_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     db = SessionLocal()
     
     try:
+        season_id = _resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
         work_events = db.query(
             Event.agent_id,
             func.count(Event.id).label('work_count')
@@ -185,14 +271,14 @@ def get_producer_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
         for i, (agent_id, work_count) in enumerate(work_events):
             agent = db.query(Agent).filter(Agent.id == agent_id).first()
             if agent:
-                result.append({
-                    "rank": i + 1,
-                    "agent_id": agent.id,
-                    "agent_number": agent.agent_number,
-                    "display_name": agent.display_name or f"Agent #{agent.agent_number}",
-                    "tier": agent.tier,
-                    "work_sessions": work_count,
-                })
+                payload = _agent_identity_payload(agent, lineage_by_agent_number)
+                payload.update(
+                    {
+                        "rank": i + 1,
+                        "work_sessions": int(work_count or 0),
+                    }
+                )
+                result.append(payload)
         
         return result
         
@@ -207,6 +293,8 @@ def get_trader_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     db = SessionLocal()
     
     try:
+        season_id = _resolve_active_or_latest_season_id(db)
+        lineage_by_agent_number = _lineage_map_for_season(db, season_id=season_id)
         trade_events = db.query(
             Event.agent_id,
             func.count(Event.id).label('trade_count')
@@ -218,14 +306,14 @@ def get_trader_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
         for i, (agent_id, trade_count) in enumerate(trade_events):
             agent = db.query(Agent).filter(Agent.id == agent_id).first()
             if agent:
-                result.append({
-                    "rank": i + 1,
-                    "agent_id": agent.id,
-                    "agent_number": agent.agent_number,
-                    "display_name": agent.display_name or f"Agent #{agent.agent_number}",
-                    "tier": agent.tier,
-                    "trades": trade_count,
-                })
+                payload = _agent_identity_payload(agent, lineage_by_agent_number)
+                payload.update(
+                    {
+                        "rank": i + 1,
+                        "trades": int(trade_count or 0),
+                    }
+                )
+                result.append(payload)
         
         return result
         

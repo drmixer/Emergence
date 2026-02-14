@@ -8,6 +8,7 @@ import {
     TrendingDown,
     Activity,
     AlertTriangle,
+    ShieldCheck,
     Flame,
     Apple,
     Battery,
@@ -160,6 +161,17 @@ export default function Dashboard() {
                         : 'Overview of the AI civilization experiment'
                     }
                 </p>
+            </div>
+
+            <div className="card trust-note-card">
+                <div className="card-body trust-note-body">
+                    <ShieldCheck size={16} />
+                    <p>
+                        These are simulation observations under defined assumptions, not direct claims about real-world groups.
+                        Check run evidence before making strong conclusions.
+                    </p>
+                    <Link to="/method" className="trust-note-link">Method</Link>
+                </div>
             </div>
 
             {/* Activity Pulse */}
@@ -775,6 +787,36 @@ export default function Dashboard() {
                     border: 1px dashed rgba(255, 255, 255, 0.12);
                     border-radius: var(--radius-md);
                     color: var(--text-muted);
+                }
+
+                .trust-note-card {
+                    margin-bottom: var(--spacing-lg);
+                    border-color: rgba(125, 211, 252, 0.28);
+                    background: rgba(56, 189, 248, 0.05);
+                }
+
+                .trust-note-body {
+                    display: flex;
+                    align-items: center;
+                    gap: var(--spacing-sm);
+                    color: var(--text-secondary);
+                    font-size: 0.9rem;
+                    padding-top: var(--spacing-md);
+                    padding-bottom: var(--spacing-md);
+                }
+
+                .trust-note-body p {
+                    flex: 1;
+                    margin: 0;
+                }
+
+                .trust-note-link {
+                    color: #7dd3fc;
+                    font-weight: 600;
+                }
+
+                .trust-note-link:hover {
+                    color: #bae6fd;
                 }
                 
                 @media (max-width: 768px) {

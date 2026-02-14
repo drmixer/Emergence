@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Activity, BookOpen, ChevronRight, FileSearch, Sparkles, Star, X } from 'lucide-react'
+import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 import './FirstTimeOnboarding.css'
 
 const ONBOARDING_STORAGE_KEY = 'emergence-first-time-onboarding-v1'
@@ -28,7 +29,35 @@ export default function FirstTimeOnboarding() {
     const path = String(location.pathname || '').trim().toLowerCase()
     const open = !dismissed && !path.startsWith('/ops')
 
+    useEffect(() => {
+        if (!open) return
+        trackKpiEventOnce('onboarding_shown', 'first_time_onboarding_v1', {
+            surface: 'onboarding_modal',
+            target: 'modal_impression',
+            metadata: { version: 'v1' },
+        })
+    }, [open])
+
     const close = (reason) => {
+        if (reason === 'completed') {
+            trackKpiEvent('onboarding_completed', {
+                surface: 'onboarding_modal',
+                target: 'open_dashboard',
+                metadata: { version: 'v1' },
+            })
+        } else if (reason === 'glossary') {
+            trackKpiEvent('onboarding_glossary_opened', {
+                surface: 'onboarding_modal',
+                target: 'open_glossary',
+                metadata: { version: 'v1' },
+            })
+        } else {
+            trackKpiEvent('onboarding_skipped', {
+                surface: 'onboarding_modal',
+                target: 'dismiss',
+                metadata: { version: 'v1', reason: String(reason || 'dismissed') },
+            })
+        }
         writeOnboardingState(reason || 'dismissed')
         setDismissed(true)
     }
