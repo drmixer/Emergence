@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 
-import { resolveApiBase } from "../lib/api-base.js"
+import { resolveConfiguredApiBase } from "../lib/api-base.js"
 
 const SITE_BASE = String(
   process.env.SMOKE_SITE_BASE || process.env.NEXT_PUBLIC_SITE_URL || "https://www.emergence.quest"
 ).replace(/\/+$/, "")
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS || 15000)
 const SKIP_SITE_CHECK = String(process.env.SMOKE_SKIP_SITE_CHECK || "").toLowerCase() === "true"
+const REQUIRE_READY =
+  String(process.env.SMOKE_REQUIRE_READY || "").toLowerCase() === "true" ||
+  !/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(SITE_BASE)
 const API_BASE = String(
-  process.env.SMOKE_API_BASE || resolveApiBase({ siteBaseHint: SITE_BASE })
+  process.env.SMOKE_API_BASE || resolveConfiguredApiBase()
 ).replace(/\/+$/, "")
 
 function fail(message) {
@@ -65,12 +68,26 @@ function validateProposals(payload) {
   ensure(Array.isArray(payload), "Proposals payload must be an array")
 }
 
+function validateReady(payload) {
+  ensure(payload && typeof payload === "object", "Ready payload must be an object")
+  ensure(payload.status === "ready", `Ready endpoint returned status=${payload?.status || "n/a"}`)
+  ensure(payload.db === "ok", `Ready endpoint reported db=${payload?.db || "n/a"}`)
+  ensure(payload.redis === "ok", `Ready endpoint reported redis=${payload?.redis || "n/a"}`)
+}
+
 async function main() {
   ensure(API_BASE.length > 0, "Resolved API base is empty")
 
   if (!SKIP_SITE_CHECK) {
     await fetchSite("/dashboard")
     console.log(`[ok] site reachable: ${SITE_BASE}/dashboard`)
+  }
+
+  if (REQUIRE_READY) {
+    const url = `${API_BASE}/ready`
+    const payload = await fetchJson(url)
+    validateReady(payload)
+    console.log(`[ok] readiness: ${url}`)
   }
 
   const checks = [
@@ -106,4 +123,3 @@ main().catch((error) => {
   console.error(`[fail] ${error?.message || error}`)
   process.exitCode = 1
 })
-

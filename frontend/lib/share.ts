@@ -1,7 +1,17 @@
-import { resolveApiBase } from "@/lib/api-base"
+import { resolveConfiguredApiBase } from "@/lib/api-base"
 
 export function resolvePublicApiBase(): string {
-  return resolveApiBase()
+  const configured = resolveConfiguredApiBase()
+  if (configured) {
+    return configured
+  }
+
+  const siteBase = resolveSiteBase()
+  if (siteBase.startsWith("http://localhost") || siteBase.startsWith("http://127.0.0.1")) {
+    return "http://localhost:8000"
+  }
+
+  return ""
 }
 
 export function resolveDeployVersion(): string {

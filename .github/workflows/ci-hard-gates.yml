@@ -159,7 +159,9 @@ jobs:
       - name: Smoke dashboard API (retry)
         working-directory: frontend
         env:
-          SMOKE_SITE_BASE: https://emergence.quest
+          SMOKE_SITE_BASE: https://www.emergence.quest
+          SMOKE_API_BASE: https://api.emergence.quest
+          SMOKE_REQUIRE_READY: "true"
           SMOKE_TIMEOUT_MS: "20000"
         run: |
           for attempt in 1 2 3 4 5 6; do
@@ -174,7 +176,7 @@ jobs:
       - name: Smoke share metadata (retry)
         working-directory: frontend
         env:
-          SMOKE_SITE_BASE: https://emergence.quest
+          SMOKE_SITE_BASE: https://www.emergence.quest
           SMOKE_RUN_ID: ci-smoke-run
           SMOKE_TIMEOUT_MS: "20000"
         run: |
@@ -186,4 +188,3 @@ jobs:
             fi
             sleep 45
           done
-

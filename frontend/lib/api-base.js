@@ -1,6 +1,5 @@
-const EMERGENCE_BACKEND_BASE = "https://backend-production-2f66.up.railway.app"
-const EMERGENCE_HOSTS = new Set(["emergence.quest", "www.emergence.quest"])
 const LOCAL_DEV_BACKEND_BASE = "http://localhost:8000"
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0"])
 
 function trimBaseUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "")
@@ -20,6 +19,10 @@ function readEnvVar(name) {
 
 function resolveConfiguredBase() {
   return readEnvVar("NEXT_PUBLIC_API_URL") || readEnvVar("VITE_API_URL")
+}
+
+export function resolveConfiguredApiBase() {
+  return normalizeConfiguredBase(resolveConfiguredBase())
 }
 
 function normalizeConfiguredBase(configuredBase) {
@@ -45,24 +48,8 @@ function hostFromUrl(rawValue) {
   }
 }
 
-function resolveKnownHostFallback(siteBaseHint = "") {
-  if (typeof window !== "undefined" && window.location?.hostname) {
-    const host = String(window.location.hostname || "").toLowerCase()
-    if (EMERGENCE_HOSTS.has(host)) return EMERGENCE_BACKEND_BASE
-  }
-
-  const hostCandidates = [
-    siteBaseHint,
-    readEnvVar("NEXT_PUBLIC_SITE_URL"),
-    readEnvVar("VERCEL_URL"),
-    readEnvVar("RAILWAY_PUBLIC_DOMAIN"),
-  ]
-  for (const candidate of hostCandidates) {
-    const host = hostFromUrl(candidate)
-    if (EMERGENCE_HOSTS.has(host)) return EMERGENCE_BACKEND_BASE
-  }
-
-  return ""
+function isLocalHost(value) {
+  return LOCAL_HOSTS.has(hostFromUrl(value))
 }
 
 export function resolveApiBase({
@@ -70,16 +57,30 @@ export function resolveApiBase({
   fallbackLocalBase = LOCAL_DEV_BACKEND_BASE,
   siteBaseHint = "",
 } = {}) {
-  const configuredBase = normalizeConfiguredBase(resolveConfiguredBase())
+  const configuredBase = resolveConfiguredApiBase()
   if (configuredBase) return configuredBase
-
-  const knownHostBase = resolveKnownHostFallback(siteBaseHint)
-  if (knownHostBase) return knownHostBase
 
   if (allowWindowOrigin && typeof window !== "undefined" && window.location?.origin) {
     const origin = trimBaseUrl(window.location.origin)
     if (origin) return origin
   }
 
-  return trimBaseUrl(fallbackLocalBase) || LOCAL_DEV_BACKEND_BASE
+  const localCandidates = [
+    siteBaseHint,
+    readEnvVar("NEXT_PUBLIC_SITE_URL"),
+    readEnvVar("VERCEL_URL"),
+    readEnvVar("RAILWAY_PUBLIC_DOMAIN"),
+  ]
+
+  if (typeof window !== "undefined" && window.location?.hostname) {
+    localCandidates.unshift(window.location.hostname)
+  } else if (String(globalThis?.process?.env?.NODE_ENV || "").toLowerCase() !== "production") {
+    localCandidates.unshift("localhost")
+  }
+
+  if (localCandidates.some(isLocalHost)) {
+    return trimBaseUrl(fallbackLocalBase) || LOCAL_DEV_BACKEND_BASE
+  }
+
+  return ""
 }
