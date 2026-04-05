@@ -17,6 +17,13 @@ from app.core.time import ensure_utc, now_utc
 from app.models.models import Event, Message, Proposal, Vote, Law, Agent
 from app.services.llm_client import llm_client
 from app.services.runtime_config import runtime_config_service
+from app.services.simulation_time import (
+    get_completed_simulation_day_count,
+    get_latest_simulation_activity_at,
+    get_simulation_anchor,
+    get_simulation_day_delta,
+    get_simulation_elapsed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,33 +113,10 @@ def _daily_summary_for_day(db: Session, day_number: int) -> Optional[Event]:
     return None
 
 
-def _simulation_anchor(db: Session):
-    """
-    Return the simulation start timestamp based on earliest non-summary event.
-    Falls back to earliest event if summaries are the only rows.
-    """
-    first_core_event = (
-        db.query(Event)
-        .filter(Event.event_type != "daily_summary")
-        .order_by(Event.created_at.asc(), Event.id.asc())
-        .first()
-    )
-    if first_core_event and first_core_event.created_at:
-        return ensure_utc(first_core_event.created_at)
-
-    first_any_event = (
-        db.query(Event).order_by(Event.created_at.asc(), Event.id.asc()).first()
-    )
-    if first_any_event and first_any_event.created_at:
-        return ensure_utc(first_any_event.created_at)
-    return None
-
-
 def _day_window(anchor, day_number: int) -> Optional[tuple]:
     if anchor is None or day_number < 1:
         return None
-    day_length_minutes = int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60)
-    day_delta = timedelta(minutes=day_length_minutes)
+    day_delta = get_simulation_day_delta()
     start = anchor + ((day_number - 1) * day_delta)
     end = start + day_delta
     return start, end
@@ -180,7 +164,7 @@ async def generate_daily_summary(day_number: int) -> str:
                 return existing_text
             return "Summary already exists for this day."
 
-        anchor = _simulation_anchor(db)
+        anchor = get_simulation_anchor(db)
         window = _day_window(anchor, day_number)
         if window is None:
             return "No simulation events yet."
@@ -450,14 +434,9 @@ async def get_story_so_far() -> str:
         total_proposals = db.query(Proposal).count()
 
         # Get simulation age
-        first_event = db.query(Event).order_by(Event.created_at).first()
-        if first_event:
-            first_event_at = ensure_utc(first_event.created_at)
-            age = now_utc() - first_event_at if first_event_at else timedelta(0)
-            days = age.days
-            hours = age.seconds // 3600
-        else:
-            days, hours = 0, 0
+        age = get_simulation_elapsed(db)
+        days = age.days
+        hours = age.seconds // 3600
 
         context = f"""
 The Emergence simulation has been running for {days} days and {hours} hours.
@@ -498,17 +477,16 @@ class SummaryScheduler:
 
         db = SessionLocal()
         try:
-            anchor = _simulation_anchor(db)
+            anchor = get_simulation_anchor(db)
             if anchor is None:
                 return None
 
-            day_length_minutes = int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60)
-            day_delta = timedelta(minutes=day_length_minutes)
-            elapsed = now_utc() - anchor
-            if elapsed < day_delta:
+            latest_activity_at = get_latest_simulation_activity_at(db)
+            day_delta = get_simulation_day_delta()
+            if latest_activity_at is None or latest_activity_at < (anchor + day_delta):
                 return None
 
-            completed_days = int(elapsed // day_delta)
+            completed_days = get_completed_simulation_day_count(db)
             latest_summary_day = _latest_summary_day_number(db)
             if completed_days <= latest_summary_day:
                 return None

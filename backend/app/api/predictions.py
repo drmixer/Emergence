@@ -5,12 +5,14 @@ Handles betting, market creation, and leaderboard endpoints.
 from typing import List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
+import hmac
 import hashlib
 import uuid
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.predictions import PredictionMarket, PredictionBet, UserPoints
 from app.models.models import Proposal, Agent
@@ -22,6 +24,8 @@ router = APIRouter()
 STARTING_BALANCE = Decimal("100.00")
 MIN_BET = Decimal("1.00")
 MAX_BET = Decimal("50.00")
+PREDICTION_USER_COOKIE = "emergence_prediction_user"
+PREDICTION_USER_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
 
 
 # ---------------------
@@ -93,20 +97,57 @@ class LeaderboardEntry(BaseModel):
 # Helper Functions
 # ---------------------
 
-def get_user_id(request: Request) -> str:
-    """Generate a consistent user ID from request."""
-    # Use combination of IP and user-agent for anonymous identification
-    ip = request.client.host if request.client else "unknown"
-    user_agent = request.headers.get("user-agent", "")
-    
-    # Check for custom user header (can be stored in localStorage)
-    custom_user_id = request.headers.get("x-user-id")
-    if custom_user_id:
-        return custom_user_id
-    
-    # Generate hash-based ID
-    raw = f"{ip}:{user_agent}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+def _prediction_cookie_secret() -> str:
+    secret = str(getattr(settings, "SECRET_KEY", "") or "").strip()
+    return secret or "development-secret-key-change-in-production"
+
+
+def _sign_prediction_user_id(user_id: str) -> str:
+    return hmac.new(
+        _prediction_cookie_secret().encode("utf-8"),
+        user_id.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _serialize_prediction_cookie(user_id: str) -> str:
+    return f"{user_id}.{_sign_prediction_user_id(user_id)}"
+
+
+def _parse_prediction_cookie(raw_value: str | None) -> str | None:
+    value = str(raw_value or "").strip()
+    if not value or "." not in value:
+        return None
+    user_id, signature = value.rsplit(".", 1)
+    if not user_id or not signature:
+        return None
+    expected = _sign_prediction_user_id(user_id)
+    if not hmac.compare_digest(signature, expected):
+        return None
+    return user_id
+
+
+def _issue_prediction_cookie(response: Response, *, user_id: str) -> None:
+    response.set_cookie(
+        key=PREDICTION_USER_COOKIE,
+        value=_serialize_prediction_cookie(user_id),
+        max_age=PREDICTION_USER_COOKIE_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=str(getattr(settings, "ENVIRONMENT", "")).lower() == "production",
+        samesite="lax",
+        path="/api/predictions",
+    )
+
+
+def resolve_prediction_user_id(request: Request, response: Response) -> str:
+    """Return a stable, server-issued anonymous user id for prediction endpoints."""
+    existing = _parse_prediction_cookie(request.cookies.get(PREDICTION_USER_COOKIE))
+    if existing:
+        return existing
+
+    user_id = f"pred_{uuid.uuid4().hex[:24]}"
+    _issue_prediction_cookie(response, user_id=user_id)
+    return user_id
 
 
 def get_or_create_user(db: Session, user_id: str) -> UserPoints:
@@ -206,6 +247,7 @@ def place_bet(
     market_id: int,
     bet_request: PlaceBetRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db)
 ):
     """Place a bet on a prediction market."""
@@ -223,7 +265,7 @@ def place_bet(
         raise HTTPException(status_code=400, detail="Betting has closed for this market")
     
     # Get user
-    user_id = get_user_id(request)
+    user_id = resolve_prediction_user_id(request, response)
     user = get_or_create_user(db, user_id)
     
     # Validate bet amount
@@ -282,10 +324,11 @@ def place_bet(
 def get_market_bets(
     market_id: int,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db)
 ):
     """Get user's bets on a specific market."""
-    user_id = get_user_id(request)
+    user_id = resolve_prediction_user_id(request, response)
     
     bets = db.query(PredictionBet).filter(
         PredictionBet.market_id == market_id,
@@ -311,9 +354,9 @@ def get_market_bets(
 # ---------------------
 
 @router.get("/me", response_model=UserStatsResponse)
-def get_my_stats(request: Request, db: Session = Depends(get_db)):
+def get_my_stats(request: Request, response: Response, db: Session = Depends(get_db)):
     """Get current user's stats and balance."""
-    user_id = get_user_id(request)
+    user_id = resolve_prediction_user_id(request, response)
     user = get_or_create_user(db, user_id)
     
     # Calculate win rate
@@ -346,12 +389,13 @@ def get_my_stats(request: Request, db: Session = Depends(get_db)):
 @router.get("/my-bets", response_model=List[BetResponse])
 def get_my_bets(
     request: Request,
+    response: Response,
     status: Optional[str] = None,
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db)
 ):
     """Get current user's betting history."""
-    user_id = get_user_id(request)
+    user_id = resolve_prediction_user_id(request, response)
     
     query = db.query(PredictionBet).filter(PredictionBet.user_id == user_id)
     
@@ -378,10 +422,11 @@ def get_my_bets(
 def set_username(
     username: str,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db)
 ):
     """Set display name for leaderboard."""
-    user_id = get_user_id(request)
+    user_id = resolve_prediction_user_id(request, response)
     user = get_or_create_user(db, user_id)
     
     # Validate username

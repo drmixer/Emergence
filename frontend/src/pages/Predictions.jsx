@@ -39,16 +39,6 @@ const fetchJson = async (endpoint, options = {}) => {
     }
 }
 
-// Get or create user ID for identification
-const getUserId = () => {
-    let userId = localStorage.getItem('emergence_user_id')
-    if (!userId) {
-        userId = 'user_' + Math.random().toString(36).substring(2, 15)
-        localStorage.setItem('emergence_user_id', userId)
-    }
-    return userId
-}
-
 // Market type icons
 const marketTypeIcons = {
     proposal_pass: Target,
@@ -97,7 +87,7 @@ export default function Predictions() {
             const [marketsData, leaderboardData, me] = await Promise.all([
                 fetchJson('/api/predictions/markets'),
                 fetchJson('/api/predictions/leaderboard'),
-                fetchJson('/api/predictions/me', { headers: { 'x-user-id': getUserId() } }).catch(() => null),
+                fetchJson('/api/predictions/me', { credentials: 'include' }).catch(() => null),
             ])
 
             setMarkets(Array.isArray(marketsData) ? marketsData : [])
@@ -142,9 +132,9 @@ export default function Predictions() {
         try {
             const response = await fetch(`${API_BASE}/api/predictions/markets/${selectedMarket.id}/bet`, {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-user-id': getUserId()
                 },
                 body: JSON.stringify({
                     prediction: betPrediction,

@@ -27,6 +27,7 @@ from app.services.archive_drafts import maybe_generate_scheduled_weekly_draft
 from app.services.emergence_metrics import persist_completed_day_snapshot
 from app.services.run_reports import maybe_generate_scheduled_run_report_backfill
 from app.services.runtime_config import runtime_config_service
+from app.services.simulation_time import get_simulation_anchor, get_simulation_day_delta
 
 # Twitter bot integration (optional)
 try:
@@ -207,13 +208,11 @@ def _passes_quote_quality_gate(
 
 def _estimate_simulation_day(db: Session, ts: datetime | None) -> int:
     when = ensure_utc(ts) or now_utc()
-    first_event = db.query(Event).order_by(Event.created_at.asc()).first()
-    first_at = ensure_utc(first_event.created_at) if first_event and first_event.created_at else None
+    first_at = get_simulation_anchor(db)
     if not first_at or when <= first_at:
         return 1
-    day_seconds = max(60, int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60) * 60)
     elapsed = max(0.0, (when - first_at).total_seconds())
-    return int(elapsed // day_seconds) + 1
+    return int(elapsed // get_simulation_day_delta().total_seconds()) + 1
 
 
 def _is_quote_already_published(event_rows: list[Event], message_id: int) -> bool:

@@ -18,7 +18,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import Recap from '../components/Recap'
 import QuoteCardGenerator from '../components/QuoteCard'
-import { api, getViewerUserId } from '../services/api'
+import { api } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
@@ -257,14 +257,13 @@ export default function Highlights() {
     async function load() {
       setLoading(true)
       try {
-        const userId = getViewerUserId()
         const [featuredEvents, latestSummary, turns, replay, openMarkets, me, overviewPayload, metricsPayload] = await Promise.all([
           api.fetch('/api/analytics/featured?limit=20'),
           api.fetch('/api/analytics/summaries/latest'),
           api.getPlotTurns(16, 72, 60, runFilter).catch(() => ({ items: [] })),
           api.getPlotTurnReplay(24, 55, 30, 240, runFilter).catch(() => ({ items: [], buckets: [] })),
           api.getPredictionMarkets('open', 8).catch(() => []),
-          api.getPredictionMe(userId).catch(() => null),
+          api.getPredictionMe().catch(() => null),
           api.getAnalyticsOverview().catch(() => null),
           api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
         ])
@@ -307,11 +306,10 @@ export default function Highlights() {
     setPlacingMarketKey(key)
 
     try {
-      const userId = getViewerUserId()
-      await api.placePredictionBet(marketId, prediction, QUICK_BET_AMOUNT, userId)
+      await api.placePredictionBet(marketId, prediction, QUICK_BET_AMOUNT)
       const [openMarkets, me] = await Promise.all([
         api.getPredictionMarkets('open', 8).catch(() => []),
-        api.getPredictionMe(userId).catch(() => null),
+        api.getPredictionMe().catch(() => null),
       ])
       setPredictionMarkets(Array.isArray(openMarkets) ? openMarkets : [])
       setPredictionStats(me && typeof me === 'object' ? me : null)

@@ -8,15 +8,6 @@ export { resolveApiBase }
 
 const API_BASE = resolveApiBase()
 
-export function getViewerUserId() {
-    let userId = localStorage.getItem('emergence_user_id')
-    if (!userId) {
-        userId = `user_${Math.random().toString(36).slice(2, 15)}`
-        localStorage.setItem('emergence_user_id', userId)
-    }
-    return userId
-}
-
 class APIService {
     constructor(baseUrl) {
         this.baseUrl = baseUrl
@@ -274,16 +265,16 @@ class APIService {
         return this.fetch(`/api/predictions/markets${query}`)
     }
 
-    async getPredictionMe(userId = getViewerUserId()) {
+    async getPredictionMe() {
         return this.fetch('/api/predictions/me', {
-            headers: { 'x-user-id': userId },
+            credentials: 'include',
         })
     }
 
-    async placePredictionBet(marketId, prediction, amount, userId = getViewerUserId()) {
+    async placePredictionBet(marketId, prediction, amount) {
         return this.fetch(`/api/predictions/markets/${marketId}/bet`, {
             method: 'POST',
-            headers: { 'x-user-id': userId },
+            credentials: 'include',
             body: JSON.stringify({ prediction, amount }),
         })
     }

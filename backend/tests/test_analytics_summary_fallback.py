@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.models.models import Agent, Event, RunReportArtifact
 
 analytics_api = importlib.import_module("app.api.analytics")
+report_artifacts = importlib.import_module("app.services.report_artifacts")
 
 
 @pytest.fixture
@@ -38,6 +39,7 @@ def _write_run_summary_artifact(tmp_dir: Path, *, run_id: str, payload: dict) ->
 
 def test_get_latest_summary_prefers_daily_summary(monkeypatch, summary_session_factory):
     SessionLocal, tmp_dir = summary_session_factory
+    monkeypatch.setattr(report_artifacts, "reports_root", lambda: Path(tmp_dir))
     with SessionLocal() as db:
         db.add(
             Event(
@@ -81,6 +83,7 @@ def test_get_latest_summary_prefers_daily_summary(monkeypatch, summary_session_f
 
 def test_get_latest_summary_uses_run_summary_fallback(monkeypatch, summary_session_factory):
     SessionLocal, tmp_dir = summary_session_factory
+    monkeypatch.setattr(report_artifacts, "reports_root", lambda: Path(tmp_dir))
     with SessionLocal() as db:
         artifact_payload = {
             "run_id": "run-20260211T063855Z",

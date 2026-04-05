@@ -24,6 +24,12 @@ from app.models.models import (
     Proposal,
     Vote,
 )
+from app.services.simulation_time import (
+    get_completed_simulation_day_count,
+    get_latest_simulation_activity_at,
+    get_simulation_anchor,
+    get_simulation_day_delta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -301,24 +307,18 @@ def compute_emergence_metrics(
 
 
 def _get_completed_simulation_day_window(db: Session):
-    first_event = db.query(Event).order_by(Event.created_at.asc()).first()
-    if not first_event or first_event.created_at is None:
+    first_at = get_simulation_anchor(db)
+    latest_at = get_latest_simulation_activity_at(db)
+    if first_at is None or latest_at is None or latest_at <= first_at:
         return None
 
-    first_at = ensure_utc(first_event.created_at)
-    now = now_utc()
-    if first_at is None or now <= first_at:
-        return None
-
-    day_length_seconds = max(60, int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60) * 60)
-    elapsed_seconds = max(0.0, (now - first_at).total_seconds())
-    current_day = int(elapsed_seconds // day_length_seconds) + 1
-    completed_day = current_day - 1
+    day_delta = get_simulation_day_delta()
+    completed_day = get_completed_simulation_day_count(db)
     if completed_day < 1:
         return None
 
-    window_start = first_at + timedelta(seconds=(completed_day - 1) * day_length_seconds)
-    window_end = window_start + timedelta(seconds=day_length_seconds)
+    window_start = first_at + ((completed_day - 1) * day_delta)
+    window_end = window_start + day_delta
     return {
         "simulation_day": completed_day,
         "window_start_at": window_start,

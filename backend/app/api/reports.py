@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.models import RunReportArtifact
+from app.services.report_artifacts import ensure_artifact_path, reports_root, resolve_registered_artifact_path
 
 router = APIRouter()
 
@@ -25,7 +26,7 @@ FORMATS = ("json", "markdown")
 
 
 def _reports_root() -> Path:
-    return Path(__file__).resolve().parents[3] / "output" / "reports"
+    return reports_root()
 
 
 def _serialize_artifact(row: RunReportArtifact) -> dict[str, Any]:
@@ -46,10 +47,8 @@ def _serialize_artifact(row: RunReportArtifact) -> dict[str, Any]:
 
 
 def _resolve_download_path(raw_path: str) -> Path:
-    artifact_path = Path(str(raw_path or "")).expanduser().resolve()
-    reports_root = _reports_root().resolve()
     try:
-        artifact_path.relative_to(reports_root)
+        artifact_path = resolve_registered_artifact_path(str(raw_path or ""))
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -119,7 +118,9 @@ def download_run_report(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
 
-    artifact_path = _resolve_download_path(str(row.artifact_path))
+    artifact_path = ensure_artifact_path(db, row)
+    if artifact_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found")
     media_type = "application/json" if clean_format == "json" else "text/markdown; charset=utf-8"
     return FileResponse(
         path=str(artifact_path),
@@ -193,7 +194,9 @@ def download_condition_comparison_report(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
 
-    artifact_path = _resolve_download_path(str(row.artifact_path))
+    artifact_path = ensure_artifact_path(db, row)
+    if artifact_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found")
     media_type = "application/json" if clean_format == "json" else "text/markdown; charset=utf-8"
     return FileResponse(
         path=str(artifact_path),

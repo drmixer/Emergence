@@ -30,6 +30,20 @@ from app.api.predictions import router as predictions_router
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper()))
 logger = logging.getLogger(__name__)
 
+ALLOWED_CORS_ORIGINS = sorted(
+    {
+        origin
+        for origin in (
+            str(getattr(settings, "FRONTEND_URL", "") or "").strip(),
+            "https://emergence.quest",
+            "https://www.emergence.quest",
+            "http://localhost:3000",
+            "http://localhost:5173",
+        )
+        if origin
+    }
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,7 +81,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:3000", "http://localhost:5173", "*"],
+    allow_origins=ALLOWED_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

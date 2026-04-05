@@ -3,7 +3,6 @@ Analytics & Highlights API Router
 """
 import logging
 import json
-from pathlib import Path as FilePath
 from io import BytesIO
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from datetime import date, datetime, timedelta, timezone
@@ -39,6 +38,8 @@ from app.services.summaries import (
 from app.services.usage_budget import usage_budget
 from app.services.emergence_metrics import compute_emergence_metrics
 from app.services.kpi_rollups import record_kpi_event
+from app.services.report_artifacts import load_json_artifact
+from app.services.simulation_time import get_simulation_day_number
 from app.core.database import SessionLocal
 from app.models.models import (
     Event,
@@ -662,20 +663,7 @@ def _latest_run_summary_fallback(db) -> dict[str, Any] | None:
         .all()
     )
     for row in rows:
-        artifact_path = FilePath(str(row.artifact_path or "").strip()).expanduser()
-        if not artifact_path.exists() or not artifact_path.is_file():
-            continue
-
-        try:
-            payload = json.loads(artifact_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning(
-                "Unable to parse run summary artifact for fallback (run_id=%s path=%s): %s",
-                str(row.run_id or ""),
-                str(artifact_path),
-                exc,
-            )
-            continue
+        payload = load_json_artifact(db, row)
         if not isinstance(payload, dict):
             continue
 
@@ -1226,17 +1214,10 @@ def overview():
         most_recent_event = db.query(Event).order_by(Event.created_at.desc()).first()
         first_event = db.query(Event).order_by(Event.created_at.asc()).first()
 
-        now = now_utc()
         first_at = ensure_utc(first_event.created_at) if first_event and first_event.created_at else None
         latest_at = ensure_utc(most_recent_event.created_at) if most_recent_event and most_recent_event.created_at else None
 
-        # Sim day number: default configuration is 1 real hour = 1 sim day.
-        day_length_seconds = max(1, int(settings.DAY_LENGTH_MINUTES) * 60)
-        day_number = (
-            int(((now - first_at).total_seconds()) // day_length_seconds) + 1
-            if first_at
-            else 0
-        )
+        day_number = get_simulation_day_number(db)
 
         # Critical agents: count agents with low food/energy (thresholds match the context-builder warning).
         critical_food = (

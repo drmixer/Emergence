@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.models.models import RunReportArtifact
 
 reports_api = importlib.import_module("app.api.reports")
+report_artifacts = importlib.import_module("app.services.report_artifacts")
 
 
 @pytest.fixture
@@ -27,6 +28,7 @@ def reports_client(tmp_path, monkeypatch):
     db_session = sessionmaker(bind=engine, future=True)()
 
     monkeypatch.setattr(reports_api, "_reports_root", lambda: Path(tmp_path))
+    monkeypatch.setattr(report_artifacts, "reports_root", lambda: Path(tmp_path))
 
     app = FastAPI()
     app.include_router(reports_api.router, prefix="/api/reports")
@@ -117,3 +119,45 @@ def test_list_and_download_condition_comparison_reports(reports_client):
 
     assert download_response.status_code == 200
     assert "# baseline" in download_response.text
+
+
+def test_download_run_report_regenerates_missing_artifact(reports_client, monkeypatch):
+    client, db_session, tmp_dir = reports_client
+    missing_file = tmp_dir / "runs" / "run-regenerate" / "technical_report.json"
+
+    db_session.add(
+        RunReportArtifact(
+            run_id="run-regenerate",
+            artifact_type="technical_report",
+            artifact_format="json",
+            artifact_path=str(missing_file),
+            status="completed",
+            metadata_json={"condition_name": "baseline_v1", "season_number": 2},
+        )
+    )
+    db_session.commit()
+
+    def _fake_rebuild_run_bundle(db, *, run_id, actor_id, condition_name=None, season_number=None):
+        _ = db, actor_id, condition_name, season_number
+        missing_file.parent.mkdir(parents=True, exist_ok=True)
+        missing_file.write_text('{"regenerated": true}\n', encoding="utf-8")
+
+    monkeypatch.setattr(reports_api, "ensure_artifact_path", lambda db, row: (  # type: ignore[arg-type]
+        _fake_rebuild_run_bundle(
+            db,
+            run_id=row.run_id,
+            actor_id="test",
+            condition_name=(row.metadata_json or {}).get("condition_name"),
+            season_number=(row.metadata_json or {}).get("season_number"),
+        )
+        or missing_file
+    ))
+
+    with client:
+        response = client.get(
+            "/api/reports/runs/run-regenerate/download",
+            params={"artifact_type": "technical_report", "format": "json"},
+        )
+
+    assert response.status_code == 200
+    assert '"regenerated": true' in response.text

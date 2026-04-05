@@ -51,7 +51,7 @@ async def _healthcheck_handler(
             if not line or line in (b"\r\n", b"\n"):
                 break
 
-        if method == "GET" and path == "/health":
+        if method == "GET" and path in {"/health", "/ready"}:
             body = json.dumps(
                 {
                     "status": "ok",
