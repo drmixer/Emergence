@@ -16,6 +16,7 @@ import {
   EyeOff,
   WandSparkles,
   Copy,
+  ExternalLink,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { api } from '../services/api'
@@ -127,6 +128,16 @@ function displayValue(value, fallback = 'n/a') {
   return text || fallback
 }
 
+function formatDraftTypeLabel(value) {
+  const text = String(value || '').trim()
+  if (!text) return 'Unknown'
+  return text
+    .split(/[_-]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9:_-]+$/
 
 function toOptionalText(value) {
@@ -149,6 +160,14 @@ function isValidOptionalIdentifier(value) {
   const text = String(value || '').trim()
   if (!text) return true
   return IDENTIFIER_PATTERN.test(text)
+}
+
+function toDraftReviewState(draft) {
+  return {
+    reviewNote: String(draft?.review_note || ''),
+    postedUrl: String(draft?.posted_url || ''),
+    externalPostId: String(draft?.external_post_id || ''),
+  }
 }
 
 export default function Ops() {
@@ -189,6 +208,13 @@ export default function Ops() {
   const [articleAction, setArticleAction] = useState('')
   const [weeklyDraftResult, setWeeklyDraftResult] = useState(null)
   const [runBundleResult, setRunBundleResult] = useState(null)
+  const [twitterStatus, setTwitterStatus] = useState(null)
+  const [twitterDrafts, setTwitterDrafts] = useState([])
+  const [twitterDraftTotal, setTwitterDraftTotal] = useState(0)
+  const [twitterDraftFilter, setTwitterDraftFilter] = useState('pending_review')
+  const [selectedTwitterDraftId, setSelectedTwitterDraftId] = useState(null)
+  const [twitterReview, setTwitterReview] = useState(() => toDraftReviewState(null))
+  const [twitterAction, setTwitterAction] = useState('')
 
   const connected = Boolean(token.trim())
   const writeEnabled = Boolean(config?.admin_write_enabled)
@@ -206,12 +232,14 @@ export default function Ops() {
     setMetricsWarning('')
 
     try {
-      const [statusResponse, configResponse, auditResponse, articlesResponse, kpiResponse] = await Promise.all([
+      const [statusResponse, configResponse, auditResponse, articlesResponse, kpiResponse, twitterStatusResponse, twitterDraftsResponse] = await Promise.all([
         api.getAdminStatus(token, adminUser),
         api.getAdminConfig(token, adminUser),
         api.getAdminAudit(token, 50, 0, adminUser),
         api.getAdminArchiveArticles(token, adminUser),
         api.getAdminKpiRollups(token, 14, true, adminUser).catch(() => null),
+        api.getTwitterStatus(token, adminUser).catch(() => null),
+        api.getTwitterDrafts(token, adminUser, twitterDraftFilter, 50, 0).catch(() => null),
       ])
       const activeRunId = String(statusResponse?.run_metadata?.run_id || statusResponse?.viewer_ops?.run_id || '').trim()
       let runMetricsResponse = null
@@ -231,6 +259,16 @@ export default function Ops() {
       }
       setRunMetrics(runMetricsResponse)
       setKpiRollups(kpiResponse)
+      setTwitterStatus(twitterStatusResponse)
+      const resolvedTwitterDrafts = Array.isArray(twitterDraftsResponse?.items) ? twitterDraftsResponse.items : []
+      setTwitterDrafts(resolvedTwitterDrafts)
+      setTwitterDraftTotal(Number(twitterDraftsResponse?.total || 0))
+      setSelectedTwitterDraftId((previous) => {
+        if (resolvedTwitterDrafts.some((draft) => Number(draft.id) === Number(previous))) {
+          return previous
+        }
+        return resolvedTwitterDrafts[0]?.id ?? null
+      })
       setRunIdInput(activeRunId)
       setProtocolVersion((previous) => previous || String(statusResponse?.run_metadata?.protocol_version || '').trim())
       setConditionName(
@@ -259,7 +297,12 @@ export default function Ops() {
   useEffect(() => {
     loadOpsData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token])
+  }, [token, twitterDraftFilter])
+
+  useEffect(() => {
+    const selectedDraft = twitterDrafts.find((draft) => Number(draft.id) === Number(selectedTwitterDraftId)) || null
+    setTwitterReview(toDraftReviewState(selectedDraft))
+  }, [selectedTwitterDraftId, twitterDrafts])
 
   const invalidFields = useMemo(() => {
     if (!config?.mutable_keys) return []
@@ -668,6 +711,60 @@ export default function Ops() {
     }
   }
 
+  const onSelectTwitterDraft = (draft) => {
+    setSelectedTwitterDraftId(draft?.id ?? null)
+  }
+
+  const onCopyTwitterDraft = async () => {
+    const draft = twitterDrafts.find((item) => Number(item.id) === Number(selectedTwitterDraftId))
+    const text = String(draft?.full_text || draft?.text || '').trim()
+    if (!text) {
+      setError('No draft text available to copy')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      setNotice('Draft text copied')
+    } catch {
+      setError('Unable to copy draft text')
+    }
+  }
+
+  const onUpdateTwitterDraft = async (nextStatus) => {
+    const draft = twitterDrafts.find((item) => Number(item.id) === Number(selectedTwitterDraftId))
+    if (!connected || !writeEnabled || !draft) return
+
+    setTwitterAction(nextStatus)
+    setNotice('')
+    setError('')
+
+    try {
+      await api.updateTwitterDraft(
+        token,
+        draft.id,
+        {
+          status: nextStatus,
+          review_note: twitterReview.reviewNote,
+          posted_url: twitterReview.postedUrl,
+          external_post_id: twitterReview.externalPostId,
+        },
+        adminUser
+      )
+      setNotice(
+        nextStatus === 'posted'
+          ? 'Draft marked as posted'
+          : nextStatus === 'dismissed'
+            ? 'Draft dismissed'
+            : 'Draft returned to review'
+      )
+      await loadOpsData()
+    } catch (draftError) {
+      setError(formatApiError(draftError, 'Failed to update draft'))
+    } finally {
+      setTwitterAction('')
+    }
+  }
+
   const statusRunMetadata = status?.run_metadata && typeof status.run_metadata === 'object' ? status.run_metadata : null
   const runMetricsMetadata = runMetrics?.run_metadata && typeof runMetrics.run_metadata === 'object' ? runMetrics.run_metadata : null
   const activeRunId = String(statusRunMetadata?.run_id || status?.viewer_ops?.run_id || '').trim()
@@ -704,6 +801,14 @@ export default function Ops() {
   const kpiAlertCounts = kpiAlerts?.counts || {}
   const kpiAlertStatus = String(kpiAlerts?.status || 'ok')
   const kpiAlertDelivery = kpiRollups?.alert_notification || {}
+  const selectedTwitterDraft =
+    twitterDrafts.find((draft) => Number(draft.id) === Number(selectedTwitterDraftId)) || null
+  const twitterPendingCount = Number(twitterStatus?.pending_review_count || 0)
+  const twitterPostedCount = Number(twitterStatus?.posted_count || 0)
+  const twitterDismissedCount = Number(twitterStatus?.dismissed_count || 0)
+  const twitterEnabled = Boolean(twitterStatus?.enabled)
+  const twitterAvailable = twitterStatus?.available !== false
+  const twitterErrorMessage = String(twitterStatus?.error || '').trim()
 
   return (
     <div className="ops-page">
@@ -1460,6 +1565,256 @@ export default function Ops() {
                   {submittingConfig ? <Loader2 size={14} className="spin" /> : <Save size={14} />}
                   Apply updates
                 </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="card ops-articles-card">
+            <div className="card-header">
+              <h3>Social Draft Queue</h3>
+              <div className="ops-article-header-actions">
+                <span className="ops-meta">
+                  {twitterEnabled ? 'X delivery enabled' : 'X delivery disabled'}
+                </span>
+                <button
+                  className="btn-subtle"
+                  type="button"
+                  onClick={loadOpsData}
+                  disabled={!connected || loading}
+                >
+                  {(loading && <Loader2 size={14} className="spin" />) || <RefreshCw size={14} />}
+                  Refresh
+                </button>
+              </div>
+            </div>
+            <div className="card-body ops-social-layout">
+              <div className="ops-social-sidebar">
+                <div className="ops-social-summary">
+                  <div className="ops-kv-grid">
+                    <div className="ops-kv-item">
+                      <span>Pending review</span>
+                      <strong>{twitterPendingCount}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Posted</span>
+                      <strong>{twitterPostedCount}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Dismissed</span>
+                      <strong>{twitterDismissedCount}</strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Module status</span>
+                      <strong>{twitterAvailable ? 'available' : 'unavailable'}</strong>
+                    </div>
+                  </div>
+                  {!twitterEnabled && (
+                    <div className="ops-alert warn compact">
+                      Draft-only mode: candidate posts are queued for manual review instead of auto-posting.
+                    </div>
+                  )}
+                  {!writeEnabled && (
+                    <div className="ops-alert warn compact">
+                      Review actions are disabled while admin writes are off.
+                    </div>
+                  )}
+                  {twitterErrorMessage && <div className="ops-alert warn compact">{twitterErrorMessage}</div>}
+                </div>
+
+                <div className="ops-social-filter-row">
+                  {[
+                    ['pending_review', 'Pending'],
+                    ['posted', 'Posted'],
+                    ['dismissed', 'Dismissed'],
+                    ['all', 'All'],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`ops-filter-chip ${twitterDraftFilter === value ? 'active' : ''}`}
+                      onClick={() => setTwitterDraftFilter(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="ops-social-list">
+                  {twitterDrafts.length === 0 ? (
+                    <div className="empty-state compact">No drafts for this filter.</div>
+                  ) : (
+                    twitterDrafts.map((draft) => {
+                      const isSelected = Number(selectedTwitterDraftId) === Number(draft.id)
+                      const createdAt = draft.created_at ? new Date(draft.created_at) : null
+                      const when = createdAt ? formatDistanceToNow(createdAt, { addSuffix: true }) : 'n/a'
+                      return (
+                        <button
+                          key={draft.id}
+                          type="button"
+                          className={`ops-social-row ${isSelected ? 'selected' : ''}`}
+                          onClick={() => onSelectTwitterDraft(draft)}
+                        >
+                          <div className="ops-social-row-top">
+                            <strong>{formatDraftTypeLabel(draft.draft_type)}</strong>
+                            <span className={`ops-status-pill ${draft.status === 'posted' ? 'published' : 'draft'}`}>
+                              {draft.status}
+                            </span>
+                          </div>
+                          <div className="ops-social-row-preview">{draft.text || draft.full_text || 'Untitled draft'}</div>
+                          <div className="ops-social-row-meta">
+                            <span>#{draft.id}</span>
+                            <span>{displayValue(draft.run_id, 'no run')}</span>
+                            <span>{when}</span>
+                          </div>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+                <div className="ops-meta">Showing {twitterDrafts.length} of {twitterDraftTotal || twitterDrafts.length} drafts.</div>
+              </div>
+
+              <div className="ops-social-detail">
+                {!selectedTwitterDraft ? (
+                  <div className="empty-state compact">Select a draft to review its details.</div>
+                ) : (
+                  <>
+                    <div className="ops-social-detail-head">
+                      <div>
+                        <strong>{formatDraftTypeLabel(selectedTwitterDraft.draft_type)}</strong>
+                        <div className="ops-meta">
+                          Draft #{selectedTwitterDraft.id} · {displayValue(selectedTwitterDraft.run_id, 'no run')} · {displayValue(selectedTwitterDraft.run_mode, 'n/a')}
+                        </div>
+                      </div>
+                      <span className={`ops-status-pill ${selectedTwitterDraft.status === 'posted' ? 'published' : 'draft'}`}>
+                        {selectedTwitterDraft.status}
+                      </span>
+                    </div>
+
+                    <div className="ops-kv-grid">
+                      <div className="ops-kv-item">
+                        <span>Source</span>
+                        <strong>{displayValue(selectedTwitterDraft.source_service, 'unknown')}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Event type</span>
+                        <strong>{displayValue(selectedTwitterDraft.source_event_type, 'unknown')}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Priority</span>
+                        <strong>{Number(selectedTwitterDraft.priority || 0)}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Reviewed by</span>
+                        <strong>{displayValue(selectedTwitterDraft.reviewed_by, 'not reviewed')}</strong>
+                      </div>
+                    </div>
+
+                    <label className="ops-field">
+                      <span>Draft text</span>
+                      <textarea
+                        rows={8}
+                        value={String(selectedTwitterDraft.full_text || selectedTwitterDraft.text || '')}
+                        readOnly
+                        className="ops-sections-textarea"
+                      />
+                    </label>
+
+                    <div className="ops-social-link-row">
+                      <button className="btn-subtle" type="button" onClick={onCopyTwitterDraft}>
+                        <Copy size={14} />
+                        Copy Text
+                      </button>
+                      {selectedTwitterDraft.url && (
+                        <a
+                          className="btn-subtle"
+                          href={selectedTwitterDraft.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <ExternalLink size={14} />
+                          Open Link
+                        </a>
+                      )}
+                    </div>
+
+                    <label className="ops-field">
+                      <span>Review note</span>
+                      <textarea
+                        rows={3}
+                        value={twitterReview.reviewNote}
+                        onChange={(event) =>
+                          setTwitterReview((prev) => ({ ...prev, reviewNote: event.target.value }))
+                        }
+                        placeholder="Why it was posted, skipped, or sent elsewhere."
+                        disabled={!writeEnabled}
+                      />
+                    </label>
+
+                    <div className="ops-social-review-grid">
+                      <label className="ops-field">
+                        <span>Posted URL</span>
+                        <input
+                          type="url"
+                          value={twitterReview.postedUrl}
+                          onChange={(event) =>
+                            setTwitterReview((prev) => ({ ...prev, postedUrl: event.target.value }))
+                          }
+                          placeholder="https://x.com/..."
+                          disabled={!writeEnabled}
+                        />
+                      </label>
+                      <label className="ops-field">
+                        <span>External post ID</span>
+                        <input
+                          type="text"
+                          value={twitterReview.externalPostId}
+                          onChange={(event) =>
+                            setTwitterReview((prev) => ({ ...prev, externalPostId: event.target.value }))
+                          }
+                          placeholder="Store the manual post id if you have one"
+                          disabled={!writeEnabled}
+                        />
+                      </label>
+                    </div>
+
+                    {selectedTwitterDraft.error_message && (
+                      <div className="ops-inline-error">
+                        Last delivery note: {selectedTwitterDraft.error_message}
+                      </div>
+                    )}
+
+                    <div className="ops-article-actions">
+                      <button
+                        className="btn-primary"
+                        type="button"
+                        onClick={() => onUpdateTwitterDraft('posted')}
+                        disabled={!writeEnabled || twitterAction !== '' || selectedTwitterDraft.status === 'posted'}
+                      >
+                        {(twitterAction === 'posted' && <Loader2 size={14} className="spin" />) || <Upload size={14} />}
+                        Mark Posted
+                      </button>
+                      <button
+                        className="btn-subtle"
+                        type="button"
+                        onClick={() => onUpdateTwitterDraft('dismissed')}
+                        disabled={!writeEnabled || twitterAction !== '' || selectedTwitterDraft.status === 'dismissed'}
+                      >
+                        {(twitterAction === 'dismissed' && <Loader2 size={14} className="spin" />) || <EyeOff size={14} />}
+                        Dismiss
+                      </button>
+                      <button
+                        className="btn-subtle"
+                        type="button"
+                        onClick={() => onUpdateTwitterDraft('pending_review')}
+                        disabled={!writeEnabled || twitterAction !== '' || selectedTwitterDraft.status === 'pending_review'}
+                      >
+                        {(twitterAction === 'pending_review' && <Loader2 size={14} className="spin" />) || <RefreshCw size={14} />}
+                        Return to Review
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </section>

@@ -415,6 +415,36 @@ class APIService {
         })
     }
 
+    // Social draft review
+    async getTwitterStatus(token, adminUser = null) {
+        return this.fetch('/api/twitter/status', {
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
+    async getTwitterDrafts(token, adminUser = null, status = 'pending_review', limit = 50, offset = 0) {
+        const params = new URLSearchParams()
+        params.append('status', String(status || 'pending_review'))
+        params.append('limit', String(limit))
+        params.append('offset', String(offset))
+        return this.fetch(`/api/twitter/drafts?${params.toString()}`, {
+            headers: this._adminHeaders(token, adminUser),
+        })
+    }
+
+    async updateTwitterDraft(token, draftId, payload = {}, adminUser = null) {
+        return this.fetch(`/api/twitter/drafts/${draftId}`, {
+            method: 'PATCH',
+            headers: this._adminHeaders(token, adminUser),
+            body: JSON.stringify({
+                status: String(payload?.status || '').trim(),
+                review_note: String(payload?.review_note || '').trim() || null,
+                posted_url: String(payload?.posted_url || '').trim() || null,
+                external_post_id: String(payload?.external_post_id || '').trim() || null,
+            }),
+        })
+    }
+
     // Admin archive/articles
     async getAdminArchiveArticles(token, adminUser = null, status = 'all', limit = 200, offset = 0) {
         const params = new URLSearchParams()
