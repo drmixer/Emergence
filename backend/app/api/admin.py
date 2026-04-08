@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import timedelta
 from pathlib import Path
 import subprocess
@@ -80,6 +81,7 @@ _KPI_ALERT_RULES = (
 _IDENTIFIER_PATTERN = r"^[A-Za-z0-9:_-]+$"
 _DEFAULT_PROTOCOL_VERSION = "protocol_v1"
 _DEFAULT_RUN_CLASS = "standard_72h"
+_DEV_RESET_QUIESCE_SECONDS = 8
 
 
 def _safe_int(value: Any) -> int:
@@ -616,6 +618,25 @@ def _run_seed_reset() -> dict[str, Any]:
     }
 
 
+def _prepare_for_dev_reset(
+    db: Session,
+    *,
+    actor_id: str,
+    reason: str,
+    quiesce_seconds: int = _DEV_RESET_QUIESCE_SECONDS,
+) -> None:
+    # A paused simulation can still have live worker tasks and open DB
+    # transactions. Flip SIMULATION_ACTIVE off first so the worker tears down
+    # scheduler and agent loops before we attempt a destructive reset.
+    runtime_config_service.update_settings(
+        db,
+        updates={"SIMULATION_ACTIVE": False, "SIMULATION_PAUSED": True},
+        changed_by=actor_id,
+        reason=reason,
+    )
+    time.sleep(max(0, int(quiesce_seconds)))
+
+
 @router.get("/status")
 def admin_status(
     db: Session = Depends(get_db),
@@ -823,13 +844,21 @@ def start_simulation_run(
             metadata.get("run_class"),
         )
 
-    # Pause before any destructive maintenance.
-    runtime_config_service.update_settings(
-        db,
-        updates={"SIMULATION_PAUSED": True},
-        changed_by=actor.actor_id,
-        reason=request.reason or f"run_start_{mode}_pre_pause",
-    )
+    # Pause before any destructive maintenance. Full resets additionally force
+    # the worker to quiesce so TRUNCATE does not block on live runtime traffic.
+    if request.reset_world:
+        _prepare_for_dev_reset(
+            db,
+            actor_id=actor.actor_id,
+            reason=request.reason or f"run_start_{mode}_pre_reset_quiesce",
+        )
+    else:
+        runtime_config_service.update_settings(
+            db,
+            updates={"SIMULATION_PAUSED": True},
+            changed_by=actor.actor_id,
+            reason=request.reason or f"run_start_{mode}_pre_pause",
+        )
 
     reset_result = None
     if request.reset_world:
@@ -924,11 +953,10 @@ def reset_dev_world(
 ):
     _assert_writes_enabled(actor)
 
-    runtime_config_service.update_settings(
+    _prepare_for_dev_reset(
         db,
-        updates={"SIMULATION_PAUSED": True},
-        changed_by=actor.actor_id,
-        reason=request.reason or "dev_world_reset_pre_pause",
+        actor_id=actor.actor_id,
+        reason=request.reason or "dev_world_reset_pre_reset_quiesce",
     )
     reset_result = _run_seed_reset()
     return {"ok": True, "simulation_paused": True, "reset_result": reset_result}

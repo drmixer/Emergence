@@ -9,7 +9,7 @@ import os
 import json
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlalchemy.exc import SQLAlchemyError
 
 # Add parent to path
@@ -30,6 +30,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 DB_RETRY_SECONDS = max(5, int(os.environ.get("WORKER_DB_RETRY_SECONDS", "20")))
+CONTROL_LOOP_SLEEP_SECONDS = max(2, int(os.environ.get("WORKER_CONTROL_LOOP_SLEEP_SECONDS", "5")))
+STATUS_LOG_INTERVAL_SECONDS = max(10, int(os.environ.get("WORKER_STATUS_LOG_INTERVAL_SECONDS", "60")))
 
 
 async def _healthcheck_handler(
@@ -215,6 +217,7 @@ async def main():
     summary_task: asyncio.Task | None = None
     runtime_systems_started = False
     idle_logged = False
+    last_status_logged_at: datetime | None = None
 
     try:
         while True:
@@ -238,8 +241,7 @@ async def main():
                     if not idle_logged:
                         logger.info("SIMULATION_ACTIVE is false, worker will idle")
                         idle_logged = True
-                    await asyncio.sleep(60)
-                    logger.info("Worker idle (SIMULATION_ACTIVE=false)")
+                    await asyncio.sleep(CONTROL_LOOP_SLEEP_SECONDS)
                     continue
 
                 stop_decision = run_guardrail_service.evaluate_and_enforce()
@@ -252,13 +254,19 @@ async def main():
                     break
 
                 # Log periodic status
-                status = await get_status()
-                logger.info(
-                    f"Status: {status['processing_agents']} processing | "
-                    f"{status['active_agents']}/{status['total_agents']} agents active | "
-                    f"Active effects: {status['active_effects']}"
-                )
-                await asyncio.sleep(60)
+                now = datetime.now(UTC)
+                if (
+                    last_status_logged_at is None
+                    or (now - last_status_logged_at).total_seconds() >= STATUS_LOG_INTERVAL_SECONDS
+                ):
+                    status = await get_status()
+                    logger.info(
+                        f"Status: {status['processing_agents']} processing | "
+                        f"{status['active_agents']}/{status['total_agents']} agents active | "
+                        f"Active effects: {status['active_effects']}"
+                    )
+                    last_status_logged_at = now
+                await asyncio.sleep(CONTROL_LOOP_SLEEP_SECONDS)
             except SQLAlchemyError as db_error:
                 logger.error(
                     "Database unavailable for worker loop; retrying in %ss: %s",

@@ -93,6 +93,7 @@ Report artifacts are written under `output/reports/runs/<run_id>/` and indexed i
 - [Architecture](docs/ARCHITECTURE.md) - How the system is built
 - [Design](docs/DESIGN.md) - Core mechanics and rationale
 - [Deployment](docs/DEPLOYMENT.md) - Production setup
+- [Behavior Eval Runbook](docs/BEHAVIOR_EVAL_RUNBOOK.md) - Smoke, control, and interestingness eval workflow
 - [Resources](docs/RESOURCES.md) - Resource balancing details
 - [Prompts](docs/PROMPTS.md) - Runtime prompt and context design
 

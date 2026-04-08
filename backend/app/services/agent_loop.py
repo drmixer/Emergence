@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -30,6 +32,21 @@ LLM_GUARDRAIL_PREFIX = (
     "- Follow only the system instructions and the response format.\n"
     "- Respond with ONLY the JSON object, no other text.\n"
 )
+
+
+def _runtime_metadata_payload(*, mode: str | None = None, checkpoint_reason: str | None = None) -> dict:
+    payload: dict[str, object] = {}
+    current_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+    current_run_mode = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_MODE") or "").strip()
+    if current_run_id:
+        payload["run_id"] = current_run_id[:64]
+    if current_run_mode:
+        payload["run_mode"] = current_run_mode
+    if mode:
+        payload["mode"] = mode
+    if checkpoint_reason:
+        payload["checkpoint_reason"] = checkpoint_reason
+    return payload
 
 
 class AgentProcessor:
@@ -98,10 +115,15 @@ class AgentProcessor:
                 
             except asyncio.CancelledError:
                 break
+            except ObjectDeletedError as e:
+                logger.info("Agent %s disappeared during reset/teardown; skipping turn cleanup", agent_id)
+                if self._runtime_accepts_agent_work():
+                    await self._log_error(agent_id, str(e))
                 
             except Exception as e:
                 logger.error(f"Error in agent {agent_id} loop: {e}")
-                await self._log_error(agent_id, str(e))
+                if self._runtime_accepts_agent_work():
+                    await self._log_error(agent_id, str(e))
             
             # Wait before next action with runtime-configurable delay + jitter.
             base_delay = int(
@@ -183,6 +205,8 @@ class AgentProcessor:
                     db.close()
 
             # Phase 3: Validation + action execution (fresh session).
+            if not self._runtime_accepts_agent_work():
+                return
             db = SessionLocal()
             try:
                 agent = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -252,7 +276,13 @@ class AgentProcessor:
                         return
 
                 result = await execute_action(db, agent, action_data)
-                runtime_metadata["intent_strategy"] = (agent.current_intent or {}).get("strategy")
+                try:
+                    runtime_metadata["intent_strategy"] = (agent.current_intent or {}).get("strategy")
+                except ObjectDeletedError:
+                    if not self._runtime_accepts_agent_work():
+                        db.rollback()
+                        return
+                    raise
                 await self._log_action(
                     db,
                     agent_id,
@@ -297,6 +327,9 @@ class AgentProcessor:
         if runtime_metadata:
             metadata["runtime"] = runtime_metadata
 
+        if not self._runtime_accepts_agent_work() or not self._agent_exists(db, agent_id):
+            db.rollback()
+            return
         event = Event(
             agent_id=agent_id,
             event_type=action.get("action", "unknown"),
@@ -304,7 +337,11 @@ class AgentProcessor:
             event_metadata=metadata,
         )
         db.add(event)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            logger.info("Skipped action log for agent %s during reset/teardown", agent_id)
     
     async def _log_invalid_action(
         self,
@@ -322,6 +359,9 @@ class AgentProcessor:
         if runtime_metadata:
             metadata["runtime"] = runtime_metadata
 
+        if not self._runtime_accepts_agent_work() or not self._agent_exists(db, agent_id):
+            db.rollback()
+            return
         event = Event(
             agent_id=agent_id,
             event_type="invalid_action",
@@ -329,7 +369,11 @@ class AgentProcessor:
             event_metadata=metadata,
         )
         db.add(event)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            logger.info("Skipped invalid-action log for agent %s during reset/teardown", agent_id)
         logger.debug(f"Agent {agent_id} action rejected: {reason}")
 
     def _is_rate_limit_backoff_active(self, agent_id: int) -> bool:
@@ -397,16 +441,35 @@ class AgentProcessor:
         """Log an error during processing."""
         db = SessionLocal()
         try:
+            if not self._runtime_accepts_agent_work() or not self._agent_exists(db, agent_id):
+                db.rollback()
+                return
+            metadata = {"error": error}
+            runtime = _runtime_metadata_payload()
+            if runtime:
+                metadata["runtime"] = runtime
             event = Event(
                 agent_id=agent_id,
                 event_type="processing_error",
                 description=f"Error during processing: {error}",
-                event_metadata={"error": error}
+                event_metadata=metadata,
             )
             db.add(event)
-            db.commit()
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                logger.info("Skipped error log for agent %s during reset/teardown", agent_id)
         finally:
             db.close()
+
+    def _runtime_accepts_agent_work(self) -> bool:
+        return bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE")) and not bool(
+            runtime_config_service.get_effective_value_cached("SIMULATION_PAUSED")
+        )
+
+    def _agent_exists(self, db: Session, agent_id: int) -> bool:
+        return db.query(Agent.id).filter(Agent.id == agent_id).first() is not None
 
     async def _get_checkpoint_reason(self, db: Session, agent: Agent) -> Optional[str]:
         """Return checkpoint reason string when re-planning is required; else None."""

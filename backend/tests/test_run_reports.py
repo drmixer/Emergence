@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.models.models import AdminConfigChange, Agent, AgentInventory, Event, SimulationRun
 from app.services import run_reports
 
 
@@ -178,3 +184,95 @@ def test_story_payload_and_markdown_include_exploratory_claim_boundary():
     assert payload["run_class"] == "special_exploratory"
     assert payload["exploratory_label"] == "exploratory"
     assert "Tournament claim boundary" in markdown
+
+
+def _build_snapshot_session():
+    engine = create_engine(
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _enable_foreign_keys(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    SimulationRun.__table__.create(bind=engine)
+    Agent.__table__.create(bind=engine)
+    AgentInventory.__table__.create(bind=engine)
+    Event.__table__.create(bind=engine)
+    AdminConfigChange.__table__.create(bind=engine)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE llm_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NULL,
+                    agent_id INTEGER NULL,
+                    success BOOLEAN NOT NULL DEFAULT 1,
+                    fallback_used BOOLEAN NOT NULL DEFAULT 0,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    estimated_cost_usd REAL NOT NULL DEFAULT 0,
+                    provider TEXT NULL,
+                    model_name TEXT NULL,
+                    resolved_model_name TEXT NULL,
+                    created_at TIMESTAMP NULL
+                )
+                """
+            )
+        )
+
+    return sessionmaker(bind=engine, future=True)()
+
+
+def test_collect_run_snapshot_uses_runtime_tagged_events_when_llm_usage_is_absent():
+    db_session = _build_snapshot_session()
+    try:
+        started_at = datetime(2026, 4, 7, 21, 0, tzinfo=timezone.utc)
+        agent = Agent(
+            agent_number=7,
+            display_name="Tagged Agent",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add(agent)
+        db_session.flush()
+        db_session.add(
+            SimulationRun(
+                run_id="run-event-only",
+                run_mode="test",
+                protocol_version="protocol_v1",
+                condition_name="behavior_eval_control_v1",
+                run_class="standard_72h",
+                started_at=started_at,
+            )
+        )
+        db_session.add(
+            Event(
+                agent_id=agent.id,
+                event_type="reserve_aid",
+                description="shared reserve kept the run traceable",
+                event_metadata={"runtime": {"run_id": "run-event-only", "run_mode": "test"}},
+                created_at=started_at + run_reports.timedelta(minutes=2),
+            )
+        )
+        db_session.commit()
+
+        snapshot = run_reports._collect_run_snapshot(db_session, run_id="run-event-only")
+
+        assert snapshot["verification_source"] == "event_metadata_runtime_run_id"
+        assert snapshot["verification_state"] == "partial"
+        assert snapshot["activity"]["total_events"] == 1
+        assert snapshot["key_moments"][0]["event_type"] == "reserve_aid"
+    finally:
+        db_session.close()

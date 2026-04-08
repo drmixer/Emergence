@@ -25,6 +25,7 @@ from app.models.models import (
 )
 from app.services.archive_drafts import maybe_generate_scheduled_weekly_draft
 from app.services.emergence_metrics import persist_completed_day_snapshot
+from app.services.law_effects import active_survival_reserve_laws
 from app.services.run_reports import maybe_generate_scheduled_run_report_backfill
 from app.services.runtime_config import runtime_config_service
 from app.services.simulation_time import get_simulation_anchor, get_simulation_day_delta
@@ -86,6 +87,241 @@ QUOTE_SALIENCE_KEYWORDS = {
     "trade",
     "resources",
 }
+
+
+def _runtime_interval_seconds(key: str, default: int) -> int:
+    raw_value = runtime_config_service.get_effective_value_cached(key)
+    try:
+        return max(30, int(raw_value or default))
+    except Exception:
+        return int(default)
+
+
+def _runtime_day_length_minutes(default: int) -> int:
+    raw_value = runtime_config_service.get_effective_value_cached("DAY_LENGTH_MINUTES")
+    try:
+        return max(5, int(raw_value or default))
+    except Exception:
+        return max(5, int(default))
+
+
+def _reserve_priority(agent: Agent) -> tuple[int, int, int]:
+    # Keep active workers alive before spending reserve on dormant maintenance.
+    # Dormant agents cannot act until revived, so sacrificing actives collapses
+    # the reserve's future replenishment capacity.
+    status_rank = 0 if str(agent.status or "") == "active" else 1
+    starvation_rank = -int(agent.starvation_cycles or 0)
+    agent_number = int(agent.agent_number or 0)
+    return (status_rank, starvation_rank, agent_number)
+
+
+def _reserve_support_priority(
+    agent: Agent,
+    *,
+    food_amount: Decimal,
+    energy_amount: Decimal,
+) -> tuple[int, Decimal, Decimal, Decimal, int, int]:
+    status = str(agent.status or "")
+    starvation_rank = -int(agent.starvation_cycles or 0)
+    agent_number = int(agent.agent_number or 0)
+
+    if status == "active":
+        required_food = ACTIVE_FOOD_COST
+        required_energy = ACTIVE_ENERGY_COST
+        status_rank = 0
+    else:
+        required_food = ACTIVE_FOOD_COST
+        required_energy = ACTIVE_ENERGY_COST
+        status_rank = 1
+
+    food_deficit = max(Decimal("0"), required_food - food_amount)
+    energy_deficit = max(Decimal("0"), required_energy - energy_amount)
+
+    # When reserve is scarce, maximize the number of agents that remain productive
+    # by funding the smallest active deficits before larger ones.
+    return (
+        status_rank,
+        food_deficit + energy_deficit,
+        energy_deficit,
+        food_deficit,
+        starvation_rank,
+        agent_number,
+    )
+
+
+def _reserve_resource_map(db: Session) -> dict[str, GlobalResources]:
+    rows = db.query(GlobalResources).filter(GlobalResources.resource_type.in_(("food", "energy"))).all()
+    return {str(row.resource_type): row for row in rows}
+
+
+def _reserve_decision_metadata(
+    *,
+    agent: Agent,
+    status_before: str,
+    support_mode: str,
+    required_food: Decimal,
+    required_energy: Decimal,
+    pre_food_amount: Decimal,
+    pre_energy_amount: Decimal,
+    available_food_before: Decimal,
+    available_energy_before: Decimal,
+    available_food_after: Decimal,
+    available_energy_after: Decimal,
+    aid_granted: bool,
+) -> dict:
+    food_deficit = max(Decimal("0"), required_food - pre_food_amount)
+    energy_deficit = max(Decimal("0"), required_energy - pre_energy_amount)
+    return {
+        "agent_number": int(agent.agent_number or 0),
+        "status_before": status_before,
+        "support_mode": support_mode,
+        "required_food": float(required_food),
+        "required_energy": float(required_energy),
+        "pre_food": float(pre_food_amount),
+        "pre_energy": float(pre_energy_amount),
+        "food_deficit": float(food_deficit),
+        "energy_deficit": float(energy_deficit),
+        "reserve_pool_food_before": float(available_food_before),
+        "reserve_pool_energy_before": float(available_energy_before),
+        "reserve_pool_food_after": float(available_food_after),
+        "reserve_pool_energy_after": float(available_energy_after),
+        "aid_granted": bool(aid_granted),
+    }
+
+
+def _apply_survival_reserve_support(
+    db: Session,
+    *,
+    agent: Agent,
+    food_inv: AgentInventory | None,
+    energy_inv: AgentInventory | None,
+    required_food: Decimal,
+    required_energy: Decimal,
+    reserve_resources: dict[str, GlobalResources],
+    emit_shortfall_event: bool = True,
+    event_metadata: dict | None = None,
+) -> tuple[AgentInventory | None, AgentInventory | None, Decimal, Decimal, bool, dict | None]:
+    food_amount = Decimal(str(food_inv.quantity)) if food_inv else Decimal("0")
+    energy_amount = Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0")
+    support_mode = (
+        str(event_metadata.get("support_mode") or "").strip()
+        if isinstance(event_metadata, dict)
+        else ""
+    ) or "active_maintenance"
+    status_before = str(agent.status or "")
+
+    food_deficit = max(Decimal("0"), required_food - food_amount)
+    energy_deficit = max(Decimal("0"), required_energy - energy_amount)
+    if food_deficit <= 0 and energy_deficit <= 0:
+        return food_inv, energy_inv, food_amount, energy_amount, False, None
+
+    food_pool = reserve_resources.get("food")
+    energy_pool = reserve_resources.get("energy")
+    available_food = Decimal(str(food_pool.in_common_pool)) if food_pool else Decimal("0")
+    available_energy = Decimal(str(energy_pool.in_common_pool)) if energy_pool else Decimal("0")
+
+    agent_name = agent.display_name or f"Agent #{agent.agent_number}"
+    if available_food < food_deficit or available_energy < energy_deficit:
+        diagnostics = _reserve_decision_metadata(
+            agent=agent,
+            status_before=status_before,
+            support_mode=support_mode,
+            required_food=required_food,
+            required_energy=required_energy,
+            pre_food_amount=food_amount,
+            pre_energy_amount=energy_amount,
+            available_food_before=available_food,
+            available_energy_before=available_energy,
+            available_food_after=available_food,
+            available_energy_after=available_energy,
+            aid_granted=False,
+        )
+        if emit_shortfall_event:
+            metadata = dict(diagnostics)
+            if isinstance(event_metadata, dict):
+                metadata.update(event_metadata)
+            db.add(
+                Event(
+                    agent_id=agent.id,
+                    event_type="reserve_shortfall",
+                    description=(
+                        f"Shared reserve could not fully cover {agent_name}'s survival deficit "
+                        f"(needed food {float(food_deficit):.2f}, energy {float(energy_deficit):.2f})"
+                    ),
+                    event_metadata=_with_runtime_metadata(metadata),
+                )
+            )
+        return food_inv, energy_inv, food_amount, energy_amount, False, diagnostics
+
+    if food_deficit > 0:
+        if food_inv is None:
+            food_inv = AgentInventory(agent_id=agent.id, resource_type="food", quantity=Decimal("0"))
+            db.add(food_inv)
+        food_inv.quantity += food_deficit
+        food_amount += food_deficit
+        if food_pool:
+            food_pool.in_common_pool -= food_deficit
+        db.add(
+            Transaction(
+                to_agent_id=agent.id,
+                resource_type="food",
+                amount=food_deficit,
+                transaction_type="allocation",
+            )
+        )
+
+    if energy_deficit > 0:
+        if energy_inv is None:
+            energy_inv = AgentInventory(agent_id=agent.id, resource_type="energy", quantity=Decimal("0"))
+            db.add(energy_inv)
+        energy_inv.quantity += energy_deficit
+        energy_amount += energy_deficit
+        if energy_pool:
+            energy_pool.in_common_pool -= energy_deficit
+        db.add(
+            Transaction(
+                to_agent_id=agent.id,
+                resource_type="energy",
+                amount=energy_deficit,
+                transaction_type="allocation",
+            )
+        )
+
+    available_food_after = Decimal(str(food_pool.in_common_pool)) if food_pool else Decimal("0")
+    available_energy_after = Decimal(str(energy_pool.in_common_pool)) if energy_pool else Decimal("0")
+    diagnostics = _reserve_decision_metadata(
+        agent=agent,
+        status_before=status_before,
+        support_mode=support_mode,
+        required_food=required_food,
+        required_energy=required_energy,
+        pre_food_amount=max(Decimal("0"), food_amount - food_deficit),
+        pre_energy_amount=max(Decimal("0"), energy_amount - energy_deficit),
+        available_food_before=available_food,
+        available_energy_before=available_energy,
+        available_food_after=available_food_after,
+        available_energy_after=available_energy_after,
+        aid_granted=True,
+    )
+    db.add(
+        Event(
+            agent_id=agent.id,
+            event_type="reserve_aid",
+            description=(
+                f"Shared reserve covered {agent_name}'s survival deficit "
+                f"(food {float(food_deficit):.2f}, energy {float(energy_deficit):.2f})"
+            ),
+            event_metadata=_with_runtime_metadata(
+                {
+                    **diagnostics,
+                    **(event_metadata or {}),
+                }
+            ),
+        )
+    )
+    return food_inv, energy_inv, food_amount, energy_amount, True, diagnostics
+
+
 QUOTE_STOPWORDS = {
     "the",
     "and",
@@ -424,6 +660,35 @@ async def process_daily_consumption():
             query = query.filter(Agent.agent_number <= settings.SIMULATION_MAX_AGENTS)
 
         living_agents = query.all()
+        reserve_laws = active_survival_reserve_laws(db)
+        reserve_resources = _reserve_resource_map(db) if reserve_laws else {}
+
+        agent_snapshots: list[tuple[Agent, AgentInventory | None, AgentInventory | None, Decimal, Decimal]] = []
+        for agent in living_agents:
+            food_inv = db.query(AgentInventory).filter(
+                AgentInventory.agent_id == agent.id,
+                AgentInventory.resource_type == "food"
+            ).first()
+
+            energy_inv = db.query(AgentInventory).filter(
+                AgentInventory.agent_id == agent.id,
+                AgentInventory.resource_type == "energy"
+            ).first()
+
+            food_amount = Decimal(str(food_inv.quantity)) if food_inv else Decimal("0")
+            energy_amount = Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0")
+            agent_snapshots.append((agent, food_inv, energy_inv, food_amount, energy_amount))
+
+        if reserve_laws:
+            agent_snapshots.sort(
+                key=lambda item: _reserve_support_priority(
+                    item[0],
+                    food_amount=item[3],
+                    energy_amount=item[4],
+                )
+            )
+        else:
+            agent_snapshots.sort(key=lambda item: _reserve_priority(item[0]))
         
         # Track outcomes
         agents_consumed = []  # Paid full cost
@@ -431,28 +696,26 @@ async def process_daily_consumption():
         agents_starving = []  # Dormant & can't pay reduced cost
         agents_died = []  # Reached death threshold
         agents_recovered = []  # Dormant but paid cost (stable)
+        agents_revived = []  # Dormant → Active via reserve or trade-equivalent recovery
         
-        for agent in living_agents:
-            # Get inventory
-            food_inv = db.query(AgentInventory).filter(
-                AgentInventory.agent_id == agent.id,
-                AgentInventory.resource_type == "food"
-            ).first()
-            
-            energy_inv = db.query(AgentInventory).filter(
-                AgentInventory.agent_id == agent.id,
-                AgentInventory.resource_type == "energy"
-            ).first()
-            
-            food_amount = Decimal(str(food_inv.quantity)) if food_inv else Decimal("0")
-            energy_amount = Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0")
-            
+        for agent, food_inv, energy_inv, food_amount, energy_amount in agent_snapshots:
             agent_name = agent.display_name or f"Agent #{agent.agent_number}"
+            reserve_decision: dict | None = None
             
             # ================================================================
             # ACTIVE AGENT PROCESSING
             # ================================================================
             if agent.status == "active":
+                if reserve_laws:
+                    food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_survival_reserve_support(
+                        db,
+                        agent=agent,
+                        food_inv=food_inv,
+                        energy_inv=energy_inv,
+                        required_food=ACTIVE_FOOD_COST,
+                        required_energy=ACTIVE_ENERGY_COST,
+                        reserve_resources=reserve_resources,
+                    )
                 can_pay_food = food_amount >= ACTIVE_FOOD_COST
                 can_pay_energy = energy_amount >= ACTIVE_ENERGY_COST
                 
@@ -490,7 +753,8 @@ async def process_daily_consumption():
                         event_metadata=_with_runtime_metadata({
                             "reason": reason, 
                             "food": float(food_amount), 
-                            "energy": float(energy_amount)
+                            "energy": float(energy_amount),
+                            "reserve_decision": reserve_decision,
                         }),
                     )
                     db.add(event)
@@ -509,6 +773,73 @@ async def process_daily_consumption():
             # DORMANT AGENT PROCESSING
             # ================================================================
             elif agent.status == "dormant":
+                if reserve_laws:
+                    # Prefer reserve-backed revival when the pool can fund a full
+                    # active-cycle deficit; otherwise fall back to dormant upkeep.
+                    revived_via_reserve = False
+                    food_inv, energy_inv, food_amount, energy_amount, revived_via_reserve, reserve_decision = _apply_survival_reserve_support(
+                        db,
+                        agent=agent,
+                        food_inv=food_inv,
+                        energy_inv=energy_inv,
+                        required_food=ACTIVE_FOOD_COST,
+                        required_energy=ACTIVE_ENERGY_COST,
+                        reserve_resources=reserve_resources,
+                        emit_shortfall_event=False,
+                        event_metadata={"support_mode": "active_revival"},
+                    )
+                    if not revived_via_reserve:
+                        food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_survival_reserve_support(
+                            db,
+                            agent=agent,
+                            food_inv=food_inv,
+                            energy_inv=energy_inv,
+                            required_food=DORMANT_FOOD_COST,
+                            required_energy=DORMANT_ENERGY_COST,
+                            reserve_resources=reserve_resources,
+                            event_metadata={"support_mode": "dormant_maintenance"},
+                        )
+                    else:
+                        can_pay_active_food = food_amount >= ACTIVE_FOOD_COST
+                        can_pay_active_energy = energy_amount >= ACTIVE_ENERGY_COST
+                        if can_pay_active_food and can_pay_active_energy:
+                            if food_inv:
+                                food_inv.quantity -= ACTIVE_FOOD_COST
+                            if energy_inv:
+                                energy_inv.quantity -= ACTIVE_ENERGY_COST
+
+                            agent.status = "active"
+                            agent.starvation_cycles = 0
+                            agents_revived.append((agent.id, agent.agent_number, agent.display_name))
+                            agents_consumed.append(agent.id)
+
+                            for resource_type, amount in [("food", ACTIVE_FOOD_COST), ("energy", ACTIVE_ENERGY_COST)]:
+                                db.add(
+                                    Transaction(
+                                        from_agent_id=agent.id,
+                                        resource_type=resource_type,
+                                        amount=amount,
+                                        transaction_type="survival_consumption",
+                                    )
+                                )
+
+                            db.add(
+                                Event(
+                                    agent_id=agent.id,
+                                    event_type="agent_revived",
+                                    description=f"🌟 {agent_name} reactivated using shared reserve support",
+                                    event_metadata=_with_runtime_metadata(
+                                        {
+                                            "revived_by": "shared_reserve",
+                                            "food": float((food_inv.quantity if food_inv else 0) or 0),
+                                            "energy": float((energy_inv.quantity if energy_inv else 0) or 0),
+                                            "reserve_decision": reserve_decision,
+                                        }
+                                    ),
+                                )
+                            )
+                            logger.info("🌟 %s revived via shared reserve", agent_name)
+                            continue
                 can_pay_reduced_food = food_amount >= DORMANT_FOOD_COST
                 can_pay_reduced_energy = energy_amount >= DORMANT_ENERGY_COST
                 
@@ -601,7 +932,8 @@ async def process_daily_consumption():
                                 "starvation_cycles": agent.starvation_cycles,
                                 "cycles_until_death": DEATH_THRESHOLD - agent.starvation_cycles,
                                 "food": float(food_amount),
-                                "energy": float(energy_amount)
+                                "energy": float(energy_amount),
+                                "reserve_decision": reserve_decision,
                             }),
                         )
                         db.add(event)
@@ -623,6 +955,7 @@ async def process_daily_consumption():
             f"Survival cycle complete: "
             f"{len(agents_consumed)} active (fed), "
             f"{len(agents_recovered)} dormant (stable), "
+            f"{len(agents_revived)} revived, "
             f"{len(agents_made_dormant)} became dormant, "
             f"{len(agents_starving)} starving, "
             f"{len(agents_died)} DIED"
@@ -631,6 +964,8 @@ async def process_daily_consumption():
         return {
             "active_fed": len(agents_consumed),
             "dormant_stable": len(agents_recovered),
+            "revived": len(agents_revived),
+            "revived_agents": agents_revived,
             "became_dormant": len(agents_made_dormant),
             "dormant_agents": agents_made_dormant,
             "starving": len(agents_starving),
@@ -690,17 +1025,38 @@ async def resolve_expired_proposals():
                         active=True,
                     )
                     db.add(law)
+                    db.flush()
                     
                     event = Event(
                         event_type="law_passed",
                         description=f"New law enacted: {proposal.title}",
                         event_metadata=_with_runtime_metadata({
+                            "law_id": law.id,
+                            "title": proposal.title,
+                            "description": proposal.description,
                             "proposal_id": proposal.id,
                             "votes_for": proposal.votes_for,
                             "votes_against": proposal.votes_against,
+                            "votes_abstain": proposal.votes_abstain,
                         }),
                     )
                     db.add(event)
+
+                    law_alert = Message(
+                        author_agent_id=proposal.author_agent_id,
+                        message_type="system_alert",
+                        content=(
+                            f"⚖️ SYSTEM ALERT: LAW ENACTED\n\n"
+                            f"Law #{law.id}: **{proposal.title}** is now active.\n\n"
+                            f"{proposal.description or ''}\n\n"
+                            f"Vote result: {proposal.votes_for} yes, {proposal.votes_against} no, "
+                            f"{proposal.votes_abstain} abstain.\n\n"
+                            f"This law is now part of the active world state. Agents may discuss it, "
+                            f"coordinate around it, comply with it, propose changes to it, or cite "
+                            f"`law_id={law.id}` in enforcement actions if they believe it is being violated."
+                        ),
+                    )
+                    db.add(law_alert)
                     
                     # Tweet about the new law
                     if _twitter_ready() and tweet_law_passed:
@@ -849,27 +1205,58 @@ class SchedulerRunner:
         
         # Proposal resolution every 5 minutes
         self.tasks.append(
-            asyncio.create_task(self._run_periodic(resolve_expired_proposals, 300))
+            asyncio.create_task(
+                self._run_periodic_dynamic(
+                    resolve_expired_proposals,
+                    interval_getter=lambda: _runtime_interval_seconds(
+                        "PROPOSAL_RESOLUTION_INTERVAL_SECONDS",
+                        settings.PROPOSAL_RESOLUTION_INTERVAL_SECONDS,
+                    ),
+                )
+            )
         )
 
         # Enforcement resolution every 5 minutes
         self.tasks.append(
-            asyncio.create_task(self._run_periodic(resolve_expired_enforcements, 300))
+            asyncio.create_task(
+                self._run_periodic_dynamic(
+                    resolve_expired_enforcements,
+                    interval_getter=lambda: _runtime_interval_seconds(
+                        "ENFORCEMENT_RESOLUTION_INTERVAL_SECONDS",
+                        settings.ENFORCEMENT_RESOLUTION_INTERVAL_SECONDS,
+                    ),
+                )
+            )
         )
         
-        # Daily consumption every day_length_minutes
+        # Daily consumption every simulation day
         self.tasks.append(
-            asyncio.create_task(self._run_periodic(process_daily_consumption, day_length_minutes * 60))
+            asyncio.create_task(
+                self._run_periodic_dynamic(
+                    process_daily_consumption,
+                    interval_getter=lambda: _runtime_day_length_minutes(day_length_minutes) * 60,
+                )
+            )
         )
         
         # Daily stats reset
         self.tasks.append(
-            asyncio.create_task(self._run_periodic(reset_daily_stats, day_length_minutes * 60))
+            asyncio.create_task(
+                self._run_periodic_dynamic(
+                    reset_daily_stats,
+                    interval_getter=lambda: _runtime_day_length_minutes(day_length_minutes) * 60,
+                )
+            )
         )
 
         # Persist one emergence metrics snapshot per completed simulation day.
         self.tasks.append(
-            asyncio.create_task(self._run_periodic(persist_completed_day_snapshot, day_length_minutes * 60))
+            asyncio.create_task(
+                self._run_periodic_dynamic(
+                    persist_completed_day_snapshot,
+                    interval_getter=lambda: _runtime_day_length_minutes(day_length_minutes) * 60,
+                )
+            )
         )
 
         # Keep queued tweets moving through rate windows.
@@ -930,6 +1317,24 @@ class SchedulerRunner:
                 logger.error(f"Error in scheduled task {func.__name__}: {e}")
             
             await asyncio.sleep(interval_seconds)
+
+    async def _run_periodic_dynamic(self, func, interval_getter):
+        """Run a function periodically and re-read the interval while sleeping."""
+        loop = asyncio.get_running_loop()
+        while self.running:
+            started = loop.time()
+            try:
+                await func()
+            except Exception as e:
+                logger.error(f"Error in scheduled task {func.__name__}: {e}")
+
+            while self.running:
+                interval_seconds = max(30, int(interval_getter() or 30))
+                elapsed = loop.time() - started
+                remaining = interval_seconds - elapsed
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(remaining, 5))
 
 
 # Singleton scheduler

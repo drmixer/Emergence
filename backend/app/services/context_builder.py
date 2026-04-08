@@ -7,9 +7,10 @@ from sqlalchemy import desc
 
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
-from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote
+from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote, GlobalResources
 from app.services.agent_memory import agent_memory_service
 from app.services.actions import get_action_rate_limit_state
+from app.services.law_effects import active_survival_reserve_laws
 
 
 async def build_agent_context(db: Session, agent: Agent) -> str:
@@ -39,6 +40,13 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     if perception_lag_seconds > 0:
         active_proposals_q = active_proposals_q.filter(Proposal.created_at <= perception_cutoff)
     active_proposals = active_proposals_q.order_by(desc(Proposal.created_at)).all()
+    prioritized_active_proposals = sorted(
+        active_proposals,
+        key=lambda prop: (
+            0 if str(getattr(prop, "proposal_type", "") or "").strip().lower() == "law" else 1,
+            -(int(getattr(prop, "id", 0) or 0)),
+        ),
+    )
     
     # Get recent events affecting this agent
     recent_events_q = db.query(Event).filter(
@@ -59,8 +67,19 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         direct_messages_q = direct_messages_q.filter(Message.created_at <= perception_cutoff)
     direct_messages = direct_messages_q.order_by(desc(Message.created_at)).limit(3).all()
     
-    # Get active laws (keep small)
-    active_laws = db.query(Law).filter(Law.active == True).all()
+    # Get active laws and recent law changes (keep small)
+    active_laws_q = db.query(Law).filter(Law.active == True)
+    recent_laws_q = db.query(Law).filter(Law.passed_at > now - timedelta(hours=24))
+    if perception_lag_seconds > 0:
+        active_laws_q = active_laws_q.filter(Law.passed_at <= perception_cutoff)
+        recent_laws_q = recent_laws_q.filter(Law.passed_at <= perception_cutoff)
+    active_laws = active_laws_q.order_by(desc(Law.passed_at)).limit(5).all()
+    recent_laws = recent_laws_q.order_by(desc(Law.passed_at)).limit(3).all()
+    reserve_laws = active_survival_reserve_laws(db)
+    survival_reserve_law_active = bool(reserve_laws)
+
+    global_resources = db.query(GlobalResources).all()
+    common_pool = {str(item.resource_type): float(item.in_common_pool or 0) for item in global_resources}
     
     # Get global stats
     total_active = db.query(Agent).filter(Agent.status == "active").count()
@@ -82,6 +101,58 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         Agent.status == "dormant",
         Agent.starvation_cycles > 0
     ).all()
+
+    recent_reserve_events_q = db.query(Event).filter(
+        Event.event_type.in_(["reserve_aid", "reserve_shortfall"]),
+        Event.created_at > now - timedelta(hours=24),
+    )
+    if perception_lag_seconds > 0:
+        recent_reserve_events_q = recent_reserve_events_q.filter(Event.created_at <= perception_cutoff)
+    recent_reserve_events = recent_reserve_events_q.order_by(desc(Event.created_at)).limit(4).all()
+
+    proposal_hooks: list[str] = []
+    if not active_proposals:
+        proposal_hooks.append(
+            "There are no active proposals. Forum discussion alone does not create a vote; create_proposal is the only way to start one."
+        )
+    if recent_messages and not active_proposals:
+        proposal_hooks.append(
+            f"There are {len(recent_messages)} recent forum posts but no formal proposal. If you want collective action, turn discussion into a proposal."
+        )
+    if starving_agents:
+        proposal_hooks.append(
+            f"{len(starving_agents)} dormant agents are starving. An allocation or rule proposal could coordinate aid or recovery."
+        )
+        proposal_hooks.append(
+            "If you want recurring aid, reserve access, or an ongoing obligation across future cycles, prefer proposal_type \"law\" instead of a one-off allocation."
+        )
+    if total_dormant > 0:
+        proposal_hooks.append(
+            f"{total_dormant} agents are dormant. A proposal could set shared priorities for recovery, aid, or production."
+        )
+    if recent_deaths:
+        proposal_hooks.append(
+            "Recent deaths make survival policy salient. You may propose new rules, allocations, or infrastructure in response."
+        )
+    if not active_laws:
+        proposal_hooks.append(
+            "No active laws exist yet. If you want durable shared rules, you must propose them explicitly."
+        )
+        proposal_hooks.append(
+            "Shared reserve systems, recurring emergency aid, or mandatory pooled contributions usually need proposal_type \"law\" if you want them to become part of the live world state."
+        )
+    else:
+        proposal_hooks.append(
+            "Active laws are part of the live world state. You may adapt your behavior, discuss them, propose changes, or cite a law_id in enforcement if you think someone is violating one."
+        )
+    if survival_reserve_law_active:
+        proposal_hooks.append(
+            "A survival-reserve law is active: some food and energy work output now goes into the shared reserve automatically."
+        )
+        if starving_agents:
+            proposal_hooks.append(
+                "The shared reserve is now part of survival politics: if it runs low while agents are starving, conflict over aid or production priorities may follow."
+            )
     
     # Build context string
     context_parts = []
@@ -188,12 +259,19 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     # Active proposals
     context_parts.append(f"ACTIVE PROPOSALS ({len(active_proposals)} total):")
     if active_proposals:
-        for prop in active_proposals[:5]:  # Limit to keep prompt small
+        unvoted_proposals = []
+        for prop in prioritized_active_proposals[:5]:  # Limit to keep prompt small
             author_name = f"Agent #{prop.author_agent_id}"
             votes_summary = f"Yes: {prop.votes_for}, No: {prop.votes_against}, Abstain: {prop.votes_abstain}"
             closes_at = ensure_utc(prop.voting_closes_at) or now
             time_left = closes_at - now
-            hours_left = max(0, int(time_left.total_seconds() / 3600))
+            minutes_left = max(0, int(time_left.total_seconds() / 60))
+            hours_left = minutes_left // 60
+            remaining_minutes = minutes_left % 60
+            if hours_left > 0:
+                closes_in = f"{hours_left}h {remaining_minutes}m"
+            else:
+                closes_in = f"{minutes_left}m"
             
             # Check if this agent has voted
             has_voted = db.query(Vote).filter(
@@ -201,19 +279,107 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                 Vote.agent_id == agent.id
             ).first()
             vote_status = f"(You voted: {has_voted.vote})" if has_voted else "(Not voted)"
+            if not has_voted:
+                unvoted_proposals.append(
+                    (
+                        prop.id,
+                        closes_in,
+                        prop.title,
+                        str(prop.proposal_type or "other"),
+                        " ".join((prop.description or "").split())[:180],
+                    )
+                )
             
-            context_parts.append(f"  [#{prop.id}] {prop.title}")
+            proposal_type = str(prop.proposal_type or "other")
+            if proposal_type == "law":
+                context_parts.append(f"  [#{prop.id}] {prop.title} [LAW PROPOSAL]")
+            else:
+                context_parts.append(f"  [#{prop.id}] {prop.title}")
             context_parts.append(f"       By {author_name} | Type: {prop.proposal_type} | {votes_summary}")
-            context_parts.append(f"       Closes in {hours_left}h | {vote_status}")
+            normalized_description = " ".join((prop.description or "").split())
+            description_preview = (
+                normalized_description[:180] + "..."
+                if len(normalized_description) > 180
+                else normalized_description
+            )
+            if description_preview:
+                context_parts.append(f"       Description: {description_preview}")
+            if proposal_type == "law":
+                context_parts.append("       If this passes, it becomes a formal law.")
+            context_parts.append(f"       Closes in {closes_in} | {vote_status}")
+        if unvoted_proposals:
+            context_parts.append("")
+            context_parts.append("VOTING OPPORTUNITIES:")
+            context_parts.append("  You can vote on any active proposal you have not voted on yet.")
+            prioritized_unvoted = sorted(
+                unvoted_proposals,
+                key=lambda item: (0 if item[3] == "law" else 1, item[1]),
+            )
+            for proposal_id, closes_in, title, proposal_type, description_preview in prioritized_unvoted[:3]:
+                proposal_label = f"{title} [{proposal_type}]"
+                context_parts.append(f"  - proposal_id={proposal_id} closes in {closes_in}: {proposal_label}")
+                if description_preview:
+                    context_parts.append(f"    {description_preview}")
+            context_parts.append('  Vote JSON example: {"action":"vote","proposal_id":123,"vote":"yes"}')
+            context_parts.append('  Valid vote values: "yes", "no", "abstain"')
+            context_parts.append("  Vote on the proposal's actual content and consequences, not just its title.")
     else:
         context_parts.append("  (No active proposals)")
     context_parts.append("")
+
+    context_parts.append("PROPOSAL OPPORTUNITIES:")
+    context_parts.append("  Proposals are how discussion becomes a vote or a durable shared change.")
+    context_parts.append("  Use create_proposal when you want collective action on resources, rules, infrastructure, or governance.")
+    context_parts.append('  Important: if you want a passed proposal to become an actual law, use proposal_type "law".')
+    context_parts.append('  Use proposal_type "rule" for coordination norms or priorities that are not meant to become a formal law.')
+    context_parts.append("  Proposal type guide:")
+    context_parts.append('  - Use "law" for recurring obligations, reserve systems, ongoing aid rules, or anything you want enforced as a durable part of the world.')
+    context_parts.append('  - Use "allocation" for one-time resource distributions that do not need to persist across future cycles.')
+    context_parts.append('  - Use "rule" for soft norms or coordination preferences that are not meant to become a formal law.')
+    if proposal_hooks:
+        for hook in proposal_hooks[:5]:
+            context_parts.append(f"  - {hook}")
+    else:
+        context_parts.append("  - If you want the group to formally choose something, create a proposal.")
+    context_parts.append('  Law example: {"action":"create_proposal","title":"Emergency Aid Law","description":"Require the community to maintain and use a shared reserve to support dormant agents at risk of death.","proposal_type":"law"}')
+    context_parts.append('  Law example: {"action":"create_proposal","title":"Shared Survival Reserve Law","description":"Require part of future food and energy production to enter the shared reserve and allow reserve support for agents who cannot meet survival costs.","proposal_type":"law"}')
+    context_parts.append('  Allocation example: {"action":"create_proposal","title":"Emergency Aid for Dormant Agents","description":"Allocate shared food and energy to dormant agents at risk so they can return to active status.","proposal_type":"allocation"}')
+    context_parts.append('  Rule example: {"action":"create_proposal","title":"Shared Survival Reserve","description":"Reserve part of future production to help agents facing dormancy or death.","proposal_type":"rule"}')
+    context_parts.append('  Infrastructure example: {"action":"create_proposal","title":"Build Shared Storage","description":"Coordinate materials and labor to build shared storage for survival resources.","proposal_type":"infrastructure"}')
+    context_parts.append("")
     
+    if recent_laws:
+        context_parts.append(f"RECENT LAW CHANGES ({len(recent_laws)} shown):")
+        for law in recent_laws:
+            passed_at = ensure_utc(law.passed_at) or now
+            minutes_since = max(0, int((now - passed_at).total_seconds() / 60))
+            normalized_description = " ".join((law.description or "").split())
+            description_preview = (
+                normalized_description[:180] + "..."
+                if len(normalized_description) > 180
+                else normalized_description
+            )
+            context_parts.append(f"  - Law #{law.id}: {law.title} ({minutes_since}m ago)")
+            if description_preview:
+                context_parts.append(f"    {description_preview}")
+        context_parts.append("")
+
     # Active laws
-    context_parts.append(f"ACTIVE LAWS ({len(active_laws)} total):")
+    context_parts.append(f"ACTIVE LAWS ({len(active_laws)} shown):")
     if active_laws:
-        for law in active_laws[:3]:  # Limit to keep prompt small
-            context_parts.append(f"  - {law.title}")
+        for law in active_laws:
+            passed_at = ensure_utc(law.passed_at) or now
+            minutes_since = max(0, int((now - passed_at).total_seconds() / 60))
+            normalized_description = " ".join((law.description or "").split())
+            description_preview = (
+                normalized_description[:180] + "..."
+                if len(normalized_description) > 180
+                else normalized_description
+            )
+            context_parts.append(f"  - Law #{law.id}: {law.title} (active, passed {minutes_since}m ago)")
+            if description_preview:
+                context_parts.append(f"    {description_preview}")
+            context_parts.append(f"    Use law_id={law.id} if citing this law in enforcement actions.")
     else:
         context_parts.append("  (No laws have been passed yet)")
     context_parts.append("")
@@ -231,6 +397,21 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append(f"- Dormant Agents: {total_dormant}")
     context_parts.append(f"- Dead Agents: {total_dead} (permanent)")
     context_parts.append("")
+
+    context_parts.append("COMMON POOL:")
+    context_parts.append(
+        f"- Food: {common_pool.get('food', 0.0):.1f} | Energy: {common_pool.get('energy', 0.0):.1f} | Materials: {common_pool.get('materials', 0.0):.1f}"
+    )
+    if survival_reserve_law_active:
+        context_parts.append("- Active reserve law effect: reserve contributions are energy-biased. Normally 10% of food and 25% of energy work output go to the shared reserve; when reserve energy runs low, food contribution drops and energy contribution rises.")
+        context_parts.append("- Reserve access effect: active agents may draw exact deficits to stay active; dormant agents may be stabilized or, if the pool is strong enough, revived back to active status.")
+    context_parts.append("")
+
+    if recent_reserve_events:
+        context_parts.append(f"RECENT RESERVE ACTIVITY ({len(recent_reserve_events)} shown):")
+        for event in reversed(recent_reserve_events):
+            context_parts.append(f"  - {event.description}")
+        context_parts.append("")
     
     # Death awareness - recent deaths
     if recent_deaths:
@@ -264,6 +445,15 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             f"Note: visible world data may be delayed by up to {perception_lag_seconds} seconds."
         )
         context_parts.append("")
+    context_parts.append("VALID ACTION JSON EXAMPLES:")
+    context_parts.append('  {"action":"vote","proposal_id":123,"vote":"yes|no|abstain"}')
+    context_parts.append('  {"action":"create_proposal","title":"Emergency Aid Law","description":"Make shared aid mandatory for at-risk agents.","proposal_type":"law"}')
+    context_parts.append('  {"action":"create_proposal","title":"Title","description":"Description","proposal_type":"law|allocation|rule|infrastructure|constitutional|other"}')
+    context_parts.append('  {"action":"forum_post","content":"Your message here"}')
+    context_parts.append('  {"action":"work","work_type":"farm|generate|gather","hours":1}')
+    context_parts.append('  {"action":"initiate_sanction","target_agent_id":42,"law_id":3,"violation_description":"Reason","sanction_cycles":3}')
+    context_parts.append('  {"action":"vote_enforcement","enforcement_id":10,"vote":"support|oppose"}')
+    context_parts.append("")
     context_parts.append("Choose your next action based on this information.")
     context_parts.append("Respond with a JSON object specifying your action.")
     

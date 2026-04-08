@@ -40,6 +40,7 @@ COOPERATION_EVENT_TYPES = {
     "forum_post",
     "agent_revived",
     "proposal_resolved",
+    "reserve_aid",
 }
 
 CONFLICT_EVENT_TYPES = {

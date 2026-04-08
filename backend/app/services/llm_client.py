@@ -138,9 +138,10 @@ class LLMClient:
 
     async def _throttle_openrouter(self) -> None:
         now = time.monotonic()
+        raw_rpm_limit = runtime_config_service.get_effective_value_cached("OPENROUTER_RPM_LIMIT")
         rpm_limit = max(
             1,
-            int(runtime_config_service.get_effective_value_cached("OPENROUTER_RPM_LIMIT") or self._openrouter_rpm),
+            int(self._openrouter_rpm if raw_rpm_limit is None else raw_rpm_limit),
         )
         async with self._openrouter_rpm_lock:
             while self._openrouter_calls and (now - self._openrouter_calls[0]) > self._openrouter_window_s:
@@ -618,13 +619,21 @@ async def get_agent_action(
         }
 
     try:
+        raw_max_action_tokens = runtime_config_service.get_effective_value_cached("LLM_ACTION_MAX_TOKENS")
         max_action_tokens = max(
             128,
-            int(runtime_config_service.get_effective_value_cached("LLM_ACTION_MAX_TOKENS") or 350),
+            int(settings.LLM_ACTION_MAX_TOKENS if raw_max_action_tokens is None else raw_max_action_tokens),
+        )
+        raw_parse_retry_attempts = runtime_config_service.get_effective_value_cached(
+            "LLM_ACTION_PARSE_RETRY_ATTEMPTS"
         )
         parse_retry_attempts = max(
             0,
-            int(runtime_config_service.get_effective_value_cached("LLM_ACTION_PARSE_RETRY_ATTEMPTS") or 2),
+            int(
+                settings.LLM_ACTION_PARSE_RETRY_ATTEMPTS
+                if raw_parse_retry_attempts is None
+                else raw_parse_retry_attempts
+            ),
         )
         base_context_prompt = context_prompt
         last_parse_meta: dict[str, Any] | None = None

@@ -11,9 +11,32 @@ from sqlalchemy import func
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
 from app.models.models import (
-    Agent, AgentInventory, Message, Proposal, Vote, 
-    Law, Event, Transaction, AgentAction
+    Agent, AgentInventory, Message, Proposal, Vote,
+    Law, Event, Transaction, AgentAction, GlobalResources
 )
+from app.services.law_effects import (
+    current_energy_reserve,
+    survival_reserve_contribution_rate,
+    survival_reserve_law_active,
+)
+from app.services.runtime_config import runtime_config_service
+
+
+def _with_runtime_metadata(metadata: dict | None = None) -> dict:
+    payload = dict(metadata or {})
+    runtime = payload.get("runtime")
+    runtime_payload = dict(runtime) if isinstance(runtime, dict) else {}
+
+    run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+    run_mode = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_MODE") or "").strip()
+    if run_id:
+        runtime_payload["run_id"] = run_id[:64]
+    if run_mode:
+        runtime_payload["run_mode"] = run_mode
+
+    if runtime_payload:
+        payload["runtime"] = runtime_payload
+    return payload
 
 
 # Work yields per hour
@@ -52,8 +75,6 @@ ACTION_COSTS = {
 
 RATE_LIMIT_REASON = "Rate limit exceeded (max actions per hour)"
 SANCTIONED_RATE_LIMIT_REASON = "You are SANCTIONED - limited to 1 action per hour"
-
-
 def get_action_rate_limit_state(db: Session, agent: Agent, *, now: Optional[datetime] = None) -> dict:
     """Return rolling-hour action budget state for an agent."""
     current_time = now or now_utc()
@@ -481,7 +502,12 @@ async def _execute_direct_message(db: Session, agent: Agent, action: dict) -> di
 
 async def _execute_create_proposal(db: Session, agent: Agent, action: dict) -> dict:
     """Create a new proposal."""
-    voting_period = timedelta(hours=settings.PROPOSAL_VOTING_HOURS)
+    raw_voting_hours = runtime_config_service.get_effective_value_cached("PROPOSAL_VOTING_HOURS")
+    try:
+        voting_hours = max(0.05, float(raw_voting_hours or settings.PROPOSAL_VOTING_HOURS))
+    except Exception:
+        voting_hours = float(settings.PROPOSAL_VOTING_HOURS)
+    voting_period = timedelta(hours=voting_hours)
     
     proposal = Proposal(
         author_agent_id=agent.id,
@@ -539,6 +565,21 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
     efficiency = EFFICIENCY_CURVE.get(hours, 0.7)
     
     amount_produced = round(base_yield * hours * efficiency, 2)
+    produced_amount = Decimal(str(amount_produced))
+    contribution_amount = Decimal("0")
+    reserve_active = False
+
+    if resource_type in {"food", "energy"} and survival_reserve_law_active(db):
+        reserve_active = True
+        contribution_rate = survival_reserve_contribution_rate(
+            resource_type,
+            energy_reserve=current_energy_reserve(db),
+        )
+        contribution_amount = (produced_amount * contribution_rate).quantize(Decimal("0.01"))
+        if contribution_amount > produced_amount:
+            contribution_amount = produced_amount
+
+    amount_kept = produced_amount - contribution_amount
     
     # Add to agent's inventory
     inventory = db.query(AgentInventory).filter(
@@ -547,29 +588,46 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
     ).first()
     
     if inventory:
-        inventory.quantity = Decimal(str(float(inventory.quantity) + amount_produced))
+        inventory.quantity += amount_kept
     else:
         inventory = AgentInventory(
             agent_id=agent.id,
             resource_type=resource_type,
-            quantity=Decimal(str(amount_produced))
+            quantity=amount_kept
         )
         db.add(inventory)
-    
+
+    if contribution_amount > 0:
+        global_resource = db.query(GlobalResources).filter(
+            GlobalResources.resource_type == resource_type
+        ).first()
+        if global_resource:
+            global_resource.in_common_pool += contribution_amount
+        db.add(
+            Transaction(
+                from_agent_id=agent.id,
+                resource_type=resource_type,
+                amount=contribution_amount,
+                transaction_type="allocation",
+            )
+        )
+
     # Record transaction
     transaction = Transaction(
         to_agent_id=agent.id,
         resource_type=resource_type,
-        amount=Decimal(str(amount_produced)),
+        amount=amount_kept,
         transaction_type="work_production"
     )
     db.add(transaction)
     
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
-    return {
-        "success": True,
-        "description": f"{author_name} worked {hours}h {work_type}ing, produced {amount_produced} {resource_type}"
-    }
+    description = f"{author_name} worked {hours}h {work_type}ing, produced {float(amount_kept):.2f} {resource_type}"
+    if reserve_active and contribution_amount > 0:
+        description += (
+            f" and contributed {float(contribution_amount):.2f} {resource_type} to the shared reserve"
+        )
+    return {"success": True, "description": description}
 
 
 async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:
@@ -654,11 +712,13 @@ async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:
                 agent_id=recipient.id,
                 event_type="agent_revived",
                 description=f"🌟 {recipient_name} has been revived thanks to resources from {sender_name}!",
-                event_metadata={
-                    "revived_by": agent.agent_number,
-                    "food": food_amount,
-                    "energy": energy_amount
-                }
+                event_metadata=_with_runtime_metadata(
+                    {
+                        "revived_by": agent.agent_number,
+                        "food": food_amount,
+                        "energy": energy_amount,
+                    }
+                ),
             )
             db.add(event)
     
@@ -728,15 +788,17 @@ async def _execute_initiate_enforcement(db: Session, agent: Agent, action: dict,
         agent_id=agent.id,
         event_type="enforcement_initiated",
         description=f"⚖️ {initiator_name} has initiated {enforcement_type} against {target_name} for violating '{law.title}'",
-        event_metadata={
-            "enforcement_id": enforcement.id,
-            "enforcement_type": enforcement_type,
-            "target_agent": target.agent_number,
-            "law_id": law.id,
-            "law_title": law.title,
-            "violation": action["violation_description"],
-            "action": action_descriptions.get(enforcement_type, enforcement_type)
-        }
+        event_metadata=_with_runtime_metadata(
+            {
+                "enforcement_id": enforcement.id,
+                "enforcement_type": enforcement_type,
+                "target_agent": target.agent_number,
+                "law_id": law.id,
+                "law_title": law.title,
+                "violation": action["violation_description"],
+                "action": action_descriptions.get(enforcement_type, enforcement_type),
+            }
+        ),
     )
     db.add(event)
     
@@ -871,11 +933,13 @@ async def _execute_enforcement(db: Session, enforcement) -> str:
             agent_id=target.id,
             event_type="agent_sanctioned",
             description=f"🔒 {target_name} has been SANCTIONED for {enforcement.sanction_cycles} cycles",
-            event_metadata={
-                "enforcement_id": enforcement.id,
-                "sanction_cycles": enforcement.sanction_cycles,
-                "sanctioned_until": target.sanctioned_until.isoformat()
-            }
+            event_metadata=_with_runtime_metadata(
+                {
+                    "enforcement_id": enforcement.id,
+                    "sanction_cycles": enforcement.sanction_cycles,
+                    "sanctioned_until": target.sanctioned_until.isoformat(),
+                }
+            ),
         )
         db.add(event)
         
@@ -909,11 +973,13 @@ async def _execute_enforcement(db: Session, enforcement) -> str:
             agent_id=target.id,
             event_type="resources_seized",
             description=f"💰 {actual_amount} {enforcement.seizure_resource} SEIZED from {target_name}",
-            event_metadata={
-                "enforcement_id": enforcement.id,
-                "resource": enforcement.seizure_resource,
-                "amount": float(actual_amount)
-            }
+            event_metadata=_with_runtime_metadata(
+                {
+                    "enforcement_id": enforcement.id,
+                    "resource": enforcement.seizure_resource,
+                    "amount": float(actual_amount),
+                }
+            ),
         )
         db.add(event)
         
@@ -927,9 +993,7 @@ async def _execute_enforcement(db: Session, enforcement) -> str:
             agent_id=target.id,
             event_type="agent_exiled",
             description=f"🚫 {target_name} has been EXILED - voting and proposal rights revoked",
-            event_metadata={
-                "enforcement_id": enforcement.id
-            }
+            event_metadata=_with_runtime_metadata({"enforcement_id": enforcement.id}),
         )
         db.add(event)
         

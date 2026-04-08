@@ -61,6 +61,30 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=900,
         description="Base delay between agent turns.",
     ),
+    "DAY_LENGTH_MINUTES": MutableSettingSpec(
+        python_type=int,
+        min_value=5,
+        max_value=240,
+        description="Simulation day length in real minutes.",
+    ),
+    "PROPOSAL_VOTING_HOURS": MutableSettingSpec(
+        python_type=float,
+        min_value=0.05,
+        max_value=72.0,
+        description="Proposal voting window in hours.",
+    ),
+    "PROPOSAL_RESOLUTION_INTERVAL_SECONDS": MutableSettingSpec(
+        python_type=int,
+        min_value=30,
+        max_value=3600,
+        description="Scheduler interval for resolving expired proposals.",
+    ),
+    "ENFORCEMENT_RESOLUTION_INTERVAL_SECONDS": MutableSettingSpec(
+        python_type=int,
+        min_value=30,
+        max_value=3600,
+        description="Scheduler interval for resolving expired enforcements.",
+    ),
     "OPENROUTER_RPM_LIMIT": MutableSettingSpec(
         python_type=int,
         min_value=1,

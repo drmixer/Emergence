@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.time import ensure_utc
 from app.models.models import Event
+from app.services.runtime_config import runtime_config_service
 
 
 def get_simulation_anchor(db: Session):
@@ -47,7 +48,11 @@ def get_latest_simulation_activity_at(db: Session):
 
 def get_simulation_day_delta() -> timedelta:
     """Return the configured simulation day duration."""
-    day_length_minutes = max(1, int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60))
+    raw_value = runtime_config_service.get_effective_value_cached("DAY_LENGTH_MINUTES")
+    try:
+        day_length_minutes = max(1, int(raw_value or getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60))
+    except Exception:
+        day_length_minutes = max(1, int(getattr(settings, "DAY_LENGTH_MINUTES", 60) or 60))
     return timedelta(minutes=day_length_minutes)
 
 

@@ -127,6 +127,8 @@ class Settings(BaseSettings):
     DAY_LENGTH_MINUTES: int = 60  # 1 real hour = 1 sim day
     # Can be fractional in dev for faster end-to-end testing (e.g. 0.25 = 15 minutes).
     PROPOSAL_VOTING_HOURS: float = 24.0
+    PROPOSAL_RESOLUTION_INTERVAL_SECONDS: int = 300
+    ENFORCEMENT_RESOLUTION_INTERVAL_SECONDS: int = 300
     SIMULATION_MAX_AGENTS: int = (
         50  # Default v1 runtime cap; set 0 to process all seeded agents
     )

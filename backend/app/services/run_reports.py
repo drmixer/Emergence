@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 import json
 import logging
 from pathlib import Path
@@ -125,6 +125,21 @@ def _gini(values: list[float]) -> float:
     for idx, value in enumerate(xs, start=1):
         weighted += idx * value
     return (2.0 * weighted) / (n * total) - (n + 1.0) / n
+
+
+def _coerce_utc_datetime(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = value.replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return ensure_utc(parsed)
+    if hasattr(value, "tzinfo"):
+        return ensure_utc(value)
+    return None
 
 
 def _coerce_run_id(raw_value: str) -> str:
@@ -439,9 +454,9 @@ def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -
     ).first()
 
     start_candidates = [
-        ensure_utc(run_start_change.created_at) if run_start_change and run_start_change.created_at else None,
-        ensure_utc(llm_row.first_seen) if llm_row and llm_row.first_seen else None,
-        ensure_utc(event_row.first_seen) if event_row and event_row.first_seen else None,
+        _coerce_utc_datetime(run_start_change.created_at) if run_start_change and run_start_change.created_at else None,
+        _coerce_utc_datetime(llm_row.first_seen) if llm_row and llm_row.first_seen else None,
+        _coerce_utc_datetime(event_row.first_seen) if event_row and event_row.first_seen else None,
     ]
     start_candidates = [candidate for candidate in start_candidates if candidate is not None]
 
@@ -449,8 +464,8 @@ def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -
     run_started_at = min(start_candidates) if start_candidates else fallback_start
 
     end_candidates = [
-        ensure_utc(llm_row.last_seen) if llm_row and llm_row.last_seen else None,
-        ensure_utc(event_row.last_seen) if event_row and event_row.last_seen else None,
+        _coerce_utc_datetime(llm_row.last_seen) if llm_row and llm_row.last_seen else None,
+        _coerce_utc_datetime(event_row.last_seen) if event_row and event_row.last_seen else None,
     ]
     end_candidates = [candidate for candidate in end_candidates if candidate is not None]
     run_ended_at = max(end_candidates) if end_candidates else now_value
@@ -613,7 +628,11 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
                 "event_id": event_id,
                 "event_type": str((row.event_type if row else "") or ""),
                 "description": str((row.description if row else "") or "").strip(),
-                "created_at": row.created_at.isoformat() if row and row.created_at else None,
+                "created_at": (
+                    _coerce_utc_datetime(row.created_at).isoformat()
+                    if row and _coerce_utc_datetime(row.created_at)
+                    else None
+                ),
             }
         )
 
@@ -635,8 +654,11 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
 
     calls = int((llm_totals.calls if llm_totals else 0) or 0)
     total_events = int(sum(event_counts.values()))
-    verification_state = "verified" if calls > 0 and total_events > 0 and key_moments else "partial"
-    if calls <= 0:
+    if calls > 0 and total_events > 0 and key_moments:
+        verification_state = "verified"
+    elif total_events > 0 and key_moments:
+        verification_state = "partial"
+    else:
         verification_state = "unverified"
 
     llm_payload = {

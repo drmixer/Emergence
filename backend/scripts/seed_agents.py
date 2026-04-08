@@ -7,6 +7,7 @@ import argparse
 import random
 from decimal import Decimal
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 # Add parent to path for imports
 import sys
@@ -388,11 +389,20 @@ def reset_database():
             print("No simulation tables found to truncate.")
             return
 
-        db.execute(
-            text(
-                f"TRUNCATE TABLE {', '.join(to_truncate)} RESTART IDENTITY CASCADE;"
+        db.execute(text("SET LOCAL lock_timeout = '5s'"))
+        db.execute(text("SET LOCAL statement_timeout = '30s'"))
+        try:
+            db.execute(
+                text(
+                    f"TRUNCATE TABLE {', '.join(to_truncate)} RESTART IDENTITY CASCADE;"
+                )
             )
-        )
+        except DBAPIError as exc:
+            db.rollback()
+            raise RuntimeError(
+                "Reset truncate failed, likely due to live DB locks from runtime processes; "
+                "pause or stop the worker before retrying."
+            ) from exc
         db.commit()
         print("Reset complete: truncated simulation tables.")
     finally:

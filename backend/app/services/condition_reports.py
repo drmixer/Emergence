@@ -58,6 +58,7 @@ COOPERATION_EVENT_TYPES = {
     "forum_reply",
     "forum_post",
     "agent_revived",
+    "reserve_aid",
 }
 
 
