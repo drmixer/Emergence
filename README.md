@@ -43,6 +43,10 @@ You'll need API keys for OpenRouter, Groq, Mistral, and/or Gemini to power the L
 
 Production uses PostgreSQL, and Neon is a good fit for hosted Postgres in this stack.
 
+Canonical Railway target:
+`emergence-prod` is the only active Railway project for this repo.
+If `emergence-dev` still exists in Railway, treat it as retired infrastructure and remove or unlink its deploy automation rather than debugging deploy failures against it.
+
 If you run this on Railway with an external Neon database:
 
 1. Create a Neon project and copy the pooled Postgres connection string.
