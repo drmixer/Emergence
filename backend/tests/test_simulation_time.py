@@ -39,11 +39,16 @@ def _seed_agent() -> Agent:
     )
 
 
-def test_simulation_day_uses_latest_non_summary_activity(simulation_session_factory):
+def test_simulation_day_uses_latest_non_summary_activity(simulation_session_factory, monkeypatch):
     session_factory = simulation_session_factory
     anchor = datetime(2026, 2, 10, 5, 2, 24, tzinfo=timezone.utc)
     latest_core = anchor + timedelta(hours=39, minutes=50)
     much_later_summary = anchor + timedelta(days=50)
+    monkeypatch.setattr(
+        simulation_time.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: 60 if key == "DAY_LENGTH_MINUTES" else "",
+    )
 
     with session_factory() as db:
         db.add(_seed_agent())
@@ -85,6 +90,11 @@ def test_summary_scheduler_does_not_backfill_idle_wall_clock_gap(
     anchor = datetime(2026, 2, 10, 5, 2, 24, tzinfo=timezone.utc)
     latest_core = anchor + timedelta(minutes=90)
     much_later_now = anchor + timedelta(days=60)
+    monkeypatch.setattr(
+        simulation_time.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: 60 if key == "DAY_LENGTH_MINUTES" else "",
+    )
 
     with session_factory() as db:
         db.add(_seed_agent())

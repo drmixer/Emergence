@@ -89,7 +89,12 @@ def test_rate_limit_backoff_suppresses_consecutive_invalid_actions(monkeypatch, 
     monkeypatch.setattr(
         agent_loop.runtime_config_service,
         "get_effective_value_cached",
-        lambda _key: "",
+        lambda key: {
+            "SIMULATION_ACTIVE": True,
+            "SIMULATION_PAUSED": False,
+            "SIMULATION_RUN_ID": "",
+            "SIMULATION_RUN_MODE": "",
+        }.get(key, ""),
     )
     monkeypatch.setattr(
         agent_loop.routine_executor,
