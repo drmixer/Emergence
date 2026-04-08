@@ -527,6 +527,49 @@ class ArchiveArticle(Base):
     )
 
 
+class SocialPostDraft(Base):
+    """Durable operator-review queue for social posts."""
+    __tablename__ = "social_post_drafts"
+
+    id = Column(Integer, primary_key=True)
+    platform = Column(String(20), nullable=False, default="x")
+    draft_type = Column(String(32), nullable=False)
+    status = Column(String(20), nullable=False, default="pending_review")
+    text = Column(Text, nullable=False)
+    full_text = Column(Text, nullable=False)
+    url = Column(String(255), nullable=True)
+    image_path = Column(String(255), nullable=True)
+    priority = Column(Integer, nullable=False, default=5)
+    run_id = Column(String(64), nullable=True, index=True)
+    run_mode = Column(String(16), nullable=True)
+    source_service = Column(String(64), nullable=True)
+    source_event_type = Column(String(64), nullable=True)
+    source_record_id = Column(Integer, nullable=True)
+    dedupe_key = Column(String(64), nullable=True, index=True)
+    metadata_json = Column(JSON, nullable=False, default=dict)
+    error_message = Column(Text, nullable=True)
+    review_note = Column(Text, nullable=True)
+    posted_url = Column(String(500), nullable=True)
+    external_post_id = Column(String(128), nullable=True)
+    reviewed_by = Column(String(120), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("platform IN ('x')", name="valid_social_post_draft_platform"),
+        CheckConstraint(
+            "status IN ('pending_review', 'posted', 'dismissed')",
+            name="valid_social_post_draft_status",
+        ),
+        CheckConstraint(
+            "(run_mode IS NULL) OR (run_mode IN ('test', 'real'))",
+            name="valid_social_post_draft_run_mode",
+        ),
+        CheckConstraint("priority >= 1 AND priority <= 10", name="valid_social_post_draft_priority"),
+    )
+
+
 class RunReportArtifact(Base):
     """Artifact registry for run-scoped report bundle outputs."""
     __tablename__ = "run_report_artifacts"

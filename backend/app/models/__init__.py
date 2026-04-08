@@ -21,6 +21,7 @@ from app.models.models import (
     AgentAction,
     Infrastructure,
     RuntimeConfigOverride,
+    SocialPostDraft,
 )
 
 __all__ = [
@@ -45,4 +46,5 @@ __all__ = [
     "AgentAction",
     "Infrastructure",
     "RuntimeConfigOverride",
+    "SocialPostDraft",
 ]

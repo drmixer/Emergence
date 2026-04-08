@@ -21,6 +21,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+from app.services.social_drafts import create_social_draft
+
 
 class TweetType(Enum):
     """Types of automated tweets"""
@@ -75,6 +77,9 @@ class TwitterBot:
         self.tweet_queue: List[TweetContent] = []
         self.tweet_type_counts_today: Dict[str, int] = {}
         self._counter_day: date = datetime.utcnow().date()
+        self.last_dispatch_status = "idle"
+        self.last_dispatch_draft_id: int | None = None
+        self.last_dispatch_error: str | None = None
         
         if self.enabled and TWEEPY_AVAILABLE:
             self._init_client()
@@ -114,6 +119,44 @@ class TwitterBot:
         except Exception as e:
             logger.error(f"Failed to initialize Twitter client: {e}")
             self.enabled = False
+
+    def _set_dispatch_state(
+        self,
+        *,
+        status: str,
+        draft_id: int | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        self.last_dispatch_status = str(status or "idle")
+        self.last_dispatch_draft_id = int(draft_id) if draft_id is not None else None
+        self.last_dispatch_error = str(error_message or "").strip() or None
+
+    def _store_review_draft(
+        self,
+        content: TweetContent,
+        *,
+        error_message: str | None = None,
+        source_service: str = "twitter_bot",
+    ) -> dict[str, Any]:
+        draft = create_social_draft(
+            platform="x",
+            draft_type=content.tweet_type.value,
+            text=content.text,
+            full_text=content.full_text(self.base_url),
+            url=content.url,
+            image_path=content.image_path,
+            priority=content.priority,
+            source_service=source_service,
+            source_event_type=content.tweet_type.value,
+            metadata={"base_url": self.base_url},
+            error_message=error_message,
+        )
+        self._set_dispatch_state(
+            status="drafted",
+            draft_id=int(draft["id"]),
+            error_message=error_message,
+        )
+        return draft
 
     def _ensure_daily_rollover(self):
         """Reset counters when UTC day changes."""
@@ -159,17 +202,33 @@ class TwitterBot:
     
     async def send_tweet(self, content: TweetContent, *, allow_requeue: bool = True) -> bool:
         """Send a tweet"""
+        _ = allow_requeue
+        self._set_dispatch_state(status="idle")
         if not self.enabled:
-            logger.info("Twitter disabled; skipping tweet: %s", content.tweet_type.value)
+            draft = self._store_review_draft(
+                content,
+                error_message="twitter_delivery_disabled",
+            )
+            logger.info(
+                "Twitter disabled; drafted post for operator review: %s (draft_id=%s)",
+                content.tweet_type.value,
+                draft["id"],
+            )
             return False
         if content.tweet_type == TweetType.NOTABLE_QUOTE:
             can_send = self.can_tweet_quote()
         else:
             can_send = self.can_tweet()
         if not can_send:
-            if allow_requeue:
-                self.tweet_queue.append(content)
-                logger.info(f"Tweet queued: {content.tweet_type.value}")
+            draft = self._store_review_draft(
+                content,
+                error_message="twitter_delivery_deferred",
+            )
+            logger.info(
+                "Twitter delivery deferred; drafted post for review: %s (draft_id=%s)",
+                content.tweet_type.value,
+                draft["id"],
+            )
             return False
         
         try:
@@ -192,9 +251,11 @@ class TwitterBot:
                     self.client.create_tweet(text=text)
                 
                 logger.info(f"Tweet sent: {content.tweet_type.value} - {text[:50]}...")
+                self._set_dispatch_state(status="sent")
             else:
                 # Dry run / logging mode
                 logger.info(f"[DRY RUN] Would tweet: {text[:100]}...")
+                self._set_dispatch_state(status="dry_run")
             self.tweets_today += 1
             self.tweet_type_counts_today[content.tweet_type.value] = (
                 int(self.tweet_type_counts_today.get(content.tweet_type.value, 0) or 0) + 1
@@ -203,7 +264,13 @@ class TwitterBot:
             return True
                 
         except Exception as e:
+            draft = self._store_review_draft(content, error_message=str(e))
             logger.error(f"Failed to send tweet: {e}")
+            logger.info(
+                "Stored failed tweet attempt for operator review: %s (draft_id=%s)",
+                content.tweet_type.value,
+                draft["id"],
+            )
             return False
     
     async def process_queue(self):
@@ -533,4 +600,7 @@ def get_twitter_status() -> Dict[str, Any]:
         "last_tweet_time": twitter_bot.last_tweet_time.isoformat() if twitter_bot.last_tweet_time else None,
         "can_tweet_now": twitter_bot.can_tweet(),
         "can_tweet_quote_now": twitter_bot.can_tweet_quote(),
+        "last_dispatch_status": twitter_bot.last_dispatch_status,
+        "last_dispatch_draft_id": twitter_bot.last_dispatch_draft_id,
+        "last_dispatch_error": twitter_bot.last_dispatch_error,
     }

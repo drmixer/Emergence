@@ -4,9 +4,12 @@ Monitor and control the Twitter bot
 """
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
-from app.core.admin_auth import AdminActor, require_admin_auth
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, Literal
+from sqlalchemy.orm import Session
+
+from app.core.admin_auth import AdminActor, assert_admin_write_access, require_admin_auth
+from app.core.database import get_db
 
 # Twitter bot integration
 try:
@@ -21,7 +24,19 @@ try:
 except ImportError:
     TWITTER_AVAILABLE = False
 
+from app.services.social_drafts import (
+    count_social_drafts,
+    create_social_draft,
+    list_social_drafts,
+    serialize_social_draft,
+    update_social_draft,
+)
+
 router = APIRouter(prefix="/twitter", tags=["twitter"])
+
+
+def _assert_writes_enabled(actor: AdminActor) -> None:
+    assert_admin_write_access(client_ip=actor.client_ip)
 
 
 class TweetRequest(BaseModel):
@@ -37,8 +52,18 @@ class TestTweetRequest(BaseModel):
     data: Dict[str, Any]
 
 
+class DraftReviewRequest(BaseModel):
+    status: Literal["pending_review", "posted", "dismissed"]
+    review_note: str | None = Field(default=None, max_length=4000)
+    posted_url: str | None = Field(default=None, max_length=500)
+    external_post_id: str | None = Field(default=None, max_length=128)
+
+
 @router.get("/status")
-async def get_status(_actor: AdminActor = Depends(require_admin_auth)):
+async def get_status(
+    db: Session = Depends(get_db),
+    _actor: AdminActor = Depends(require_admin_auth),
+):
     """Get current Twitter bot status"""
     if not TWITTER_AVAILABLE:
         return {
@@ -49,6 +74,9 @@ async def get_status(_actor: AdminActor = Depends(require_admin_auth)):
     
     status = get_twitter_status()
     status["available"] = True
+    status["pending_review_count"] = count_social_drafts(db, platform="x", status_filter="pending_review")
+    status["posted_count"] = count_social_drafts(db, platform="x", status_filter="posted")
+    status["dismissed_count"] = count_social_drafts(db, platform="x", status_filter="dismissed")
     return status
 
 
@@ -133,6 +161,7 @@ async def test_tweet_format(
 @router.post("/send")
 async def send_manual_tweet(
     request: TweetRequest,
+    db: Session = Depends(get_db),
     _actor: AdminActor = Depends(require_admin_auth),
 ):
     """
@@ -143,17 +172,43 @@ async def send_manual_tweet(
         raise HTTPException(status_code=503, detail="Twitter bot not available")
     
     if not twitter_bot.enabled:
+        draft = create_social_draft(
+            platform="x",
+            draft_type="drama",
+            text=request.message,
+            full_text=request.message,
+            url=request.url,
+            priority=10,
+            source_service="admin_manual",
+            source_event_type="manual_request",
+            error_message="twitter_delivery_disabled",
+            metadata={"requested_via": "admin_api"},
+        )
         return {
             "success": False,
-            "error": "Twitter bot is disabled. Set TWITTER_ENABLED=true to enable.",
-            "would_tweet": request.message
+            "error": "Twitter bot is disabled. Drafted for manual review instead.",
+            "would_tweet": request.message,
+            "draft": draft,
         }
     
     if not twitter_bot.can_tweet():
+        draft = create_social_draft(
+            platform="x",
+            draft_type="drama",
+            text=request.message,
+            full_text=request.message,
+            url=request.url,
+            priority=10,
+            source_service="admin_manual",
+            source_event_type="manual_request",
+            error_message="twitter_delivery_deferred",
+            metadata={"requested_via": "admin_api"},
+        )
         return {
             "success": False,
-            "error": "Cannot tweet right now (rate limited or daily limit reached)",
-            "queue_size": len(twitter_bot.tweet_queue)
+            "error": "Cannot tweet right now; drafted for manual review instead.",
+            "queue_size": len(twitter_bot.tweet_queue),
+            "draft": draft,
         }
     
     try:
@@ -168,8 +223,10 @@ async def send_manual_tweet(
         
         return {
             "success": success,
-            "message": "Tweet sent" if success else "Tweet queued",
-            "remaining_today": twitter_bot.max_tweets_per_day - twitter_bot.tweets_today
+            "message": "Tweet sent" if success else "Tweet drafted for review",
+            "remaining_today": twitter_bot.max_tweets_per_day - twitter_bot.tweets_today,
+            "dispatch_status": twitter_bot.last_dispatch_status,
+            "draft_id": twitter_bot.last_dispatch_draft_id,
         }
         
     except Exception as e:
@@ -190,21 +247,60 @@ async def reset_daily_counter(_actor: AdminActor = Depends(require_admin_auth)):
     }
 
 
-@router.get("/queue")
-async def get_tweet_queue(_actor: AdminActor = Depends(require_admin_auth)):
-    """Get the current tweet queue"""
+@router.get("/drafts")
+async def list_tweet_drafts(
+    status: Literal["pending_review", "posted", "dismissed", "all"] = "pending_review",
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _actor: AdminActor = Depends(require_admin_auth),
+):
+    """Get durable social drafts for manual review."""
     if not TWITTER_AVAILABLE:
         raise HTTPException(status_code=503, detail="Twitter bot not available")
-    
-    queue_items = []
-    for content in twitter_bot.tweet_queue:
-        queue_items.append({
-            "type": content.tweet_type.value,
-            "text": content.text[:100] + "..." if len(content.text) > 100 else content.text,
-            "priority": content.priority
-        })
-    
+
+    return list_social_drafts(
+        db,
+        platform="x",
+        status_filter=status,
+        limit=max(1, min(int(limit), 200)),
+        offset=max(0, int(offset)),
+    )
+
+
+@router.patch("/drafts/{draft_id}")
+async def review_tweet_draft(
+    draft_id: int,
+    request: DraftReviewRequest,
+    db: Session = Depends(get_db),
+    actor: AdminActor = Depends(require_admin_auth),
+):
+    """Mark a durable draft as posted, dismissed, or back to pending review."""
+    _assert_writes_enabled(actor)
+    draft = update_social_draft(
+        db,
+        draft_id=int(draft_id),
+        status=request.status,
+        reviewed_by=actor.actor_id,
+        review_note=request.review_note,
+        posted_url=request.posted_url,
+        external_post_id=request.external_post_id,
+    )
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    db.commit()
+    db.refresh(draft)
+    return serialize_social_draft(draft)
+
+
+@router.get("/queue")
+async def get_tweet_queue(
+    db: Session = Depends(get_db),
+    _actor: AdminActor = Depends(require_admin_auth),
+):
+    """Compatibility alias for pending-review drafts."""
+    payload = list_social_drafts(db, platform="x", status_filter="pending_review", limit=100, offset=0)
     return {
-        "queue_size": len(twitter_bot.tweet_queue),
-        "items": queue_items
+        "queue_size": int(payload["total"]),
+        "items": payload["items"],
     }

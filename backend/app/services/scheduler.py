@@ -28,6 +28,7 @@ from app.services.emergence_metrics import persist_completed_day_snapshot
 from app.services.law_effects import active_survival_reserve_laws
 from app.services.run_reports import maybe_generate_scheduled_run_report_backfill
 from app.services.runtime_config import runtime_config_service
+from app.services.social_drafts import list_draft_texts_for_dedupe
 from app.services.simulation_time import get_simulation_anchor, get_simulation_day_delta
 
 # Twitter bot integration (optional)
@@ -343,7 +344,7 @@ QUOTE_STOPWORDS = {
 
 
 def _twitter_ready() -> bool:
-    return bool(TWITTER_AVAILABLE and twitter_bot and getattr(twitter_bot, "enabled", False))
+    return bool(TWITTER_AVAILABLE and twitter_bot)
 
 
 def _with_runtime_metadata(metadata: dict | None = None) -> dict:
@@ -469,7 +470,7 @@ def _is_quote_already_published(event_rows: list[Event], message_id: int) -> boo
 
 async def process_twitter_queue():
     """Flush queued tweets when the rate window allows."""
-    if not _twitter_ready():
+    if not _twitter_ready() or not getattr(twitter_bot, "enabled", False):
         return
     await twitter_bot.process_queue()
 
@@ -477,8 +478,6 @@ async def process_twitter_queue():
 async def tweet_high_salience_quote():
     """Tweet a high-salience public quote from recent forum activity."""
     if not _twitter_ready() or not tweet_notable_quote or not TweetType:
-        return None
-    if not twitter_bot.can_tweet_quote():
         return None
 
     lookback_hours = max(1, int(getattr(settings, "TWITTER_QUOTE_LOOKBACK_HOURS", 6) or 6))
@@ -528,6 +527,13 @@ async def tweet_high_salience_quote():
             if getattr(item, "tweet_type", None) == TweetType.NOTABLE_QUOTE and str(item.text or "").strip()
         ]
         recent_quote_texts.extend(queued_quote_texts)
+        recent_quote_texts.extend(
+            list_draft_texts_for_dedupe(
+                db,
+                platform="x",
+                draft_type=TweetType.NOTABLE_QUOTE.value,
+            )
+        )
 
         messages = (
             db.query(Message)
@@ -589,11 +595,13 @@ async def tweet_high_salience_quote():
         agent_name=author.display_name,
         day=day_number,
     )
+    dispatch_status = str(getattr(twitter_bot, "last_dispatch_status", "") or "").strip().lower()
     queued = any(
         item.tweet_type == TweetType.NOTABLE_QUOTE and item.text == quote_text
         for item in (twitter_bot.tweet_queue or [])
     )
-    if not success and not queued:
+    drafted = dispatch_status == "drafted"
+    if not success and not queued and not drafted:
         return None
 
     db = SessionLocal()
@@ -602,16 +610,19 @@ async def tweet_high_salience_quote():
             Event(
                 agent_id=author.id,
                 event_type="tweet_posted",
-                description=f"Twitter notable quote posted for Agent #{author.agent_number}",
+                description=(
+                    f"Twitter notable quote {'posted' if success else 'drafted'} for Agent #{author.agent_number}"
+                ),
                 event_metadata=_with_runtime_metadata({
                     "source": "notable_quote",
-                    "status": "sent" if success else "queued",
+                    "status": "sent" if success else (dispatch_status or "queued"),
                     "message_id": int(best.id),
                     "agent_id": int(author.id),
                     "agent_number": int(author.agent_number),
                     "day_number": int(day_number),
                     "quote_fingerprint": quote_fingerprint,
                     "quote_text": quote_text,
+                    "draft_id": getattr(twitter_bot, "last_dispatch_draft_id", None),
                 }),
             )
         )
@@ -624,12 +635,17 @@ async def tweet_high_salience_quote():
 
     logger.info(
         "Twitter quote %s: agent=%s message_id=%s score=%s",
-        "sent" if success else "queued",
+        "sent" if success else (dispatch_status or "queued"),
         author.agent_number,
         best.id,
         candidates[0][0],
     )
-    return {"queued": not success, "message_id": int(best.id), "agent_number": int(author.agent_number)}
+    return {
+        "queued": bool(not success and queued),
+        "drafted": bool(not success and drafted),
+        "message_id": int(best.id),
+        "agent_number": int(author.agent_number),
+    }
 
 
 async def process_daily_consumption():
