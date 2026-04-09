@@ -70,7 +70,7 @@ function App() {
     { path: '/resources', icon: Package, label: 'Resources' },
     { path: '/timeline', icon: Calendar, label: 'Timeline' },
     { path: '/highlights', icon: Star, label: 'Highlights' },
-    { path: '/reports', icon: FileSearch, label: 'Reports' },
+    { path: '/archive', icon: FileSearch, label: 'Archive' },
     { path: '/glossary', icon: BookOpen, label: 'Glossary' },
     { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
     { path: '/leaderboards', icon: Trophy, label: 'Leaderboards' },
@@ -225,6 +225,7 @@ function App() {
                 <Route path="/network" element={<Network />} />
                 <Route path="/timeline" element={<Timeline />} />
                 <Route path="/highlights" element={<Highlights />} />
+                <Route path="/archive" element={<Reports />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/leaderboards" element={<Leaderboards />} />
                 <Route path="/predictions" element={<Predictions />} />

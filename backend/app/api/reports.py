@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,14 @@ from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.models import RunReportArtifact
-from app.services.report_artifacts import ensure_artifact_path, reports_root, resolve_registered_artifact_path
+from app.models.models import RunReportArtifact, SimulationRun
+from app.services.report_artifacts import (
+    ensure_artifact_path,
+    load_json_artifact,
+    reports_root,
+    resolve_registered_artifact_path,
+)
+from app.services.runtime_config import runtime_config_service
 
 router = APIRouter()
 
@@ -46,6 +53,43 @@ def _serialize_artifact(row: RunReportArtifact) -> dict[str, Any]:
     }
 
 
+def _serialize_run_metadata(row: SimulationRun | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "run_id": str(row.run_id),
+        "run_mode": str(row.run_mode),
+        "protocol_version": str(row.protocol_version or "").strip() or None,
+        "condition_name": str(row.condition_name or "").strip() or None,
+        "hypothesis_id": str(row.hypothesis_id or "").strip() or None,
+        "season_id": str(row.season_id or "").strip() or None,
+        "season_number": int(row.season_number) if row.season_number is not None else None,
+        "parent_run_id": str(row.parent_run_id or "").strip() or None,
+        "epoch_id": str(row.epoch_id or "").strip() or None,
+        "run_class": str(row.run_class or "").strip() or None,
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "ended_at": row.ended_at.isoformat() if row.ended_at else None,
+    }
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    text_value = str(value or "").strip()
+    if not text_value:
+        return None
+    try:
+        return datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _duration_hours(started_at: Any, ended_at: Any) -> float | None:
+    start_dt = _parse_datetime(started_at)
+    end_dt = _parse_datetime(ended_at)
+    if start_dt is None or end_dt is None or end_dt < start_dt:
+        return None
+    return round((end_dt - start_dt).total_seconds() / 3600, 2)
+
+
 def _resolve_download_path(raw_path: str) -> Path:
     try:
         artifact_path = resolve_registered_artifact_path(str(raw_path or ""))
@@ -60,6 +104,147 @@ def _resolve_download_path(raw_path: str) -> Path:
             detail="Artifact file not found",
         )
     return artifact_path
+
+
+@router.get("/archive/runs")
+def list_archived_runs(
+    limit: int = Query(24, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    active_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip() or None
+
+    summary_rows = (
+        db.query(RunReportArtifact)
+        .filter(
+            RunReportArtifact.artifact_type == "run_summary",
+            RunReportArtifact.artifact_format == "json",
+            RunReportArtifact.status == "completed",
+        )
+        .order_by(RunReportArtifact.updated_at.desc(), RunReportArtifact.id.desc())
+        .all()
+    )
+
+    summary_by_run: dict[str, dict[str, Any]] = {}
+    for row in summary_rows:
+        clean_run_id = str(row.run_id or "").strip()
+        if not clean_run_id or clean_run_id == active_run_id or clean_run_id in summary_by_run:
+            continue
+        payload = load_json_artifact(db, row)
+        if not isinstance(payload, dict):
+            continue
+        metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+        run_ended_at = payload.get("run_ended_at") or payload.get("generated_at_utc") or (
+            row.updated_at.isoformat() if row.updated_at else None
+        )
+        raw_season_number = payload.get("season_number")
+        summary_by_run[clean_run_id] = {
+            "run_id": clean_run_id,
+            "condition_name": str(payload.get("condition_name") or "").strip() or None,
+            "season_number": (
+                int(raw_season_number)
+                if raw_season_number is not None and str(raw_season_number).strip() != ""
+                else None
+            ),
+            "run_class": str(payload.get("run_class") or "").strip() or None,
+            "replicate_count": int(payload.get("replicate_count") or 1),
+            "generated_at_utc": payload.get("generated_at_utc"),
+            "run_started_at": payload.get("run_started_at"),
+            "run_ended_at": run_ended_at,
+            "duration_hours": _duration_hours(payload.get("run_started_at"), payload.get("run_ended_at")),
+            "metrics": {
+                "total_events": int(metrics.get("total_events") or 0),
+                "llm_calls": int(metrics.get("llm_calls") or 0),
+                "deaths": int(metrics.get("deaths") or 0),
+                "laws_passed": int(metrics.get("laws_passed") or 0),
+                "estimated_cost_usd": float(metrics.get("estimated_cost_usd") or 0.0),
+            },
+            "sort_key": (
+                (_parse_datetime(run_ended_at) or _parse_datetime(payload.get("generated_at_utc")) or row.updated_at).timestamp()
+                if (_parse_datetime(run_ended_at) or _parse_datetime(payload.get("generated_at_utc")) or row.updated_at)
+                else 0
+            ),
+        }
+
+    run_ids = list(summary_by_run.keys())
+    if not run_ids:
+        return {
+            "active_run_id": active_run_id,
+            "count": 0,
+            "stats": {
+                "completed_runs": 0,
+                "total_events": 0,
+                "llm_calls": 0,
+                "deaths": 0,
+                "estimated_cost_usd": 0.0,
+            },
+            "items": [],
+        }
+
+    artifact_rows = (
+        db.query(RunReportArtifact)
+        .filter(
+            RunReportArtifact.run_id.in_(run_ids),
+            RunReportArtifact.status == "completed",
+            RunReportArtifact.artifact_type.in_(RUN_ARTIFACT_TYPES),
+            RunReportArtifact.artifact_format.in_(FORMATS),
+        )
+        .order_by(RunReportArtifact.updated_at.desc(), RunReportArtifact.id.desc())
+        .all()
+    )
+    run_rows = (
+        db.query(SimulationRun)
+        .filter(SimulationRun.run_id.in_(run_ids))
+        .all()
+    )
+    run_registry = {str(row.run_id): row for row in run_rows}
+
+    artifacts_by_run: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in artifact_rows:
+        run_bucket = artifacts_by_run.setdefault(str(row.run_id), {})
+        artifact_bucket = run_bucket.setdefault(
+            str(row.artifact_type),
+            {"available": True, "formats": [], "updated_at": None},
+        )
+        artifact_format = str(row.artifact_format or "").strip()
+        if artifact_format and artifact_format not in artifact_bucket["formats"]:
+            artifact_bucket["formats"].append(artifact_format)
+        if artifact_bucket["updated_at"] is None and row.updated_at:
+            artifact_bucket["updated_at"] = row.updated_at.isoformat()
+
+    items = [
+        {
+            "run_id": run_id,
+            "summary": {
+                key: value
+                for key, value in summary.items()
+                if key != "sort_key"
+            },
+            "run_metadata": _serialize_run_metadata(run_registry.get(run_id)),
+            "artifacts": artifacts_by_run.get(run_id, {}),
+        }
+        for run_id, summary in summary_by_run.items()
+    ]
+    items.sort(
+        key=lambda item: float(summary_by_run.get(item["run_id"], {}).get("sort_key") or 0),
+        reverse=True,
+    )
+    visible_items = items[:limit]
+
+    return {
+        "active_run_id": active_run_id,
+        "count": len(items),
+        "stats": {
+            "completed_runs": len(items),
+            "total_events": sum(int(item["summary"]["metrics"]["total_events"]) for item in items),
+            "llm_calls": sum(int(item["summary"]["metrics"]["llm_calls"]) for item in items),
+            "deaths": sum(int(item["summary"]["metrics"]["deaths"]) for item in items),
+            "estimated_cost_usd": round(
+                sum(float(item["summary"]["metrics"]["estimated_cost_usd"]) for item in items),
+                4,
+            ),
+        },
+        "items": visible_items,
+    }
 
 
 @router.get("/runs/{run_id}")

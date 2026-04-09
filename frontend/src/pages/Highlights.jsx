@@ -246,6 +246,8 @@ export default function Highlights() {
   const [predictionNotice, setPredictionNotice] = useState(null)
   const [predictionError, setPredictionError] = useState(null)
   const [placingMarketKey, setPlacingMarketKey] = useState(null)
+  const [activeRunId, setActiveRunId] = useState('')
+  const [selectedRunId, setSelectedRunId] = useState('')
   const [overview, setOverview] = useState(null)
   const [emergenceMetrics, setEmergenceMetrics] = useState(null)
   const [shareNotice, setShareNotice] = useState('')
@@ -271,16 +273,19 @@ export default function Highlights() {
     async function load() {
       setLoading(true)
       try {
-        const [latestSummary, bestMomentsPayload, turns, replay, replayStoryPayload, openMarkets, me, overviewPayload, metricsPayload] = await Promise.all([
-          api.fetch('/api/analytics/summaries/latest'),
-          api.getBestMoments(6, 72, 55, runFilter).catch(() => ({ items: [] })),
-          api.getPlotTurns(16, 72, 60, runFilter).catch(() => ({ items: [] })),
-          api.getPlotTurnReplay(24, 55, 30, 240, runFilter).catch(() => ({ items: [], buckets: [] })),
-          api.getReplayStory(24, 55, 8, runFilter).catch(() => ({ items: [], chapters: [] })),
-          api.getPredictionMarkets('open', 8).catch(() => []),
-          api.getPredictionMe().catch(() => null),
-          api.getAnalyticsOverview().catch(() => null),
-          api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
+        const overviewPayload = await api.getAnalyticsOverview().catch(() => null)
+        const liveRunId = String(overviewPayload?.scope?.active_run_id || '').trim()
+        const effectiveRunId = runFilter || liveRunId
+        const archiveView = Boolean(runFilter)
+        const [latestSummary, bestMomentsPayload, turns, replay, replayStoryPayload, openMarkets, me, metricsPayload] = await Promise.all([
+          api.getLatestSummary(effectiveRunId).catch(() => null),
+          api.getBestMoments(6, 72, 55, effectiveRunId).catch(() => ({ items: [] })),
+          api.getPlotTurns(16, 72, 60, effectiveRunId).catch(() => ({ items: [] })),
+          api.getPlotTurnReplay(24, 55, 30, 240, effectiveRunId).catch(() => ({ items: [], buckets: [] })),
+          api.getReplayStory(24, 55, 8, effectiveRunId).catch(() => ({ items: [], chapters: [] })),
+          archiveView ? Promise.resolve([]) : api.getPredictionMarkets('open', 8).catch(() => []),
+          archiveView ? Promise.resolve(null) : api.getPredictionMe().catch(() => null),
+          archiveView ? Promise.resolve(null) : api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
         ])
 
         setSummary(latestSummary?.summary ? latestSummary : null)
@@ -296,6 +301,8 @@ export default function Highlights() {
         setReplayBuckets(buckets)
         setReplayIndex(buckets.length > 0 ? buckets.length - 1 : -1)
 
+        setActiveRunId(liveRunId)
+        setSelectedRunId(effectiveRunId)
         setPredictionMarkets(Array.isArray(openMarkets) ? openMarkets : [])
         setPredictionStats(me && typeof me === 'object' ? me : null)
         setOverview(overviewPayload && typeof overviewPayload === 'object' ? overviewPayload : null)
@@ -308,6 +315,8 @@ export default function Highlights() {
         setReplayStory({ items: [], chapters: [] })
         setReplayBuckets([])
         setReplayIndex(-1)
+        setActiveRunId('')
+        setSelectedRunId('')
         setPredictionMarkets([])
         setPredictionStats(null)
         setOverview(null)
@@ -426,6 +435,9 @@ export default function Highlights() {
     return { runDetailHref, evidenceApiHref }
   }, [activeReplayMoment])
 
+  const isArchiveView = Boolean(runFilter)
+  const showLiveStateStrip = !isArchiveView && !!selectedRunId && selectedRunId === activeRunId
+
   const stateStrip = useMemo(() => {
     const day = Number(overview?.day_number || 0)
     const deaths = Number(overview?.agents?.dead || 0)
@@ -542,14 +554,14 @@ export default function Highlights() {
       ? replayStoryMoments.length > 0
       : replayBuckets.length > 0
     if (loading || activeTab !== 'replay' || !replayReady) return
-    trackKpiEventOnce('replay_start', `replay_start:${runFilter || 'all'}:${replayMode}`, {
-      runId: runFilter,
+    trackKpiEventOnce('replay_start', `replay_start:${selectedRunId || 'all'}:${replayMode}`, {
+      runId: selectedRunId,
       surface: 'highlights_replay_tab',
       target: replayMode === 'story60'
         ? 'story60'
         : (requestedEventId > 0 ? 'focused_event' : 'default'),
     })
-  }, [loading, activeTab, replayMode, replayBuckets.length, replayStoryMoments.length, runFilter, requestedEventId])
+  }, [loading, activeTab, replayMode, replayBuckets.length, replayStoryMoments.length, selectedRunId, requestedEventId])
 
   useEffect(() => {
     if (loading || activeTab !== 'replay') return
@@ -561,12 +573,12 @@ export default function Highlights() {
 
     if (!timelineCompleted && !storyCompleted) return
     const target = replayMode === 'story60' ? 'story60_last_moment' : 'timeline_start_reached'
-    trackKpiEventOnce('replay_complete', `replay_complete:${runFilter || 'all'}:${replayMode}`, {
-      runId: runFilter,
+    trackKpiEventOnce('replay_complete', `replay_complete:${selectedRunId || 'all'}:${replayMode}`, {
+      runId: selectedRunId,
       surface: 'highlights_replay_tab',
       target,
     })
-  }, [loading, activeTab, replayMode, replayBuckets.length, replayIndex, replayStoryMoments.length, storyMomentIndex, runFilter])
+  }, [loading, activeTab, replayMode, replayBuckets.length, replayIndex, replayStoryMoments.length, storyMomentIndex, selectedRunId])
 
   return (
     <div className="highlights-page">
@@ -576,13 +588,21 @@ export default function Highlights() {
           Highlights
         </h1>
         <p className="page-description">
-          Notable events, recaps, and daily summaries
+          {isArchiveView && selectedRunId
+            ? `Archived replay surfaces for ${selectedRunId}`
+            : 'Notable events, recaps, and daily summaries for the current run'}
         </p>
       </div>
 
       <div className="feed-notice">
         Highlights are observational summaries from simulation data. For claim-level evidence, review run detail traces and the <Link to="/method">method notes</Link>.
       </div>
+
+      {isArchiveView && selectedRunId && (
+        <div className="feed-notice">
+          Viewing archived run <strong>{selectedRunId}</strong>. <Link to="/archive">Back to archive</Link>
+        </div>
+      )}
 
       <div className="highlight-tabs">
         <button
@@ -636,7 +656,7 @@ export default function Highlights() {
         </button>
       </div>
 
-      {(activeTab === 'plotTurns' || activeTab === 'replay') && (
+      {showLiveStateStrip && (activeTab === 'plotTurns' || activeTab === 'replay') && (
         <div className="state-strip">
           <div className="state-item">
             <span>Day</span>
@@ -664,7 +684,7 @@ export default function Highlights() {
       {shareNotice && <div className="feed-notice success">{shareNotice}</div>}
 
       {activeTab === 'recap' && (
-        <Recap />
+        <Recap runId={selectedRunId} />
       )}
 
       {activeTab === 'quotes' && (
@@ -738,8 +758,8 @@ export default function Highlights() {
               <div className="summary-header">
                 <h2>
                   {summary.source === 'run_summary_fallback'
-                    ? `Run ${summary.run_id || 'Latest'} Summary`
-                    : (summary.day_number ? `Day ${summary.day_number} Summary` : 'Latest Summary')}
+                    ? `Run ${summary.run_id || selectedRunId || 'Latest'} Summary`
+                    : (summary.day_number ? `Day ${summary.day_number} Summary` : `Run ${selectedRunId || 'Latest'} Summary`)}
                 </h2>
                 <span className="summary-date">
                   {summary.created_at ? new Date(summary.created_at).toLocaleDateString() : ''}
@@ -748,7 +768,7 @@ export default function Highlights() {
 
               {summary.source === 'run_summary_fallback' && (
                 <div className="feed-notice">
-                  Daily summary is unavailable for this window. Showing latest run-summary fallback.
+                  Daily summary is unavailable for this run window. Showing the scoped run-summary fallback.
                 </div>
               )}
 
@@ -857,6 +877,12 @@ export default function Highlights() {
 
       {activeTab === 'predictions' && (
         <div className="prediction-panel">
+          {isArchiveView ? (
+            <div className="empty-state">
+              Predictions are live-only. Return to <Link to="/highlights?tab=predictions">the current run market</Link>.
+            </div>
+          ) : (
+            <>
           <div className="prediction-intro-card">
             <strong>Audience-side calls only.</strong>
             <p>These hooks resolve from live run data after the window closes. They do not affect the simulation or agent incentives.</p>
@@ -950,6 +976,8 @@ export default function Highlights() {
               </div>
             )
           })}
+            </>
+          )}
         </div>
       )}
 

@@ -952,34 +952,47 @@ def get_summaries(limit: int = Query(10, le=50)):
 
 
 @router.get("/summaries/latest")
-def get_latest_summary():
+def get_latest_summary(
+    run_id: str | None = Query(default=None, max_length=64, pattern=r"^[A-Za-z0-9:_-]+$"),
+):
     """Get the most recent daily summary."""
     db = SessionLocal()
     try:
-        summary = db.query(Event).filter(
-            Event.event_type == "daily_summary"
-        ).order_by(Event.created_at.desc()).first()
-        
+        requested_run_id = str(run_id or "").strip()
+        active_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+        target_run_id = requested_run_id or active_run_id
+
+        summary_query = db.query(Event).filter(Event.event_type == "daily_summary")
+        if target_run_id:
+            summary_query = summary_query.filter(
+                text("(events.event_metadata -> 'runtime' ->> 'run_id') = :run_id")
+            ).params(run_id=target_run_id)
+
+        summary = summary_query.order_by(Event.created_at.desc()).first()
+
         if not summary:
-            fallback = _latest_run_summary_fallback(db)
+            fallback = _latest_run_summary_fallback(db, run_id=target_run_id or None)
             if fallback is not None:
                 return fallback
             return {"message": "No summaries yet", "summary": None, "source": "none"}
 
-        return {
+        response = {
             "day_number": (summary.event_metadata or {}).get("day_number"),
             "summary": (summary.event_metadata or {}).get("summary"),
             "stats": (summary.event_metadata or {}).get("stats"),
             "created_at": summary.created_at.isoformat() if summary.created_at else None,
             "source": "daily_summary",
         }
+        if target_run_id:
+            response["run_id"] = target_run_id
+        return response
     finally:
         db.close()
 
 
-def _latest_run_summary_fallback(db) -> dict[str, Any] | None:
+def _latest_run_summary_fallback(db, run_id: str | None = None) -> dict[str, Any] | None:
     """Fallback to the newest run_summary artifact when daily summaries are unavailable."""
-    rows = (
+    rows_query = (
         db.query(RunReportArtifact)
         .filter(
             RunReportArtifact.artifact_type == "run_summary",
@@ -987,9 +1000,11 @@ def _latest_run_summary_fallback(db) -> dict[str, Any] | None:
             RunReportArtifact.status == "completed",
         )
         .order_by(RunReportArtifact.updated_at.desc(), RunReportArtifact.id.desc())
-        .limit(5)
-        .all()
     )
+    clean_run_id = str(run_id or "").strip()
+    if clean_run_id:
+        rows_query = rows_query.filter(RunReportArtifact.run_id == clean_run_id)
+    rows = rows_query.limit(5).all()
     for row in rows:
         payload = load_json_artifact(db, row)
         if not isinstance(payload, dict):

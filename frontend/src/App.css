@@ -971,6 +971,123 @@ tr:last-child td {
   animation: spin 1s linear infinite;
 }
 
+.archive-page {
+  gap: var(--spacing-lg);
+}
+
+.archive-current-run-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.archive-current-run-body p {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+}
+
+.archive-current-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.archive-stats-grid {
+  margin-top: 0;
+}
+
+.archive-run-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.archive-run-card {
+  padding: var(--spacing-lg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+    rgba(10, 12, 18, 0.78);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.archive-run-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+}
+
+.archive-run-card-head h3 {
+  margin: 0;
+}
+
+.archive-run-card-head p {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+}
+
+.archive-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.archive-run-meta span {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.archive-run-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.archive-run-stats > div {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.archive-run-stats span {
+  display: block;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.archive-run-stats strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 1.05rem;
+}
+
+.archive-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.archive-run-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
 @media (max-width: 900px) {
   .reports-filters,
   .reports-grid {
@@ -983,5 +1100,24 @@ tr:last-child td {
 
   .reports-item-actions {
     justify-content: flex-start;
+  }
+
+  .archive-current-run-body,
+  .archive-run-card-head {
+    flex-direction: column;
+  }
+
+  .archive-run-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .archive-run-foot {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .archive-run-stats {
+    grid-template-columns: 1fr;
   }
 }

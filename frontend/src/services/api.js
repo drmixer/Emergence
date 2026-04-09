@@ -222,6 +222,14 @@ class APIService {
         return this.fetch(`/api/analytics/plot-turns/replay-story?${params.toString()}`)
     }
 
+    async getLatestSummary(runId = '') {
+        const params = new URLSearchParams()
+        const cleanRunId = String(runId || '').trim()
+        if (cleanRunId) params.append('run_id', cleanRunId)
+        const query = params.toString() ? `?${params.toString()}` : ''
+        return this.fetch(`/api/analytics/summaries/latest${query}`)
+    }
+
     async getRunDetail(runId, hoursFallback = 24, traceLimit = 12, minSalience = 55) {
         const cleanRunId = String(runId || '').trim()
         if (!cleanRunId) {
@@ -240,6 +248,12 @@ class APIService {
             throw new Error('runId is required')
         }
         return this.fetch(`/api/reports/runs/${encodeURIComponent(cleanRunId)}`)
+    }
+
+    async getRunsArchive(limit = 24) {
+        const params = new URLSearchParams()
+        params.append('limit', String(limit))
+        return this.fetch(`/api/reports/archive/runs?${params.toString()}`)
     }
 
     async getConditionReports(conditionName) {

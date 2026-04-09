@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.models.models import RunReportArtifact
+from app.models.models import RunReportArtifact, SimulationRun
 
 reports_api = importlib.import_module("app.api.reports")
 report_artifacts = importlib.import_module("app.services.report_artifacts")
@@ -25,6 +26,7 @@ def reports_client(tmp_path, monkeypatch):
         poolclass=StaticPool,
     )
     RunReportArtifact.__table__.create(bind=engine)
+    SimulationRun.__table__.create(bind=engine)
     db_session = sessionmaker(bind=engine, future=True)()
 
     monkeypatch.setattr(reports_api, "_reports_root", lambda: Path(tmp_path))
@@ -161,3 +163,112 @@ def test_download_run_report_regenerates_missing_artifact(reports_client, monkey
 
     assert response.status_code == 200
     assert '"regenerated": true' in response.text
+
+
+def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_client, monkeypatch):
+    client, db_session, tmp_dir = reports_client
+
+    archived_summary_file = tmp_dir / "runs" / "run-archive-1" / "run_report_summary.json"
+    archived_summary_file.parent.mkdir(parents=True, exist_ok=True)
+    archived_summary_file.write_text(
+        """
+{
+  "run_id": "run-archive-1",
+  "condition_name": "baseline_v2",
+  "season_number": 3,
+  "run_class": "standard_72h",
+  "replicate_count": 2,
+  "generated_at_utc": "2026-04-08T03:30:00+00:00",
+  "run_started_at": "2026-04-08T01:00:00+00:00",
+  "run_ended_at": "2026-04-08T03:00:00+00:00",
+  "metrics": {
+    "total_events": 420,
+    "llm_calls": 88,
+    "deaths": 4,
+    "laws_passed": 3,
+    "estimated_cost_usd": 1.2345
+  }
+}
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    technical_file = tmp_dir / "runs" / "run-archive-1" / "technical_report.md"
+    technical_file.write_text("# technical\n", encoding="utf-8")
+    approachable_file = tmp_dir / "runs" / "run-archive-1" / "approachable_report.md"
+    approachable_file.write_text("# approachable\n", encoding="utf-8")
+
+    active_summary_file = tmp_dir / "runs" / "run-live-1" / "run_report_summary.json"
+    active_summary_file.parent.mkdir(parents=True, exist_ok=True)
+    active_summary_file.write_text('{"run_id":"run-live-1","metrics":{"total_events":10}}\n', encoding="utf-8")
+
+    db_session.add_all(
+        [
+            SimulationRun(
+                run_id="run-archive-1",
+                run_mode="real",
+                protocol_version="phase-2",
+                condition_name="baseline_v2",
+                season_number=3,
+                run_class="standard_72h",
+                carryover_agent_count=0,
+                fresh_agent_count=50,
+                protocol_deviation=False,
+                started_at=datetime.fromisoformat("2026-04-08T01:00:00+00:00"),
+                ended_at=datetime.fromisoformat("2026-04-08T03:00:00+00:00"),
+            ),
+            RunReportArtifact(
+                run_id="run-archive-1",
+                artifact_type="run_summary",
+                artifact_format="json",
+                artifact_path=str(archived_summary_file),
+                status="completed",
+            ),
+            RunReportArtifact(
+                run_id="run-archive-1",
+                artifact_type="technical_report",
+                artifact_format="markdown",
+                artifact_path=str(technical_file),
+                status="completed",
+            ),
+            RunReportArtifact(
+                run_id="run-archive-1",
+                artifact_type="approachable_report",
+                artifact_format="markdown",
+                artifact_path=str(approachable_file),
+                status="completed",
+            ),
+            RunReportArtifact(
+                run_id="run-live-1",
+                artifact_type="run_summary",
+                artifact_format="json",
+                artifact_path=str(active_summary_file),
+                status="completed",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        reports_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: "run-live-1" if key == "SIMULATION_RUN_ID" else None,
+    )
+
+    with client:
+        response = client.get("/api/reports/archive/runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["active_run_id"] == "run-live-1"
+    assert payload["count"] == 1
+    assert payload["stats"]["completed_runs"] == 1
+    assert payload["stats"]["total_events"] == 420
+    assert payload["stats"]["llm_calls"] == 88
+    assert payload["stats"]["deaths"] == 4
+    assert payload["stats"]["estimated_cost_usd"] == 1.2345
+    assert payload["items"][0]["run_id"] == "run-archive-1"
+    assert payload["items"][0]["summary"]["duration_hours"] == 2.0
+    assert payload["items"][0]["run_metadata"]["condition_name"] == "baseline_v2"
+    assert payload["items"][0]["artifacts"]["technical_report"]["formats"] == ["markdown"]
+    assert payload["items"][0]["artifacts"]["approachable_report"]["formats"] == ["markdown"]

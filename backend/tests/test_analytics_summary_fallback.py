@@ -124,3 +124,49 @@ def test_get_latest_summary_uses_run_summary_fallback(monkeypatch, summary_sessi
     assert payload["stats"]["total_events"] == 11155
     assert payload["stats"]["llm_calls"] == 1286
     assert "fallback summary" in payload["summary"]
+
+
+def test_get_latest_summary_defaults_to_active_run_scope(monkeypatch, summary_session_factory):
+    SessionLocal, tmp_dir = summary_session_factory
+    monkeypatch.setattr(report_artifacts, "reports_root", lambda: Path(tmp_dir))
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                Event(
+                    event_type="daily_summary",
+                    description="Archived summary",
+                    event_metadata={
+                        "day_number": 4,
+                        "summary": "Archived run summary.",
+                        "stats": {"messages": 90},
+                        "runtime": {"run_id": "run-archived"},
+                    },
+                    created_at=datetime(2026, 2, 12, 7, 0, tzinfo=timezone.utc),
+                ),
+                Event(
+                    event_type="daily_summary",
+                    description="Live summary",
+                    event_metadata={
+                        "day_number": 5,
+                        "summary": "Active run summary.",
+                        "stats": {"messages": 120},
+                        "runtime": {"run_id": "run-live"},
+                    },
+                    created_at=datetime(2026, 2, 12, 8, 0, tzinfo=timezone.utc),
+                ),
+            ]
+        )
+        db.commit()
+
+    monkeypatch.setattr(analytics_api, "SessionLocal", SessionLocal)
+    monkeypatch.setattr(
+        analytics_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: "run-live" if key == "SIMULATION_RUN_ID" else None,
+    )
+
+    payload = analytics_api.get_latest_summary()
+
+    assert payload["source"] == "daily_summary"
+    assert payload["run_id"] == "run-live"
+    assert payload["summary"] == "Active run summary."

@@ -159,7 +159,7 @@ function buildRecap({ id, period, title, fallbackHeadline, intro, moments, stats
 }
 
 // Main Recap Component
-export default function Recap({ minimal = false }) {
+export default function Recap({ minimal = false, runId = '' }) {
     const [recaps, setRecaps] = useState([])
     const [activeRecap, setActiveRecap] = useState(null)
     const [isPlaying, setIsPlaying] = useState(false)
@@ -168,15 +168,22 @@ export default function Recap({ minimal = false }) {
 
     useEffect(() => {
         async function loadRecaps() {
+            const scopedRunId = String(runId || '').trim()
             try {
                 const [overview, story, latestSummary, last24hMoments, lastWeekMoments] = await Promise.all([
-                    api.getAnalyticsOverview().catch(() => null),
-                    api.fetch('/api/analytics/story').catch(() => null),
-                    api.fetch('/api/analytics/summaries/latest').catch(() => null),
-                    api.getBestMoments(5, 24, 55).catch(() => []),
-                    api.getBestMoments(6, 168, 55).catch(() => []),
+                    scopedRunId ? Promise.resolve(null) : api.getAnalyticsOverview().catch(() => null),
+                    scopedRunId ? Promise.resolve(null) : api.fetch('/api/analytics/story').catch(() => null),
+                    api.getLatestSummary(scopedRunId).catch(() => null),
+                    api.getBestMoments(5, 24, 55, scopedRunId).catch(() => ({ items: [] })),
+                    api.getBestMoments(6, 168, 55, scopedRunId).catch(() => ({ items: [] })),
                 ])
 
+                const last24h = Array.isArray(last24hMoments?.items)
+                    ? last24hMoments.items
+                    : (Array.isArray(last24hMoments) ? last24hMoments : [])
+                const lastWeek = Array.isArray(lastWeekMoments?.items)
+                    ? lastWeekMoments.items
+                    : (Array.isArray(lastWeekMoments) ? lastWeekMoments : [])
                 const recapsBuilt = []
                 const overviewStats = overview ? {
                     messages: Number(overview?.messages?.total || 0),
@@ -190,35 +197,39 @@ export default function Recap({ minimal = false }) {
                 recapsBuilt.push(buildRecap({
                     id: 1,
                     period: 'last_24h',
-                    title: 'The Past 24 Hours',
-                    fallbackHeadline: 'Latest Pressure',
-                    intro: Array.isArray(last24hMoments) && last24hMoments[0]?.title
-                        ? `In the last 24 hours, ${last24hMoments[0].title.toLowerCase()} defined the public arc.`
-                        : 'The last 24 hours did not produce a clean high-salience turn yet.',
-                    moments: Array.isArray(last24hMoments) ? last24hMoments : [],
-                    stats: overviewStats,
+                    title: scopedRunId ? 'Run Recap' : 'The Past 24 Hours',
+                    fallbackHeadline: scopedRunId ? `Run ${scopedRunId}` : 'Latest Pressure',
+                    intro: Array.isArray(last24h) && last24h[0]?.title
+                        ? `In this run, ${last24h[0].title.toLowerCase()} defined the public arc.`
+                        : (scopedRunId
+                            ? 'This archived run did not produce a clean high-salience turn yet.'
+                            : 'The last 24 hours did not produce a clean high-salience turn yet.'),
+                    moments: last24h,
+                    stats: latestSummary?.stats || overviewStats,
                 }))
 
-                if (latestSummary?.summary || (Array.isArray(lastWeekMoments) && lastWeekMoments.length > 0)) {
+                if (latestSummary?.summary || lastWeek.length > 0) {
                     recapsBuilt.push(buildRecap({
                         id: 2,
                         period: 'last_week',
-                        title: 'Latest Summary',
-                        fallbackHeadline: latestSummary?.day_number ? `Day ${latestSummary.day_number} Summary` : 'This Week',
+                        title: scopedRunId ? 'Episode Recap' : 'Latest Summary',
+                        fallbackHeadline: latestSummary?.day_number
+                            ? `Day ${latestSummary.day_number} Summary`
+                            : (scopedRunId ? `Run ${scopedRunId} Summary` : 'This Week'),
                         intro: String(latestSummary?.summary || 'The week built through a sequence of visible turning points.').trim(),
-                        moments: Array.isArray(lastWeekMoments) ? lastWeekMoments : [],
+                        moments: lastWeek,
                         stats: latestSummary?.stats || overviewStats,
                     }))
                 }
 
-                if (story?.story || (Array.isArray(lastWeekMoments) && lastWeekMoments.length > 0)) {
+                if (!scopedRunId && (story?.story || lastWeek.length > 0)) {
                     recapsBuilt.push(buildRecap({
                         id: 3,
                         period: 'all_time',
                         title: 'The Story So Far',
                         fallbackHeadline: 'The Story So Far',
                         intro: String(story?.story || 'The simulation is still gathering a longer-running public narrative.').trim(),
-                        moments: Array.isArray(lastWeekMoments) ? lastWeekMoments : [],
+                        moments: lastWeek,
                         stats: overviewStats,
                     }))
                 }
@@ -231,7 +242,7 @@ export default function Recap({ minimal = false }) {
         }
 
         loadRecaps()
-    }, [])
+    }, [runId])
 
     const { displayedText, isComplete } = useTypewriter(
         activeRecap?.summary?.narrative || '',
