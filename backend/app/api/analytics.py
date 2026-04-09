@@ -40,6 +40,7 @@ from app.services.emergence_metrics import compute_emergence_metrics
 from app.services.kpi_rollups import record_kpi_event
 from app.services.report_artifacts import load_json_artifact
 from app.services.simulation_time import get_simulation_day_number
+from app.services.runtime_config import runtime_config_service
 from app.core.database import SessionLocal
 from app.models.models import (
     Event,
@@ -1592,6 +1593,8 @@ def overview():
     """Key simulation stats for dashboards."""
     db = SessionLocal()
     try:
+        active_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip() or None
+
         total_agents = db.query(Agent).count()
         active_agents = db.query(Agent).filter(Agent.status == "active").count()
         dormant_agents = db.query(Agent).filter(Agent.status == "dormant").count()
@@ -1645,6 +1648,15 @@ def overview():
 
         return {
             "day_number": day_number,
+            "scope": {
+                "summary": "Agent status and resources reflect the live world state. Message, proposal, and law totals are cumulative within the currently loaded simulation database.",
+                "agent_state_scope": "live_world_state",
+                "resource_scope": "live_world_state",
+                "message_scope": "cumulative_database_history",
+                "proposal_scope": "cumulative_database_history",
+                "law_scope": "cumulative_database_history",
+                "active_run_id": active_run_id,
+            },
             "agents": {
                 "total": total_agents,
                 "active": active_agents,

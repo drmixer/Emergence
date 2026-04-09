@@ -379,7 +379,10 @@ export default function Timeline() {
         <div className="timeline-page">
             <div className="timeline-header">
                 <div>
-                    <h1>📅 Timeline</h1>
+                    <h1>
+                        <Calendar size={30} />
+                        Timeline
+                    </h1>
                     <p className="timeline-subtitle">
                         The history of the AI civilization — Day {currentDay}
                     </p>

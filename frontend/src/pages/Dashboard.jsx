@@ -4,8 +4,6 @@ import {
     Users,
     FileText,
     Scale,
-    TrendingUp,
-    TrendingDown,
     Activity,
     AlertTriangle,
     ShieldCheck,
@@ -58,6 +56,7 @@ function formatPct(value) {
 
 export default function Dashboard() {
     const [stats, setStats] = useState(null)
+    const [scope, setScope] = useState(null)
     const [proposals, setProposals] = useState([])
     const [topAgents, setTopAgents] = useState([])
     const [crises, setCrises] = useState([])
@@ -109,6 +108,7 @@ export default function Dashboard() {
                     totalMaterials: sumWorldResource(resources, 'materials'),
                     maxMaterials: materialsMax,
                 })
+                setScope(overview?.scope && typeof overview.scope === 'object' ? overview.scope : null)
 
                 setProposals(Array.isArray(activeProposals) ? activeProposals : [])
                 setTopAgents(Array.isArray(activityLeaderboard) ? activityLeaderboard : [])
@@ -120,6 +120,7 @@ export default function Dashboard() {
             } catch (_error) {
                 setError('Failed to load live data.')
                 setStats(null)
+                setScope(null)
                 setProposals([])
                 setTopAgents([])
                 setCrises([])
@@ -184,6 +185,15 @@ export default function Dashboard() {
                 />
             )}
 
+            {!loading && stats && (
+                <div className="dashboard-scope-note">
+                    <span>{scope?.summary || 'Agent status and resources reflect the live world state. Message, proposal, and law totals are cumulative within the currently loaded simulation database.'}</span>
+                    {scope?.active_run_id && (
+                        <strong>Run {scope.active_run_id}</strong>
+                    )}
+                </div>
+            )}
+
             {!loading && error && (
                 <div className="feed-notice">
                     {error}
@@ -246,9 +256,8 @@ export default function Dashboard() {
                                 </div>
                             </div>
                             <div className="stat-value">{stats?.activeAgents || 0}</div>
-                            <div className="stat-change positive">
-                                <TrendingUp size={14} />
-                                <span>+2 from yesterday</span>
+                            <div className="stat-change">
+                                <span>Live world state</span>
                             </div>
                         </div>
 
@@ -260,9 +269,8 @@ export default function Dashboard() {
                                 </div>
                             </div>
                             <div className="stat-value">{stats?.dormantAgents || 0}</div>
-                            <div className="stat-change negative">
-                                <TrendingDown size={14} />
-                                <span>-2 from yesterday</span>
+                            <div className="stat-change">
+                                <span>Live world state</span>
                             </div>
                         </div>
 
@@ -274,6 +282,9 @@ export default function Dashboard() {
                                 </div>
                             </div>
                             <div className="stat-value">{stats?.activeProposals || 0}</div>
+                            <div className="stat-change">
+                                <span>Open right now</span>
+                            </div>
                         </div>
 
                         <div className="stat-card">
@@ -284,6 +295,9 @@ export default function Dashboard() {
                                 </div>
                             </div>
                             <div className="stat-value">{stats?.passedLaws || 0}</div>
+                            <div className="stat-change">
+                                <span>Cumulative in loaded history</span>
+                            </div>
                         </div>
                     </>
                 )}
@@ -818,6 +832,26 @@ export default function Dashboard() {
                 .trust-note-link:hover {
                     color: #bae6fd;
                 }
+
+                .dashboard-scope-note {
+                    margin-bottom: var(--spacing-lg);
+                    display: flex;
+                    justify-content: space-between;
+                    gap: var(--spacing-md);
+                    align-items: center;
+                    padding: var(--spacing-sm) var(--spacing-md);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: var(--radius-md);
+                    background: rgba(255, 255, 255, 0.02);
+                    color: var(--text-secondary);
+                    font-size: 0.83rem;
+                }
+
+                .dashboard-scope-note strong {
+                    color: var(--text-primary);
+                    font-size: 0.78rem;
+                    white-space: nowrap;
+                }
                 
                 @media (max-width: 768px) {
                     .resource-grid {
@@ -826,6 +860,11 @@ export default function Dashboard() {
 
                     .inequality-grid {
                         grid-template-columns: 1fr;
+                    }
+
+                    .dashboard-scope-note {
+                        flex-direction: column;
+                        align-items: flex-start;
                     }
                 }
                 

@@ -12,7 +12,23 @@ export default function GlossaryTooltip({
     const entry = GLOSSARY_TERMS_BY_KEY[termKey]
     const [open, setOpen] = useState(false)
     const wrapperRef = useRef(null)
+    const closeTimerRef = useRef(null)
     const tooltipId = useId()
+
+    const cancelClose = () => {
+        if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current)
+            closeTimerRef.current = null
+        }
+    }
+
+    const scheduleClose = () => {
+        cancelClose()
+        closeTimerRef.current = setTimeout(() => {
+            setOpen(false)
+            closeTimerRef.current = null
+        }, 140)
+    }
 
     useEffect(() => {
         if (!open) return undefined
@@ -32,6 +48,8 @@ export default function GlossaryTooltip({
         }
     }, [open])
 
+    useEffect(() => () => cancelClose(), [])
+
     if (!entry) {
         return <span className={className}>{children || termKey}</span>
     }
@@ -40,8 +58,11 @@ export default function GlossaryTooltip({
         <span
             className={`glossary-inline ${open ? 'open' : ''} ${className}`}
             ref={wrapperRef}
-            onMouseEnter={() => setOpen(true)}
-            onMouseLeave={() => setOpen(false)}
+            onMouseEnter={() => {
+                cancelClose()
+                setOpen(true)
+            }}
+            onMouseLeave={scheduleClose}
         >
             <button
                 type="button"
@@ -49,8 +70,15 @@ export default function GlossaryTooltip({
                 aria-haspopup="dialog"
                 aria-expanded={open}
                 aria-controls={tooltipId}
-                onClick={() => setOpen((prev) => !prev)}
-                onFocus={() => setOpen(true)}
+                onClick={() => {
+                    cancelClose()
+                    setOpen((prev) => !prev)
+                }}
+                onFocus={() => {
+                    cancelClose()
+                    setOpen(true)
+                }}
+                onBlur={scheduleClose}
             >
                 <span className="glossary-trigger-label">{children || entry.shortLabel}</span>
                 <CircleHelp size={12} />
@@ -60,6 +88,8 @@ export default function GlossaryTooltip({
                 id={tooltipId}
                 role="dialog"
                 className={`glossary-popover ${open ? 'visible' : ''}`}
+                onMouseEnter={cancelClose}
+                onMouseLeave={scheduleClose}
             >
                 <span className="glossary-popover-title">{entry.label}</span>
                 <span className="glossary-popover-body">{entry.definition}</span>
