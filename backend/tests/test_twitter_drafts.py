@@ -80,6 +80,24 @@ def test_send_tweet_creates_durable_draft_when_delivery_disabled(session_factory
     assert draft.run_mode == "real"
     assert draft.full_text.endswith("/laws")
     assert draft.error_message == "twitter_delivery_disabled"
+    assert draft.metadata_json["editorial_frame"]["format_version"] == "context-light-v1"
+
+
+def test_tweet_formatter_adds_stake_and_consequence_fields():
+    formatter = twitter_bot_module.TweetFormatter()
+
+    content = formatter.format_law_passed(
+        law_name="Reserve Rationing Act",
+        law_id=14,
+        yes_votes=11,
+        no_votes=8,
+        description="Cuts reserve draws during low-supply cycles.",
+    )
+
+    assert "Stake:" in content.text
+    assert "Consequence:" in content.text
+    assert content.stake == "The rulebook moved by a 11-8 vote."
+    assert "Cuts reserve draws" in str(content.consequence)
 
 
 def test_twitter_drafts_api_lists_and_updates_review_state(session_factory, monkeypatch):

@@ -186,6 +186,15 @@ class APIService {
         return this.fetch(`/api/analytics/plot-turns?${params.toString()}`)
     }
 
+    async getBestMoments(limit = 6, hours = 72, minSalience = 55, runId = '') {
+        const params = new URLSearchParams()
+        params.append('limit', String(limit))
+        params.append('hours', String(hours))
+        params.append('min_salience', String(minSalience))
+        if (runId) params.append('run_id', String(runId))
+        return this.fetch(`/api/analytics/best-moments?${params.toString()}`)
+    }
+
     async getSocialDynamics(days = 7) {
         return this.fetch(`/api/analytics/social-dynamics?days=${days}`)
     }
@@ -202,6 +211,15 @@ class APIService {
         params.append('limit', String(limit))
         if (runId) params.append('run_id', String(runId))
         return this.fetch(`/api/analytics/plot-turns/replay?${params.toString()}`)
+    }
+
+    async getReplayStory(hours = 24, minSalience = 55, limit = 8, runId = '') {
+        const params = new URLSearchParams()
+        params.append('hours', String(hours))
+        params.append('min_salience', String(minSalience))
+        params.append('limit', String(limit))
+        if (runId) params.append('run_id', String(runId))
+        return this.fetch(`/api/analytics/plot-turns/replay-story?${params.toString()}`)
     }
 
     async getRunDetail(runId, hoursFallback = 24, traceLimit = 12, minSalience = 55) {

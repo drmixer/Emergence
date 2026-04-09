@@ -11,7 +11,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.models.predictions import PredictionMarket
+from decimal import Decimal
+
+from app.models.models import Agent, AgentInventory, Event, GlobalResources, Proposal
+from app.models.predictions import PredictionBet, PredictionMarket, UserPoints
 
 predictions_api = importlib.import_module("app.api.predictions")
 
@@ -84,3 +87,126 @@ def test_prediction_bet_uses_cookie_identity(predictions_client):
     refreshed = client.get("/api/predictions/me")
     assert refreshed.json()["user_id"] == user_id
     assert refreshed.json()["bets_made"] == 1
+
+
+def test_list_markets_auto_generates_live_audience_hooks(predictions_client):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+
+    agent = Agent(
+        agent_number=7,
+        display_name="Beacon-07",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="stability",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    db_session.add(agent)
+    db_session.flush()
+
+    db_session.add_all(
+        [
+            AgentInventory(agent_id=agent.id, resource_type="food", quantity=0.5),
+            AgentInventory(agent_id=agent.id, resource_type="energy", quantity=0.25),
+            GlobalResources(resource_type="food", total_amount=100, in_common_pool=12),
+            GlobalResources(resource_type="energy", total_amount=100, in_common_pool=8),
+            Proposal(
+                author_agent_id=agent.id,
+                title="Emergency Reserve Rule",
+                description="Keep the reserve alive during shortages.",
+                proposal_type="law",
+                status="active",
+                votes_for=4,
+                votes_against=2,
+                voting_closes_at=now + timedelta(hours=6),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/predictions/markets?status=open&limit=10")
+    assert response.status_code == 200
+
+    items = response.json()
+    titles = {item["title"] for item in items}
+    assert "Will any new law pass in the next 24 hours?" in titles
+    assert "Will the shared reserve avoid a shortfall in the next 24 hours?" in titles
+    assert "Will any agent die in the next 24 hours?" in titles
+    assert "Will Beacon-07 stay active in the next 24 hours?" in titles
+
+    reserve_market = next(item for item in items if item["title"] == "Will the shared reserve avoid a shortfall in the next 24 hours?")
+    assert reserve_market["auto_generated"] is True
+    assert reserve_market["stake"]
+    assert reserve_market["resolution_basis"]
+    assert reserve_market["evidence_links"]
+
+
+def test_list_markets_resolves_expired_auto_hook_and_pays_winner(predictions_client):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+
+    agent = Agent(
+        agent_number=12,
+        display_name="Cinder-12",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="dead",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    db_session.add(agent)
+    db_session.flush()
+
+    market = PredictionMarket(
+        title="Will any agent die in the next 24 hours?",
+        description="Auto hook",
+        market_type="custom",
+        status="open",
+        created_at=now - timedelta(hours=30),
+        closes_at=now - timedelta(hours=6),
+    )
+    yes_user = UserPoints(
+        user_id="pred_yes",
+        balance=Decimal("95.00"),
+        total_wagered=Decimal("5.00"),
+        bets_made=1,
+    )
+    no_user = UserPoints(
+        user_id="pred_no",
+        balance=Decimal("97.00"),
+        total_wagered=Decimal("3.00"),
+        bets_made=1,
+    )
+    db_session.add_all([market, yes_user, no_user])
+    db_session.flush()
+    db_session.add_all(
+        [
+            PredictionBet(market_id=market.id, user_id="pred_yes", prediction="yes", amount=Decimal("5.00")),
+            PredictionBet(market_id=market.id, user_id="pred_no", prediction="no", amount=Decimal("3.00")),
+            Event(
+                agent_id=agent.id,
+                event_type="agent_died",
+                description="Cinder-12 died",
+                created_at=now - timedelta(hours=12),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/predictions/markets?status=resolved&limit=10")
+    assert response.status_code == 200
+
+    db_session.refresh(market)
+    db_session.refresh(yes_user)
+    db_session.refresh(no_user)
+    assert market.status == "resolved"
+    assert market.outcome == "yes"
+    assert float(yes_user.balance) == 103.0
+    assert float(no_user.balance) == 97.0
+    assert yes_user.bets_won == 1
+    assert no_user.bets_lost == 1

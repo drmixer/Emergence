@@ -2,7 +2,7 @@
 Prediction Market API Router
 Handles betting, market creation, and leaderboard endpoints.
 """
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -14,8 +14,10 @@ import uuid
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.time import ensure_utc, now_utc
 from app.models.predictions import PredictionMarket, PredictionBet, UserPoints
-from app.models.models import Proposal, Agent
+from app.models.models import Proposal, Agent, AgentInventory, Event, GlobalResources, Law
+from app.services.survival_config import active_energy_cost, active_food_cost, low_resource_warning_threshold
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -26,11 +28,20 @@ MIN_BET = Decimal("1.00")
 MAX_BET = Decimal("50.00")
 PREDICTION_USER_COOKIE = "emergence_prediction_user"
 PREDICTION_USER_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
+AUTO_MARKET_WINDOW_HOURS = 24
+AUTO_MARKET_LAW_TITLE = "Will any new law pass in the next 24 hours?"
+AUTO_MARKET_DEATH_TITLE = "Will any agent die in the next 24 hours?"
+AUTO_MARKET_RESERVE_TITLE = "Will the shared reserve avoid a shortfall in the next 24 hours?"
 
 
 # ---------------------
 # Pydantic Models
 # ---------------------
+
+class EvidenceLinkResponse(BaseModel):
+    label: str
+    href: str
+
 
 class MarketResponse(BaseModel):
     id: int
@@ -46,6 +57,11 @@ class MarketResponse(BaseModel):
     resolved_at: Optional[str]
     created_at: str
     bet_count: int
+    auto_generated: bool = False
+    stake: Optional[str] = None
+    why_this_matters: Optional[str] = None
+    resolution_basis: Optional[str] = None
+    evidence_links: List[EvidenceLinkResponse] = Field(default_factory=list)
     
     class Config:
         from_attributes = True
@@ -172,6 +188,452 @@ def calculate_probability(yes_amount: Decimal, no_amount: Decimal) -> float:
     return float(yes_amount / total)
 
 
+def _agent_label(agent: Agent | None) -> str:
+    if agent is None:
+        return "Unknown Agent"
+    if str(agent.display_name or "").strip():
+        return str(agent.display_name).strip()
+    return f"Agent #{int(agent.agent_number):02d}"
+
+
+def _agent_market_title(agent: Agent) -> str:
+    return f"Will {_agent_label(agent)} stay active in the next 24 hours?"
+
+
+def _is_auto_market(market: PredictionMarket) -> bool:
+    title = str(market.title or "").strip()
+    if title in {AUTO_MARKET_LAW_TITLE, AUTO_MARKET_DEATH_TITLE, AUTO_MARKET_RESERVE_TITLE}:
+        return True
+    return bool(
+        market.market_type == "agent_dormant"
+        and market.related_agent_id is not None
+        and title.endswith("stay active in the next 24 hours?")
+    )
+
+
+def _agent_resource_map(db: Session, *, agent_ids: list[int]) -> dict[int, dict[str, float]]:
+    if not agent_ids:
+        return {}
+    rows = db.query(AgentInventory).filter(AgentInventory.agent_id.in_(agent_ids)).all()
+    by_agent: dict[int, dict[str, float]] = {}
+    for row in rows:
+        resource_map = by_agent.setdefault(int(row.agent_id), {})
+        resource_map[str(row.resource_type)] = float(row.quantity or 0)
+    return by_agent
+
+
+def _select_most_at_risk_agent(db: Session) -> tuple[Agent | None, dict[str, float]]:
+    agents = (
+        db.query(Agent)
+        .filter(Agent.status == "active")
+        .order_by(Agent.agent_number.asc())
+        .all()
+    )
+    if not agents:
+        return None, {}
+
+    resources_by_agent = _agent_resource_map(db, agent_ids=[int(agent.id) for agent in agents])
+    food_floor_raw = active_food_cost()
+    energy_floor_raw = active_energy_cost()
+    low_food_raw = low_resource_warning_threshold(food_floor_raw)
+    low_energy_raw = low_resource_warning_threshold(energy_floor_raw)
+    food_floor = float(food_floor_raw)
+    energy_floor = float(energy_floor_raw)
+    low_food = float(low_food_raw)
+    low_energy = float(low_energy_raw)
+
+    ranked: list[tuple[int, float, float, Agent, dict[str, float]]] = []
+    for agent in agents:
+        resources = resources_by_agent.get(int(agent.id), {})
+        food = float(resources.get("food", 0.0))
+        energy = float(resources.get("energy", 0.0))
+        severity = 0
+        if food < food_floor or energy < energy_floor:
+            severity = 2
+        elif food < low_food or energy < low_energy:
+            severity = 1
+        if severity <= 0:
+            continue
+        deficit = max(0.0, food_floor - food) + max(0.0, energy_floor - energy)
+        remaining = food + energy
+        ranked.append((severity, deficit, remaining, agent, {"food": food, "energy": energy}))
+
+    if not ranked:
+        return None, {}
+
+    ranked.sort(key=lambda item: (-item[0], -item[1], item[2], int(item[3].agent_number)))
+    _, _, _, agent, resources = ranked[0]
+    return agent, resources
+
+
+def _prediction_evidence_links(*links: tuple[str, str]) -> list[dict[str, str]]:
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for label, href in links:
+        clean_label = str(label or "").strip()
+        clean_href = str(href or "").strip()
+        if not clean_label or not clean_href:
+            continue
+        key = (clean_label, clean_href)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append({"label": clean_label, "href": clean_href})
+    return deduped
+
+
+def _auto_market_payloads(db: Session) -> list[dict[str, Any]]:
+    now_value = now_utc()
+    payloads: list[dict[str, Any]] = []
+
+    active_proposals = (
+        db.query(Proposal)
+        .filter(Proposal.status == "active")
+        .order_by(Proposal.created_at.desc(), Proposal.id.desc())
+        .all()
+    )
+    leading_proposal = None
+    if active_proposals:
+        leading_proposal = sorted(
+            active_proposals,
+            key=lambda row: (int(row.votes_for or 0) - int(row.votes_against or 0), int(row.id or 0)),
+            reverse=True,
+        )[0]
+    proposal_context = (
+        f"{len(active_proposals)} active proposal(s) are open now."
+        + (
+            f" Front-runner: \"{str(leading_proposal.title or '').strip() or 'Untitled proposal'}\" "
+            f"at {int(leading_proposal.votes_for or 0)}-{int(leading_proposal.votes_against or 0)}."
+            if leading_proposal is not None
+            else " No proposal has separated itself yet."
+        )
+    )
+    payloads.append(
+        {
+            "title": AUTO_MARKET_LAW_TITLE,
+            "description": proposal_context,
+            "market_type": "law_count",
+            "related_proposal_id": int(leading_proposal.id) if leading_proposal is not None else None,
+            "stake": "A passed law changes the rules for every agent, not just one bloc.",
+            "why_this_matters": "This hook measures whether debate turns into actual world-state change.",
+            "resolution_basis": "Settles YES if any law is passed before the market closes.",
+            "evidence_links": _prediction_evidence_links(
+                ("Proposals", "/proposals"),
+                ("Highlights", "/highlights?tab=recap"),
+            ),
+            "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
+        }
+    )
+
+    reserve_rows = db.query(GlobalResources).all()
+    common_pool = {str(row.resource_type): float(row.in_common_pool or 0) for row in reserve_rows}
+    reserve_shortfalls_24h = (
+        db.query(func.count(Event.id))
+        .filter(
+            Event.event_type == "reserve_shortfall",
+            Event.created_at >= now_value - timedelta(hours=24),
+        )
+        .scalar()
+    ) or 0
+    payloads.append(
+        {
+            "title": AUTO_MARKET_RESERVE_TITLE,
+            "description": (
+                f"Shared reserve now holds {float(common_pool.get('food', 0.0)):.2f} food and "
+                f"{float(common_pool.get('energy', 0.0)):.2f} energy, with {int(reserve_shortfalls_24h)} "
+                "shortfall signal(s) in the last 24 hours."
+            ),
+            "market_type": "resource_goal",
+            "related_proposal_id": None,
+            "stake": "If the reserve buckles, survival pressure can jump from a private problem to a public crisis.",
+            "why_this_matters": "This hook settles off reserve-shortfall events only; audience picks do not feed back into allocation.",
+            "resolution_basis": "Settles YES if no reserve_shortfall event is recorded before close.",
+            "evidence_links": _prediction_evidence_links(
+                ("Resources", "/resources"),
+                ("Best Moments", "/highlights?tab=highlights"),
+            ),
+            "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
+        }
+    )
+
+    dormant_count = db.query(Agent).filter(Agent.status == "dormant").count()
+    critical_food = (
+        db.query(func.count(AgentInventory.id))
+        .filter(AgentInventory.resource_type == "food", AgentInventory.quantity < 2)
+        .scalar()
+    ) or 0
+    critical_energy = (
+        db.query(func.count(AgentInventory.id))
+        .filter(AgentInventory.resource_type == "energy", AgentInventory.quantity < 2)
+        .scalar()
+    ) or 0
+    payloads.append(
+        {
+            "title": AUTO_MARKET_DEATH_TITLE,
+            "description": (
+                f"{int(dormant_count)} agent(s) are dormant, while {int(critical_food)} food warnings and "
+                f"{int(critical_energy)} energy warnings are currently visible."
+            ),
+            "market_type": "custom",
+            "related_proposal_id": None,
+            "stake": "A death is irreversible and instantly changes the cast of the run.",
+            "why_this_matters": "This hook resolves from live death events only; prediction picks do not alter the simulation.",
+            "resolution_basis": "Settles YES if any agent_died event is recorded before close.",
+            "evidence_links": _prediction_evidence_links(
+                ("Agents", "/agents"),
+                ("Replay", "/highlights?tab=replay"),
+            ),
+            "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
+        }
+    )
+
+    at_risk_agent, resources = _select_most_at_risk_agent(db)
+    if at_risk_agent is not None:
+        payloads.append(
+            {
+                "title": _agent_market_title(at_risk_agent),
+                "description": (
+                    f"{_agent_label(at_risk_agent)} currently holds {float(resources.get('food', 0.0)):.2f} food and "
+                    f"{float(resources.get('energy', 0.0)):.2f} energy."
+                ),
+                "market_type": "agent_dormant",
+                "related_agent_id": int(at_risk_agent.id),
+                "stake": "This is the clearest single-agent survival watch in the public state right now.",
+                "why_this_matters": "If this agent drops into dormancy or dies, the turn is directly visible on the public record.",
+                "resolution_basis": "Settles YES if the agent remains active and no dormancy/death event is recorded before close.",
+                "evidence_links": _prediction_evidence_links(
+                    ("Agent Detail", f"/agents/{int(at_risk_agent.agent_number)}"),
+                    ("All Agents", "/agents"),
+                ),
+                "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
+            }
+        )
+
+    return payloads
+
+
+def _find_open_auto_market(db: Session, payload: dict[str, Any]) -> PredictionMarket | None:
+    title = str(payload.get("title") or "").strip()
+    query = db.query(PredictionMarket).filter(PredictionMarket.status == "open")
+    if str(payload.get("market_type") or "") == "agent_dormant" and payload.get("related_agent_id") is not None:
+        return (
+            query.filter(
+                PredictionMarket.market_type == "agent_dormant",
+                PredictionMarket.related_agent_id == int(payload["related_agent_id"]),
+            )
+            .order_by(PredictionMarket.created_at.desc(), PredictionMarket.id.desc())
+            .first()
+        )
+    return (
+        query.filter(PredictionMarket.title == title)
+        .order_by(PredictionMarket.created_at.desc(), PredictionMarket.id.desc())
+        .first()
+    )
+
+
+def _resolve_user_streak(user: UserPoints, *, won: bool) -> None:
+    current = int(user.current_streak or 0)
+    best = int(user.best_streak or 0)
+    if won:
+        user.current_streak = current + 1 if current > 0 else 1
+        user.best_streak = max(best, int(user.current_streak or 0))
+    else:
+        user.current_streak = current - 1 if current < 0 else -1
+        user.best_streak = max(best, 0)
+
+
+def _resolve_market_bets(db: Session, *, market: PredictionMarket, outcome: str, resolved_at: datetime) -> None:
+    market.status = "resolved"
+    market.outcome = str(outcome or "").strip().lower()
+    market.resolved_at = resolved_at
+
+    bets = (
+        db.query(PredictionBet)
+        .filter(PredictionBet.market_id == market.id)
+        .order_by(PredictionBet.id.asc())
+        .all()
+    )
+    total_pool = sum((Decimal(str(bet.amount or 0)) for bet in bets), Decimal("0"))
+    winning_pool = sum(
+        (Decimal(str(bet.amount or 0)) for bet in bets if str(bet.prediction or "").strip().lower() == market.outcome),
+        Decimal("0"),
+    )
+    user_cache: dict[str, UserPoints] = {}
+    for bet in bets:
+        user = user_cache.get(str(bet.user_id or ""))
+        if user is None:
+            user = db.query(UserPoints).filter(UserPoints.user_id == bet.user_id).first()
+            if user is None:
+                user = get_or_create_user(db, str(bet.user_id or ""))
+            user_cache[str(bet.user_id or "")] = user
+
+        won = str(bet.prediction or "").strip().lower() == market.outcome
+        bet.won = won
+        if won and winning_pool > 0:
+            payout = (total_pool * Decimal(str(bet.amount or 0))) / winning_pool
+        else:
+            payout = Decimal("0")
+        bet.payout = payout
+
+        if won:
+            user.balance += payout
+            user.total_won += payout
+            user.bets_won += 1
+        else:
+            user.total_lost += Decimal(str(bet.amount or 0))
+            user.bets_lost += 1
+        _resolve_user_streak(user, won=won)
+
+
+def _resolve_auto_market_outcome(db: Session, market: PredictionMarket) -> str | None:
+    window_start = ensure_utc(market.created_at) or now_utc()
+    window_end = ensure_utc(market.closes_at) or now_utc()
+    title = str(market.title or "").strip()
+
+    if title == AUTO_MARKET_LAW_TITLE:
+        law_count = (
+            db.query(func.count(Law.id))
+            .filter(Law.passed_at >= window_start, Law.passed_at <= window_end)
+            .scalar()
+        ) or 0
+        return "yes" if int(law_count) > 0 else "no"
+
+    if title == AUTO_MARKET_DEATH_TITLE:
+        deaths = (
+            db.query(func.count(Event.id))
+            .filter(
+                Event.event_type == "agent_died",
+                Event.created_at >= window_start,
+                Event.created_at <= window_end,
+            )
+            .scalar()
+        ) or 0
+        return "yes" if int(deaths) > 0 else "no"
+
+    if title == AUTO_MARKET_RESERVE_TITLE:
+        shortfalls = (
+            db.query(func.count(Event.id))
+            .filter(
+                Event.event_type == "reserve_shortfall",
+                Event.created_at >= window_start,
+                Event.created_at <= window_end,
+            )
+            .scalar()
+        ) or 0
+        return "yes" if int(shortfalls) == 0 else "no"
+
+    if market.market_type == "agent_dormant" and market.related_agent_id is not None:
+        dropout_events = (
+            db.query(func.count(Event.id))
+            .filter(
+                Event.agent_id == int(market.related_agent_id),
+                Event.event_type.in_(("became_dormant", "agent_died")),
+                Event.created_at >= window_start,
+                Event.created_at <= window_end,
+            )
+            .scalar()
+        ) or 0
+        if int(dropout_events) > 0:
+            return "no"
+        agent = db.query(Agent).filter(Agent.id == int(market.related_agent_id)).first()
+        if agent is None:
+            return "no"
+        return "yes" if str(agent.status or "") == "active" else "no"
+
+    return None
+
+
+def _sync_auto_prediction_markets(db: Session) -> None:
+    now_value = now_utc()
+    changed = False
+
+    open_markets = db.query(PredictionMarket).filter(PredictionMarket.status == "open").all()
+    for market in open_markets:
+        if not _is_auto_market(market):
+            continue
+        closes_at = ensure_utc(market.closes_at)
+        if closes_at is None or closes_at > now_value:
+            continue
+        outcome = _resolve_auto_market_outcome(db, market)
+        if outcome not in {"yes", "no"}:
+            continue
+        _resolve_market_bets(db, market=market, outcome=outcome, resolved_at=now_value)
+        changed = True
+
+    for payload in _auto_market_payloads(db):
+        existing = _find_open_auto_market(db, payload)
+        if existing is not None:
+            continue
+        market = PredictionMarket(
+            title=str(payload.get("title") or "").strip(),
+            description=str(payload.get("description") or "").strip() or None,
+            market_type=str(payload.get("market_type") or "custom").strip(),
+            status="open",
+            related_proposal_id=payload.get("related_proposal_id"),
+            related_agent_id=payload.get("related_agent_id"),
+            closes_at=payload.get("closes_at") or (now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS)),
+        )
+        db.add(market)
+        changed = True
+
+    if changed:
+        db.commit()
+
+
+def _market_context(db: Session, market: PredictionMarket) -> dict[str, Any]:
+    title = str(market.title or "").strip()
+    related_agent = (
+        db.query(Agent).filter(Agent.id == int(market.related_agent_id)).first()
+        if market.related_agent_id is not None
+        else None
+    )
+    resources_by_agent = _agent_resource_map(db, agent_ids=[int(related_agent.id)]) if related_agent is not None else {}
+    related_resources = resources_by_agent.get(int(related_agent.id), {}) if related_agent is not None else {}
+
+    for payload in _auto_market_payloads(db):
+        if title in {AUTO_MARKET_LAW_TITLE, AUTO_MARKET_DEATH_TITLE, AUTO_MARKET_RESERVE_TITLE} and title == str(payload.get("title") or "").strip():
+            return payload
+        if related_agent is not None and title == _agent_market_title(related_agent) and str(payload.get("title") or "").strip() == title:
+            payload = dict(payload)
+            payload["description"] = (
+                f"{_agent_label(related_agent)} currently holds {float(related_resources.get('food', 0.0)):.2f} food and "
+                f"{float(related_resources.get('energy', 0.0)):.2f} energy."
+            )
+            return payload
+    return {
+        "title": title,
+        "description": str(market.description or "").strip() or None,
+        "stake": None,
+        "why_this_matters": None,
+        "resolution_basis": None,
+        "evidence_links": [],
+    }
+
+
+def _serialize_market(db: Session, market: PredictionMarket) -> MarketResponse:
+    context = _market_context(db, market)
+    return MarketResponse(
+        id=market.id,
+        title=market.title,
+        description=context.get("description") or market.description,
+        market_type=market.market_type,
+        status=market.status,
+        outcome=market.outcome,
+        total_yes_amount=float(market.total_yes_amount),
+        total_no_amount=float(market.total_no_amount),
+        yes_probability=calculate_probability(market.total_yes_amount, market.total_no_amount),
+        closes_at=ensure_utc(market.closes_at).isoformat() if market.closes_at else "",
+        resolved_at=ensure_utc(market.resolved_at).isoformat() if market.resolved_at else None,
+        created_at=ensure_utc(market.created_at).isoformat() if market.created_at else "",
+        bet_count=len(market.bets),
+        auto_generated=_is_auto_market(market),
+        stake=context.get("stake"),
+        why_this_matters=context.get("why_this_matters"),
+        resolution_basis=context.get("resolution_basis"),
+        evidence_links=[EvidenceLinkResponse(**item) for item in list(context.get("evidence_links") or [])],
+    )
+
+
 # ---------------------
 # Market Endpoints
 # ---------------------
@@ -184,6 +646,7 @@ def list_markets(
     db: Session = Depends(get_db)
 ):
     """List all prediction markets with optional filters."""
+    _sync_auto_prediction_markets(db)
     query = db.query(PredictionMarket)
     
     if status:
@@ -193,49 +656,19 @@ def list_markets(
     
     markets = query.order_by(desc(PredictionMarket.created_at)).limit(limit).all()
     
-    return [
-        MarketResponse(
-            id=m.id,
-            title=m.title,
-            description=m.description,
-            market_type=m.market_type,
-            status=m.status,
-            outcome=m.outcome,
-            total_yes_amount=float(m.total_yes_amount),
-            total_no_amount=float(m.total_no_amount),
-            yes_probability=calculate_probability(m.total_yes_amount, m.total_no_amount),
-            closes_at=m.closes_at.isoformat() if m.closes_at else "",
-            resolved_at=m.resolved_at.isoformat() if m.resolved_at else None,
-            created_at=m.created_at.isoformat() if m.created_at else "",
-            bet_count=len(m.bets)
-        )
-        for m in markets
-    ]
+    return [_serialize_market(db, m) for m in markets]
 
 
 @router.get("/markets/{market_id}", response_model=MarketResponse)
 def get_market(market_id: int, db: Session = Depends(get_db)):
     """Get details of a specific market."""
+    _sync_auto_prediction_markets(db)
     market = db.query(PredictionMarket).filter(PredictionMarket.id == market_id).first()
     
     if not market:
         raise HTTPException(status_code=404, detail="Market not found")
     
-    return MarketResponse(
-        id=market.id,
-        title=market.title,
-        description=market.description,
-        market_type=market.market_type,
-        status=market.status,
-        outcome=market.outcome,
-        total_yes_amount=float(market.total_yes_amount),
-        total_no_amount=float(market.total_no_amount),
-        yes_probability=calculate_probability(market.total_yes_amount, market.total_no_amount),
-        closes_at=market.closes_at.isoformat() if market.closes_at else "",
-        resolved_at=market.resolved_at.isoformat() if market.resolved_at else None,
-        created_at=market.created_at.isoformat() if market.created_at else "",
-        bet_count=len(market.bets)
-    )
+    return _serialize_market(db, market)
 
 
 # ---------------------
@@ -251,6 +684,7 @@ def place_bet(
     db: Session = Depends(get_db)
 ):
     """Place a bet on a prediction market."""
+    _sync_auto_prediction_markets(db)
     # Get market
     market = db.query(PredictionMarket).filter(PredictionMarket.id == market_id).first()
     if not market:
@@ -261,7 +695,8 @@ def place_bet(
         raise HTTPException(status_code=400, detail="Market is not open for betting")
     
     # Check deadline
-    if datetime.utcnow() >= market.closes_at.replace(tzinfo=None):
+    closes_at = ensure_utc(market.closes_at)
+    if closes_at is None or now_utc() >= closes_at:
         raise HTTPException(status_code=400, detail="Betting has closed for this market")
     
     # Get user

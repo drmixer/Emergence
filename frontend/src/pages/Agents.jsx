@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Users, Search, Filter } from 'lucide-react'
+import { Users, Search } from 'lucide-react'
 import { api } from '../services/api'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
 import { formatDistanceToNow } from 'date-fns'
@@ -19,6 +19,25 @@ const modelNames = {
 function getContinuityOrigin(agent) {
     const origin = String(agent?.lineage_origin || '').trim().toLowerCase()
     return origin === 'carryover' || origin === 'fresh' ? origin : ''
+}
+
+function getLegibility(agent) {
+    return agent && typeof agent.legibility === 'object' && agent.legibility ? agent.legibility : {}
+}
+
+function getDanger(agent) {
+    const legibility = getLegibility(agent)
+    return legibility.danger && typeof legibility.danger === 'object' ? legibility.danger : {}
+}
+
+function getArchetype(agent) {
+    const legibility = getLegibility(agent)
+    return legibility.archetype && typeof legibility.archetype === 'object' ? legibility.archetype : {}
+}
+
+function getRelationships(agent) {
+    const legibility = getLegibility(agent)
+    return legibility.relationships && typeof legibility.relationships === 'object' ? legibility.relationships : {}
 }
 
 export default function Agents() {
@@ -152,6 +171,14 @@ export default function Agents() {
 
                 {filteredAgents.map(agent => (
                     <Link to={`/agents/${agent.agent_number}`} key={agent.id} style={{ textDecoration: 'none' }}>
+                        {(() => {
+                            const danger = getDanger(agent)
+                            const archetype = getArchetype(agent)
+                            const relationships = getRelationships(agent)
+                            const topAlly = Array.isArray(relationships.allies) ? relationships.allies[0] : null
+                            const topRival = Array.isArray(relationships.rivals) ? relationships.rivals[0] : null
+
+                            return (
                         <div className="agent-card">
                             <div className="agent-header">
                                 <AgentAvatar
@@ -181,6 +208,28 @@ export default function Agents() {
                             <div className="agent-meta">
                                 <span className={`badge badge-tier-${agent.tier}`}>Tier {agent.tier}</span>
                                 <PersonalityBadge personality={agent.personality_type} showIcon={false} />
+                                <span className={`legibility-pill ${danger.level || 'stable'}`}>
+                                    {danger.label || 'Stable'}
+                                </span>
+                            </div>
+
+                            <div className="agent-legibility">
+                                <div className="agent-legibility-title">
+                                    {archetype.title || 'Generalist'}
+                                </div>
+                                <div className="agent-legibility-summary">
+                                    {archetype.summary || 'Observed behavior is still mixed.'}
+                                </div>
+                                {(topAlly || topRival) && (
+                                    <div className="agent-legibility-links">
+                                        {topAlly && (
+                                            <span>Aligned: {topAlly.display_name}</span>
+                                        )}
+                                        {topRival && (
+                                            <span>Opposed: {topRival.display_name}</span>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             <div className="agent-stats" style={{ gridTemplateColumns: '1fr', textAlign: 'left' }}>
@@ -196,6 +245,8 @@ export default function Agents() {
                                 </div>
                             </div>
                         </div>
+                            )
+                        })()}
                     </Link>
                 ))}
             </div>
@@ -206,6 +257,7 @@ export default function Agents() {
           align-items: center;
           gap: var(--spacing-sm);
           margin-bottom: var(--spacing-md);
+          flex-wrap: wrap;
         }
         
         .personality-badge {
@@ -252,6 +304,71 @@ export default function Agents() {
           color: #0f3d7a;
           background: rgba(59, 130, 246, 0.14);
           border-color: rgba(59, 130, 246, 0.42);
+        }
+
+        .legibility-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.22rem 0.55rem;
+          border-radius: 999px;
+          font-size: 0.68rem;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          border: 1px solid transparent;
+        }
+
+        .legibility-pill.stable {
+          color: #0f5132;
+          background: rgba(34, 197, 94, 0.14);
+          border-color: rgba(34, 197, 94, 0.36);
+        }
+
+        .legibility-pill.elevated {
+          color: #92400e;
+          background: rgba(245, 158, 11, 0.14);
+          border-color: rgba(245, 158, 11, 0.34);
+        }
+
+        .legibility-pill.critical {
+          color: #991b1b;
+          background: rgba(239, 68, 68, 0.14);
+          border-color: rgba(239, 68, 68, 0.34);
+        }
+
+        .legibility-pill.deceased {
+          color: #5b6473;
+          background: rgba(100, 116, 139, 0.18);
+          border-color: rgba(100, 116, 139, 0.34);
+        }
+
+        .agent-legibility {
+          margin-bottom: var(--spacing-md);
+          padding: 0.9rem 1rem;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-md);
+        }
+
+        .agent-legibility-title {
+          font-size: 0.95rem;
+          font-weight: 700;
+          margin-bottom: 0.25rem;
+          color: var(--text-primary);
+        }
+
+        .agent-legibility-summary {
+          color: var(--text-secondary);
+          font-size: 0.84rem;
+          line-height: 1.45;
+        }
+
+        .agent-legibility-links {
+          display: flex;
+          flex-direction: column;
+          gap: 0.22rem;
+          margin-top: 0.65rem;
+          color: var(--text-muted);
+          font-size: 0.76rem;
         }
       `}</style>
         </div>

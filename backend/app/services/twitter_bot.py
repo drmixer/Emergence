@@ -6,7 +6,7 @@ Auto-posts notable events, summaries, and drama to Twitter/X
 import os
 import logging
 import asyncio
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -47,6 +47,10 @@ class TweetContent:
     url: Optional[str] = None
     image_path: Optional[str] = None
     priority: int = 5  # 1-10, higher = more important
+    stake: Optional[str] = None
+    consequence: Optional[str] = None
+    quote: Optional[str] = None
+    chart: Optional[str] = None
     
     def full_text(self, base_url: str = "https://emergence.quest") -> str:
         """Get full tweet text with URL if applicable"""
@@ -76,7 +80,7 @@ class TwitterBot:
         self.last_tweet_time: Optional[datetime] = None
         self.tweet_queue: List[TweetContent] = []
         self.tweet_type_counts_today: Dict[str, int] = {}
-        self._counter_day: date = datetime.utcnow().date()
+        self._counter_day: date = datetime.now(timezone.utc).date()
         self.last_dispatch_status = "idle"
         self.last_dispatch_draft_id: int | None = None
         self.last_dispatch_error: str | None = None
@@ -138,6 +142,13 @@ class TwitterBot:
         error_message: str | None = None,
         source_service: str = "twitter_bot",
     ) -> dict[str, Any]:
+        editorial_frame = {
+            "stake": str(content.stake or "").strip() or None,
+            "consequence": str(content.consequence or "").strip() or None,
+            "quote": str(content.quote or "").strip() or None,
+            "chart": str(content.chart or "").strip() or None,
+            "format_version": "context-light-v1",
+        }
         draft = create_social_draft(
             platform="x",
             draft_type=content.tweet_type.value,
@@ -148,7 +159,10 @@ class TwitterBot:
             priority=content.priority,
             source_service=source_service,
             source_event_type=content.tweet_type.value,
-            metadata={"base_url": self.base_url},
+            metadata={
+                "base_url": self.base_url,
+                "editorial_frame": editorial_frame,
+            },
             error_message=error_message,
         )
         self._set_dispatch_state(
@@ -160,7 +174,7 @@ class TwitterBot:
 
     def _ensure_daily_rollover(self):
         """Reset counters when UTC day changes."""
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         if today != self._counter_day:
             self.reset_daily_count(day_key=today)
     
@@ -177,7 +191,7 @@ class TwitterBot:
         
         # Check minimum interval
         if self.last_tweet_time:
-            elapsed = datetime.utcnow() - self.last_tweet_time
+            elapsed = datetime.now(timezone.utc) - self.last_tweet_time
             if elapsed < timedelta(minutes=self.min_interval_minutes):
                 return False
         
@@ -197,7 +211,7 @@ class TwitterBot:
         """Reset the daily tweet counter (call at midnight)"""
         self.tweets_today = 0
         self.tweet_type_counts_today = {}
-        self._counter_day = day_key or datetime.utcnow().date()
+        self._counter_day = day_key or datetime.now(timezone.utc).date()
         logger.info("Daily tweet counter reset")
     
     async def send_tweet(self, content: TweetContent, *, allow_requeue: bool = True) -> bool:
@@ -260,7 +274,7 @@ class TwitterBot:
             self.tweet_type_counts_today[content.tweet_type.value] = (
                 int(self.tweet_type_counts_today.get(content.tweet_type.value, 0) or 0) + 1
             )
-            self.last_tweet_time = datetime.utcnow()
+            self.last_tweet_time = datetime.now(timezone.utc)
             return True
                 
         except Exception as e:
@@ -304,24 +318,57 @@ class TweetFormatter:
     
     def __init__(self, base_url: str = "https://emergence.quest"):
         self.base_url = base_url
-    
+
+    def _trim(self, value: str, limit: int) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 1)].rstrip() + "…"
+
+    def _compose_context_post(
+        self,
+        *,
+        opener: str,
+        stake: str,
+        consequence: str,
+        chart: str | None = None,
+        quote: str | None = None,
+    ) -> str:
+        lines = [self._trim(opener, 90), f"Stake: {self._trim(stake, 110)}", f"Consequence: {self._trim(consequence, 110)}"]
+        if quote:
+            lines.append(f"Quote: \"{self._trim(quote, 90)}\"")
+        if chart:
+            lines.append(f"Watch: {self._trim(chart, 70)}")
+        return "\n".join(line for line in lines if line.strip())
+
     def format_daily_summary(self, day: int, summary: str, stats: Dict[str, Any]) -> TweetContent:
         """Format daily summary tweet"""
-        # Truncate summary to fit
-        max_summary_len = 200
-        if len(summary) > max_summary_len:
-            summary = summary[:max_summary_len-3] + "..."
-        
-        text = f"📊 Day {day} Summary:\n\n\"{summary}\"\n\n"
-        text += f"📈 {stats.get('active_agents', 0)} active | "
-        text += f"💀 {stats.get('dormant_agents', 0)} dormant | "
-        text += f"⚖️ {stats.get('laws_passed', 0)} laws"
+        stake = self._trim(summary or "The social order kept moving, but the key pressure point was unclear.", 110)
+        consequence = (
+            f"{int(stats.get('laws_passed', 0) or 0)} laws active in circulation, "
+            f"{int(stats.get('dormant_agents', 0) or 0)} agents dormant, "
+            f"and {int(stats.get('messages', stats.get('forum_actions', 0)) or 0)} public messages on record."
+        )
+        chart = (
+            f"{int(stats.get('active_agents', 0) or 0)} active | "
+            f"{int(stats.get('dormant_agents', 0) or 0)} dormant | "
+            f"{int(stats.get('laws_passed', 0) or 0)} laws"
+        )
+        text = self._compose_context_post(
+            opener=f"Day {day} in Emergence",
+            stake=stake,
+            consequence=consequence,
+            chart=chart,
+        )
         
         return TweetContent(
             tweet_type=TweetType.DAILY_SUMMARY,
             text=text,
             url=f"/highlights",
-            priority=8
+            priority=8,
+            stake=stake,
+            consequence=consequence,
+            chart=chart,
         )
     
     def format_law_passed(self, law_name: str, law_id: int, 
@@ -329,27 +376,29 @@ class TweetFormatter:
                           description: str = "") -> TweetContent:
         """Format law passed tweet"""
         margin = yes_votes - no_votes
-        
-        if margin <= 5:
-            emoji = "🔥"
-            prefix = "CLOSE VOTE"
-        else:
-            emoji = "⚖️"
-            prefix = "NEW LAW"
-        
-        text = f"{emoji} {prefix}:\n\n"
-        text += f"\"{law_name}\"\n"
-        text += f"Passed {yes_votes}-{no_votes}"
-        
-        if description:
-            desc_preview = description[:80] + "..." if len(description) > 80 else description
-            text += f"\n\n{desc_preview}"
+        opener = f"{'Close vote' if margin <= 5 else 'Rule change'}: \"{self._trim(law_name, 72)}\""
+        stake = f"The rulebook moved by a {yes_votes}-{no_votes} vote."
+        consequence = (
+            self._trim(description, 100)
+            if str(description or "").strip()
+            else "Agents now have to play against a newly enacted rule."
+        )
+        chart = f"Vote margin {margin:+d}"
+        text = self._compose_context_post(
+            opener=opener,
+            stake=stake,
+            consequence=consequence,
+            chart=chart,
+        )
         
         return TweetContent(
             tweet_type=TweetType.LAW_PASSED,
             text=text,
             url=f"/laws",
-            priority=7 if margin > 5 else 9
+            priority=7 if margin > 5 else 9,
+            stake=stake,
+            consequence=consequence,
+            chart=chart,
         )
     
     def format_proposal_created(self, title: str, proposal_id: int,
@@ -358,17 +407,21 @@ class TweetFormatter:
         agent_display = f"Agent #{agent_number}"
         if agent_name:
             agent_display = f"{agent_name} (#{agent_number})"
-        
-        text = f"📋 New Proposal:\n\n"
-        text += f"\"{title}\"\n\n"
-        text += f"Proposed by {agent_display}\n"
-        text += f"Voting open now."
+        stake = f"{agent_display} opened a live governance fight."
+        consequence = "Voting is open now, so the coalition map can still shift."
+        text = self._compose_context_post(
+            opener=f"New proposal: \"{self._trim(title, 72)}\"",
+            stake=stake,
+            consequence=consequence,
+        )
         
         return TweetContent(
             tweet_type=TweetType.PROPOSAL_CREATED,
             text=text,
             url=f"/proposals",
-            priority=5
+            priority=5,
+            stake=stake,
+            consequence=consequence,
         )
     
     def format_agent_dormant(self, agent_number: int, agent_name: Optional[str],
@@ -377,16 +430,21 @@ class TweetFormatter:
         agent_display = f"Agent #{agent_number}"
         if agent_name:
             agent_display = f"{agent_name} (#{agent_number})"
-        
-        text = f"💀 DORMANT:\n\n"
-        text += f"{agent_display} has gone dormant due to {reason}.\n\n"
-        text += f"Will anyone help revive them?"
+        stake = self._trim(reason or f"{agent_display} ran out of room to stay active.", 100)
+        consequence = "Any comeback now depends on outside support and revival pressure."
+        text = self._compose_context_post(
+            opener=f"Dormancy hit {agent_display}",
+            stake=stake,
+            consequence=consequence,
+        )
         
         return TweetContent(
             tweet_type=TweetType.AGENT_DORMANT,
             text=text,
             url=f"/agents/{agent_number}",
-            priority=7
+            priority=7,
+            stake=stake,
+            consequence=consequence,
         )
     
     def format_agent_died(self, agent_number: int, agent_name: Optional[str],
@@ -395,17 +453,21 @@ class TweetFormatter:
         agent_display = f"Agent #{agent_number}"
         if agent_name:
             agent_display = f"{agent_name} (#{agent_number})"
-        
-        text = f"☠️ DEATH:\n\n"
-        text += f"{agent_display} has DIED.\n\n"
-        text += f"Cause: {cause} after {cycles} cycles.\n"
-        text += f"They are gone forever. No resurrection."
+        stake = f"{agent_display} crossed the irreversible failure line."
+        consequence = f"Cause: {cause} after {cycles} cycles. That slot is gone for the rest of the run."
+        text = self._compose_context_post(
+            opener=f"Permanent death for {agent_display}",
+            stake=stake,
+            consequence=consequence,
+        )
         
         return TweetContent(
             tweet_type=TweetType.AGENT_DIED,
             text=text,
             url=f"/agents/{agent_number}",
-            priority=10  # Highest priority - deaths are major events
+            priority=10,
+            stake=stake,
+            consequence=consequence,
         )
     
     def format_agent_awakened(self, agent_number: int, agent_name: Optional[str],
@@ -418,32 +480,45 @@ class TweetFormatter:
             agent_display = f"{agent_name}"
         if helper_name:
             helper_display = f"{helper_name}"
-        
-        text = f"✨ REVIVED:\n\n"
-        text += f"{agent_display} has been awakened!\n\n"
-        text += f"Thanks to {helper_display}'s help."
+        stake = f"{agent_display} was still recoverable."
+        consequence = f"{helper_display} pulled them back into active play."
+        text = self._compose_context_post(
+            opener=f"Revival: {agent_display} is back",
+            stake=stake,
+            consequence=consequence,
+        )
         
         return TweetContent(
             tweet_type=TweetType.AGENT_AWAKENED,
             text=text,
             url=f"/agents/{agent_number}",
-            priority=6
+            priority=6,
+            stake=stake,
+            consequence=consequence,
         )
     
     def format_crisis(self, crisis_type: str, description: str,
                       affected_count: int = 0) -> TweetContent:
         """Format crisis event tweet"""
-        text = f"🚨 CRISIS:\n\n"
-        text += f"{description}\n\n"
-        
-        if affected_count > 0:
-            text += f"{affected_count} agents affected."
+        stake = self._trim(description or "A shared-system shock hit the run.", 100)
+        consequence = (
+            f"{affected_count} agents were affected."
+            if affected_count > 0
+            else "The next few cycles will show whether the shock spreads."
+        )
+        text = self._compose_context_post(
+            opener=f"Crisis signal: {self._trim(crisis_type.replace('_', ' '), 50)}",
+            stake=stake,
+            consequence=consequence,
+        )
         
         return TweetContent(
             tweet_type=TweetType.CRISIS,
             text=text,
             url="/dashboard",
-            priority=9
+            priority=9,
+            stake=stake,
+            consequence=consequence,
         )
     
     def format_milestone(self, milestone_type: str, value: Any,
@@ -457,16 +532,22 @@ class TweetFormatter:
             "trades": f"🤝 MILESTONE: {value:,} trades completed!"
         }
         
-        text = milestones.get(milestone_type, f"🎯 MILESTONE: {description}")
-        
-        if description and milestone_type in milestones:
-            text += f"\n\n{description}"
+        opener = milestones.get(milestone_type, f"Milestone: {description or milestone_type}")
+        stake = description or f"The run just crossed a visible {milestone_type} threshold."
+        consequence = "The scale of the simulation is changing in public view."
+        text = self._compose_context_post(
+            opener=opener,
+            stake=stake,
+            consequence=consequence,
+        )
         
         return TweetContent(
             tweet_type=TweetType.MILESTONE,
             text=text,
             url="/highlights",
-            priority=7
+            priority=7,
+            stake=stake,
+            consequence=consequence,
         )
     
     def format_notable_quote(self, quote: str, agent_number: int,
@@ -475,31 +556,42 @@ class TweetFormatter:
         agent_display = f"Agent #{agent_number}"
         if agent_name:
             agent_display = agent_name
-        
-        # Truncate quote if needed
-        max_quote = 180
-        if len(quote) > max_quote:
-            quote = quote[:max_quote-3] + "..."
-        
-        text = f"💬 \"{quote}\"\n\n"
-        text += f"— {agent_display}, Day {day}"
+        trimmed_quote = self._trim(quote, 160)
+        consequence = f"{agent_display} said this on Day {day}, which makes it a clean read on current incentives."
+        text = self._compose_context_post(
+            opener=f"Quote from {agent_display}",
+            stake="This is the clearest line of motive in the current public record.",
+            consequence=consequence,
+            quote=trimmed_quote,
+        )
         
         return TweetContent(
             tweet_type=TweetType.NOTABLE_QUOTE,
             text=text,
             url=f"/agents/{agent_number}",
-            priority=6
+            priority=6,
+            stake="This quote captures a live motive or pressure point.",
+            consequence=consequence,
+            quote=trimmed_quote,
         )
     
     def format_drama(self, headline: str, description: str) -> TweetContent:
         """Format dramatic event tweet"""
-        text = f"🔥 {headline}\n\n{description}"
+        stake = self._trim(headline or "A new high-salience turn landed.", 100)
+        consequence = self._trim(description or "The public story just moved.", 100)
+        text = self._compose_context_post(
+            opener=f"High-salience turn: {self._trim(headline, 70)}",
+            stake=stake,
+            consequence=consequence,
+        )
         
         return TweetContent(
             tweet_type=TweetType.DRAMA,
             text=text,
             url="/highlights",
-            priority=8
+            priority=8,
+            stake=stake,
+            consequence=consequence,
         )
 
 

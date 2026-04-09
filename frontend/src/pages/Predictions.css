@@ -5,6 +5,41 @@
     margin: 0 auto;
 }
 
+.prediction-intro {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-xl);
+    margin-bottom: var(--spacing-xl);
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-xl);
+    align-items: flex-start;
+}
+
+.prediction-intro strong {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: var(--text-primary);
+}
+
+.prediction-intro p {
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.prediction-intro-note {
+    flex-shrink: 0;
+    padding: 0.35rem 0.8rem;
+    border-radius: var(--radius-full);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 /* User Stats Bar */
 .user-stats-bar {
     display: flex;
@@ -189,6 +224,12 @@
     gap: var(--spacing-md);
 }
 
+.market-badges {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
 .market-type-badge {
     display: inline-flex;
     align-items: center;
@@ -201,6 +242,20 @@
     letter-spacing: 0.08em;
     background: rgba(255, 255, 255, 0.04);
     color: var(--text-secondary);
+}
+
+.market-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: 0.3rem 0.9rem;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
 }
 
 .market-type-badge.proposal_pass,
@@ -259,6 +314,53 @@
     color: var(--text-secondary);
     line-height: 1.6;
     margin-bottom: var(--spacing-lg);
+}
+
+.market-context {
+    display: grid;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-lg);
+}
+
+.market-context-row {
+    display: grid;
+    grid-template-columns: 88px 1fr;
+    gap: var(--spacing-md);
+    align-items: start;
+}
+
+.market-context-row span {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+}
+
+.market-context-row p {
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    font-size: 0.86rem;
+}
+
+.market-evidence {
+    display: flex;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.market-evidence a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.8rem;
+}
+
+.market-evidence a:hover {
+    color: var(--text-primary);
 }
 
 /* Probability Bar */
@@ -553,6 +655,13 @@
 .modal-header {
     text-align: center;
     margin-bottom: var(--spacing-2xl);
+}
+
+.modal-resolution {
+    margin-top: var(--spacing-sm);
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.5;
 }
 
 .modal-header h2 {

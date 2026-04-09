@@ -3,16 +3,14 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
     Play,
-    Pause,
     ChevronLeft,
     ChevronRight,
     Sparkles,
-    Volume2,
-    VolumeX,
     Clock,
     Calendar
 } from 'lucide-react'
 import { api } from '../services/api'
+import { getMomentEvidenceHref, getMomentReplayHref } from '../utils/bestMoments'
 
 // Typewriter effect hook
 function useTypewriter(text, speed = 30, enabled = true) {
@@ -70,6 +68,96 @@ function RecapCard({ recap, isActive, onSelect }) {
     )
 }
 
+function buildHighlightItems(moments) {
+    if (!Array.isArray(moments)) return []
+    return moments.slice(0, 4).map((moment) => ({
+        type: moment?.event_type || 'event',
+        text: moment?.title || moment?.label || 'Key moment',
+        context: moment?.stake || 'This turn changed the run trajectory.',
+        evidenceHref: getMomentEvidenceHref(moment),
+        replayHref: getMomentReplayHref(moment),
+    }))
+}
+
+function deriveStake(primaryMoment, fallbackText) {
+    if (primaryMoment?.stake) return primaryMoment.stake
+    const trimmed = String(fallbackText || '').trim()
+    if (trimmed) return trimmed
+    return 'No single high-stakes turn has separated itself yet.'
+}
+
+function deriveConsequence(stats = {}, moments = []) {
+    const laws = Number(stats?.laws_passed || 0)
+    const votes = Number(stats?.votes || 0)
+    const active = Number(stats?.active_agents || 0)
+    const dormant = Number(stats?.dormant_agents || 0)
+    const leadMoment = Array.isArray(moments) && moments[0] ? moments[0] : null
+
+    if (leadMoment?.title) {
+        return `${leadMoment.title} became the clearest visible turning point for the public story.`
+    }
+    if (laws > 0) {
+        return `${laws} laws passed, so governance changed the operating rules instead of staying theoretical.`
+    }
+    if (votes > 0) {
+        return `${votes} votes landed, which means coalitions were forced to show themselves in public.`
+    }
+    if (dormant > 0) {
+        return `${dormant} agents are dormant against ${active} still active, keeping survival pressure visible.`
+    }
+    return 'Momentum shifted, but the consequence is still emerging from the latest visible actions.'
+}
+
+function deriveWatchNext(moments = [], stats = {}) {
+    const labels = moments.map((moment) => String(moment?.label || moment?.title || '').toLowerCase())
+    if (labels.some((label) => label.includes('death') || label.includes('dormancy') || label.includes('shortfall'))) {
+        return 'Watch whether survival pressure spreads to more agents before the next reset in momentum.'
+    }
+    if (labels.some((label) => label.includes('law') || label.includes('constitution') || label.includes('vote'))) {
+        return 'Watch whether the latest rule change actually realigns coalitions or stays symbolic.'
+    }
+    if (labels.some((label) => label.includes('revival') || label.includes('awaken'))) {
+        return 'Watch whether recovery turns into a broader alliance instead of a one-off rescue.'
+    }
+    if (Number(stats?.messages || 0) > Number(stats?.votes || 0)) {
+        return 'Watch whether conversation hardens into proposals and votes in the next visible phase.'
+    }
+    return 'Watch the next best moment for a clearer break in the balance of power.'
+}
+
+function buildNarrative({ intro, stake, consequence, watchNext }) {
+    return [
+        intro,
+        `Stake: ${stake}`,
+        `Consequence: ${consequence}`,
+        `Watch next: ${watchNext}`,
+    ].join('\n\n')
+}
+
+function buildRecap({ id, period, title, fallbackHeadline, intro, moments, stats }) {
+    const primaryMoment = Array.isArray(moments) && moments[0] ? moments[0] : null
+    const headline = primaryMoment?.label || primaryMoment?.title || fallbackHeadline
+    const stake = deriveStake(primaryMoment, intro)
+    const consequence = deriveConsequence(stats, moments)
+    const watchNext = deriveWatchNext(moments, stats)
+
+    return {
+        id,
+        period,
+        title,
+        created_at: new Date().toISOString(),
+        summary: {
+            headline,
+            narrative: buildNarrative({ intro, stake, consequence, watchNext }),
+            stake,
+            consequence,
+            watchNext,
+            highlights: buildHighlightItems(moments),
+            stats,
+        },
+    }
+}
+
 // Main Recap Component
 export default function Recap({ minimal = false }) {
     const [recaps, setRecaps] = useState([])
@@ -81,73 +169,58 @@ export default function Recap({ minimal = false }) {
     useEffect(() => {
         async function loadRecaps() {
             try {
-                const [overview, story, latestSummary, dramatic, featured] = await Promise.all([
+                const [overview, story, latestSummary, last24hMoments, lastWeekMoments] = await Promise.all([
                     api.getAnalyticsOverview().catch(() => null),
                     api.fetch('/api/analytics/story').catch(() => null),
                     api.fetch('/api/analytics/summaries/latest').catch(() => null),
-                    api.fetch('/api/analytics/dramatic?hours=24&limit=10').catch(() => []),
-                    api.fetch('/api/analytics/featured?limit=6').catch(() => []),
+                    api.getBestMoments(5, 24, 55).catch(() => []),
+                    api.getBestMoments(6, 168, 55).catch(() => []),
                 ])
 
                 const recapsBuilt = []
+                const overviewStats = overview ? {
+                    messages: Number(overview?.messages?.total || 0),
+                    proposals: Number(overview?.proposals?.total || 0),
+                    votes: Number(overview?.votes?.total || 0),
+                    laws_passed: Number(overview?.laws?.total || 0),
+                    active_agents: Number(overview?.agents?.active || 0),
+                    dormant_agents: Number(overview?.agents?.dormant || 0),
+                } : {}
 
-                const featuredHighlights = Array.isArray(featured)
-                    ? featured.slice(0, 5).map(e => ({ type: e.event_type || 'event', text: e.title || e.description || 'Event' }))
-                    : []
-
-                const dramaticLines = Array.isArray(dramatic)
-                    ? dramatic
-                        .filter(d => d?.title || d?.description)
-                        .slice(0, 8)
-                        .map(d => `- ${d.title || d.description}`)
-                    : []
-
-                recapsBuilt.push({
+                recapsBuilt.push(buildRecap({
                     id: 1,
                     period: 'last_24h',
                     title: 'The Past 24 Hours',
-                    created_at: new Date().toISOString(),
-                    summary: {
-                        headline: dramaticLines.length > 0 ? 'The Past 24 Hours' : 'No dramatic events yet',
-                        narrative: dramaticLines.length > 0 ? dramaticLines.join('\n') : 'The simulation is still warming up.',
-                        highlights: featuredHighlights,
-                        stats: overview?.messages ? {
-                            messages: overview.messages.total,
-                            proposals: overview.proposals?.total,
-                            votes: overview.votes?.total,
-                            laws_passed: overview.laws?.total,
-                        } : {},
-                    }
-                })
+                    fallbackHeadline: 'Latest Pressure',
+                    intro: Array.isArray(last24hMoments) && last24hMoments[0]?.title
+                        ? `In the last 24 hours, ${last24hMoments[0].title.toLowerCase()} defined the public arc.`
+                        : 'The last 24 hours did not produce a clean high-salience turn yet.',
+                    moments: Array.isArray(last24hMoments) ? last24hMoments : [],
+                    stats: overviewStats,
+                }))
 
-                if (latestSummary?.summary) {
-                    recapsBuilt.push({
+                if (latestSummary?.summary || (Array.isArray(lastWeekMoments) && lastWeekMoments.length > 0)) {
+                    recapsBuilt.push(buildRecap({
                         id: 2,
                         period: 'last_week',
                         title: 'Latest Summary',
-                        created_at: latestSummary.created_at || new Date().toISOString(),
-                        summary: {
-                            headline: latestSummary.day_number ? `Day ${latestSummary.day_number} Summary` : 'Latest Summary',
-                            narrative: latestSummary.summary,
-                            highlights: featuredHighlights,
-                            stats: latestSummary.stats || {},
-                        }
-                    })
+                        fallbackHeadline: latestSummary?.day_number ? `Day ${latestSummary.day_number} Summary` : 'This Week',
+                        intro: String(latestSummary?.summary || 'The week built through a sequence of visible turning points.').trim(),
+                        moments: Array.isArray(lastWeekMoments) ? lastWeekMoments : [],
+                        stats: latestSummary?.stats || overviewStats,
+                    }))
                 }
 
-                if (story?.story) {
-                    recapsBuilt.push({
+                if (story?.story || (Array.isArray(lastWeekMoments) && lastWeekMoments.length > 0)) {
+                    recapsBuilt.push(buildRecap({
                         id: 3,
                         period: 'all_time',
                         title: 'The Story So Far',
-                        created_at: new Date().toISOString(),
-                        summary: {
-                            headline: 'The Story So Far',
-                            narrative: story.story,
-                            highlights: featuredHighlights,
-                            stats: {},
-                        }
-                    })
+                        fallbackHeadline: 'The Story So Far',
+                        intro: String(story?.story || 'The simulation is still gathering a longer-running public narrative.').trim(),
+                        moments: Array.isArray(lastWeekMoments) ? lastWeekMoments : [],
+                        stats: overviewStats,
+                    }))
                 }
 
                 setRecaps(recapsBuilt)
@@ -218,7 +291,7 @@ export default function Recap({ minimal = false }) {
                     <span>Previously on Emergence...</span>
                 </div>
                 <p className="recap-minimal-text">
-                    {activeRecap.summary.headline}
+                    {activeRecap.summary.stake || activeRecap.summary.headline}
                 </p>
                 <Link to="/highlights" className="recap-minimal-link">
                     Read full recap →
@@ -306,6 +379,23 @@ export default function Recap({ minimal = false }) {
                     )}
                 </div>
 
+                {(isComplete || !showTypewriter) && (
+                    <div className="recap-hooks">
+                        <div className="recap-hook">
+                            <span className="recap-hook-label">Stake</span>
+                            <p>{activeRecap.summary.stake}</p>
+                        </div>
+                        <div className="recap-hook">
+                            <span className="recap-hook-label">Consequence</span>
+                            <p>{activeRecap.summary.consequence}</p>
+                        </div>
+                        <div className="recap-hook">
+                            <span className="recap-hook-label">Watch Next</span>
+                            <p>{activeRecap.summary.watchNext}</p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Highlights */}
                 {(isComplete || !showTypewriter) && (
                     <div className="recap-highlights">
@@ -314,7 +404,18 @@ export default function Recap({ minimal = false }) {
                             {activeRecap.summary.highlights.map((highlight, index) => (
                                 <div key={index} className={`highlight-item ${highlight.type}`}>
                                     <span className="highlight-dot" />
-                                    <span>{highlight.text}</span>
+                                    <div className="highlight-copy">
+                                        <span>{highlight.text}</span>
+                                        <small>{highlight.context}</small>
+                                    </div>
+                                    <div className="highlight-actions">
+                                        {highlight.evidenceHref && (
+                                            <Link to={highlight.evidenceHref}>Evidence</Link>
+                                        )}
+                                        {highlight.replayHref && (
+                                            <Link to={highlight.replayHref}>Replay</Link>
+                                        )}
+                                    </div>
                                 </div>
                             ))}
                         </div>

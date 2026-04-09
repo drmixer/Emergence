@@ -21,6 +21,7 @@ import QuoteCardGenerator from '../components/QuoteCard'
 import { api } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
+import { getMomentEvidenceHref, getMomentReplayHref } from '../utils/bestMoments'
 
 const QUICK_BET_AMOUNT = 5
 
@@ -33,18 +34,25 @@ const getImportanceColor = (importance) => {
 }
 
 const eventTypeIcons = {
-  milestone: Award,
   world_event: Zap,
-  close_vote: AlertTriangle,
-  dormancy: AlertTriangle,
+  law_passed: Award,
+  proposal_resolved: AlertTriangle,
+  agent_died: AlertTriangle,
+  became_dormant: AlertTriangle,
   default: Star,
 }
 
 const pct = (value) => `${Math.round(Number(value || 0) * 100)}%`
 const getTurnRunId = (turn) => String(turn?.metadata?.runtime?.run_id || '').trim()
 const VALID_TABS = new Set(['recap', 'highlights', 'summary', 'plotTurns', 'predictions', 'replay', 'quotes'])
+const VALID_REPLAY_MODES = new Set(['timeline', 'story60'])
 const MAJOR_CATEGORIES = new Set(['crisis', 'conflict', 'governance'])
 const STORY_CHAPTERS = ['Trigger', 'Escalation', 'Turning Point', 'Outcome']
+
+function resolveReplayMode(requestedMode, requestedEventId = 0) {
+  if (VALID_REPLAY_MODES.has(requestedMode)) return requestedMode
+  return requestedEventId > 0 ? 'timeline' : 'story60'
+}
 
 function getMomentTier(turn) {
   const salience = Number(turn?.salience || 0)
@@ -220,14 +228,16 @@ export default function Highlights() {
   const requestedTab = String(searchParams.get('tab') || '').trim()
   const requestedEventId = Number(searchParams.get('event') || 0)
   const runFilter = String(searchParams.get('run') || '').trim()
+  const requestedReplayMode = String(searchParams.get('mode') || '').trim()
 
-  const [featured, setFeatured] = useState([])
   const [summary, setSummary] = useState(null)
+  const [bestMoments, setBestMoments] = useState([])
   const [plotTurns, setPlotTurns] = useState([])
   const [replayTurns, setReplayTurns] = useState([])
+  const [replayStory, setReplayStory] = useState({ items: [], chapters: [] })
   const [replayBuckets, setReplayBuckets] = useState([])
   const [replayIndex, setReplayIndex] = useState(-1)
-  const [replayMode, setReplayMode] = useState('timeline')
+  const [replayMode, setReplayMode] = useState(resolveReplayMode(requestedReplayMode, requestedEventId))
   const [storyMomentIndex, setStoryMomentIndex] = useState(0)
   const [selectedReplayEventId, setSelectedReplayEventId] = useState(0)
   const [showSourceDetail, setShowSourceDetail] = useState(false)
@@ -249,29 +259,38 @@ export default function Highlights() {
   }, [requestedTab])
 
   useEffect(() => {
-    setReplayMode('timeline')
+    setReplayMode(resolveReplayMode(requestedReplayMode, requestedEventId))
     setShowSourceDetail(false)
-  }, [runFilter])
+  }, [runFilter, requestedReplayMode, requestedEventId])
+
+  useEffect(() => {
+    setReplayMode(resolveReplayMode(requestedReplayMode, requestedEventId))
+  }, [requestedReplayMode, requestedEventId])
 
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
-        const [featuredEvents, latestSummary, turns, replay, openMarkets, me, overviewPayload, metricsPayload] = await Promise.all([
-          api.fetch('/api/analytics/featured?limit=20'),
+        const [latestSummary, bestMomentsPayload, turns, replay, replayStoryPayload, openMarkets, me, overviewPayload, metricsPayload] = await Promise.all([
           api.fetch('/api/analytics/summaries/latest'),
+          api.getBestMoments(6, 72, 55, runFilter).catch(() => ({ items: [] })),
           api.getPlotTurns(16, 72, 60, runFilter).catch(() => ({ items: [] })),
           api.getPlotTurnReplay(24, 55, 30, 240, runFilter).catch(() => ({ items: [], buckets: [] })),
+          api.getReplayStory(24, 55, 8, runFilter).catch(() => ({ items: [], chapters: [] })),
           api.getPredictionMarkets('open', 8).catch(() => []),
           api.getPredictionMe().catch(() => null),
           api.getAnalyticsOverview().catch(() => null),
           api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
         ])
 
-        setFeatured(Array.isArray(featuredEvents) ? featuredEvents : [])
         setSummary(latestSummary?.summary ? latestSummary : null)
+        setBestMoments(Array.isArray(bestMomentsPayload?.items) ? bestMomentsPayload.items : [])
         setPlotTurns(Array.isArray(turns?.items) ? turns.items : [])
         setReplayTurns(Array.isArray(replay?.items) ? replay.items : [])
+        setReplayStory({
+          items: Array.isArray(replayStoryPayload?.items) ? replayStoryPayload.items : [],
+          chapters: Array.isArray(replayStoryPayload?.chapters) ? replayStoryPayload.chapters : [],
+        })
 
         const buckets = Array.isArray(replay?.buckets) ? replay.buckets : []
         setReplayBuckets(buckets)
@@ -282,10 +301,11 @@ export default function Highlights() {
         setOverview(overviewPayload && typeof overviewPayload === 'object' ? overviewPayload : null)
         setEmergenceMetrics(metricsPayload && typeof metricsPayload === 'object' ? metricsPayload : null)
       } catch {
-        setFeatured([])
         setSummary(null)
+        setBestMoments([])
         setPlotTurns([])
         setReplayTurns([])
+        setReplayStory({ items: [], chapters: [] })
         setReplayBuckets([])
         setReplayIndex(-1)
         setPredictionMarkets([])
@@ -351,6 +371,9 @@ export default function Highlights() {
   }, [replayTurns, activeReplayBucket])
 
   const replayStoryMoments = useMemo(() => {
+    if (Array.isArray(replayStory.items) && replayStory.items.length > 0) {
+      return replayStory.items
+    }
     const selected = pickReplayStoryMoments(replayTurns, 8)
     return selected.map((turn, index) => ({
       ...turn,
@@ -358,7 +381,22 @@ export default function Highlights() {
       why_this_matters: getWhyThisMatters(turn),
       deltas: buildMomentDeltas(turn),
     }))
-  }, [replayTurns])
+  }, [replayTurns, replayStory.items])
+
+  const replayStoryChapters = useMemo(() => {
+    if (Array.isArray(replayStory.chapters) && replayStory.chapters.length > 0) {
+      return replayStory.chapters
+    }
+    return STORY_CHAPTERS.map((label) => {
+      const chapterItems = replayStoryMoments.filter((item) => item?.chapter === label)
+      return {
+        label,
+        count: chapterItems.length,
+        description: '',
+        lead_event_id: Number(chapterItems[0]?.event_id || 0),
+      }
+    }).filter((chapter) => chapter.count > 0)
+  }, [replayStory.chapters, replayStoryMoments])
 
   const activeStoryMoment =
     storyMomentIndex >= 0 && storyMomentIndex < replayStoryMoments.length
@@ -376,7 +414,6 @@ export default function Highlights() {
   const activeReplayMoment = replayMode === 'story60' ? activeStoryMoment : activeTimelineMoment
 
   const activeReplayMomentDeltas = useMemo(() => buildMomentDeltas(activeReplayMoment), [activeReplayMoment])
-
   const activeReplayEvidence = useMemo(() => {
     const turn = activeReplayMoment
     if (!turn) return { runDetailHref: '', evidenceApiHref: '' }
@@ -560,7 +597,7 @@ export default function Highlights() {
           onClick={() => setActiveTab('highlights')}
         >
           <Star size={16} />
-          Featured Events
+          Best Moments
         </button>
         <button
           className={`tab-btn ${activeTab === 'summary' ? 'active' : ''}`}
@@ -588,7 +625,7 @@ export default function Highlights() {
           onClick={() => setActiveTab('replay')}
         >
           <TimerReset size={16} />
-          Replay 24h
+          Replay
         </button>
         <button
           className={`tab-btn ${activeTab === 'quotes' ? 'active' : ''}`}
@@ -636,34 +673,54 @@ export default function Highlights() {
 
       {activeTab === 'highlights' && (
         <div className="featured-events">
+          <div className="featured-intro">
+            <h3>Best Moments</h3>
+            <p>The fastest way to understand why this run matters, with replay and evidence links on every card.</p>
+          </div>
           {loading && (
-            <div className="empty-state">Loading featured events…</div>
+            <div className="empty-state">Loading best moments…</div>
           )}
-          {!loading && featured.length === 0 && (
-            <div className="empty-state">No featured events yet.</div>
+          {!loading && bestMoments.length === 0 && (
+            <div className="empty-state">No best moments yet.</div>
           )}
-          {featured.map((event) => {
-            const Icon = eventTypeIcons[event.event_type] || eventTypeIcons.default
-            const color = getImportanceColor(event.importance)
+          {bestMoments.map((turn) => {
+            const Icon = eventTypeIcons[turn.event_type] || eventTypeIcons.default
+            const color = getImportanceColor(turn.salience)
+            const evidenceHref = getMomentEvidenceHref(turn)
+            const replayHref = getMomentReplayHref(turn)
 
             return (
-              <div key={event.event_id} className={`featured-card color-${color}`}>
+              <div key={turn.event_id} className={`featured-card color-${color}`}>
                 <div className="featured-header">
                   <div className={`featured-icon ${color}`}>
                     <Icon size={20} />
                   </div>
                   <div className="featured-meta">
-                    <span className="featured-type">{event.event_type.replace(/_/g, ' ')}</span>
+                    <span className="featured-type">{turn.label || 'Best moment'}</span>
                     <span className="featured-time">
-                      {formatDistanceToNow(new Date(event.created_at), { addSuffix: true })}
+                      {formatDistanceToNow(new Date(turn.created_at), { addSuffix: true })}
                     </span>
                   </div>
                   <div className={`importance-badge ${color}`}>
-                    {event.importance}
+                    {turn.salience}
                   </div>
                 </div>
-                <h3 className="featured-title">{event.title}</h3>
-                <p className="featured-description">{event.description}</p>
+                <h3 className="featured-title">{turn.title}</h3>
+                <p className="featured-description">{turn.stake || 'This moment changed momentum and helps explain what happened next.'}</p>
+                <div className="featured-actions">
+                  {evidenceHref && (
+                    <Link to={evidenceHref} className="plot-turn-run-link">
+                      Evidence
+                    </Link>
+                  )}
+                  <Link to={replayHref} className="plot-turn-run-link">
+                    Replay
+                  </Link>
+                  <button type="button" className="moment-share-btn" onClick={() => shareMoment(turn, 'highlights_best_moments')}>
+                    <Share2 size={14} />
+                    Share
+                  </button>
+                </div>
               </div>
             )
           })}
@@ -800,6 +857,11 @@ export default function Highlights() {
 
       {activeTab === 'predictions' && (
         <div className="prediction-panel">
+          <div className="prediction-intro-card">
+            <strong>Audience-side calls only.</strong>
+            <p>These hooks resolve from live run data after the window closes. They do not affect the simulation or agent incentives.</p>
+          </div>
+
           {predictionStats && (
             <div className="prediction-stats">
               <div>
@@ -835,12 +897,34 @@ export default function Highlights() {
             return (
               <div key={market.id} className="prediction-card">
                 <div className="prediction-row">
-                  <h3>{market.title}</h3>
+                  <div className="prediction-title-wrap">
+                    <h3>{market.title}</h3>
+                    {market.auto_generated && <span className="prediction-live-chip">Live Hook</span>}
+                  </div>
                   <span className="prediction-close">
                     Closes {market.closes_at ? formatDistanceToNow(new Date(market.closes_at), { addSuffix: true }) : 'soon'}
                   </span>
                 </div>
                 {market.description && <p>{market.description}</p>}
+                {market.stake && (
+                  <div className="prediction-copy-block">
+                    <span>Stake</span>
+                    <strong>{market.stake}</strong>
+                  </div>
+                )}
+                {market.resolution_basis && (
+                  <div className="prediction-copy-block">
+                    <span>Settles</span>
+                    <strong>{market.resolution_basis}</strong>
+                  </div>
+                )}
+                {Array.isArray(market.evidence_links) && market.evidence_links.length > 0 && (
+                  <div className="prediction-links">
+                    {market.evidence_links.map((link) => (
+                      <a key={`${market.id}-${link.href}`} href={link.href}>{link.label}</a>
+                    ))}
+                  </div>
+                )}
 
                 <div className="prediction-probability">
                   <div className="prediction-yes" style={{ width: pct(yesProb) }}>YES {pct(yesProb)}</div>
@@ -878,20 +962,32 @@ export default function Highlights() {
 
           {replayBuckets.length > 0 && activeReplayBucket && (
             <>
+              <div className="replay-intro-card">
+                <div>
+                  <strong>Replay in 60 Seconds</strong>
+                  <p>Compressed, chaptered playback from verified plot turns. Use timeline mode when you want the full 24-hour scrub.</p>
+                </div>
+                <span>
+                  {replayStoryMoments.length > 0
+                    ? `${replayStoryMoments.length} curated moments`
+                    : `${replayBuckets.length} timeline slices`}
+                </span>
+              </div>
+
               <div className="replay-mode-toggle">
-                <button
-                  type="button"
-                  className={`tab-btn ${replayMode === 'timeline' ? 'active' : ''}`}
-                  onClick={() => setReplayMode('timeline')}
-                >
-                  Replay Timeline
-                </button>
                 <button
                   type="button"
                   className={`tab-btn ${replayMode === 'story60' ? 'active' : ''}`}
                   onClick={() => setReplayMode('story60')}
                 >
                   Replay in 60 Seconds
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${replayMode === 'timeline' ? 'active' : ''}`}
+                  onClick={() => setReplayMode('timeline')}
+                >
+                  Replay Timeline
                 </button>
               </div>
 
@@ -1072,7 +1168,7 @@ export default function Highlights() {
                     <div className="replay-header">
                       <h3>Replay in 60 Seconds</h3>
                       <span>
-                        {replayStoryMoments.length} curated moments · chaptered narrative
+                        {replayStoryMoments.length} curated moments · chaptered narrative · about one minute to scan
                       </span>
                     </div>
 
@@ -1080,6 +1176,32 @@ export default function Highlights() {
                       <div className="empty-state compact">No curated moments available yet.</div>
                     ) : (
                       <>
+                        <div className="story-chapter-strip">
+                          {replayStoryChapters.map((chapter) => {
+                            const isActive = chapter.label === activeStoryMoment.chapter
+                            return (
+                              <button
+                                key={`chapter-${chapter.label}`}
+                                type="button"
+                                className={`story-chapter-item ${isActive ? 'active' : ''}`}
+                                onClick={() => {
+                                  const nextIndex = replayStoryMoments.findIndex(
+                                    (turn) => Number(turn?.event_id || 0) === Number(chapter.lead_event_id || 0)
+                                  )
+                                  if (nextIndex >= 0) {
+                                    setStoryMomentIndex(nextIndex)
+                                    setSelectedReplayEventId(Number(replayStoryMoments[nextIndex]?.event_id || 0))
+                                  }
+                                }}
+                              >
+                                <span>{chapter.label}</span>
+                                <strong>{chapter.count} moment{chapter.count === 1 ? '' : 's'}</strong>
+                                {chapter.description && <em>{chapter.description}</em>}
+                              </button>
+                            )
+                          })}
+                        </div>
+
                         <div className="story60-controls">
                           <button
                             type="button"
@@ -1121,6 +1243,9 @@ export default function Highlights() {
                             <span className="plot-turn-salience">Signal {activeStoryMoment.salience}</span>
                           </div>
                           <p>{activeStoryMoment.description}</p>
+                          {activeStoryMoment.chapter_description && (
+                            <p className="story60-chapter-copy">{activeStoryMoment.chapter_description}</p>
+                          )}
                           <div className="plot-turn-meta">
                             <span>{(activeStoryMoment.category || 'notable').replace(/_/g, ' ')}</span>
                             <span>
@@ -1177,6 +1302,9 @@ export default function Highlights() {
                       <div className="empty-state compact">Select a moment to inspect impact and evidence.</div>
                     ) : (
                       <>
+                        {activeReplayMoment.chapter && (
+                          <span className="why-chapter-kicker">{activeReplayMoment.chapter}</span>
+                        )}
                         <p className="why-title">{activeReplayMoment.title}</p>
                         <p className="why-copy">{activeStoryMoment?.why_this_matters || getWhyThisMatters(activeReplayMoment)}</p>
                         {activeReplayMomentDeltas.length > 0 && (
@@ -1305,6 +1433,22 @@ export default function Highlights() {
           gap: var(--spacing-md);
         }
 
+        .featured-intro {
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-lg);
+          padding: var(--spacing-lg);
+        }
+
+        .featured-intro h3 {
+          margin-bottom: 0.35rem;
+        }
+
+        .featured-intro p {
+          margin: 0;
+          color: var(--text-secondary);
+        }
+
         .featured-card {
           background: var(--bg-card);
           border: 1px solid var(--border-color);
@@ -1384,6 +1528,14 @@ export default function Highlights() {
         .featured-description {
           color: var(--text-secondary);
           line-height: 1.6;
+        }
+
+        .featured-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          margin-top: var(--spacing-md);
+          flex-wrap: wrap;
         }
 
         .summary-card {
@@ -1580,6 +1732,24 @@ export default function Highlights() {
           gap: var(--spacing-md);
         }
 
+        .prediction-intro-card {
+          padding: var(--spacing-lg);
+          border-radius: var(--radius-lg);
+          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid var(--border-color);
+        }
+
+        .prediction-intro-card strong {
+          display: block;
+          margin-bottom: 0.35rem;
+        }
+
+        .prediction-intro-card p {
+          margin: 0;
+          color: var(--text-secondary);
+          line-height: 1.55;
+        }
+
         .prediction-stats {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1613,13 +1783,33 @@ export default function Highlights() {
           display: flex;
           justify-content: space-between;
           gap: var(--spacing-sm);
-          align-items: baseline;
+          align-items: flex-start;
           margin-bottom: var(--spacing-xs);
+        }
+
+        .prediction-title-wrap {
+          display: flex;
+          flex-direction: column;
+          gap: 0.45rem;
         }
 
         .prediction-row h3 {
           margin: 0;
           font-size: 1rem;
+        }
+
+        .prediction-live-chip {
+          display: inline-flex;
+          align-items: center;
+          width: fit-content;
+          padding: 0.2rem 0.55rem;
+          border-radius: 999px;
+          font-size: 0.68rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.08);
         }
 
         .prediction-close {
@@ -1632,6 +1822,42 @@ export default function Highlights() {
           margin: 0;
           color: var(--text-secondary);
           font-size: 0.9rem;
+        }
+
+        .prediction-copy-block {
+          display: grid;
+          gap: 0.3rem;
+          margin-top: var(--spacing-sm);
+        }
+
+        .prediction-copy-block span {
+          font-size: 0.68rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--text-muted);
+        }
+
+        .prediction-copy-block strong {
+          font-size: 0.9rem;
+          line-height: 1.5;
+          color: var(--text-primary);
+        }
+
+        .prediction-links {
+          display: flex;
+          gap: var(--spacing-md);
+          flex-wrap: wrap;
+          margin-top: var(--spacing-sm);
+        }
+
+        .prediction-links a {
+          color: var(--text-muted);
+          text-decoration: none;
+          font-size: 0.82rem;
+        }
+
+        .prediction-links a:hover {
+          color: var(--text-primary);
         }
 
         .prediction-probability {
@@ -1688,6 +1914,43 @@ export default function Highlights() {
           display: flex;
           flex-direction: column;
           gap: var(--spacing-md);
+        }
+
+        .replay-intro-card {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: var(--spacing-md);
+          padding: var(--spacing-md);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: var(--radius-lg);
+          background:
+            radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 45%),
+            rgba(255, 255, 255, 0.03);
+        }
+
+        .replay-intro-card strong {
+          display: block;
+          margin-bottom: 0.35rem;
+          font-size: 0.96rem;
+          color: var(--text-primary);
+        }
+
+        .replay-intro-card p {
+          margin: 0;
+          max-width: 44rem;
+          color: var(--text-secondary);
+          font-size: 0.86rem;
+          line-height: 1.5;
+        }
+
+        .replay-intro-card span {
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          border-radius: var(--radius-full);
+          padding: 0.25rem 0.7rem;
+          color: #bfdbfe;
+          font-size: 0.72rem;
+          white-space: nowrap;
         }
 
         .replay-mode-toggle {
@@ -1860,8 +2123,56 @@ export default function Highlights() {
           font-size: 0.82rem;
         }
 
+        .story-chapter-strip {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+          gap: var(--spacing-sm);
+        }
+
+        .story-chapter-item {
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: var(--radius-md);
+          background: rgba(255, 255, 255, 0.03);
+          color: var(--text-primary);
+          text-align: left;
+          padding: var(--spacing-sm);
+          display: grid;
+          gap: 0.22rem;
+          cursor: pointer;
+        }
+
+        .story-chapter-item span {
+          font-size: 0.68rem;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          color: var(--text-muted);
+        }
+
+        .story-chapter-item strong {
+          font-size: 0.86rem;
+        }
+
+        .story-chapter-item em {
+          font-size: 0.75rem;
+          line-height: 1.4;
+          color: var(--text-secondary);
+          font-style: normal;
+        }
+
+        .story-chapter-item.active {
+          border-color: rgba(96, 165, 250, 0.4);
+          background: rgba(59, 130, 246, 0.12);
+        }
+
         .story60-card {
           margin: 0;
+        }
+
+        .story60-chapter-copy {
+          margin: 0;
+          color: var(--text-secondary);
+          font-size: 0.82rem;
+          line-height: 1.45;
         }
 
         .story-chapter-badge {
@@ -1946,6 +2257,18 @@ export default function Highlights() {
           font-size: 1rem;
           font-weight: 600;
           color: var(--text-primary);
+        }
+
+        .why-chapter-kicker {
+          display: inline-flex;
+          align-self: flex-start;
+          border-radius: var(--radius-full);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          padding: 0.18rem 0.55rem;
+          color: #bfdbfe;
+          font-size: 0.68rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
         }
 
         .why-copy {
@@ -2062,6 +2385,10 @@ export default function Highlights() {
 
           .replay-focus-layout {
             grid-template-columns: 1fr;
+          }
+
+          .replay-intro-card {
+            flex-direction: column;
           }
 
           .why-panel {

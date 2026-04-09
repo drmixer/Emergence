@@ -15,6 +15,7 @@ import { api } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 import GlossaryTooltip from '../components/GlossaryTooltip'
+import { getStoryReplayHref } from '../utils/bestMoments'
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString()
@@ -285,6 +286,9 @@ export default function RunDetail() {
           <span>{runId || 'unknown-run'}</span>
         </div>
         <div className="run-topbar-actions">
+          <Link className="btn btn-secondary" to={getStoryReplayHref(runId)}>
+            Replay in 60 Seconds
+          </Link>
           <button type="button" className="btn btn-secondary run-share-btn" onClick={shareRun}>
             <Share2 size={14} />
             Share Run

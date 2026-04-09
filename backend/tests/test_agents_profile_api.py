@@ -56,6 +56,17 @@ def test_agent_detail_includes_profile_stats_and_carryover_lineage():
     db = _build_db_session()
     now = now_utc()
 
+    counterpart = Agent(
+        agent_number=7,
+        display_name="Beacon-07",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="stability",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=3),
+        last_active_at=now,
+    )
     agent = Agent(
         agent_number=22,
         display_name="Nova-22",
@@ -67,19 +78,29 @@ def test_agent_detail_includes_profile_stats_and_carryover_lineage():
         created_at=now - timedelta(days=5),
         last_active_at=now,
     )
-    db.add(agent)
+    db.add_all([counterpart, agent])
     db.flush()
 
     db.add_all(
         [
+            AgentInventory(agent_id=counterpart.id, resource_type="food", quantity=12),
+            AgentInventory(agent_id=counterpart.id, resource_type="energy", quantity=11),
+            AgentInventory(agent_id=counterpart.id, resource_type="materials", quantity=6),
             AgentInventory(agent_id=agent.id, resource_type="food", quantity=42),
             AgentInventory(agent_id=agent.id, resource_type="energy", quantity=17),
             AgentInventory(agent_id=agent.id, resource_type="materials", quantity=8),
             Event(agent_id=agent.id, event_type="work", description="did work"),
             Event(agent_id=agent.id, event_type="invalid_action", description="bad action"),
             Event(agent_id=agent.id, event_type="law_passed", description="passed law"),
+            Event(
+                agent_id=agent.id,
+                event_type="trade",
+                description="sent emergency food support",
+                event_metadata={"action": {"recipient_agent_id": 7}},
+            ),
             Message(author_agent_id=agent.id, content="hello", message_type="forum_post"),
             Message(author_agent_id=agent.id, content="reply", message_type="forum_reply"),
+            Message(author_agent_id=agent.id, recipient_agent_id=counterpart.id, content="coordination ping", message_type="direct_message"),
         ]
     )
 
@@ -123,11 +144,11 @@ def test_agent_detail_includes_profile_stats_and_carryover_lineage():
     assert response.status_code == 200
     body = response.json()
     stats = body["profile_stats"]
-    assert stats["total_actions"] == 3
-    assert stats["meaningful_actions"] == 1
+    assert stats["total_actions"] == 4
+    assert stats["meaningful_actions"] == 2
     assert stats["invalid_actions"] == 1
-    assert stats["invalid_action_rate"] == 0.3333
-    assert stats["messages_authored"] == 2
+    assert stats["invalid_action_rate"] == 0.25
+    assert stats["messages_authored"] == 3
     assert stats["proposals_created"] == 1
     assert stats["votes_cast"] == 1
     assert stats["laws_passed"] == 1
@@ -140,6 +161,11 @@ def test_agent_detail_includes_profile_stats_and_carryover_lineage():
     assert lineage["is_carryover"] is True
     assert lineage["is_fresh"] is False
     assert lineage["parent_agent_number"] == 22
+
+    legibility = body["legibility"]
+    assert legibility["archetype"]["title"] == "Institution Builder"
+    assert legibility["danger"]["level"] == "stable"
+    assert legibility["relationships"]["allies"][0]["agent_number"] == 7
 
     db.close()
 
@@ -172,6 +198,14 @@ def test_list_agents_includes_lineage_fields_for_current_season():
     )
     db.add_all([agent_1, agent_2])
     db.flush()
+    db.add_all(
+        [
+            AgentInventory(agent_id=agent_1.id, resource_type="food", quantity=8),
+            AgentInventory(agent_id=agent_1.id, resource_type="energy", quantity=8),
+            AgentInventory(agent_id=agent_2.id, resource_type="food", quantity=0),
+            AgentInventory(agent_id=agent_2.id, resource_type="energy", quantity=0),
+        ]
+    )
 
     db.add(
         SimulationRun(
@@ -223,6 +257,8 @@ def test_list_agents_includes_lineage_fields_for_current_season():
     assert second["lineage_is_fresh"] is True
     assert second["lineage_parent_agent_number"] is None
     assert second["lineage_season_id"] == "season_01"
+    assert first["legibility"]["danger"]["level"] == "stable"
+    assert second["legibility"]["danger"]["level"] == "critical"
 
     db.close()
 
@@ -258,5 +294,6 @@ def test_agent_detail_lineage_defaults_when_missing():
     assert body["lineage"]["parent_agent_number"] is None
     assert body["profile_stats"]["total_actions"] == 0
     assert body["profile_stats"]["invalid_action_rate"] == 0.0
+    assert body["legibility"]["archetype"]["title"] == "Survivor"
 
     db.close()

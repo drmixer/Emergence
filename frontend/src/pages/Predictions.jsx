@@ -178,8 +178,16 @@ export default function Predictions() {
                     Prediction Market
                 </h1>
                 <p className="page-description">
-                    Bet Emergence Points (EP) on outcomes. Prove you understand the simulation better than anyone!
+                    Audience-side prediction hooks over live run outcomes. Picks do not influence the simulation.
                 </p>
+            </div>
+
+            <div className="prediction-intro">
+                <div>
+                    <strong>Come back when these settle.</strong>
+                    <p>Each live hook resolves from public run evidence after the clock runs out: law passes, reserve shortfalls, deaths, and at-risk agent survival.</p>
+                </div>
+                <span className="prediction-intro-note">Virtual EP only. No effect on agent incentives.</span>
             </div>
 
             {/* User Stats Bar */}
@@ -272,9 +280,17 @@ export default function Predictions() {
                                         onClick={() => isOpen && openBetModal(market)}
                                     >
                                         <div className="market-header">
-                                            <div className={`market-type-badge ${market.market_type}`}>
-                                                <Icon size={14} />
-                                                {marketTypeLabels[market.market_type]}
+                                            <div className="market-badges">
+                                                <div className={`market-type-badge ${market.market_type}`}>
+                                                    <Icon size={14} />
+                                                    {marketTypeLabels[market.market_type]}
+                                                </div>
+                                                {market.auto_generated && (
+                                                    <div className="market-live-badge">
+                                                        <Sparkles size={14} />
+                                                        Live Hook
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="market-meta">
                                                 {isOpen ? (
@@ -294,6 +310,37 @@ export default function Predictions() {
                                         <h3 className="market-title">{market.title}</h3>
                                         {market.description && (
                                             <p className="market-description">{market.description}</p>
+                                        )}
+                                        {(market.stake || market.why_this_matters || market.resolution_basis) && (
+                                            <div className="market-context">
+                                                {market.stake && (
+                                                    <div className="market-context-row">
+                                                        <span>Stake</span>
+                                                        <p>{market.stake}</p>
+                                                    </div>
+                                                )}
+                                                {market.why_this_matters && (
+                                                    <div className="market-context-row">
+                                                        <span>Why Watch</span>
+                                                        <p>{market.why_this_matters}</p>
+                                                    </div>
+                                                )}
+                                                {market.resolution_basis && (
+                                                    <div className="market-context-row">
+                                                        <span>Settles</span>
+                                                        <p>{market.resolution_basis}</p>
+                                                    </div>
+                                                )}
+                                                {Array.isArray(market.evidence_links) && market.evidence_links.length > 0 && (
+                                                    <div className="market-evidence">
+                                                        {market.evidence_links.map((link) => (
+                                                            <a key={`${market.id}-${link.href}`} href={link.href}>
+                                                                {link.label}
+                                                            </a>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
                                         )}
 
                                         <div className="probability-bar">
@@ -378,6 +425,9 @@ export default function Predictions() {
                         <div className="modal-header">
                             <h2>Place Your Bet</h2>
                             <p className="modal-subtitle">{selectedMarket.title}</p>
+                            {selectedMarket.resolution_basis && (
+                                <p className="modal-resolution">{selectedMarket.resolution_basis}</p>
+                            )}
                         </div>
 
                         <div className="bet-options">

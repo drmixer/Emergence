@@ -26,6 +26,37 @@ def _sample_snapshot() -> dict[str, object]:
         "laws_passed": 12,
         "deaths": 9,
         "verification_state": "verified",
+        "top_actors": [
+            {"display_name": "Nova-22", "actions": 48, "agent_number": 22},
+            {"display_name": "Beacon-07", "actions": 35, "agent_number": 7},
+        ],
+        "recent_laws": [
+            {
+                "id": 14,
+                "title": "Reserve Rationing Act",
+                "description": "Cuts reserve draws during low-supply cycles.",
+                "author": "Nova-22",
+            }
+        ],
+        "recent_deaths": [
+            {"event_id": 9003, "display_name": "Cinder-04", "agent_number": 4},
+        ],
+        "recent_dormancies": [
+            {"event_id": 9004, "display_name": "Lumen-09", "agent_number": 9},
+        ],
+        "recent_revivals": [
+            {"event_id": 9005, "display_name": "Beacon-07", "agent_number": 7},
+        ],
+        "risk_watch": [
+            {
+                "display_name": "Lumen-09",
+                "agent_number": 9,
+                "level": "critical",
+                "level_label": "At Risk",
+                "food": 0.5,
+                "energy": 0.25,
+            }
+        ],
         "traces": [
             {"event_id": 9001, "event_type": "create_proposal", "description": "Coalition proposal", "created_at": None},
             {"event_id": 9002, "event_type": "forum_post", "description": "Public post", "created_at": None},
@@ -87,6 +118,24 @@ def test_render_markdown_outputs_claim_and_evidence_lines():
     assert "- Claim:" in markdown
     assert "Evidence:" in markdown
     assert "Run Evidence API" in markdown
+    assert "Who Rose and Who Fell" in markdown
+    assert "Risk Next" in markdown
+
+
+def test_weekly_digest_summary_reads_like_episode_setup():
+    start = datetime(2026, 2, 2, 15, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 2, 9, 15, 0, tzinfo=timezone.utc)
+
+    summary = weekly_digest._build_digest_summary(
+        run_id="run-20260209T150000Z",
+        window_start=start,
+        window_end=end,
+        snapshot=_sample_snapshot(),
+    )
+
+    assert "dominant story was survival pressure" in summary
+    assert "Reserve Rationing Act" in summary
+    assert "Lumen-09" in summary
 
 
 def test_evidence_gate_reports_insufficient_evidence():

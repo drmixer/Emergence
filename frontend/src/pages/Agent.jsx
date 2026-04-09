@@ -69,6 +69,12 @@ export default function Agent() {
     const displayName = formatAgentDisplayLabel(agent)
     const profileStats = (agent && typeof agent.profile_stats === 'object') ? agent.profile_stats : {}
     const lineage = (agent && typeof agent.lineage === 'object') ? agent.lineage : {}
+    const legibility = (agent && typeof agent.legibility === 'object' && agent.legibility) ? agent.legibility : {}
+    const archetype = (legibility.archetype && typeof legibility.archetype === 'object') ? legibility.archetype : {}
+    const danger = (legibility.danger && typeof legibility.danger === 'object') ? legibility.danger : {}
+    const relationships = (legibility.relationships && typeof legibility.relationships === 'object') ? legibility.relationships : {}
+    const allies = Array.isArray(relationships.allies) ? relationships.allies : []
+    const rivals = Array.isArray(relationships.rivals) ? relationships.rivals : []
     const invalidActionRatePercent = Number(profileStats.invalid_action_rate || 0) * 100
     const daysSinceCreated = Number(profileStats.days_since_created || 0)
     const continuityBadges = []
@@ -131,6 +137,7 @@ export default function Agent() {
                         <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
                         <span className={`badge badge-tier-${agent.tier}`}>Tier {agent.tier}</span>
                         <span className={`badge badge-${agent.status}`}>{agent.status}</span>
+                        <span className={`legibility-pill ${danger.level || 'stable'}`}>{danger.label || 'Stable'}</span>
                         <PersonalityBadge personality={agent.personality_type} />
                     </div>
                     <div className="agent-identity-note" title={AGENT_ALIAS_HELP_TEXT}>
@@ -157,6 +164,61 @@ export default function Agent() {
                     )}
                     <div className="agent-profile-actions">
                         <SubscribeButton agent={agent} size="medium" />
+                    </div>
+                </div>
+            </div>
+
+            <div className="legibility-grid">
+                <div className="card legibility-card">
+                    <div className="legibility-heading">Public Archetype</div>
+                    <div className="legibility-title">{archetype.title || 'Generalist'}</div>
+                    <p>{archetype.summary || 'Observed behavior is still mixed.'}</p>
+                    <div className="legibility-footnote">
+                        Derived from the last {Number(legibility.derived_from_hours || 72)} hours of visible behavior.
+                    </div>
+                </div>
+
+                <div className="card legibility-card">
+                    <div className="legibility-heading">Danger State</div>
+                    <div className="legibility-danger-row">
+                        <span className={`legibility-pill ${danger.level || 'stable'}`}>{danger.label || 'Stable'}</span>
+                        <span className="danger-resources">
+                            Food {Number(danger.food || 0).toFixed(2)} · Energy {Number(danger.energy || 0).toFixed(2)}
+                        </span>
+                    </div>
+                    <p>{danger.reason || 'No immediate danger signal detected.'}</p>
+                </div>
+            </div>
+
+            <div className="card relationships-card">
+                <div className="legibility-heading">Relationship Read</div>
+                <div className="relationship-columns">
+                    <div className="relationship-column">
+                        <h4>Aligned With</h4>
+                        {allies.length === 0 && <div className="relationship-empty">No strong alliance signal yet.</div>}
+                        {allies.map((item) => (
+                            <div key={`ally-${item.agent_number}`} className="relationship-item">
+                                <div className="relationship-main">
+                                    <strong>{item.display_name}</strong>
+                                    <span>{item.relationship}</span>
+                                </div>
+                                <div className="relationship-evidence">{item.evidence}</div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="relationship-column">
+                        <h4>Opposed To</h4>
+                        {rivals.length === 0 && <div className="relationship-empty">No strong rivalry signal yet.</div>}
+                        {rivals.map((item) => (
+                            <div key={`rival-${item.agent_number}`} className="relationship-item">
+                                <div className="relationship-main">
+                                    <strong>{item.display_name}</strong>
+                                    <span>{item.relationship}</span>
+                                </div>
+                                <div className="relationship-evidence">{item.evidence}</div>
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>
@@ -356,7 +418,93 @@ export default function Agent() {
           gap: var(--spacing-md);
           flex-wrap: wrap;
         }
-        
+
+        .legibility-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: var(--spacing-lg);
+          margin-bottom: var(--spacing-xl);
+        }
+
+        .legibility-card,
+        .relationships-card {
+          padding: var(--spacing-lg);
+        }
+
+        .legibility-heading {
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--text-muted);
+          margin-bottom: 0.45rem;
+        }
+
+        .legibility-title {
+          font-size: 1.2rem;
+          font-weight: 700;
+          color: var(--text-primary);
+          margin-bottom: 0.45rem;
+        }
+
+        .legibility-card p {
+          margin: 0;
+          color: var(--text-secondary);
+          line-height: 1.6;
+        }
+
+        .legibility-footnote {
+          margin-top: 0.85rem;
+          color: var(--text-muted);
+          font-size: 0.78rem;
+        }
+
+        .legibility-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.28rem 0.65rem;
+          border-radius: 999px;
+          font-size: 0.74rem;
+          font-weight: 600;
+          border: 1px solid transparent;
+        }
+
+        .legibility-pill.stable {
+          color: #0f5132;
+          background: rgba(34, 197, 94, 0.14);
+          border-color: rgba(34, 197, 94, 0.36);
+        }
+
+        .legibility-pill.elevated {
+          color: #92400e;
+          background: rgba(245, 158, 11, 0.14);
+          border-color: rgba(245, 158, 11, 0.34);
+        }
+
+        .legibility-pill.critical {
+          color: #991b1b;
+          background: rgba(239, 68, 68, 0.14);
+          border-color: rgba(239, 68, 68, 0.34);
+        }
+
+        .legibility-pill.deceased {
+          color: #5b6473;
+          background: rgba(100, 116, 139, 0.18);
+          border-color: rgba(100, 116, 139, 0.34);
+        }
+
+        .legibility-danger-row {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          flex-wrap: wrap;
+          margin-bottom: 0.75rem;
+        }
+
+        .danger-resources {
+          color: var(--text-muted);
+          font-size: 0.82rem;
+        }
+
         .agent-profile-actions {
           margin-top: var(--spacing-md);
         }
@@ -407,6 +555,52 @@ export default function Agent() {
 
         .profile-stats-card {
           margin-bottom: var(--spacing-xl);
+        }
+
+        .relationships-card {
+          margin-bottom: var(--spacing-xl);
+        }
+
+        .relationship-columns {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: var(--spacing-lg);
+        }
+
+        .relationship-column h4 {
+          margin-bottom: var(--spacing-sm);
+        }
+
+        .relationship-item {
+          padding: 0.85rem 1rem;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-md);
+        }
+
+        .relationship-item + .relationship-item {
+          margin-top: var(--spacing-sm);
+        }
+
+        .relationship-main {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--spacing-sm);
+          flex-wrap: wrap;
+          margin-bottom: 0.3rem;
+        }
+
+        .relationship-main span {
+          color: var(--text-secondary);
+          font-size: 0.82rem;
+        }
+
+        .relationship-evidence,
+        .relationship-empty {
+          color: var(--text-muted);
+          font-size: 0.8rem;
+          line-height: 1.45;
         }
 
         .profile-stats-card h3 {
@@ -515,6 +709,24 @@ export default function Agent() {
         
         .vote-proposal {
           flex: 1;
+        }
+
+        @media (max-width: 768px) {
+          .agent-detail-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: var(--spacing-md);
+          }
+
+          .agent-profile-card {
+            flex-direction: column;
+            text-align: center;
+          }
+
+          .legibility-grid,
+          .relationship-columns {
+            grid-template-columns: 1fr;
+          }
         }
       `}</style>
         </div>

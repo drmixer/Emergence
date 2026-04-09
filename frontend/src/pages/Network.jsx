@@ -450,6 +450,30 @@ export default function Network() {
                                     <span>Connections</span>
                                     <span>{selectedNode.data.connectionCount}</span>
                                 </div>
+                                {selectedNode.data?.legibility?.archetype?.title && (
+                                    <div className="stat-row">
+                                        <span>Archetype</span>
+                                        <span>{selectedNode.data.legibility.archetype.title}</span>
+                                    </div>
+                                )}
+                                {selectedNode.data?.legibility?.danger?.label && (
+                                    <div className="stat-row">
+                                        <span>Danger</span>
+                                        <span>{selectedNode.data.legibility.danger.label}</span>
+                                    </div>
+                                )}
+                                {selectedNode.data?.legibility?.relationships?.allies?.[0] && (
+                                    <div className="stat-row">
+                                        <span>Aligned</span>
+                                        <span>{selectedNode.data.legibility.relationships.allies[0].display_name}</span>
+                                    </div>
+                                )}
+                                {selectedNode.data?.legibility?.relationships?.rivals?.[0] && (
+                                    <div className="stat-row">
+                                        <span>Opposed</span>
+                                        <span>{selectedNode.data.legibility.relationships.rivals[0].display_name}</span>
+                                    </div>
+                                )}
                             </div>
                         </Panel>
                     )}

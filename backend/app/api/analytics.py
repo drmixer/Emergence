@@ -94,6 +94,21 @@ PLOT_TURN_BASE_SCORES = {
     "create_proposal": 60,
     "vote_enforcement": 72,
 }
+BEST_MOMENT_CATEGORY_PRIORITY = {
+    "crisis": 5,
+    "conflict": 4,
+    "governance": 4,
+    "alliance": 3,
+    "cooperation": 3,
+    "notable": 2,
+}
+REPLAY_STORY_CHAPTERS = ("Trigger", "Escalation", "Turning Point", "Outcome")
+REPLAY_STORY_CHAPTER_DESCRIPTIONS = {
+    "Trigger": "The first decisive shift that made this run worth following.",
+    "Escalation": "Pressure built and the run stopped looking stable.",
+    "Turning Point": "This is where incentives or survival odds visibly changed.",
+    "Outcome": "What the run looks like after the decisive swing.",
+}
 
 
 def _gini(values):
@@ -483,6 +498,318 @@ def _serialize_plot_turn(event: Event, score: int, actor_label: str | None = Non
         "created_at": ensure_utc(event.created_at).isoformat() if event.created_at else None,
         "metadata": event.event_metadata or {},
     }
+
+
+def _plot_turn_created_at_ms(payload: dict[str, Any]) -> int:
+    timestamp = payload.get("created_at")
+    if not timestamp:
+        return 0
+    try:
+        value = ensure_utc(datetime.fromisoformat(str(timestamp)))
+    except ValueError:
+        return 0
+    return int(value.timestamp() * 1000) if value else 0
+
+
+def _best_moment_run_id(payload: dict[str, Any]) -> str:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    runtime = metadata.get("runtime") if isinstance(metadata.get("runtime"), dict) else {}
+    return str(runtime.get("run_id") or "").strip()
+
+
+def _best_moment_label(payload: dict[str, Any]) -> str:
+    event_type = str(payload.get("event_type") or "")
+    category = str(payload.get("category") or "")
+
+    if event_type == "agent_died":
+        return "Permanent death"
+    if event_type == "became_dormant":
+        return "Dormancy"
+    if event_type in {"agent_revived", "awakened"}:
+        return "Revival"
+    if event_type == "law_passed":
+        return "Law passed"
+    if event_type == "proposal_resolved":
+        return "Vote resolved"
+    if event_type == "world_event":
+        return "World shock"
+    if category == "conflict":
+        return "Conflict spike"
+    if category == "alliance":
+        return "Alliance shift"
+    if category == "cooperation":
+        return "Coordination swing"
+    if category == "governance":
+        return "Governance turn"
+    if category == "crisis":
+        return "System pressure"
+    return "Best moment"
+
+
+def _best_moment_stake(payload: dict[str, Any]) -> str:
+    event_type = str(payload.get("event_type") or "")
+    category = str(payload.get("category") or "")
+
+    if event_type == "agent_died":
+        return "A permanent loss narrowed the set of possible outcomes."
+    if event_type == "became_dormant":
+        return "A vulnerable actor dropped out of active play and survival pressure increased."
+    if event_type in {"agent_revived", "awakened"}:
+        return "A return to play changed who can coordinate, trade, or vote next."
+    if event_type == "law_passed" or category == "governance":
+        return "The rules changed, so downstream incentives and behavior likely changed too."
+    if category == "crisis" or event_type == "world_event":
+        return "A system-wide shock changed constraints for many agents at once."
+    if category == "conflict":
+        return "Escalation can rapidly reorder trust, coalitions, and survival odds."
+    if category in {"alliance", "cooperation"}:
+        return "Coordination power shifted and the run may now favor a different bloc."
+    return "This moment changed momentum and helps explain what happened next."
+
+
+def _replay_story_chapter_label(index: int, total: int) -> str:
+    if total <= 1:
+        return REPLAY_STORY_CHAPTERS[0]
+    ratio = index / max(1, total - 1)
+    if ratio < 0.25:
+        return REPLAY_STORY_CHAPTERS[0]
+    if ratio < 0.55:
+        return REPLAY_STORY_CHAPTERS[1]
+    if ratio < 0.8:
+        return REPLAY_STORY_CHAPTERS[2]
+    return REPLAY_STORY_CHAPTERS[3]
+
+
+def _replay_story_why_this_matters(payload: dict[str, Any]) -> str:
+    event_type = str(payload.get("event_type") or "")
+    category = str(payload.get("category") or "")
+
+    if event_type == "law_passed" or category == "governance":
+        return "Governance changed the rule set, so incentives and downstream behavior likely shifted after this moment."
+    if category == "crisis" or event_type == "world_event":
+        return "A system-level shock altered constraints for many agents at once and can redirect the entire run trajectory."
+    if category == "conflict":
+        return "Conflict spikes coordination costs and can rapidly reorder faction trust, trade flow, and survival outcomes."
+    if category in {"alliance", "cooperation"}:
+        return "Coordination and alliances change who can execute strategy, absorb shocks, and control governance outcomes."
+    return "This high-salience event changed momentum and helps explain why subsequent actions unfolded the way they did."
+
+
+def _replay_story_state_deltas(payload: dict[str, Any]) -> list[dict[str, str]]:
+    if not isinstance(payload, dict):
+        return []
+
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    event_type = str(payload.get("event_type") or "")
+    category = str(payload.get("category") or "")
+    result = str(metadata.get("result") or "").strip().lower()
+    deltas: list[dict[str, str]] = []
+
+    if event_type == "law_passed":
+        deltas.append({"label": "Laws", "value": "+1", "tone": "up"})
+
+    if event_type == "agent_died":
+        deltas.append({"label": "Deaths", "value": "+1", "tone": "down"})
+
+    if event_type == "proposal_resolved":
+        value = "Resolved"
+        tone = "neutral"
+        if result == "passed":
+            value = "Passed"
+            tone = "up"
+        elif result in {"failed", "expired"}:
+            value = result.title()
+            tone = "down"
+        deltas.append({"label": "Proposal", "value": value, "tone": tone})
+
+    if category in {"alliance", "cooperation"}:
+        deltas.append({"label": "Coalitions", "value": "Alignment Shift", "tone": "up"})
+
+    if category == "conflict":
+        deltas.append({"label": "Conflict", "value": "Escalation", "tone": "alert"})
+
+    if category == "crisis":
+        deltas.append({"label": "Pressure", "value": "System Shock", "tone": "alert"})
+
+    effect = metadata.get("effect") if isinstance(metadata.get("effect"), dict) else {}
+    effect_resource = str(effect.get("resource") or metadata.get("resource") or "").strip()
+    if effect_resource:
+        deltas.append(
+            {
+                "label": effect_resource[:1].upper() + effect_resource[1:],
+                "value": "Resource Swing",
+                "tone": "neutral",
+            }
+        )
+    elif (
+        effect.get("reduce_all_agents") is not None
+        or effect.get("disable_communication") is not None
+        or effect.get("consumption_modifier") is not None
+    ):
+        deltas.append({"label": "Resources", "value": "Global Shift", "tone": "alert"})
+
+    impacted_agents = int(metadata.get("affected_agents") or metadata.get("impacted_agents") or 0)
+    if impacted_agents > 0:
+        deltas.append({"label": "Impacted", "value": f"{impacted_agents} agents", "tone": "neutral"})
+
+    deduped: list[dict[str, str]] = []
+    seen_labels: set[str] = set()
+    for delta in deltas:
+        label = str(delta.get("label") or "").strip()
+        if not label or label in seen_labels:
+            continue
+        seen_labels.add(label)
+        deduped.append(delta)
+        if len(deduped) >= 4:
+            break
+    return deduped
+
+
+def _select_replay_story_payloads(turns: list[dict[str, Any]], target_count: int = 8) -> list[dict[str, Any]]:
+    clean_turns = [turn for turn in turns if int(turn.get("event_id") or 0) > 0]
+    if not clean_turns:
+        return []
+
+    max_available = min(10, len(clean_turns))
+    bounded_target = max_available
+    if len(clean_turns) >= 6:
+        bounded_target = min(max(target_count, 6), max_available)
+
+    ranked = sorted(
+        clean_turns,
+        key=lambda turn: (int(turn.get("salience") or 0), _plot_turn_created_at_ms(turn)),
+        reverse=True,
+    )
+
+    selected: list[dict[str, Any]] = []
+    category_counts: dict[str, int] = {}
+    max_per_category = max(2, (bounded_target + 2) // 3)
+
+    for turn in ranked:
+        if len(selected) >= bounded_target:
+            break
+
+        category = str(turn.get("category") or "notable")
+        current_category_count = int(category_counts.get(category, 0))
+        if current_category_count >= max_per_category:
+            continue
+
+        turn_timestamp = _plot_turn_created_at_ms(turn)
+        has_nearby_selected = any(
+            abs(_plot_turn_created_at_ms(item) - turn_timestamp) < 25 * 60 * 1000
+            for item in selected
+        )
+        if has_nearby_selected and int(turn.get("salience") or 0) < 85:
+            continue
+
+        selected.append(turn)
+        category_counts[category] = current_category_count + 1
+
+    if len(selected) < bounded_target:
+        for turn in ranked:
+            if len(selected) >= bounded_target:
+                break
+            event_id = int(turn.get("event_id") or 0)
+            if any(int(item.get("event_id") or 0) == event_id for item in selected):
+                continue
+            selected.append(turn)
+
+    selected.sort(key=_plot_turn_created_at_ms)
+
+    annotated: list[dict[str, Any]] = []
+    for index, turn in enumerate(selected):
+        chapter = _replay_story_chapter_label(index, len(selected))
+        annotated.append(
+            {
+                **turn,
+                "chapter": chapter,
+                "chapter_description": REPLAY_STORY_CHAPTER_DESCRIPTIONS.get(chapter),
+                "why_this_matters": _replay_story_why_this_matters(turn),
+                "deltas": _replay_story_state_deltas(turn),
+                "run_id": _best_moment_run_id(turn) or None,
+            }
+        )
+    return annotated
+
+
+def _build_replay_story_payload(turns: list[dict[str, Any]], target_count: int = 8) -> dict[str, Any]:
+    items = _select_replay_story_payloads(turns, target_count=target_count)
+    chapters = []
+    for label in REPLAY_STORY_CHAPTERS:
+        chapter_items = [item for item in items if str(item.get("chapter") or "") == label]
+        if not chapter_items:
+            continue
+        chapters.append(
+            {
+                "label": label,
+                "description": REPLAY_STORY_CHAPTER_DESCRIPTIONS.get(label),
+                "count": len(chapter_items),
+                "lead_event_id": int(chapter_items[0].get("event_id") or 0),
+            }
+        )
+    return {"items": items, "chapters": chapters}
+
+
+def _select_best_moments_payloads(turns: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    clean_turns = [turn for turn in turns if int(turn.get("event_id") or 0) > 0]
+    if not clean_turns:
+        return []
+
+    ranked = sorted(
+        clean_turns,
+        key=lambda turn: (
+            int(turn.get("salience") or 0),
+            int(BEST_MOMENT_CATEGORY_PRIORITY.get(str(turn.get("category") or "notable"), 1)),
+            _plot_turn_created_at_ms(turn),
+        ),
+        reverse=True,
+    )
+
+    selected: list[dict[str, Any]] = []
+    category_counts: dict[str, int] = {}
+
+    for allow_duplicate_category in (False, True):
+        for turn in ranked:
+            if len(selected) >= limit:
+                break
+            event_id = int(turn.get("event_id") or 0)
+            if any(int(item.get("event_id") or 0) == event_id for item in selected):
+                continue
+
+            category = str(turn.get("category") or "notable")
+            if not allow_duplicate_category and int(category_counts.get(category, 0)) >= 1:
+                continue
+
+            turn_timestamp = _plot_turn_created_at_ms(turn)
+            turn_event_type = str(turn.get("event_type") or "")
+            too_close_to_similar = False
+            for item in selected:
+                if str(item.get("event_type") or "") != turn_event_type:
+                    continue
+                if abs(_plot_turn_created_at_ms(item) - turn_timestamp) < 45 * 60 * 1000:
+                    too_close_to_similar = True
+                    break
+            if too_close_to_similar:
+                continue
+
+            selected.append(turn)
+            category_counts[category] = int(category_counts.get(category, 0)) + 1
+
+    curated = sorted(
+        selected,
+        key=lambda turn: (int(turn.get("salience") or 0), _plot_turn_created_at_ms(turn)),
+        reverse=True,
+    )[:limit]
+
+    return [
+        {
+            **turn,
+            "label": _best_moment_label(turn),
+            "stake": _best_moment_stake(turn),
+            "run_id": _best_moment_run_id(turn) or None,
+        }
+        for turn in curated
+    ]
 
 
 def _collect_scored_plot_turns(
@@ -949,6 +1276,78 @@ def plot_turns_replay(
             "count": len(events),
             "items": events,
             "buckets": buckets,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/plot-turns/replay-story")
+def plot_turns_replay_story(
+    hours: int = Query(24, ge=1, le=24 * 7),
+    min_salience: int = Query(55, ge=1, le=100),
+    limit: int = Query(8, ge=4, le=10),
+    run_id: Optional[str] = Query(None, max_length=64),
+):
+    """
+    Curated, chaptered replay story for a quick viewer-facing run summary.
+    """
+    now = now_utc()
+    window_start = now - timedelta(hours=hours)
+
+    db = SessionLocal()
+    try:
+        scored = _collect_scored_plot_turns(
+            db,
+            window_start=window_start,
+            now=now,
+            min_salience=min_salience,
+            candidate_limit=max(limit * 8, 240),
+            run_id=run_id,
+        )
+        story = _build_replay_story_payload([item[2] for item in scored], target_count=limit)
+        return {
+            "window_hours": hours,
+            "min_salience": min_salience,
+            "run_id": run_id,
+            "count": len(story["items"]),
+            "chapter_count": len(story["chapters"]),
+            "items": story["items"],
+            "chapters": story["chapters"],
+        }
+    finally:
+        db.close()
+
+
+@router.get("/best-moments")
+def best_moments(
+    limit: int = Query(6, ge=1, le=20),
+    hours: int = Query(72, ge=1, le=24 * 14),
+    min_salience: int = Query(55, ge=1, le=100),
+    run_id: Optional[str] = Query(None, max_length=64),
+):
+    """
+    Curated, viewer-facing top moments selected from the plot-turn salience stream.
+    """
+    now = now_utc()
+    window_start = now - timedelta(hours=hours)
+
+    db = SessionLocal()
+    try:
+        scored = _collect_scored_plot_turns(
+            db,
+            window_start=window_start,
+            now=now,
+            min_salience=min_salience,
+            candidate_limit=max(60, limit * 18),
+            run_id=run_id,
+        )
+        moments = _select_best_moments_payloads([item[2] for item in scored], limit)
+        return {
+            "window_hours": hours,
+            "min_salience": min_salience,
+            "run_id": run_id,
+            "count": len(moments),
+            "items": moments,
         }
     finally:
         db.close()

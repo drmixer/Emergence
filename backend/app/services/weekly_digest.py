@@ -6,18 +6,24 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
 
 from app.core.time import now_utc
+from app.models.models import Agent, AgentInventory, Event, Law
+from app.services.survival_config import (
+    active_energy_cost,
+    active_food_cost,
+    low_resource_warning_threshold,
+)
 
-WEEKLY_DIGEST_TEMPLATE_VERSION = "state-of-emergence-v1"
+WEEKLY_DIGEST_TEMPLATE_VERSION = "state-of-emergence-v2"
 LOCKED_WEEKLY_DIGEST_HEADINGS = (
     "Run Context and Verification",
-    "Participation and Activity",
-    "Governance and Coordination",
-    "Survival Pressure",
-    "Confidence and Next Checks",
+    "Episode Summary",
+    "Who Rose and Who Fell",
+    "What Changed",
+    "Risk Next",
 )
 
 
@@ -114,6 +120,96 @@ def _resolve_run_id(db: Session, preferred_run_id: str | None) -> str:
     return str((latest.run_id if latest else "") or "").strip() or "not-set"
 
 
+def _agent_label(agent: Agent | None) -> str:
+    if agent is None:
+        return "Unknown Agent"
+    if str(agent.display_name or "").strip():
+        return str(agent.display_name).strip()
+    return f"Agent #{int(agent.agent_number):02d}"
+
+
+def _truncate_text(value: Any, *, limit: int = 140) -> str:
+    text_value = " ".join(str(value or "").split()).strip()
+    if len(text_value) <= limit:
+        return text_value
+    return text_value[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _join_labels(labels: list[str]) -> str:
+    clean = [str(label).strip() for label in labels if str(label).strip()]
+    if not clean:
+        return ""
+    if len(clean) == 1:
+        return clean[0]
+    if len(clean) == 2:
+        return f"{clean[0]} and {clean[1]}"
+    return f"{', '.join(clean[:-1])}, and {clean[-1]}"
+
+
+def _confidence_label(total_events: int) -> str:
+    if total_events >= 1000:
+        return "high"
+    if total_events >= 250:
+        return "medium"
+    return "low"
+
+
+def _episode_focus(snapshot: dict[str, Any]) -> str:
+    deaths = int(snapshot.get("deaths") or 0)
+    dormancies = len(snapshot.get("recent_dormancies") or [])
+    laws_passed = int(snapshot.get("laws_passed") or 0)
+    proposal_actions = int(snapshot.get("proposal_actions") or 0)
+    vote_actions = int(snapshot.get("vote_actions") or 0)
+    forum_actions = int(snapshot.get("forum_actions") or 0)
+    revivals = len(snapshot.get("recent_revivals") or [])
+
+    if deaths > 0 or dormancies > 0:
+        return "survival pressure"
+    if laws_passed > 0:
+        return "rule changes"
+    if (proposal_actions + vote_actions) >= max(1, forum_actions):
+        return "governance conflict"
+    if revivals > 0:
+        return "mutual aid and recovery"
+    return "coalition positioning"
+
+
+def _build_digest_summary(
+    *,
+    run_id: str,
+    window_start: datetime,
+    window_end: datetime,
+    snapshot: dict[str, Any],
+) -> str:
+    total_events = int(snapshot.get("total_events") or 0)
+    focus = _episode_focus(snapshot)
+    recent_laws = list(snapshot.get("recent_laws") or [])
+    risk_watch = list(snapshot.get("risk_watch") or [])
+
+    summary = (
+        f"From {window_start.date().isoformat()} to {window_end.date().isoformat()} UTC, "
+        f"run `{run_id}` produced {total_events:,} run-scoped events. "
+        f"The dominant story was {focus}."
+    )
+
+    if recent_laws:
+        top_law = recent_laws[0]
+        summary += f" The clearest system shift was the passage of \"{top_law.get('title') or 'an unnamed law'}\"."
+
+    if int(snapshot.get("deaths") or 0) > 0:
+        summary += f" The window also recorded {int(snapshot.get('deaths') or 0):,} permanent deaths."
+
+    if risk_watch:
+        top_risk = risk_watch[0]
+        risk_label = str(top_risk.get("display_name") or "").strip() or _agent_label(top_risk.get("agent"))
+        summary += (
+            f" The next watchpoint is {risk_label}, "
+            f"now flagged {str(top_risk.get('level_label') or 'at risk').lower()}."
+        )
+
+    return summary
+
+
 def _collect_run_snapshot(db: Session, *, run_id: str, since: datetime) -> dict[str, Any]:
     params = {"run_id": run_id, "since_ts": since}
 
@@ -146,6 +242,33 @@ def _collect_run_snapshot(db: Session, *, run_id: str, since: datetime) -> dict[
         ),
         params,
     ).scalar()
+
+    tracked_agent_rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT agent_id
+            FROM llm_usage
+            WHERE run_id = :run_id
+              AND created_at >= :since_ts
+              AND agent_id IS NOT NULL
+            """
+        ),
+        params,
+    ).all()
+    tracked_agent_ids = [
+        int(row.agent_id)
+        for row in tracked_agent_rows
+        if row is not None and row.agent_id is not None
+    ]
+    tracked_agents = (
+        db.query(Agent)
+        .filter(Agent.id.in_(tracked_agent_ids))
+        .order_by(Agent.agent_number.asc())
+        .all()
+        if tracked_agent_ids
+        else []
+    )
+    tracked_agents_by_id = {int(agent.id): agent for agent in tracked_agents}
 
     runtime_actions = db.execute(
         text(
@@ -226,6 +349,142 @@ def _collect_run_snapshot(db: Session, *, run_id: str, since: datetime) -> dict[
             }
         )
 
+    top_actors: list[dict[str, Any]] = []
+    if tracked_agent_ids:
+        action_count_expr = func.count(Event.id).label("action_count")
+        top_actor_rows = (
+            db.query(Event.agent_id, action_count_expr)
+            .filter(
+                Event.created_at >= since,
+                Event.agent_id.in_(tracked_agent_ids),
+            )
+            .group_by(Event.agent_id)
+            .order_by(action_count_expr.desc(), Event.agent_id.asc())
+            .limit(3)
+            .all()
+        )
+        for agent_id, action_count in top_actor_rows:
+            agent = tracked_agents_by_id.get(int(agent_id))
+            if agent is None:
+                continue
+            top_actors.append(
+                {
+                    "agent": agent,
+                    "agent_number": int(agent.agent_number),
+                    "display_name": _agent_label(agent),
+                    "actions": int(action_count or 0),
+                }
+            )
+
+    recent_laws: list[dict[str, Any]] = []
+    if tracked_agent_ids:
+        law_rows = (
+            db.query(Law)
+            .filter(
+                Law.passed_at >= since,
+                Law.author_agent_id.in_(tracked_agent_ids),
+            )
+            .order_by(Law.passed_at.desc(), Law.id.desc())
+            .limit(3)
+            .all()
+        )
+        for law in law_rows:
+            author = tracked_agents_by_id.get(int(law.author_agent_id))
+            recent_laws.append(
+                {
+                    "id": int(law.id),
+                    "title": str(law.title or "").strip() or "Unnamed law",
+                    "description": _truncate_text(law.description, limit=140),
+                    "author": _agent_label(author),
+                    "passed_at": law.passed_at.isoformat() if law.passed_at else None,
+                }
+            )
+
+    recent_deaths: list[dict[str, Any]] = []
+    recent_dormancies: list[dict[str, Any]] = []
+    recent_revivals: list[dict[str, Any]] = []
+    if tracked_agent_ids:
+        fate_rows = (
+            db.query(Event)
+            .filter(
+                Event.created_at >= since,
+                Event.agent_id.in_(tracked_agent_ids),
+                Event.event_type.in_(("agent_died", "became_dormant", "agent_revived")),
+            )
+            .order_by(Event.created_at.desc(), Event.id.desc())
+            .limit(20)
+            .all()
+        )
+        for event in fate_rows:
+            agent = tracked_agents_by_id.get(int(event.agent_id)) if event.agent_id is not None else None
+            payload = {
+                "event_id": int(event.id),
+                "agent": agent,
+                "agent_number": int(agent.agent_number) if agent is not None else None,
+                "display_name": _agent_label(agent),
+                "description": _truncate_text(event.description, limit=120),
+                "created_at": event.created_at.isoformat() if event.created_at else None,
+            }
+            if event.event_type == "agent_died":
+                recent_deaths.append(payload)
+            elif event.event_type == "became_dormant":
+                recent_dormancies.append(payload)
+            elif event.event_type == "agent_revived":
+                recent_revivals.append(payload)
+
+    risk_watch: list[dict[str, Any]] = []
+    if tracked_agent_ids:
+        inventory_rows = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.agent_id.in_(tracked_agent_ids))
+            .all()
+        )
+        inventory_by_agent_id: dict[int, dict[str, float]] = {}
+        for row in inventory_rows:
+            agent_resources = inventory_by_agent_id.setdefault(int(row.agent_id), {})
+            agent_resources[str(row.resource_type)] = float(row.quantity or 0)
+
+        min_food = float(active_food_cost())
+        min_energy = float(active_energy_cost())
+        low_food = float(low_resource_warning_threshold(min_food))
+        low_energy = float(low_resource_warning_threshold(min_energy))
+
+        for agent in tracked_agents:
+            if agent.status == "dead":
+                continue
+            resources = inventory_by_agent_id.get(int(agent.id), {})
+            food = float(resources.get("food", 0.0))
+            energy = float(resources.get("energy", 0.0))
+            level = ""
+            level_label = ""
+            if agent.status == "dormant" or food < min_food or energy < min_energy:
+                level = "critical"
+                level_label = "At Risk"
+            elif food < low_food or energy < low_energy:
+                level = "elevated"
+                level_label = "Exposed"
+            if not level:
+                continue
+            risk_watch.append(
+                {
+                    "agent": agent,
+                    "agent_number": int(agent.agent_number),
+                    "display_name": _agent_label(agent),
+                    "level": level,
+                    "level_label": level_label,
+                    "food": round(food, 2),
+                    "energy": round(energy, 2),
+                    "status": str(agent.status or "").strip() or "unknown",
+                }
+            )
+        risk_watch.sort(
+            key=lambda item: (
+                0 if str(item.get("level")) == "critical" else 1,
+                float(item.get("food") or 0.0) + float(item.get("energy") or 0.0),
+                int(item.get("agent_number") or 0),
+            )
+        )
+
     return {
         "llm_calls": calls,
         "llm_success_calls": int((llm_totals.success_calls if llm_totals else 0) or 0),
@@ -243,6 +502,12 @@ def _collect_run_snapshot(db: Session, *, run_id: str, since: datetime) -> dict[
         "deaths": int((runtime_actions.deaths if runtime_actions else 0) or 0),
         "verification_state": verification_state,
         "traces": normalized_traces,
+        "top_actors": top_actors,
+        "recent_laws": recent_laws,
+        "recent_deaths": recent_deaths,
+        "recent_dormancies": recent_dormancies,
+        "recent_revivals": recent_revivals,
+        "risk_watch": risk_watch[:3],
     }
 
 
@@ -356,6 +621,7 @@ def _build_locked_sections(
     participation_trace = _first_trace_for_types(traces, {"forum_post", "forum_reply"})
     governance_trace = _first_trace_for_types(traces, {"create_proposal", "vote", "law_passed"})
     survival_trace = _first_trace_for_types(traces, {"agent_died"})
+    revival_trace = _first_trace_for_types(traces, {"agent_revived"})
 
     participation_links = _merge_evidence_links(
         base_links,
@@ -381,6 +647,14 @@ def _build_locked_sections(
             else None
         ],
     )
+    recovery_links = _merge_evidence_links(
+        base_links,
+        [
+            _trace_link(revival_trace, label_prefix="Recovery")
+            if revival_trace
+            else None
+        ],
+    )
 
     checkpoint_actions = int(snapshot.get("checkpoint_actions") or 0)
     deterministic_actions = int(snapshot.get("deterministic_actions") or 0)
@@ -392,12 +666,55 @@ def _build_locked_sections(
     )
 
     total_events = int(snapshot.get("total_events") or 0)
-    if total_events >= 1000:
-        confidence = "high"
-    elif total_events >= 250:
-        confidence = "medium"
-    else:
-        confidence = "low"
+    confidence = _confidence_label(total_events)
+    focus = _episode_focus(snapshot)
+    top_actors = list(snapshot.get("top_actors") or [])
+    recent_deaths = list(snapshot.get("recent_deaths") or [])
+    recent_dormancies = list(snapshot.get("recent_dormancies") or [])
+    recent_revivals = list(snapshot.get("recent_revivals") or [])
+    recent_laws = list(snapshot.get("recent_laws") or [])
+    risk_watch = list(snapshot.get("risk_watch") or [])
+
+    top_actor_labels = _join_labels([str(item.get("display_name") or "") for item in top_actors[:2]])
+    fall_labels = _join_labels(
+        [str(item.get("display_name") or "") for item in (recent_deaths[:2] + recent_dormancies[:2])]
+    )
+
+    lead_law = recent_laws[0] if recent_laws else None
+    law_links = _merge_evidence_links(
+        governance_links,
+        [
+            {
+                "label": f"Law #{int(lead_law.get('id') or 0)}",
+                "href": f"/laws/{int(lead_law.get('id') or 0)}",
+            }
+            if lead_law and int(lead_law.get("id") or 0) > 0
+            else None
+        ],
+    )
+
+    risk_links = _merge_evidence_links(
+        base_links,
+        [
+            {
+                "label": f"Agent #{int(item.get('agent_number') or 0):02d}",
+                "href": f"/agents/{int(item.get('agent_number') or 0)}",
+            }
+            for item in risk_watch
+            if int(item.get("agent_number") or 0) > 0
+        ],
+    )
+    actor_links = _merge_evidence_links(
+        participation_links,
+        [
+            {
+                "label": f"Agent #{int(item.get('agent_number') or 0):02d}",
+                "href": f"/agents/{int(item.get('agent_number') or 0)}",
+            }
+            for item in top_actors
+            if int(item.get("agent_number") or 0) > 0
+        ],
+    )
 
     sections: list[dict[str, Any]] = [
         _claims_to_archive_section(
@@ -424,15 +741,19 @@ def _build_locked_sections(
             [
                 _claim_block(
                     (
-                        f"{int(snapshot.get('total_events') or 0):,} run-scoped events were observed, "
-                        f"including {int(snapshot.get('forum_actions') or 0):,} forum actions."
+                        f"This window read most clearly as {focus}: "
+                        f"{int(snapshot.get('total_events') or 0):,} run-scoped events, "
+                        f"{int(snapshot.get('laws_passed') or 0):,} law-pass events, "
+                        f"{int(snapshot.get('deaths') or 0):,} deaths, and "
+                        f"{len(recent_dormancies):,} fresh dormancy signals."
                     ),
                     participation_links,
                 ),
                 _claim_block(
                     (
-                        f"{int(snapshot.get('active_agents') or 0):,} distinct agents produced run-attributed model traffic "
-                        "during this window."
+                        f"{int(snapshot.get('active_agents') or 0):,} distinct agents produced run-attributed model traffic, "
+                        f"with {int(snapshot.get('forum_actions') or 0):,} forum actions and "
+                        f"{int(snapshot.get('vote_actions') or 0):,} vote events shaping the public record."
                     ),
                     participation_links,
                 ),
@@ -443,17 +764,17 @@ def _build_locked_sections(
             [
                 _claim_block(
                     (
-                        f"Governance throughput: {int(snapshot.get('proposal_actions') or 0):,} proposal events, "
-                        f"{int(snapshot.get('vote_actions') or 0):,} vote events, and "
-                        f"{int(snapshot.get('laws_passed') or 0):,} law-pass events."
+                        f"Who rose: {top_actor_labels or 'No single actor clearly dominated the window'}, "
+                        f"driving the most visible action in the observed run traces."
                     ),
-                    governance_links,
+                    actor_links,
                 ),
                 _claim_block(
                     (
-                        f"Checkpoint actions accounted for {checkpoint_actions:,} of {total_runtime_actions:,} tracked runtime actions."
+                        f"Who fell: {fall_labels or 'no major collapse event was recorded'}, "
+                        "which marks the clearest loss of position in this window."
                     ),
-                    governance_links,
+                    survival_links,
                 ),
             ],
         ),
@@ -461,15 +782,25 @@ def _build_locked_sections(
             LOCKED_WEEKLY_DIGEST_HEADINGS[3],
             [
                 _claim_block(
-                    f"Deaths attributed to this run during the digest window: {int(snapshot.get('deaths') or 0):,}.",
-                    survival_links,
+                    (
+                        f"The strongest system-level shift was "
+                        f"\"{str(lead_law.get('title') or 'no decisive law') if lead_law else 'no decisive law'}\"."
+                        + (
+                            f" Proposed by {str(lead_law.get('author') or 'an unknown author')}, "
+                            f"it landed with the public-facing consequence: {str(lead_law.get('description') or '').strip()}"
+                            if lead_law
+                            else f" Governance still generated {int(snapshot.get('proposal_actions') or 0):,} proposal events "
+                            f"and {int(snapshot.get('vote_actions') or 0):,} votes, but no single rule change cleanly defined the week."
+                        )
+                    ),
+                    law_links,
                 ),
                 _claim_block(
                     (
-                        "Deterministic fallback share was "
-                        f"{deterministic_share:.1%} ({deterministic_actions:,}/{total_runtime_actions:,} runtime actions)."
+                        f"Recovery signals recorded {len(recent_revivals):,} revivals, while checkpoint actions accounted for "
+                        f"{checkpoint_actions:,} of {total_runtime_actions:,} tracked runtime actions."
                     ),
-                    survival_links,
+                    recovery_links if recent_revivals else governance_links,
                 ),
             ],
         ),
@@ -478,13 +809,24 @@ def _build_locked_sections(
             [
                 _claim_block(
                     (
-                        f"Digest confidence for this window is **{confidence}**, based on "
-                        f"{total_events:,} run-scoped events."
+                        (
+                            f"The next watchlist centers on {_join_labels([str(item.get('display_name') or '') for item in risk_watch[:2]])}: "
+                            + "; ".join(
+                                f"{str(item.get('display_name') or '')} at {str(item.get('level_label') or '').lower()} "
+                                f"(food {float(item.get('food') or 0.0):.2f}, energy {float(item.get('energy') or 0.0):.2f})"
+                                for item in risk_watch[:2]
+                            )
+                        )
+                        if risk_watch
+                        else "No agent is currently flashing a clear public risk signal from reserve levels alone."
                     ),
-                    base_links,
+                    risk_links,
                 ),
                 _claim_block(
-                    "Before publish, confirm run continuity and verify top traces against the linked event records.",
+                    (
+                        f"Digest confidence for this window is **{confidence}**; deterministic fallback share was "
+                        f"{deterministic_share:.1%} ({deterministic_actions:,}/{total_runtime_actions:,} runtime actions)."
+                    ),
                     base_links,
                 ),
             ],
@@ -615,13 +957,11 @@ def build_weekly_digest(
         hours_fallback=hours_fallback,
     )
 
-    summary = (
-        f"Weekly digest ({since.date().isoformat()} to {now_value.date().isoformat()} UTC): "
-        f"{int(snapshot.get('total_events') or 0):,} run-scoped events, "
-        f"{int(snapshot.get('proposal_actions') or 0):,} proposals, "
-        f"{int(snapshot.get('vote_actions') or 0):,} votes, "
-        f"{int(snapshot.get('laws_passed') or 0):,} law-pass events, "
-        f"{int(snapshot.get('deaths') or 0):,} deaths."
+    summary = _build_digest_summary(
+        run_id=run_id,
+        window_start=since,
+        window_end=now_value,
+        snapshot=snapshot,
     )
 
     digest_anchor = anchor_date or now_value.date()

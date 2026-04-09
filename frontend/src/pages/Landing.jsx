@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, ChevronDown, Users, MessageSquare, Scale, Sparkles, Zap, Brain, Clock, Loader } from 'lucide-react'
+import { Play, ChevronDown, Users, MessageSquare, Scale, Sparkles, Zap, Brain, Clock, Loader, ArrowUpRight, Share2 } from 'lucide-react'
 import { api } from '../services/api'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
+import { trackShareAction } from '../services/shareAnalytics'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
+import { getMomentEvidenceHref, getMomentReplayHref, getMomentRunId, getStoryReplayHref } from '../utils/bestMoments'
 
 // Pre-launch teaser quotes
 const TEASER_QUOTES = [
@@ -140,12 +142,14 @@ export default function Landing() {
     const navigate = useNavigate()
     const [currentQuoteIndex, setCurrentQuoteIndex] = useState(0)
     const [quotes, setQuotes] = useState([])
+    const [bestMoments, setBestMoments] = useState([])
     const [stats, setStats] = useState({
         day: 0,
         messages: 0,
         laws: 0,
         activeAgents: 100
     })
+    const [shareNotice, setShareNotice] = useState('')
     const [isLoading, setIsLoading] = useState(true)
     const [isVisible, setIsVisible] = useState(false)
     const [isPreLaunch, setIsPreLaunch] = useState(true)
@@ -155,9 +159,10 @@ export default function Landing() {
     useEffect(() => {
         async function fetchStats() {
             try {
-                const [data, recentMessages] = await Promise.all([
-                    api.getLandingStats(),
+                const [data, recentMessages, bestMomentsPayload] = await Promise.all([
+                    api.getLandingStats().catch(() => null),
                     api.getMessages(5).catch(() => []),
+                    api.getBestMoments(3, 72, 55).catch(() => ({ items: [] })),
                 ])
                 if (data) {
                     setStats({
@@ -181,6 +186,8 @@ export default function Landing() {
                 } else {
                     setQuotes([])
                 }
+
+                setBestMoments(Array.isArray(bestMomentsPayload?.items) ? bestMomentsPayload.items : [])
             } catch (error) {
                 console.error('Failed to fetch stats:', error)
                 // Keep default values on error
@@ -241,6 +248,56 @@ export default function Landing() {
 
     const activeQuotes = isPreLaunch ? TEASER_QUOTES : (quotes.length > 0 ? quotes : TEASER_QUOTES)
     const currentQuote = activeQuotes[currentQuoteIndex % activeQuotes.length]
+
+    const shareMoment = async (turn) => {
+        const eventId = Number(turn?.event_id || 0)
+        if (!eventId) return
+
+        const runId = getMomentRunId(turn)
+        const origin = window.location.origin
+        const shareUrl = runId
+            ? `${origin}/share/run/${encodeURIComponent(runId)}/moment/${eventId}`
+            : `${origin}/share/moment/${eventId}`
+
+        trackShareAction('share_clicked', {
+            runId,
+            eventId,
+            surface: 'landing_best_moments',
+            target: 'moment_link',
+        })
+
+        try {
+            if (navigator.share) {
+                await navigator.share({
+                    title: turn?.title || 'Emergence moment',
+                    text: String(turn?.description || '').slice(0, 200),
+                    url: shareUrl,
+                })
+                trackShareAction('share_native_success', {
+                    runId,
+                    eventId,
+                    surface: 'landing_best_moments',
+                    target: 'moment_link',
+                })
+                setShareNotice('Moment shared.')
+            } else {
+                await navigator.clipboard.writeText(shareUrl)
+                trackShareAction('share_copied', {
+                    runId,
+                    eventId,
+                    surface: 'landing_best_moments',
+                    target: 'moment_link',
+                })
+                setShareNotice('Moment link copied.')
+            }
+            setTimeout(() => setShareNotice(''), 2000)
+        } catch (error) {
+            if (error?.name !== 'AbortError') {
+                setShareNotice('Unable to share right now.')
+                setTimeout(() => setShareNotice(''), 2000)
+            }
+        }
+    }
 
     return (
         <div className={`landing-page ${isVisible ? 'visible' : ''}`}>
@@ -340,6 +397,77 @@ export default function Landing() {
                             <span>{isPreLaunch ? 'System' : currentQuote.role}</span>
                         </div>
                     </div>
+                </div>
+
+                <div className="hero-best-moments">
+                    <div className="hero-best-moments-header">
+                        <div>
+                            <span className="hero-best-moments-eyebrow">Best Moments</span>
+                            <p>Evidence-backed turning points from the live run.</p>
+                        </div>
+                        <button
+                            type="button"
+                            className="hero-best-moments-link"
+                            onClick={() => navigate(getStoryReplayHref())}
+                        >
+                            Open 60s replay
+                            <ArrowUpRight size={15} />
+                        </button>
+                    </div>
+
+                    <div className="hero-best-moments-grid">
+                        {isLoading && (
+                            <div className="hero-moment-empty">Loading notable moments...</div>
+                        )}
+                        {!isLoading && bestMoments.length === 0 && (
+                            <div className="hero-moment-empty">
+                                {isPreLaunch
+                                    ? 'Best moments will appear as soon as the run starts producing evidence-backed events.'
+                                    : 'No high-salience moments are available yet.'}
+                            </div>
+                        )}
+                        {!isLoading && bestMoments.map((turn) => {
+                            const evidenceHref = getMomentEvidenceHref(turn)
+                            const replayHref = getMomentReplayHref(turn)
+
+                            return (
+                                <article key={turn.event_id} className={`hero-moment-card category-${turn.category || 'notable'}`}>
+                                    <div className="hero-moment-meta">
+                                        <span>{turn.label || 'Best moment'}</span>
+                                        <strong>{turn.salience}</strong>
+                                    </div>
+                                    <h3>{turn.title}</h3>
+                                    <p>{turn.stake || 'This moment changed momentum and helps explain what happened next.'}</p>
+                                    <div className="hero-moment-actions">
+                                        <button
+                                            type="button"
+                                            className="hero-moment-link"
+                                            onClick={() => navigate(evidenceHref || replayHref)}
+                                        >
+                                            Evidence
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="hero-moment-link subtle"
+                                            onClick={() => navigate(replayHref)}
+                                        >
+                                            Replay
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="hero-moment-link subtle"
+                                            onClick={() => shareMoment(turn)}
+                                        >
+                                            <Share2 size={14} />
+                                            Share
+                                        </button>
+                                    </div>
+                                </article>
+                            )
+                        })}
+                    </div>
+
+                    {shareNotice && <div className="hero-moment-notice">{shareNotice}</div>}
                 </div>
 
                 {/* Scroll Indicator */}
