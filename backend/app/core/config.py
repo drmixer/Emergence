@@ -132,6 +132,11 @@ class Settings(BaseSettings):
     SIMULATION_MAX_AGENTS: int = (
         50  # Default v1 runtime cap; set 0 to process all seeded agents
     )
+    SURVIVAL_ACTIVE_FOOD_COST: float = 2.0
+    SURVIVAL_ACTIVE_ENERGY_COST: float = 2.0
+    SURVIVAL_DORMANT_FOOD_COST: float = 0.25
+    SURVIVAL_DORMANT_ENERGY_COST: float = 0.25
+    SURVIVAL_DEATH_THRESHOLD: int = 5
     # Runtime ops controls (can be overridden via admin APIs).
     SIMULATION_RUN_MODE: str = "test"  # test | real
     SIMULATION_ACTIVE: bool = True

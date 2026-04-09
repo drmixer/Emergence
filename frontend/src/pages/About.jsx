@@ -160,6 +160,11 @@ export default function About() {
                 Follow Updates
                 <ExternalLink size={14} />
               </a>
+              <a href="https://drmixer.me" target="_blank" rel="noopener noreferrer">
+                <ExternalLink size={20} />
+                Dr Mixer
+                <ExternalLink size={14} />
+              </a>
             </div>
           </div>
         </div>

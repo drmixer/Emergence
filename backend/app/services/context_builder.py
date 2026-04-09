@@ -11,6 +11,14 @@ from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Eve
 from app.services.agent_memory import agent_memory_service
 from app.services.actions import get_action_rate_limit_state
 from app.services.law_effects import active_survival_reserve_laws
+from app.services.survival_config import (
+    active_energy_cost,
+    active_food_cost,
+    death_threshold,
+    dormant_energy_cost,
+    dormant_food_cost,
+    low_resource_warning_threshold,
+)
 
 
 async def build_agent_context(db: Session, agent: Agent) -> str:
@@ -181,21 +189,34 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     # Survival warning if low resources
     food = inventory_dict.get('food', 0)
     energy = inventory_dict.get('energy', 0)
-    if food < 2 or energy < 2:
+    critical_food = float(active_food_cost())
+    critical_energy = float(active_energy_cost())
+    low_food = float(low_resource_warning_threshold(active_food_cost()))
+    low_energy = float(low_resource_warning_threshold(active_energy_cost()))
+    if food < low_food or energy < low_energy:
         context_parts.append("")
         context_parts.append("⚠️ SURVIVAL WARNING ⚠️")
-        if food < 1:
-            context_parts.append(f"- CRITICAL: You have {food:.1f} food. You need 1.0 to stay active!")
-        elif food < 2:
+        if food < critical_food:
+            context_parts.append(
+                f"- CRITICAL: You have {food:.1f} food. You need {critical_food:.2f} to stay active!"
+            )
+        elif food < low_food:
             context_parts.append(f"- LOW FOOD: You have {food:.1f} food. Get more soon!")
-        if energy < 1:
-            context_parts.append(f"- CRITICAL: You have {energy:.1f} energy. You need 1.0 to stay active!")
-        elif energy < 2:
+        if energy < critical_energy:
+            context_parts.append(
+                f"- CRITICAL: You have {energy:.1f} energy. You need {critical_energy:.2f} to stay active!"
+            )
+        elif energy < low_energy:
             context_parts.append(f"- LOW ENERGY: You have {energy:.1f} energy. Get more soon!")
         context_parts.append("")
         context_parts.append("If you cannot pay survival costs, you go DORMANT.")
-        context_parts.append("Dormant agents still need 0.25 food + 0.25 energy per cycle.")
-        context_parts.append("After 5 cycles without paying survival costs, you DIE PERMANENTLY.")
+        context_parts.append(
+            f"Dormant agents still need {float(dormant_food_cost()):.2f} food + "
+            f"{float(dormant_energy_cost()):.2f} energy per cycle."
+        )
+        context_parts.append(
+            f"After {death_threshold()} cycles without paying survival costs, you DIE PERMANENTLY."
+        )
     
     # Enforcement status (Phase 3: Teeth)
     if agent.exiled:

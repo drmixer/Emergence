@@ -30,6 +30,13 @@ from app.services.run_reports import maybe_generate_scheduled_run_report_backfil
 from app.services.runtime_config import runtime_config_service
 from app.services.social_drafts import list_draft_texts_for_dedupe
 from app.services.simulation_time import get_simulation_anchor, get_simulation_day_delta
+from app.services.survival_config import (
+    active_energy_cost,
+    active_food_cost,
+    death_threshold,
+    dormant_energy_cost,
+    dormant_food_cost,
+)
 
 # Twitter bot integration (optional)
 try:
@@ -52,20 +59,6 @@ except ImportError:
     twitter_bot = None
 
 logger = logging.getLogger(__name__)
-
-# ============================================================================
-# SURVIVAL COST CONFIGURATION
-# ============================================================================
-# Active agents must pay full survival cost each cycle
-ACTIVE_FOOD_COST = Decimal("1.0")
-ACTIVE_ENERGY_COST = Decimal("1.0")
-
-# Dormant agents pay reduced survival cost (but NOT zero - scarcity still kills)
-DORMANT_FOOD_COST = Decimal("0.25")
-DORMANT_ENERGY_COST = Decimal("0.25")
-
-# After this many consecutive cycles of unpaid survival cost, agent dies permanently
-DEATH_THRESHOLD = 5
 
 # Quote-scoring keywords tuned for governance/drama stakes.
 QUOTE_SALIENCE_KEYWORDS = {
@@ -127,12 +120,12 @@ def _reserve_support_priority(
     agent_number = int(agent.agent_number or 0)
 
     if status == "active":
-        required_food = ACTIVE_FOOD_COST
-        required_energy = ACTIVE_ENERGY_COST
+        required_food = active_food_cost()
+        required_energy = active_energy_cost()
         status_rank = 0
     else:
-        required_food = ACTIVE_FOOD_COST
-        required_energy = ACTIVE_ENERGY_COST
+        required_food = active_food_cost()
+        required_energy = active_energy_cost()
         status_rank = 1
 
     food_deficit = max(Decimal("0"), required_food - food_amount)
@@ -653,11 +646,11 @@ async def process_daily_consumption():
     Process daily resource consumption for all living agents.
     
     SURVIVAL MECHANICS:
-    - Active agents: Pay 1 food + 1 energy per cycle
+    - Active agents: Pay the configured active food + energy cost each cycle
     - If active agent can't pay → goes DORMANT
-    - Dormant agents: Pay 0.25 food + 0.25 energy per cycle (reduced, not zero)
+    - Dormant agents: Pay the configured dormant food + energy cost per cycle
     - If dormant agent can't pay reduced cost → starvation_cycles += 1
-    - If starvation_cycles >= DEATH_THRESHOLD → PERMANENT DEATH
+    - If starvation_cycles reaches the configured death threshold → PERMANENT DEATH
     - Death is irreversible. Agent is removed from simulation.
     
     This ensures scarcity is the root cause of death, not just "sleeping too long".
@@ -666,6 +659,11 @@ async def process_daily_consumption():
     
     try:
         logger.info("Processing daily survival cycle...")
+        active_food = active_food_cost()
+        active_energy = active_energy_cost()
+        dormant_food = dormant_food_cost()
+        dormant_energy = dormant_energy_cost()
+        dormant_death_threshold = death_threshold()
         
         # Get all living agents (both active and dormant)
         query = db.query(Agent).filter(or_(Agent.status == "active", Agent.status == "dormant"))
@@ -728,23 +726,23 @@ async def process_daily_consumption():
                         agent=agent,
                         food_inv=food_inv,
                         energy_inv=energy_inv,
-                        required_food=ACTIVE_FOOD_COST,
-                        required_energy=ACTIVE_ENERGY_COST,
+                        required_food=active_food,
+                        required_energy=active_energy,
                         reserve_resources=reserve_resources,
                     )
-                can_pay_food = food_amount >= ACTIVE_FOOD_COST
-                can_pay_energy = energy_amount >= ACTIVE_ENERGY_COST
+                can_pay_food = food_amount >= active_food
+                can_pay_energy = energy_amount >= active_energy
                 
                 if can_pay_food and can_pay_energy:
                     # Pay full survival cost - stays active
-                    food_inv.quantity -= ACTIVE_FOOD_COST
-                    energy_inv.quantity -= ACTIVE_ENERGY_COST
+                    food_inv.quantity -= active_food
+                    energy_inv.quantity -= active_energy
                     
                     # Reset starvation counter (agent is well-fed)
                     agent.starvation_cycles = 0
                     
                     # Record transactions
-                    for resource_type, amount in [("food", ACTIVE_FOOD_COST), ("energy", ACTIVE_ENERGY_COST)]:
+                    for resource_type, amount in [("food", active_food), ("energy", active_energy)]:
                         transaction = Transaction(
                             from_agent_id=agent.id,
                             resource_type=resource_type,
@@ -798,8 +796,8 @@ async def process_daily_consumption():
                         agent=agent,
                         food_inv=food_inv,
                         energy_inv=energy_inv,
-                        required_food=ACTIVE_FOOD_COST,
-                        required_energy=ACTIVE_ENERGY_COST,
+                        required_food=active_food,
+                        required_energy=active_energy,
                         reserve_resources=reserve_resources,
                         emit_shortfall_event=False,
                         event_metadata={"support_mode": "active_revival"},
@@ -810,26 +808,26 @@ async def process_daily_consumption():
                             agent=agent,
                             food_inv=food_inv,
                             energy_inv=energy_inv,
-                            required_food=DORMANT_FOOD_COST,
-                            required_energy=DORMANT_ENERGY_COST,
+                            required_food=dormant_food,
+                            required_energy=dormant_energy,
                             reserve_resources=reserve_resources,
                             event_metadata={"support_mode": "dormant_maintenance"},
                         )
                     else:
-                        can_pay_active_food = food_amount >= ACTIVE_FOOD_COST
-                        can_pay_active_energy = energy_amount >= ACTIVE_ENERGY_COST
+                        can_pay_active_food = food_amount >= active_food
+                        can_pay_active_energy = energy_amount >= active_energy
                         if can_pay_active_food and can_pay_active_energy:
                             if food_inv:
-                                food_inv.quantity -= ACTIVE_FOOD_COST
+                                food_inv.quantity -= active_food
                             if energy_inv:
-                                energy_inv.quantity -= ACTIVE_ENERGY_COST
+                                energy_inv.quantity -= active_energy
 
                             agent.status = "active"
                             agent.starvation_cycles = 0
                             agents_revived.append((agent.id, agent.agent_number, agent.display_name))
                             agents_consumed.append(agent.id)
 
-                            for resource_type, amount in [("food", ACTIVE_FOOD_COST), ("energy", ACTIVE_ENERGY_COST)]:
+                            for resource_type, amount in [("food", active_food), ("energy", active_energy)]:
                                 db.add(
                                     Transaction(
                                         from_agent_id=agent.id,
@@ -856,21 +854,21 @@ async def process_daily_consumption():
                             )
                             logger.info("🌟 %s revived via shared reserve", agent_name)
                             continue
-                can_pay_reduced_food = food_amount >= DORMANT_FOOD_COST
-                can_pay_reduced_energy = energy_amount >= DORMANT_ENERGY_COST
+                can_pay_reduced_food = food_amount >= dormant_food
+                can_pay_reduced_energy = energy_amount >= dormant_energy
                 
                 if can_pay_reduced_food and can_pay_reduced_energy:
                     # Pay reduced survival cost - stays dormant but stable
                     if food_inv:
-                        food_inv.quantity -= DORMANT_FOOD_COST
+                        food_inv.quantity -= dormant_food
                     if energy_inv:
-                        energy_inv.quantity -= DORMANT_ENERGY_COST
+                        energy_inv.quantity -= dormant_energy
                     
                     # Starvation counter doesn't increase (agent is surviving)
                     # But it also doesn't reset - need to become active for that
                     
                     # Record transactions
-                    for resource_type, amount in [("food", DORMANT_FOOD_COST), ("energy", DORMANT_ENERGY_COST)]:
+                    for resource_type, amount in [("food", dormant_food), ("energy", dormant_energy)]:
                         transaction = Transaction(
                             from_agent_id=agent.id,
                             resource_type=resource_type,
@@ -894,11 +892,11 @@ async def process_daily_consumption():
                     
                     logger.warning(
                         f"💀 {agent_name} cannot pay survival cost! "
-                        f"Starvation cycle {agent.starvation_cycles}/{DEATH_THRESHOLD}"
+                        f"Starvation cycle {agent.starvation_cycles}/{dormant_death_threshold}"
                     )
                     
                     # Check for PERMANENT DEATH
-                    if agent.starvation_cycles >= DEATH_THRESHOLD:
+                    if agent.starvation_cycles >= dormant_death_threshold:
                         # ========================================
                         # PERMANENT DEATH - NO RESURRECTION
                         # ========================================
@@ -943,10 +941,10 @@ async def process_daily_consumption():
                         event = Event(
                             agent_id=agent.id,
                             event_type="starvation_warning",
-                            description=f"⚠️ {agent_name} is starving! Cycle {agent.starvation_cycles}/{DEATH_THRESHOLD} until death",
+                            description=f"⚠️ {agent_name} is starving! Cycle {agent.starvation_cycles}/{dormant_death_threshold} until death",
                             event_metadata=_with_runtime_metadata({
                                 "starvation_cycles": agent.starvation_cycles,
-                                "cycles_until_death": DEATH_THRESHOLD - agent.starvation_cycles,
+                                "cycles_until_death": dormant_death_threshold - agent.starvation_cycles,
                                 "food": float(food_amount),
                                 "energy": float(energy_amount),
                                 "reserve_decision": reserve_decision,

@@ -67,6 +67,36 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=240,
         description="Simulation day length in real minutes.",
     ),
+    "SURVIVAL_ACTIVE_FOOD_COST": MutableSettingSpec(
+        python_type=float,
+        min_value=0.01,
+        max_value=10.0,
+        description="Food consumed by each active agent per survival cycle.",
+    ),
+    "SURVIVAL_ACTIVE_ENERGY_COST": MutableSettingSpec(
+        python_type=float,
+        min_value=0.01,
+        max_value=10.0,
+        description="Energy consumed by each active agent per survival cycle.",
+    ),
+    "SURVIVAL_DORMANT_FOOD_COST": MutableSettingSpec(
+        python_type=float,
+        min_value=0.0,
+        max_value=10.0,
+        description="Food consumed by each dormant agent per survival cycle.",
+    ),
+    "SURVIVAL_DORMANT_ENERGY_COST": MutableSettingSpec(
+        python_type=float,
+        min_value=0.0,
+        max_value=10.0,
+        description="Energy consumed by each dormant agent per survival cycle.",
+    ),
+    "SURVIVAL_DEATH_THRESHOLD": MutableSettingSpec(
+        python_type=int,
+        min_value=1,
+        max_value=20,
+        description="Consecutive unpaid dormant cycles before permanent death.",
+    ),
     "PROPOSAL_VOTING_HOURS": MutableSettingSpec(
         python_type=float,
         min_value=0.05,

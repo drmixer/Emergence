@@ -90,6 +90,19 @@ def _configure_reserve(monkeypatch, session_factory) -> None:
     )
 
 
+def _configure_no_reserve(monkeypatch, session_factory, *, runtime_values: dict[str, object] | None = None) -> None:
+    values = dict(runtime_values or {})
+    monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
+    monkeypatch.setattr(scheduler, "_twitter_ready", lambda: False)
+    monkeypatch.setattr(scheduler, "active_survival_reserve_laws", lambda _db: [])
+    monkeypatch.setattr(scheduler.settings, "SIMULATION_MAX_AGENTS", 0, raising=False)
+    monkeypatch.setattr(
+        scheduler.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: values.get(key, ""),
+    )
+
+
 def test_reserve_prioritizes_active_agents_before_dormant_maintenance(session_factory, monkeypatch):
     _configure_reserve(monkeypatch, session_factory)
 
@@ -98,7 +111,7 @@ def test_reserve_prioritizes_active_agents_before_dormant_maintenance(session_fa
             db,
             agent_number=1,
             status="active",
-            food="1.00",
+            food="2.00",
             energy="0.10",
         )
         dormant_agent = _seed_agent(
@@ -109,7 +122,7 @@ def test_reserve_prioritizes_active_agents_before_dormant_maintenance(session_fa
             energy="0.10",
             starvation_cycles=1,
         )
-        _seed_reserve(db, food="0.20", energy="0.95")
+        _seed_reserve(db, food="0.20", energy="1.95")
         active_agent_id = active_agent.id
         dormant_agent_id = dormant_agent.id
 
@@ -132,7 +145,7 @@ def test_reserve_prioritizes_active_agents_before_dormant_maintenance(session_fa
     assert aid_meta["status_before"] == "active"
     assert aid_meta["support_mode"] == "active_maintenance"
     assert aid_meta["aid_granted"] is True
-    assert aid_meta["reserve_pool_energy_before"] == pytest.approx(0.95)
+    assert aid_meta["reserve_pool_energy_before"] == pytest.approx(1.95)
     assert aid_meta["reserve_pool_energy_after"] == pytest.approx(0.05)
 
 
@@ -148,7 +161,7 @@ def test_reserve_can_revive_dormant_agent_when_pool_covers_active_cycle(session_
             energy="0.10",
             starvation_cycles=2,
         )
-        _seed_reserve(db, food="1.00", energy="1.00")
+        _seed_reserve(db, food="2.00", energy="2.00")
         dormant_agent_id = dormant_agent.id
 
     result = asyncio.run(scheduler.process_daily_consumption())
@@ -198,8 +211,8 @@ def test_reserve_support_saves_smallest_active_deficit_first(session_factory, mo
             db,
             agent_number=2,
             status="active",
-            food="0.80",
-            energy="0.80",
+            food="1.80",
+            energy="1.80",
         )
         _seed_reserve(db, food="0.25", energy="0.25")
         high_deficit_agent_id = high_deficit_agent.id
@@ -228,3 +241,35 @@ def test_reserve_support_saves_smallest_active_deficit_first(session_factory, mo
     assert shortfall_meta["support_mode"] == "active_maintenance"
     assert shortfall_meta["reserve_pool_food_before"] == pytest.approx(0.05)
     assert shortfall_meta["reserve_pool_energy_before"] == pytest.approx(0.05)
+
+
+def test_active_survival_cost_runtime_override_can_force_dormancy(session_factory, monkeypatch):
+    _configure_no_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={
+            "SURVIVAL_ACTIVE_FOOD_COST": 1.5,
+            "SURVIVAL_ACTIVE_ENERGY_COST": 1.5,
+        },
+    )
+
+    with session_factory() as db:
+        agent = _seed_agent(
+            db,
+            agent_number=5,
+            status="active",
+            food="1.40",
+            energy="1.40",
+        )
+        agent_id = agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["became_dormant"] == 1
+    assert result["active_fed"] == 0
+
+    with session_factory() as db:
+        refreshed_agent = db.query(Agent).filter(Agent.id == agent_id).one()
+        dormant_event = db.query(Event).filter(Event.event_type == "became_dormant").one()
+
+    assert refreshed_agent.status == "dormant"
+    assert dormant_event.agent_id == agent_id

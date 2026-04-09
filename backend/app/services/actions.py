@@ -20,6 +20,7 @@ from app.services.law_effects import (
     survival_reserve_law_active,
 )
 from app.services.runtime_config import runtime_config_service
+from app.services.survival_config import active_energy_cost, active_food_cost
 
 
 def _with_runtime_metadata(metadata: dict | None = None) -> dict:
@@ -683,8 +684,8 @@ async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:
     
     sender_name = agent.display_name or f"Agent #{agent.agent_number}"
     
-    # Check if this awakens a dormant agent
-    # Revival requires enough resources to pay NEXT cycle's survival cost (1 food + 1 energy)
+    # Check if this awakens a dormant agent.
+    # Revival requires enough resources to pay the next active survival cycle.
     awakened = False
     if recipient.status == "dormant":
         # Check if recipient now has enough to survive the next cycle
@@ -700,8 +701,9 @@ async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:
         food_amount = float(food_inv.quantity) if food_inv else 0
         energy_amount = float(energy_inv.quantity) if energy_inv else 0
         
-        # Need at least 1 food AND 1 energy to become active (next cycle's cost)
-        if food_amount >= 1 and energy_amount >= 1:
+        required_food = float(active_food_cost())
+        required_energy = float(active_energy_cost())
+        if food_amount >= required_food and energy_amount >= required_energy:
             recipient.status = "active"
             recipient.starvation_cycles = 0  # Reset starvation counter on revival
             awakened = True
