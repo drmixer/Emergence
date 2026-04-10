@@ -13,11 +13,18 @@ esac
 
 WORKER_MODE_RAW="${WORKER_MODE:-false}"
 WORKER_MODE_NORM="$(printf '%s' "${WORKER_MODE_RAW}" | tr '[:upper:]' '[:lower:]')"
+SERVICE_NAME_RAW="${RAILWAY_SERVICE_NAME:-${SERVICE_NAME:-}}"
+SERVICE_NAME_NORM="$(printf '%s' "${SERVICE_NAME_RAW}" | tr '[:upper:]' '[:lower:]')"
+
+if [ "${WORKER_MODE_NORM}" = "false" ] && [ "${SERVICE_NAME_NORM}" = "worker" ]; then
+  WORKER_MODE_NORM="true"
+fi
 
 echo "[startup] emergence-backend starting"
 echo "[startup] python=$(python -V 2>&1)"
 echo "[startup] host=${HOST} port=${PORT}"
 echo "[startup] worker_mode=${WORKER_MODE_NORM}"
+echo "[startup] service_name=${SERVICE_NAME_NORM:-unknown}"
 
 case "${WORKER_MODE_NORM}" in
   1|true|yes|on)

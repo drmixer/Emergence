@@ -51,6 +51,7 @@ If you run this on Railway with an external Neon database:
 
 1. Create a Neon project and copy the pooled Postgres connection string.
 2. Set `DATABASE_URL` in both `backend` and `worker` services.
+3. Deploy the `worker` service from the same `backend/` directory with `WORKER_MODE=true` so `start.sh` launches `worker.py`.
 3. Run migrations with `alembic upgrade head`.
 4. During testing, pause the simulation outside active windows to save DB and inference costs:
 
