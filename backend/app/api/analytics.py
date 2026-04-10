@@ -958,20 +958,28 @@ def get_latest_summary(
     """Get the most recent daily summary."""
     db = SessionLocal()
     try:
-        requested_run_id = str(run_id or "").strip()
+        requested_run_id = run_id.strip() if isinstance(run_id, str) else ""
         active_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
         target_run_id = requested_run_id or active_run_id
 
-        summary_query = db.query(Event).filter(Event.event_type == "daily_summary")
-        if target_run_id:
-            summary_query = summary_query.filter(
-                text("(events.event_metadata -> 'runtime' ->> 'run_id') = :run_id")
-            ).params(run_id=target_run_id)
+        summary = None
+        fallback = None
 
-        summary = summary_query.order_by(Event.created_at.desc()).first()
+        if requested_run_id:
+            summary = _latest_daily_summary(db, run_id=requested_run_id)
+            if not summary:
+                fallback = _latest_run_summary_fallback(db, run_id=requested_run_id)
+        else:
+            if active_run_id:
+                summary = _latest_daily_summary(db, run_id=active_run_id)
+                if not summary:
+                    fallback = _latest_run_summary_fallback(db, run_id=active_run_id)
+            if not summary and fallback is None:
+                summary = _latest_daily_summary(db)
+            if not summary and fallback is None:
+                fallback = _latest_run_summary_fallback(db)
 
         if not summary:
-            fallback = _latest_run_summary_fallback(db, run_id=target_run_id or None)
             if fallback is not None:
                 return fallback
             return {"message": "No summaries yet", "summary": None, "source": "none"}
@@ -988,6 +996,26 @@ def get_latest_summary(
         return response
     finally:
         db.close()
+
+
+def _latest_daily_summary(db, run_id: str | None = None) -> Event | None:
+    """Return the newest daily summary, optionally scoped to a run id."""
+    rows = (
+        db.query(Event)
+        .filter(Event.event_type == "daily_summary")
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .all()
+    )
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return rows[0] if rows else None
+
+    for row in rows:
+        metadata = row.event_metadata if isinstance(row.event_metadata, dict) else {}
+        runtime = metadata.get("runtime") if isinstance(metadata.get("runtime"), dict) else {}
+        if str(runtime.get("run_id") or "").strip() == clean_run_id:
+            return row
+    return None
 
 
 def _latest_run_summary_fallback(db, run_id: str | None = None) -> dict[str, Any] | None:
