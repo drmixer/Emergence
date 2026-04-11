@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.core.database import SessionLocal
 from app.core.time import now_utc
 from app.models.models import SimulationRun
+from app.services.run_policy import coerce_run_class, deterministic_failure_policy_for_run_class
 from app.services.runtime_config import runtime_config_service
 
 _DEFAULT_PROTOCOL_VERSION = "protocol_v1"
@@ -49,6 +50,10 @@ def _status_payload() -> dict[str, Any]:
             "simulation_paused": bool(effective.get("SIMULATION_PAUSED", False)),
             "simulation_run_mode": str(effective.get("SIMULATION_RUN_MODE") or ""),
             "simulation_run_id": str(effective.get("SIMULATION_RUN_ID") or ""),
+            "simulation_run_class": coerce_run_class(effective.get("SIMULATION_RUN_CLASS")),
+            "deterministic_failure_policy": deterministic_failure_policy_for_run_class(
+                effective.get("SIMULATION_RUN_CLASS")
+            ),
             "simulation_condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or ""),
             "simulation_season_number": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
             "action_count": int((counts_row.action_count if counts_row else 0) or 0),
@@ -77,6 +82,7 @@ def _update_runtime(updates: dict[str, Any], reason: str) -> dict[str, Any]:
                 "SIMULATION_PAUSED": bool(effective.get("SIMULATION_PAUSED", False)),
                 "SIMULATION_RUN_MODE": str(effective.get("SIMULATION_RUN_MODE") or ""),
                 "SIMULATION_RUN_ID": str(effective.get("SIMULATION_RUN_ID") or ""),
+                "SIMULATION_RUN_CLASS": coerce_run_class(effective.get("SIMULATION_RUN_CLASS")),
                 "SIMULATION_CONDITION_NAME": str(effective.get("SIMULATION_CONDITION_NAME") or ""),
                 "SIMULATION_SEASON_NUMBER": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
             },
@@ -90,10 +96,25 @@ def _clean_optional_text(value: Any) -> str | None:
     return text_value or None
 
 
+def _existing_run_class(run_id: str | None) -> str | None:
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return None
+    db = SessionLocal()
+    try:
+        row = db.query(SimulationRun).filter(SimulationRun.run_id == clean_run_id).first()
+        if row is None:
+            return None
+        return str(row.run_class or "").strip() or None
+    finally:
+        db.close()
+
+
 def _upsert_run_registry_start(
     *,
     run_id: str,
     run_mode: str | None,
+    run_class: str | None,
     condition_name: str | None,
     season_number: int | None,
     reason: str,
@@ -111,6 +132,7 @@ def _upsert_run_registry_start(
         )
         started_at = now_utc()
         clean_mode = str(run_mode or "").strip() or "test"
+        resolved_run_class = coerce_run_class(run_class)
         clean_condition = _clean_optional_text(condition_name)
         clean_season_number = int(season_number or 0)
         season_value = clean_season_number if clean_season_number > 0 else None
@@ -123,7 +145,7 @@ def _upsert_run_registry_start(
                 protocol_version=_DEFAULT_PROTOCOL_VERSION,
                 condition_name=clean_condition,
                 season_number=season_value,
-                run_class=_DEFAULT_RUN_CLASS,
+                run_class=resolved_run_class,
                 started_at=started_at,
                 start_reason=reason,
                 end_reason=None,
@@ -137,7 +159,7 @@ def _upsert_run_registry_start(
             )
             row.condition_name = clean_condition
             row.season_number = season_value
-            row.run_class = str(row.run_class or _DEFAULT_RUN_CLASS)
+            row.run_class = resolved_run_class
             row.started_at = started_at
             row.start_reason = reason
             row.end_reason = None
@@ -202,6 +224,7 @@ def main() -> None:
     start = sub.add_parser("start", help="Resume simulation processing.")
     start.add_argument("--run-mode", choices=("test", "real"), default=None)
     start.add_argument("--run-id", default=None)
+    start.add_argument("--run-class", choices=("standard_72h", "deep_96h", "special_exploratory"), default=None)
     start.add_argument("--condition", default=None)
     start.add_argument("--season-number", type=int, default=None)
 
@@ -238,6 +261,9 @@ def main() -> None:
             updates["SIMULATION_RUN_MODE"] = args.run_mode
         if args.run_id is not None:
             updates["SIMULATION_RUN_ID"] = str(args.run_id)
+        resolved_cli_run_class = args.run_class or _existing_run_class(args.run_id)
+        if resolved_cli_run_class is not None:
+            updates["SIMULATION_RUN_CLASS"] = coerce_run_class(resolved_cli_run_class)
         if args.condition is not None:
             updates["SIMULATION_CONDITION_NAME"] = str(args.condition or "").strip()
         if args.season_number is not None:
@@ -251,6 +277,7 @@ def main() -> None:
         result["run_registry"] = _upsert_run_registry_start(
             run_id=str(effective.get("SIMULATION_RUN_ID") or "").strip(),
             run_mode=str(effective.get("SIMULATION_RUN_MODE") or "").strip() or None,
+            run_class=coerce_run_class(effective.get("SIMULATION_RUN_CLASS")),
             condition_name=(
                 str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None
             ),

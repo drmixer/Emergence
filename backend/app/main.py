@@ -56,14 +56,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.info("Config: env=%s", settings.ENVIRONMENT)
     logger.info(
-        "LLM config: provider=%s groq=%s openrouter=%s mistral=%s gemini=%s groq_default_model=%s mistral_model=%s",
-        getattr(settings, "LLM_PROVIDER", "auto"),
-        bool(getattr(settings, "GROQ_API_KEY", "")),
+        "LLM config: openrouter=%s mistral=%s gemini=%s mistral_model=%s run_class=%s",
         bool(getattr(settings, "OPENROUTER_API_KEY", "")),
         bool(getattr(settings, "MISTRAL_API_KEY", "")),
         bool(getattr(settings, "GEMINI_API_KEY", "")),
-        getattr(settings, "GROQ_DEFAULT_MODEL", ""),
         getattr(settings, "MISTRAL_SMALL_MODEL", ""),
+        getattr(settings, "SIMULATION_RUN_CLASS", ""),
     )
     poller = asyncio.create_task(event_polling_task())
     yield

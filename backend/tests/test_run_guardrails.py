@@ -40,7 +40,6 @@ def test_hard_budget_stop_triggers(monkeypatch):
             day_key=date.today(),
             calls_total=42,
             calls_openrouter_free=20,
-            calls_groq=22,
             estimated_cost_usd=1.1,
         ),
     )

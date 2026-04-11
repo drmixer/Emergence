@@ -299,7 +299,7 @@ def _llm_totals_for_run(db: Session, *, run_id: str, started_at: Any, ended_at: 
             SELECT
               COUNT(*) AS calls,
               COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
               COALESCE(SUM(total_tokens), 0) AS total_tokens,
               COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
             FROM llm_usage
@@ -318,7 +318,8 @@ def _llm_totals_for_run(db: Session, *, run_id: str, started_at: Any, ended_at: 
     return {
         "calls": int((row.calls if row else 0) or 0),
         "success_calls": int((row.success_calls if row else 0) or 0),
-        "fallback_calls": int((row.fallback_calls if row else 0) or 0),
+        "provider_model_fallback_calls": int((row.provider_model_fallback_calls if row else 0) or 0),
+        "fallback_calls": int((row.provider_model_fallback_calls if row else 0) or 0),
         "total_tokens": int((row.total_tokens if row else 0) or 0),
         "estimated_cost_usd": float((row.estimated_cost_usd if row else 0.0) or 0.0),
     }
@@ -398,6 +399,7 @@ def generate_run_report_summary(
     metrics = {
         "llm_calls": int(llm["calls"]),
         "success_calls": int(llm["success_calls"]),
+        "provider_model_fallback_calls": int(llm["provider_model_fallback_calls"]),
         "fallback_calls": int(llm["fallback_calls"]),
         "total_tokens": int(llm["total_tokens"]),
         "estimated_cost_usd": float(llm["estimated_cost_usd"]),

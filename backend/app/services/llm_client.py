@@ -14,6 +14,7 @@ from openai import RateLimitError, APIError
 
 from app.core.config import settings
 from app.core.time import now_utc
+from app.services.run_policy import build_terminal_llm_failure_action, current_run_class
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
 
@@ -43,17 +44,6 @@ OPENROUTER_CONFIG = {
         "llama-3.1-8b": "meta-llama/llama-3.2-3b-instruct:free",
         "gemini-flash": "qwen/qwen3-coder:free",
     },
-}
-
-GROQ_CONFIG = {
-    "base_url": "https://api.groq.com/openai/v1",
-    "models": {
-        # Attribution cohort (seeded explicitly in scripts/seed_agents.py)
-        "gr_llama_3_1_8b_instant": "llama-3.1-8b-instant",
-        # Legacy values
-        "llama-3.3-70b": "llama-3.3-70b-versatile",
-        "llama-3.1-8b": "llama-3.1-8b-instant",
-    }
 }
 
 MISTRAL_CONFIG = {
@@ -93,6 +83,10 @@ class RetryableCompletionError(RuntimeError):
         self.finish_reason = finish_reason
 
 
+class LLMConfigurationError(RuntimeError):
+    """Raised when model/provider routing is invalid for the current config."""
+
+
 class LLMClient:
     """Unified LLM client supporting multiple providers."""
     
@@ -100,10 +94,6 @@ class LLMClient:
         self.openrouter_client = AsyncOpenAI(
             base_url=OPENROUTER_CONFIG["base_url"],
             api_key=settings.OPENROUTER_API_KEY,
-        )
-        self.groq_client = AsyncOpenAI(
-            base_url=GROQ_CONFIG["base_url"],
-            api_key=settings.GROQ_API_KEY,
         )
         self.mistral_client = AsyncOpenAI(
             base_url=(getattr(settings, "MISTRAL_BASE_URL", "") or MISTRAL_CONFIG["base_url"]),
@@ -115,7 +105,6 @@ class LLMClient:
         )
 
         # Concurrency guards to reduce provider rate limits.
-        self._groq_sem = asyncio.Semaphore(max(1, int(getattr(settings, "GROQ_MAX_CONCURRENCY", 2) or 2)))
         self._openrouter_sem = asyncio.Semaphore(max(1, int(getattr(settings, "OPENROUTER_MAX_CONCURRENCY", 6) or 6)))
         self._mistral_sem = asyncio.Semaphore(max(1, int(getattr(settings, "MISTRAL_MAX_CONCURRENCY", 4) or 4)))
         self._gemini_sem = asyncio.Semaphore(max(1, int(getattr(settings, "GEMINI_MAX_CONCURRENCY", 4) or 4)))
@@ -262,8 +251,6 @@ class LLMClient:
     def _provider_name_for_client(self, client: AsyncOpenAI) -> str:
         if client is self.openrouter_client:
             return "openrouter"
-        if client is self.groq_client:
-            return "groq"
         if client is self.gemini_client:
             return "gemini"
         return "mistral"
@@ -304,10 +291,7 @@ class LLMClient:
         used_model_name = model_name
         used_max_tokens = max_tokens
         used_temperature = temperature
-        degraded = False
-
         if decision.soft_cap_reached:
-            degraded = True
             reduced_tokens = max(16, max_tokens // 2 if max_tokens > 1 else max_tokens)
             used_max_tokens = min(max_tokens, reduced_tokens)
             used_temperature = min(temperature, 0.5)
@@ -321,8 +305,6 @@ class LLMClient:
 
         if client is self.openrouter_client:
             sem = self._openrouter_sem
-        elif client is self.groq_client:
-            sem = self._groq_sem
         elif client is self.gemini_client:
             sem = self._gemini_sem
         else:
@@ -355,7 +337,7 @@ class LLMClient:
                 completion_tokens=0,
                 total_tokens=0,
                 success=False,
-                fallback_used=(fallback_used or degraded),
+                fallback_used=fallback_used,
                 byok_used=None,
                 latency_ms=latency_ms,
                 error_type=e.__class__.__name__,
@@ -380,7 +362,7 @@ class LLMClient:
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             success=True,
-            fallback_used=(fallback_used or degraded),
+            fallback_used=fallback_used,
             byok_used=byok_used,
             latency_ms=latency_ms,
             error_type=None,
@@ -389,25 +371,6 @@ class LLMClient:
     
     def _get_client_and_model(self, model_type: str):
         """Get the appropriate client and model name."""
-        gemini_default_model = GEMINI_CONFIG["models"]["gm_gemini_2_0_flash"]
-        force_cheapest = bool(runtime_config_service.get_effective_value_cached("FORCE_CHEAPEST_ROUTE"))
-        if force_cheapest:
-            if settings.OPENROUTER_API_KEY:
-                return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
-            if settings.GROQ_API_KEY:
-                key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
-                model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-                return self.groq_client, model_name
-            if settings.MISTRAL_API_KEY:
-                mistral_default_model = str(
-                    getattr(settings, "MISTRAL_SMALL_MODEL", MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"])
-                    or MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"]
-                ).strip()
-                return self.mistral_client, mistral_default_model
-            if settings.GEMINI_API_KEY:
-                return self.gemini_client, GEMINI_CONFIG["models"]["gm_gemini_2_0_flash_lite"]
-
-        provider = (settings.LLM_PROVIDER or "auto").strip().lower()
         mistral_default_model = str(
             getattr(settings, "MISTRAL_SMALL_MODEL", MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"])
             or MISTRAL_CONFIG["models"]["or_mistral_small_3_1_24b"]
@@ -423,43 +386,9 @@ class LLMClient:
         # Explicit mappings always take precedence for clean attribution.
         if model_type in OPENROUTER_CONFIG["models"]:
             return self.openrouter_client, OPENROUTER_CONFIG["models"][model_type]
-        if model_type in GROQ_CONFIG["models"]:
-            return self.groq_client, GROQ_CONFIG["models"][model_type]
 
-        # For unknown/legacy unexpected values, respect forced provider if set.
-        if provider == "groq":
-            key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
-            model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-            return self.groq_client, model_name
-        if provider == "openrouter":
-            logger.warning("Unknown model type %s, forcing OpenRouter gpt-oss-20b:free", model_type)
-            return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
-        if provider == "mistral":
-            logger.warning("Unknown model type %s, forcing direct Mistral %s", model_type, mistral_default_model)
-            return self.mistral_client, mistral_default_model
-        if provider == "gemini":
-            logger.warning("Unknown model type %s, forcing direct Gemini %s", model_type, gemini_default_model)
-            return self.gemini_client, gemini_default_model
-
-        # auto: prefer OpenRouter free fallback, then Mistral, then Groq, then Gemini.
-        if settings.OPENROUTER_API_KEY:
-            logger.warning("Unknown model type %s, defaulting to OpenRouter gpt-oss-20b:free", model_type)
-            return self.openrouter_client, OPENROUTER_CONFIG["models"]["or_gpt_oss_20b_free"]
-        if settings.MISTRAL_API_KEY:
-            logger.warning("Unknown model type %s, defaulting to direct Mistral %s", model_type, mistral_default_model)
-            return self.mistral_client, mistral_default_model
-        if settings.GROQ_API_KEY:
-            key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
-            model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-            logger.warning("Unknown model type %s, defaulting to Groq %s", model_type, model_name)
-            return self.groq_client, model_name
-        if settings.GEMINI_API_KEY:
-            logger.warning("Unknown model type %s, defaulting to direct Gemini %s", model_type, gemini_default_model)
-            return self.gemini_client, gemini_default_model
-        key = settings.GROQ_DEFAULT_MODEL or "llama-3.1-8b"
-        model_name = GROQ_CONFIG["models"].get(key, GROQ_CONFIG["models"]["llama-3.1-8b"])
-        logger.warning("Unknown model type %s, defaulting to Groq %s (no provider keys set)", model_type, model_name)
-        return self.groq_client, model_name
+        logger.error("Unknown model type configured for agent routing: %s", model_type)
+        raise LLMConfigurationError(f"Unknown model type: {model_type}")
     
     async def get_completion(
         self,
@@ -474,31 +403,22 @@ class LLMClient:
     ) -> Optional[str]:
         """Get a completion with retry logic."""
 
-        if (
-            not settings.OPENROUTER_API_KEY
-            and not settings.GROQ_API_KEY
-            and not settings.MISTRAL_API_KEY
-            and not settings.GEMINI_API_KEY
-        ):
+        if not settings.OPENROUTER_API_KEY and not settings.MISTRAL_API_KEY and not settings.GEMINI_API_KEY:
             logger.error(
-                "No provider API keys are set (OPENROUTER_API_KEY/GROQ_API_KEY/MISTRAL_API_KEY/GEMINI_API_KEY); "
-                "returning no completion."
+                "No provider API keys are set (OPENROUTER_API_KEY/MISTRAL_API_KEY/GEMINI_API_KEY)."
             )
-            return None
+            raise LLMConfigurationError("No configured LLM providers are available")
 
         client, model_name = self._get_client_and_model(model_type)
-        if client is self.groq_client and not settings.GROQ_API_KEY:
-            logger.error("Selected Groq route for model_type=%s but GROQ_API_KEY is not set.", model_type)
-            return None
         if client is self.openrouter_client and not settings.OPENROUTER_API_KEY:
             logger.error("Selected OpenRouter route for model_type=%s but OPENROUTER_API_KEY is not set.", model_type)
-            return None
+            raise LLMConfigurationError("OpenRouter API key is not configured")
         if client is self.mistral_client and not settings.MISTRAL_API_KEY:
             logger.error("Selected Mistral route for model_type=%s but MISTRAL_API_KEY is not set.", model_type)
-            return None
+            raise LLMConfigurationError("Mistral API key is not configured")
         if client is self.gemini_client and not settings.GEMINI_API_KEY:
             logger.error("Selected Gemini route for model_type=%s but GEMINI_API_KEY is not set.", model_type)
-            return None
+            raise LLMConfigurationError("Gemini API key is not configured")
         
         attempt_max_tokens = max(64, int(max_tokens or 64))
         max_retry_tokens = 900
@@ -556,6 +476,9 @@ class LLMClient:
                 if attempt == max_retries - 1:
                     raise
                 await asyncio.sleep(wait_time)
+
+            except LLMConfigurationError:
+                raise
                 
             except RateLimitError as e:
                 wait_time = (2 ** attempt) + random.random()
@@ -589,34 +512,11 @@ async def get_agent_action(
     system_prompt: str,
     context_prompt: str,
     checkpoint_number: int | None = None,
+    run_class: str | None = None,
 ) -> Optional[dict]:
     """Get an action decision from an agent."""
-    
-    def _fallback_action(reason: str) -> dict:
-        # Keep the simulation moving even if the LLM provider is unavailable.
-        # Bias toward "work" which is always safe and doesn't spam the forum.
-        seed = agent_id + int(now_utc().timestamp() // 3600)
-        rng = random.Random(seed)
-        roll = rng.random()
 
-        if roll < 0.75:
-            return {
-                "action": "work",
-                "work_type": rng.choice(["farm", "generate", "gather"]),
-                "hours": rng.randint(1, 4),
-                "reasoning": f"Fallback (LLM unavailable): {reason}",
-            }
-        if roll < 0.9:
-            return {"action": "idle", "reasoning": f"Fallback (LLM unavailable): {reason}"}
-
-        return {
-            "action": "forum_post",
-            "content": (
-                "I'm having trouble communicating clearly right now, so I'll focus on work and "
-                "staying alive. If anyone has a concrete plan, summarize it and tag me."
-            ),
-            "reasoning": f"Fallback (LLM unavailable): {reason}",
-        }
+    resolved_run_class = run_class or current_run_class()
 
     try:
         raw_max_action_tokens = runtime_config_service.get_effective_value_cached("LLM_ACTION_MAX_TOKENS")
@@ -661,7 +561,12 @@ async def get_agent_action(
             if not response:
                 if parse_attempt < parse_retry_attempts:
                     continue
-                return _fallback_action("No response from LLM")
+                return build_terminal_llm_failure_action(
+                    agent_id=agent_id,
+                    reason="No response from LLM",
+                    run_class=resolved_run_class,
+                    failure_stage="terminal_llm_failure",
+                )
 
             action_data, parse_meta = parse_action_response_with_meta(response)
             parse_meta["attempt"] = parse_attempt + 1
@@ -686,13 +591,23 @@ async def get_agent_action(
                 max_action_tokens = min(900, max_action_tokens + 120)
                 continue
 
-            # Final attempt: return safe coercion result, with telemetry attached.
-            action_data["_llm_meta"] = {"parse": parse_meta}
-            return action_data
+            fallback_action = build_terminal_llm_failure_action(
+                agent_id=agent_id,
+                reason=f"Unusable checkpoint output: {parse_meta.get('error_type') or 'parse_error'}",
+                run_class=resolved_run_class,
+                failure_stage="invalid_checkpoint_output",
+            )
+            fallback_action["_llm_meta"] = {"parse": parse_meta}
+            return fallback_action
         
     except Exception as e:
         logger.error(f"Error getting action for agent {agent_id}: {e}")
-        return _fallback_action(str(e))
+        return build_terminal_llm_failure_action(
+            agent_id=agent_id,
+            reason=str(e),
+            run_class=resolved_run_class,
+            failure_stage="terminal_llm_failure",
+        )
 
 
 def parse_action_response(response: str) -> dict:

@@ -20,6 +20,11 @@ from app.services.llm_client import get_agent_action
 from app.services.actions import execute_action, validate_action
 from app.services.context_builder import build_agent_context
 from app.services.agent_memory import agent_memory_service
+from app.services.run_policy import (
+    build_terminal_llm_failure_action,
+    current_run_class,
+    deterministic_failure_policy_for_run_class,
+)
 from app.services.runtime_config import runtime_config_service
 from app.services.routine_executor import routine_executor
 
@@ -38,10 +43,14 @@ def _runtime_metadata_payload(*, mode: str | None = None, checkpoint_reason: str
     payload: dict[str, object] = {}
     current_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
     current_run_mode = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_MODE") or "").strip()
+    current_run_class = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_CLASS") or "").strip()
     if current_run_id:
         payload["run_id"] = current_run_id[:64]
     if current_run_mode:
         payload["run_mode"] = current_run_mode
+    if current_run_class:
+        payload["run_class"] = current_run_class
+        payload["deterministic_failure_policy"] = deterministic_failure_policy_for_run_class(current_run_class)
     if mode:
         payload["mode"] = mode
     if checkpoint_reason:
@@ -141,10 +150,12 @@ class AgentProcessor:
             runtime_mode = "deterministic"
             action_data: Optional[dict] = None
             llm_meta: Optional[dict] = None
+            deterministic_meta: Optional[dict] = None
             model_type: Optional[str] = None
             system_prompt: Optional[str] = None
             context: Optional[str] = None
             checkpoint_number_hint: Optional[int] = None
+            run_class = current_run_class()
 
             db = SessionLocal()
             try:
@@ -188,21 +199,16 @@ class AgentProcessor:
                     system_prompt=system_prompt or LLM_GUARDRAIL_PREFIX,
                     context_prompt=context or "",
                     checkpoint_number=checkpoint_number_hint,
+                    run_class=run_class,
                 )
 
             if not action_data:
-                # Controlled fallback when LLM fails at checkpoint: keep moving deterministically.
-                db = SessionLocal()
-                try:
-                    agent = db.query(Agent).filter(Agent.id == agent_id).first()
-                    if not agent or agent.status != "active":
-                        return
-                    action_data = routine_executor.build_action(db, agent)
-                    runtime_mode = "deterministic_fallback"
-                    if checkpoint_reason:
-                        checkpoint_reason = f"{checkpoint_reason}:llm_no_response"
-                finally:
-                    db.close()
+                action_data = build_terminal_llm_failure_action(
+                    agent_id=agent_id,
+                    reason="No action returned from LLM client",
+                    run_class=run_class,
+                    failure_stage="terminal_llm_failure",
+                )
 
             # Phase 3: Validation + action execution (fresh session).
             if not self._runtime_accepts_agent_work():
@@ -219,12 +225,18 @@ class AgentProcessor:
                     maybe_meta = action_data.pop("_llm_meta", None)
                     if isinstance(maybe_meta, dict):
                         llm_meta = maybe_meta
+                    deterministic_meta = action_data.pop("_deterministic_meta", None)
+                    if isinstance(deterministic_meta, dict):
+                        runtime_mode = str(deterministic_meta.get("runtime_mode") or runtime_mode)
 
                 if checkpoint_reason:
                     self._apply_checkpoint_state(agent, checkpoint_reason, action_data or {})
 
                 current_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
                 current_run_mode = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_MODE") or "").strip()
+                current_run_class_value = str(
+                    runtime_config_service.get_effective_value_cached("SIMULATION_RUN_CLASS") or ""
+                ).strip()
                 runtime_metadata = {
                     "mode": runtime_mode,
                     "checkpoint_reason": checkpoint_reason,
@@ -233,6 +245,17 @@ class AgentProcessor:
                     runtime_metadata["run_id"] = current_run_id[:64]
                 if current_run_mode:
                     runtime_metadata["run_mode"] = current_run_mode
+                if current_run_class_value:
+                    runtime_metadata["run_class"] = current_run_class_value
+                    runtime_metadata["deterministic_failure_policy"] = deterministic_failure_policy_for_run_class(
+                        current_run_class_value
+                    )
+                if isinstance(deterministic_meta, dict):
+                    runtime_metadata["continuity_protection"] = bool(
+                        deterministic_meta.get("continuity_protection")
+                    )
+                    runtime_metadata["failure_stage"] = deterministic_meta.get("failure_stage")
+                    runtime_metadata["failure_reason"] = deterministic_meta.get("failure_reason")
                 parse_meta = (llm_meta or {}).get("parse") if isinstance(llm_meta, dict) else None
                 if isinstance(parse_meta, dict):
                     runtime_metadata["llm_parse_status"] = parse_meta.get("parse_status")
@@ -246,15 +269,27 @@ class AgentProcessor:
                 validation = await validate_action(db, agent, action_data)
                 if not validation["valid"]:
                     self._apply_rate_limit_backoff(agent_id, validation, runtime_metadata=runtime_metadata)
-                    # If the checkpoint output is invalid, attempt one deterministic fallback this turn.
+                    # If checkpoint output is invalid, use the run-class-aware deterministic policy.
                     if checkpoint_reason:
-                        fallback_action = routine_executor.build_action(db, agent)
+                        fallback_action = build_terminal_llm_failure_action(
+                            agent_id=agent_id,
+                            reason=f"Checkpoint action rejected: {validation['reason']}",
+                            run_class=run_class,
+                            failure_stage="invalid_checkpoint_output",
+                        )
+                        fallback_meta = fallback_action.pop("_deterministic_meta", None)
+                        if isinstance(fallback_meta, dict):
+                            runtime_mode = str(fallback_meta.get("runtime_mode") or runtime_mode)
+                            runtime_metadata["mode"] = runtime_mode
+                            runtime_metadata["continuity_protection"] = bool(
+                                fallback_meta.get("continuity_protection")
+                            )
+                            runtime_metadata["failure_stage"] = fallback_meta.get("failure_stage")
+                            runtime_metadata["failure_reason"] = fallback_meta.get("failure_reason")
                         fallback_validation = await validate_action(db, agent, fallback_action)
                         if fallback_validation["valid"]:
                             action_data = fallback_action
                             validation = fallback_validation
-                            runtime_mode = "deterministic_fallback"
-                            runtime_metadata["mode"] = runtime_mode
                         else:
                             self._apply_rate_limit_backoff(agent_id, fallback_validation, runtime_metadata=runtime_metadata)
                             await self._log_invalid_action(

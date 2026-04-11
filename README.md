@@ -6,6 +6,11 @@ Emergence is a live simulation where 50 LLM-driven agents operate under the same
 
 Resource scarcity, action costs, and permanent death create real stakes. Different model families and capability tiers introduce cognitive diversity.
 
+Current run-policy summary:
+- `standard_72h`: default research run, no provider/model fallback, terminal LLM failure forces idle
+- `deep_96h`: longer research run, no provider/model fallback, terminal LLM failure forces idle
+- `special_exploratory`: exploratory/showcase run, no provider/model fallback, terminal LLM failure may use deterministic routine continuity protection
+
 ## Project Goal
 
 The project focuses on one question:
@@ -37,7 +42,7 @@ npm install
 npm run dev
 ```
 
-You'll need API keys for OpenRouter, Groq, Mistral, and/or Gemini to power the LLMs. See the `.env.example` files for what's required.
+You'll need API keys for OpenRouter, Mistral, and/or Gemini to power the LLMs. See the `.env.example` files for what's required. Deprecated Groq env vars may still exist in some deploy environments for compatibility, but they are no longer used for routing.
 
 ## Neon Postgres
 
@@ -71,6 +76,7 @@ From repo root:
 # Simulation runtime controls
 make sim-status
 make sim-start RUN_MODE=real
+make sim-start RUN_MODE=real RUN_CLASS=deep_96h
 make sim-stop
 
 # Run-scoped research outputs
@@ -89,7 +95,7 @@ Report artifacts are written under `output/reports/runs/<run_id>/` and indexed i
 - **Backend:** Python, FastAPI, PostgreSQL, Redis
 - **Database Hosting:** Neon (production-ready option)
 - **Frontend:** React, Vite
-- **LLMs:** OpenRouter, Groq, Mistral, Gemini
+- **LLMs:** OpenRouter, Mistral, Gemini
 - **Hosting:** Railway
 
 ## Documentation
@@ -113,6 +119,8 @@ A few principles guide this project:
 3. **Observer transparency.** Logs are public to observers. Transparency is an observer constraint, not a social objective.
 
 4. **Capability diversity.** Different underlying models produce heterogeneous behavior.
+
+5. **Attribution integrity.** We do not silently remap agents onto a different provider/model mid-run; unknown model assignments are treated as configuration errors.
 
 ## Contributing
 

@@ -219,7 +219,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str, since: datetime) -> dict[
             SELECT
               COUNT(*) AS calls,
               COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
               COALESCE(SUM(total_tokens), 0) AS total_tokens,
               COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
             FROM llm_usage
@@ -276,7 +276,8 @@ def _collect_run_snapshot(db: Session, *, run_id: str, since: datetime) -> dict[
             SELECT
               COUNT(*) AS total_events,
               COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
-              COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_actions,
+              COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_forced_idle' THEN 1 ELSE 0 END), 0) AS deterministic_forced_idle_actions,
+              COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') IN ('deterministic_routine_fallback', 'deterministic_fallback') THEN 1 ELSE 0 END), 0) AS deterministic_routine_fallback_actions,
               COALESCE(SUM(CASE WHEN e.event_type = 'create_proposal' THEN 1 ELSE 0 END), 0) AS proposal_actions,
               COALESCE(SUM(CASE WHEN e.event_type = 'vote' THEN 1 ELSE 0 END), 0) AS vote_actions,
               COALESCE(SUM(CASE WHEN e.event_type IN ('forum_post', 'forum_reply') THEN 1 ELSE 0 END), 0) AS forum_actions,
@@ -488,13 +489,25 @@ def _collect_run_snapshot(db: Session, *, run_id: str, since: datetime) -> dict[
     return {
         "llm_calls": calls,
         "llm_success_calls": int((llm_totals.success_calls if llm_totals else 0) or 0),
-        "llm_fallback_calls": int((llm_totals.fallback_calls if llm_totals else 0) or 0),
+        "llm_provider_model_fallback_calls": int(
+            (llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0
+        ),
+        "llm_fallback_calls": int((llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0),
         "llm_total_tokens": int((llm_totals.total_tokens if llm_totals else 0) or 0),
         "llm_cost_usd": float((llm_totals.estimated_cost_usd if llm_totals else 0.0) or 0.0),
         "active_agents": int(active_agents or 0),
         "total_events": int((runtime_actions.total_events if runtime_actions else 0) or 0),
         "checkpoint_actions": int((runtime_actions.checkpoint_actions if runtime_actions else 0) or 0),
-        "deterministic_actions": int((runtime_actions.deterministic_actions if runtime_actions else 0) or 0),
+        "deterministic_forced_idle_actions": int(
+            (runtime_actions.deterministic_forced_idle_actions if runtime_actions else 0) or 0
+        ),
+        "deterministic_routine_fallback_actions": int(
+            (runtime_actions.deterministic_routine_fallback_actions if runtime_actions else 0) or 0
+        ),
+        "deterministic_actions": int(
+            ((runtime_actions.deterministic_forced_idle_actions if runtime_actions else 0) or 0)
+            + ((runtime_actions.deterministic_routine_fallback_actions if runtime_actions else 0) or 0)
+        ),
         "proposal_actions": int((runtime_actions.proposal_actions if runtime_actions else 0) or 0),
         "vote_actions": int((runtime_actions.vote_actions if runtime_actions else 0) or 0),
         "forum_actions": int((runtime_actions.forum_actions if runtime_actions else 0) or 0),
@@ -657,7 +670,11 @@ def _build_locked_sections(
     )
 
     checkpoint_actions = int(snapshot.get("checkpoint_actions") or 0)
-    deterministic_actions = int(snapshot.get("deterministic_actions") or 0)
+    deterministic_forced_idle_actions = int(snapshot.get("deterministic_forced_idle_actions") or 0)
+    deterministic_routine_fallback_actions = int(
+        snapshot.get("deterministic_routine_fallback_actions") or 0
+    )
+    deterministic_actions = deterministic_forced_idle_actions + deterministic_routine_fallback_actions
     total_runtime_actions = checkpoint_actions + deterministic_actions
     deterministic_share = (
         (deterministic_actions / total_runtime_actions)
@@ -825,7 +842,9 @@ def _build_locked_sections(
                 _claim_block(
                     (
                         f"Digest confidence for this window is **{confidence}**; deterministic fallback share was "
-                        f"{deterministic_share:.1%} ({deterministic_actions:,}/{total_runtime_actions:,} runtime actions)."
+                        f"{deterministic_share:.1%} ({deterministic_actions:,}/{total_runtime_actions:,} runtime actions), "
+                        f"split across {deterministic_forced_idle_actions:,} forced idle actions and "
+                        f"{deterministic_routine_fallback_actions:,} routine continuity actions."
                     ),
                     base_links,
                 ),

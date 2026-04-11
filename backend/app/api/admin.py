@@ -24,6 +24,7 @@ from app.core.database import get_db
 from app.core.time import now_utc
 from app.models.models import AdminConfigChange, SimulationRun
 from app.services.kpi_rollups import get_recent_rollups
+from app.services.run_policy import coerce_run_class, deterministic_failure_policy_for_run_class
 from app.services.run_reports import get_run_report_pipeline_status, maybe_generate_run_closeout_bundle
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
@@ -396,6 +397,7 @@ def _resolve_run_start_metadata(
     *,
     run_id: str,
     mode: str,
+    existing_run_class: str | None = None,
 ) -> dict[str, Any]:
     season_number = int(request.season_number or 0)
     return {
@@ -410,7 +412,7 @@ def _resolve_run_start_metadata(
         "mirror_control_run_id": _clean_optional_identifier(request.mirror_control_run_id),
         "transfer_policy_version": _clean_optional_identifier(request.transfer_policy_version),
         "epoch_id": _clean_optional_identifier(request.epoch_id),
-        "run_class": str(request.run_class or _DEFAULT_RUN_CLASS),
+        "run_class": coerce_run_class(request.run_class or existing_run_class or _DEFAULT_RUN_CLASS),
     }
 
 
@@ -653,6 +655,10 @@ def admin_status(
         "viewer_ops": {
             "run_mode": effective.get("SIMULATION_RUN_MODE"),
             "run_id": current_run_id,
+            "run_class": coerce_run_class(effective.get("SIMULATION_RUN_CLASS")),
+            "deterministic_failure_policy": deterministic_failure_policy_for_run_class(
+                effective.get("SIMULATION_RUN_CLASS")
+            ),
             "condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None,
             "season_number": (
                 int(effective.get("SIMULATION_SEASON_NUMBER") or 0)
@@ -667,7 +673,6 @@ def admin_status(
             "day_key": budget.day_key.isoformat(),
             "calls_total": int(budget.calls_total),
             "calls_openrouter_free": int(budget.calls_openrouter_free),
-            "calls_groq": int(budget.calls_groq),
             "calls_gemini": int(budget.calls_gemini),
             "estimated_cost_usd": float(budget.estimated_cost_usd),
             "soft_cap_usd": float(effective.get("LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0),
@@ -815,7 +820,13 @@ def start_simulation_run(
 
     mode = str(request.mode or "").strip()
     run_id = _normalize_run_id(request.run_id, mode)
-    metadata = _resolve_run_start_metadata(request, run_id=run_id, mode=mode)
+    existing_run_row = _get_simulation_run_row(db, run_id=run_id)
+    metadata = _resolve_run_start_metadata(
+        request,
+        run_id=run_id,
+        mode=mode,
+        existing_run_class=(existing_run_row.run_class if existing_run_row else None),
+    )
     _validate_run_reference(
         db,
         run_id=run_id,
@@ -875,6 +886,7 @@ def start_simulation_run(
         updates={
             "SIMULATION_RUN_MODE": mode,
             "SIMULATION_RUN_ID": run_id,
+            "SIMULATION_RUN_CLASS": coerce_run_class(metadata.get("run_class")),
             "SIMULATION_CONDITION_NAME": str(metadata.get("condition_name") or "").strip(),
             "SIMULATION_SEASON_NUMBER": int(request.season_number or 0),
             "SIMULATION_ACTIVE": True,
@@ -888,6 +900,10 @@ def start_simulation_run(
         "ok": True,
         "mode": mode,
         "run_id": run_id,
+        "run_class": coerce_run_class(metadata.get("run_class")),
+        "deterministic_failure_policy": deterministic_failure_policy_for_run_class(
+            metadata.get("run_class")
+        ),
         "condition_name": str(metadata.get("condition_name") or "").strip() or None,
         "season_number": int(request.season_number or 0) or None,
         "simulation_active": True,
@@ -916,6 +932,7 @@ def stop_simulation_run(
     updates: dict[str, Any] = {"SIMULATION_PAUSED": True}
     if request.clear_run_id:
         updates["SIMULATION_RUN_ID"] = ""
+        updates["SIMULATION_RUN_CLASS"] = _DEFAULT_RUN_CLASS
         updates["SIMULATION_CONDITION_NAME"] = ""
         updates["SIMULATION_SEASON_NUMBER"] = 0
 
@@ -1008,12 +1025,15 @@ def get_run_metrics(
             "llm": {
                 "calls": 0,
                 "success_calls": 0,
+                "provider_model_fallback_calls": 0,
                 "fallback_calls": 0,
                 "total_tokens": 0,
                 "estimated_cost_usd": 0.0,
             },
             "activity": {
                 "checkpoint_actions": 0,
+                "deterministic_forced_idle_actions": 0,
+                "deterministic_routine_fallback_actions": 0,
                 "deterministic_actions": 0,
                 "proposal_actions": 0,
                 "vote_actions": 0,
@@ -1053,7 +1073,7 @@ def get_run_metrics(
             SELECT
               COUNT(*) AS calls,
               COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
               COALESCE(SUM(total_tokens), 0) AS total_tokens,
               COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
             FROM llm_usage
@@ -1069,7 +1089,8 @@ def get_run_metrics(
             """
             SELECT
               COALESCE(SUM(CASE WHEN (event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
-              COALESCE(SUM(CASE WHEN (event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_actions,
+              COALESCE(SUM(CASE WHEN (event_metadata -> 'runtime' ->> 'mode') = 'deterministic_forced_idle' THEN 1 ELSE 0 END), 0) AS deterministic_forced_idle_actions,
+              COALESCE(SUM(CASE WHEN (event_metadata -> 'runtime' ->> 'mode') IN ('deterministic_routine_fallback', 'deterministic_fallback') THEN 1 ELSE 0 END), 0) AS deterministic_routine_fallback_actions,
               COALESCE(SUM(CASE WHEN event_type = 'create_proposal' THEN 1 ELSE 0 END), 0) AS proposal_actions,
               COALESCE(SUM(CASE WHEN event_type = 'vote' THEN 1 ELSE 0 END), 0) AS vote_actions,
               COALESCE(SUM(CASE WHEN event_type IN ('forum_post', 'forum_reply') THEN 1 ELSE 0 END), 0) AS forum_actions
@@ -1130,13 +1151,25 @@ def get_run_metrics(
         "llm": {
             "calls": int((llm_totals.calls if llm_totals else 0) or 0),
             "success_calls": int((llm_totals.success_calls if llm_totals else 0) or 0),
-            "fallback_calls": int((llm_totals.fallback_calls if llm_totals else 0) or 0),
+            "provider_model_fallback_calls": int(
+                (llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0
+            ),
+            "fallback_calls": int((llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0),
             "total_tokens": int((llm_totals.total_tokens if llm_totals else 0) or 0),
             "estimated_cost_usd": float((llm_totals.estimated_cost_usd if llm_totals else 0.0) or 0.0),
         },
         "activity": {
             "checkpoint_actions": int((runtime_actions.checkpoint_actions if runtime_actions else 0) or 0),
-            "deterministic_actions": int((runtime_actions.deterministic_actions if runtime_actions else 0) or 0),
+            "deterministic_forced_idle_actions": int(
+                (runtime_actions.deterministic_forced_idle_actions if runtime_actions else 0) or 0
+            ),
+            "deterministic_routine_fallback_actions": int(
+                (runtime_actions.deterministic_routine_fallback_actions if runtime_actions else 0) or 0
+            ),
+            "deterministic_actions": int(
+                ((runtime_actions.deterministic_forced_idle_actions if runtime_actions else 0) or 0)
+                + ((runtime_actions.deterministic_routine_fallback_actions if runtime_actions else 0) or 0)
+            ),
             "proposal_actions": int((runtime_actions.proposal_actions if runtime_actions else 0) or 0),
             "vote_actions": int((runtime_actions.vote_actions if runtime_actions else 0) or 0),
             "forum_actions": int((runtime_actions.forum_actions if runtime_actions else 0) or 0),

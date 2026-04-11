@@ -491,7 +491,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
             SELECT
               COUNT(*) AS calls,
               COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
               COALESCE(SUM(total_tokens), 0) AS total_tokens,
@@ -510,7 +510,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
               provider,
               COUNT(*) AS calls,
               COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
               COALESCE(SUM(total_tokens), 0) AS total_tokens,
               COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
             FROM llm_usage
@@ -530,7 +530,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
               COALESCE(resolved_model_name, model_name) AS model_name,
               COUNT(*) AS calls,
               COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+              COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
               COALESCE(SUM(total_tokens), 0) AS total_tokens,
               COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
             FROM llm_usage
@@ -573,7 +573,8 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
             """
             SELECT
               COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
-              COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_actions
+              COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_forced_idle' THEN 1 ELSE 0 END), 0) AS deterministic_forced_idle_actions,
+              COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') IN ('deterministic_routine_fallback', 'deterministic_fallback') THEN 1 ELSE 0 END), 0) AS deterministic_routine_fallback_actions
             FROM events e
             WHERE e.created_at >= :since_ts
               AND (
@@ -664,7 +665,10 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
     llm_payload = {
         "calls": calls,
         "success_calls": int((llm_totals.success_calls if llm_totals else 0) or 0),
-        "fallback_calls": int((llm_totals.fallback_calls if llm_totals else 0) or 0),
+        "provider_model_fallback_calls": int(
+            (llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0
+        ),
+        "fallback_calls": int((llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0),
         "prompt_tokens": int((llm_totals.prompt_tokens if llm_totals else 0) or 0),
         "completion_tokens": int((llm_totals.completion_tokens if llm_totals else 0) or 0),
         "total_tokens": int((llm_totals.total_tokens if llm_totals else 0) or 0),
@@ -673,8 +677,12 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
             int((llm_totals.success_calls if llm_totals else 0) or 0),
             calls,
         ),
+        "provider_model_fallback_rate": _safe_ratio(
+            int((llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0),
+            calls,
+        ),
         "fallback_rate": _safe_ratio(
-            int((llm_totals.fallback_calls if llm_totals else 0) or 0),
+            int((llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0),
             calls,
         ),
         "by_provider": [
@@ -682,7 +690,8 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
                 "provider": str(row.provider or ""),
                 "calls": int(row.calls or 0),
                 "success_calls": int(row.success_calls or 0),
-                "fallback_calls": int(row.fallback_calls or 0),
+                "provider_model_fallback_calls": int(row.provider_model_fallback_calls or 0),
+                "fallback_calls": int(row.provider_model_fallback_calls or 0),
                 "total_tokens": int(row.total_tokens or 0),
                 "estimated_cost_usd": float(row.estimated_cost_usd or 0.0),
             }
@@ -694,7 +703,8 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
                 "model_name": str(row.model_name or ""),
                 "calls": int(row.calls or 0),
                 "success_calls": int(row.success_calls or 0),
-                "fallback_calls": int(row.fallback_calls or 0),
+                "provider_model_fallback_calls": int(row.provider_model_fallback_calls or 0),
+                "fallback_calls": int(row.provider_model_fallback_calls or 0),
                 "total_tokens": int(row.total_tokens or 0),
                 "estimated_cost_usd": float(row.estimated_cost_usd or 0.0),
             }
@@ -702,10 +712,18 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         ],
     }
 
+    deterministic_forced_idle_actions = int(
+        (runtime_mode_counts.deterministic_forced_idle_actions if runtime_mode_counts else 0) or 0
+    )
+    deterministic_routine_fallback_actions = int(
+        (runtime_mode_counts.deterministic_routine_fallback_actions if runtime_mode_counts else 0) or 0
+    )
     activity_payload = {
         "total_events": total_events,
         "checkpoint_actions": int((runtime_mode_counts.checkpoint_actions if runtime_mode_counts else 0) or 0),
-        "deterministic_actions": int((runtime_mode_counts.deterministic_actions if runtime_mode_counts else 0) or 0),
+        "deterministic_forced_idle_actions": deterministic_forced_idle_actions,
+        "deterministic_routine_fallback_actions": deterministic_routine_fallback_actions,
+        "deterministic_actions": deterministic_forced_idle_actions + deterministic_routine_fallback_actions,
         "proposal_actions": int(event_counts.get("create_proposal", 0)),
         "vote_actions": int(event_counts.get("vote", 0)),
         "forum_actions": int(event_counts.get("forum_post", 0) + event_counts.get("forum_reply", 0)),
@@ -751,12 +769,14 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
         "## LLM Totals",
         f"- Calls: {int((llm or {}).get('calls') or 0):,}",
         f"- Success calls: {int((llm or {}).get('success_calls') or 0):,}",
-        f"- Fallback calls: {int((llm or {}).get('fallback_calls') or 0):,}",
+        f"- Provider/model fallback calls: {int((llm or {}).get('provider_model_fallback_calls') or 0):,}",
         f"- Total tokens: {int((llm or {}).get('total_tokens') or 0):,}",
         f"- Estimated cost (USD): {float((llm or {}).get('estimated_cost_usd') or 0.0):.6f}",
         "",
         "## Activity Metrics",
         f"- Total events: {int((activity or {}).get('total_events') or 0):,}",
+        f"- Deterministic forced idle actions: {int((activity or {}).get('deterministic_forced_idle_actions') or 0):,}",
+        f"- Deterministic routine fallback actions: {int((activity or {}).get('deterministic_routine_fallback_actions') or 0):,}",
         f"- Proposals created: {int((activity or {}).get('proposal_actions') or 0):,}",
         f"- Votes cast: {int((activity or {}).get('vote_actions') or 0):,}",
         f"- Laws passed: {int((activity or {}).get('laws_passed') or 0):,}",
@@ -773,7 +793,7 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
             "- "
             + f"{row.get('provider')}: calls={int(row.get('calls') or 0)}, "
             + f"success={int(row.get('success_calls') or 0)}, "
-            + f"fallback={int(row.get('fallback_calls') or 0)}, "
+            + f"provider_model_fallback={int(row.get('provider_model_fallback_calls') or 0)}, "
             + f"cost_usd={float(row.get('estimated_cost_usd') or 0.0):.6f}"
         )
     rows.extend(["", "## Model Breakdown"])
@@ -782,7 +802,7 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
             "- "
             + f"{row.get('provider')}/{row.get('model_name')}: calls={int(row.get('calls') or 0)}, "
             + f"success={int(row.get('success_calls') or 0)}, "
-            + f"fallback={int(row.get('fallback_calls') or 0)}, "
+            + f"provider_model_fallback={int(row.get('provider_model_fallback_calls') or 0)}, "
             + f"cost_usd={float(row.get('estimated_cost_usd') or 0.0):.6f}"
         )
     rows.extend(["", "## Caveats"])
@@ -1099,7 +1119,7 @@ def _build_planner_payload(
     else:
         lines.append("No prior comparable run found for automatic delta.")
 
-    fallback_rate = float((current_llm or {}).get("fallback_rate") or 0.0)
+    fallback_rate = float((current_llm or {}).get("provider_model_fallback_rate") or 0.0)
     deaths = int((current_activity or {}).get("deaths") or 0)
     if fallback_rate >= 0.20:
         recommendation = {
@@ -1549,7 +1569,7 @@ def rebuild_run_bundle(
             {
                 "heading": "Provider and Model Reliability",
                 "paragraphs": [
-                    f"{row.get('provider')} | calls={row.get('calls')} | success={row.get('success_calls')} | fallback={row.get('fallback_calls')} | cost_usd={float(row.get('estimated_cost_usd') or 0.0):.6f}"
+                    f"{row.get('provider')} | calls={row.get('calls')} | success={row.get('success_calls')} | provider_model_fallback={row.get('provider_model_fallback_calls')} | cost_usd={float(row.get('estimated_cost_usd') or 0.0):.6f}"
                     for row in (technical_payload.get("llm") or {}).get("by_provider", [])
                 ]
                 or ["No provider usage rows were found for this run."],

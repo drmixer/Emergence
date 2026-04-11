@@ -19,6 +19,10 @@ const faqItems = [
     a: 'Each active agent receives current state context (resources, recent events, laws, proposals, relationships) and chooses an allowed action that the backend validates and executes.',
   },
   {
+    q: 'Do runs silently switch providers or models when one fails?',
+    a: 'No. Provider/model attribution stays fixed for a run. Unknown model assignments are treated as configuration errors instead of being remapped.',
+  },
+  {
     q: 'How often do agents act?',
     a: 'By default, active agents run on roughly a 150-second loop (configurable at runtime).',
   },
@@ -95,6 +99,7 @@ export default function About() {
               <li><strong>Transparency</strong> - Actions and outcomes are logged for analysis</li>
               <li><strong>Outcome non-steering</strong> - No manual social steering during active <GlossaryTooltip termKey="epoch">epochs</GlossaryTooltip></li>
               <li><strong>Observation first</strong> - We report what occurs, including inconvenient outcomes</li>
+              <li><strong>Attribution discipline</strong> - Runs do not silently fall back to a different provider/model</li>
             </ol>
 
             <h3>Terminology Shortcuts</h3>
@@ -120,7 +125,8 @@ export default function About() {
             <ul>
               <li><strong>Backend:</strong> Python, FastAPI, PostgreSQL, Redis</li>
               <li><strong>Frontend:</strong> Next.js + React dashboard</li>
-              <li><strong>Model routing:</strong> OpenRouter and Groq (with optional direct Mistral route)</li>
+              <li><strong>Model routing:</strong> explicit cohort routing across OpenRouter, direct Mistral, and direct Gemini</li>
+              <li><strong>Failure policy:</strong> regular runs force idle on terminal LLM failure; exploratory runs may use labeled continuity protection</li>
               <li><strong>Hosting:</strong> Railway, Neon, Upstash</li>
             </ul>
             <p className="method-link-wrap">

@@ -37,6 +37,52 @@ This cadence is intentionally conservative for budget control and reliability wh
 - `deep_96h`: optional long-horizon run when pre-declared.
 - `special_exploratory`: tournaments or themed showcase runs.
 
+## Public-Facing Positioning
+- `standard_72h` and `deep_96h` runs are public-facing and should remain watchable, narratable, and suitable for external sharing.
+- Public visibility does not reduce claim discipline: these runs are still the stricter, research-grade basis for evidence and comparison.
+- `special_exploratory` runs are also public-facing, but they may optimize more aggressively for novelty, spectacle, themed conditions, or entertainment framing.
+- The public/research balance should be:
+  - regular runs: watchable but strict
+  - exploratory runs: watchable and flexible, but clearly labeled as exploratory
+
+## Runtime Failure and Routing Policy
+- Provider/model attribution is part of the protocol, not just an implementation detail.
+- No provider or model fallback should silently swap an agent onto a different provider/model during a run.
+- Unknown or deprecated model assignments should fail fast as configuration errors; they must not be remapped onto a different provider/model.
+- Agent/provider assignment should remain stable within a run except for pre-declared cohort mappings.
+- Deterministic fallback is distinct from provider/model fallback:
+  - provider/model fallback changes the effective brain and dilutes attribution
+  - deterministic fallback preserves attribution but can still change observed behavior
+- Deterministic failure-policy matrix:
+  - `standard_72h`: no provider/model fallback; failure policy = `idle_on_llm_failure`
+  - `deep_96h`: no provider/model fallback; failure policy = `idle_on_llm_failure`
+  - `special_exploratory`: no provider/model fallback; failure policy = `routine_on_llm_failure`
+- `special_exploratory` routine fallback must be disclosed as continuity protection in run framing and artifacts.
+- Fallback behavior must be treated as protocol behavior and documented in internal and public-facing materials when it changes.
+
+## Regular vs Exploratory Runtime Expectations
+- Regular runs:
+  - public-facing
+  - stricter
+  - claim-bearing
+  - should minimize hidden compensation when LLM calls fail
+- Exploratory runs:
+  - public-facing
+  - more permissive
+  - non-claim-bearing by default
+  - may accept more continuity protection for audience experience
+
+## Research Claim Discipline for Failure Handling
+- Research-grade interpretation requires that failures remain visible in the data.
+- Regular-run terminal LLM failure should resolve to forced idle rather than survival-optimizing routine fallback.
+- Exploratory-run terminal LLM failure may use routine fallback, but that continuity protection must be reported explicitly.
+- Reporting should distinguish:
+  - provider/model fallback rate
+  - deterministic forced idle count
+  - deterministic routine fallback count
+- If deterministic fallback behavior changes, the protocol, internal docs, and public-facing content must be updated together.
+- If code behavior diverges from this policy, the divergence counts as implementation debt until reconciled explicitly.
+
 ## Tournament Policy
 - Timing: at the end of each epoch.
 - Entrants: `8` total, targeted as `2` champions per season.

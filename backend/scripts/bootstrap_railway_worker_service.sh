@@ -18,13 +18,11 @@ railway variable set -s "${SERVICE_NAME}" \
   DATABASE_URL='${{backend.DATABASE_URL}}' \
   REDIS_URL='${{backend.REDIS_URL}}' \
   OPENROUTER_API_KEY='${{backend.OPENROUTER_API_KEY}}' \
-  GROQ_API_KEY='${{backend.GROQ_API_KEY}}' \
   GEMINI_API_KEY='${{backend.GEMINI_API_KEY}}' \
   MISTRAL_API_KEY='${{backend.MISTRAL_API_KEY}}' \
   ENVIRONMENT='${{backend.ENVIRONMENT}}' \
   SECRET_KEY='${{backend.SECRET_KEY}}' \
   FRONTEND_URL='${{backend.FRONTEND_URL}}' \
-  LLM_PROVIDER='${{backend.LLM_PROVIDER}}' \
   USAGE_BUDGET_KEY_PREFIX='${{backend.USAGE_BUDGET_KEY_PREFIX}}' \
   --skip-deploys
 

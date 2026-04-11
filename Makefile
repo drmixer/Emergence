@@ -2,6 +2,7 @@
 
 RUN_MODE ?= real
 RUN_ID ?=
+RUN_CLASS ?=
 CONDITION ?=
 SEASON_NUMBER ?=
 EPOCH_ID ?=
@@ -16,6 +17,7 @@ sim-start:
 	@cd backend && \
 	CMD="railway run -s backend -- venv/bin/python scripts/simulation_control.py start --run-mode \"$(RUN_MODE)\""; \
 	if [ -n "$(RUN_ID)" ]; then CMD="$$CMD --run-id \"$(RUN_ID)\""; fi; \
+	if [ -n "$(RUN_CLASS)" ]; then CMD="$$CMD --run-class \"$(RUN_CLASS)\""; fi; \
 	if [ -n "$(CONDITION)" ]; then CMD="$$CMD --condition \"$(CONDITION)\""; fi; \
 	if [ -n "$(SEASON_NUMBER)" ]; then CMD="$$CMD --season-number \"$(SEASON_NUMBER)\""; fi; \
 	eval $$CMD

@@ -33,6 +33,11 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         python_type=str,
         description="Run label for metrics attribution (max 64 chars). Empty value uses auto-generated id.",
     ),
+    "SIMULATION_RUN_CLASS": MutableSettingSpec(
+        python_type=str,
+        allowed_values=("standard_72h", "deep_96h", "special_exploratory"),
+        description="Explicit run class that controls deterministic failure policy.",
+    ),
     "SIMULATION_CONDITION_NAME": MutableSettingSpec(
         python_type=str,
         description="Optional condition label for research tagging/reporting (max 120 chars).",
@@ -169,12 +174,6 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=50000,
         description="Daily cap for OpenRouter free-route calls.",
     ),
-    "LLM_MAX_CALLS_PER_DAY_GROQ": MutableSettingSpec(
-        python_type=int,
-        min_value=0,
-        max_value=50000,
-        description="Daily cap for Groq-route calls.",
-    ),
     "LLM_MAX_CALLS_PER_DAY_GEMINI": MutableSettingSpec(
         python_type=int,
         min_value=0,
@@ -252,6 +251,9 @@ def _coerce_value(key: str, raw_value: Any, spec: MutableSettingSpec) -> Any:
         if len(text) > 64:
             raise ValueError("must be <= 64 characters")
         value = text
+
+    if key == "SIMULATION_RUN_CLASS":
+        value = str(value or "").strip().lower()
 
     if key == "SIMULATION_CONDITION_NAME":
         text = str(value or "").strip()

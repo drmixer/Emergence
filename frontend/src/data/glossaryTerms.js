@@ -21,7 +21,7 @@ export const GLOSSARY_TERMS = [
         key: 'tournament',
         label: 'Tournament',
         shortLabel: 'tournament',
-        definition: 'A special exploratory run after an epoch with selected champions, labeled separately from baseline research runs.',
+        definition: 'A special exploratory run after an epoch with selected champions, labeled separately from baseline research runs and allowed continuity-protective deterministic fallback.',
     },
     {
         key: 'carryover',
@@ -39,7 +39,7 @@ export const GLOSSARY_TERMS = [
         key: 'exploratory',
         label: 'Exploratory Run',
         shortLabel: 'exploratory',
-        definition: 'A run class used for showcase or stress-testing scenarios that is excluded from baseline condition synthesis by default.',
+        definition: 'A run class used for showcase or stress-testing scenarios that is excluded from baseline condition synthesis by default and may use labeled routine continuity protection on terminal LLM failure.',
     },
     {
         key: 'canonical-identity',

@@ -56,6 +56,14 @@ export default function Method() {
               routing groups, not hard-coded map-visibility classes.
             </p>
 
+            <h3>Run Classes & Failure Policy</h3>
+            <ul>
+              <li><strong>standard_72h:</strong> default research run; no provider/model fallback; terminal LLM failure resolves to forced idle.</li>
+              <li><strong>deep_96h:</strong> longer research run; no provider/model fallback; terminal LLM failure resolves to forced idle.</li>
+              <li><strong>special_exploratory:</strong> exploratory/showcase run; no provider/model fallback; terminal LLM failure may use deterministic routine continuity protection.</li>
+              <li><strong>Unknown model assignments:</strong> treated as configuration errors, not silently remapped.</li>
+            </ul>
+
             <h3>Research Cadence Terms</h3>
             <ul>
               <li><GlossaryTooltip termKey="run">Run</GlossaryTooltip>: one simulation execution window with a fixed run ID.</li>
@@ -74,6 +82,7 @@ export default function Method() {
               <li>Governance participation</li>
               <li>Inequality and concentration trends</li>
               <li>Status transitions (active/dormant/dead/revived)</li>
+              <li>Provider/model fallback rate, deterministic forced-idle count, and deterministic routine-continuity count</li>
             </ul>
 
             <h3>Design Boundaries</h3>

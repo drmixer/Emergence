@@ -28,7 +28,6 @@ class BudgetSnapshot:
     day_key: date
     calls_total: int
     calls_openrouter_free: int
-    calls_groq: int
     estimated_cost_usd: float
     calls_gemini: int = 0
 
@@ -87,7 +86,6 @@ class UsageBudgetService:
         return {
             "total": f"{prefix}llm:usage:{day}:calls_total",
             "openrouter_free": f"{prefix}llm:usage:{day}:calls_openrouter_free",
-            "groq": f"{prefix}llm:usage:{day}:calls_groq",
             "gemini": f"{prefix}llm:usage:{day}:calls_gemini",
             "cost": f"{prefix}llm:usage:{day}:estimated_cost_usd",
         }
@@ -101,7 +99,6 @@ class UsageBudgetService:
                     SELECT
                         COUNT(*) AS calls_total,
                         COALESCE(SUM(CASE WHEN provider = 'openrouter' AND model_name LIKE '%:free' THEN 1 ELSE 0 END), 0) AS calls_openrouter_free,
-                        COALESCE(SUM(CASE WHEN provider = 'groq' THEN 1 ELSE 0 END), 0) AS calls_groq,
                         COALESCE(SUM(CASE WHEN provider = 'gemini' THEN 1 ELSE 0 END), 0) AS calls_gemini,
                         COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
                     FROM llm_usage
@@ -111,18 +108,17 @@ class UsageBudgetService:
                 {"day_key": day_key},
             ).first()
             if not row:
-                return BudgetSnapshot(day_key, 0, 0, 0, 0.0)
+                return BudgetSnapshot(day_key, 0, 0, 0.0)
             return BudgetSnapshot(
                 day_key=day_key,
                 calls_total=int(row.calls_total or 0),
                 calls_openrouter_free=int(row.calls_openrouter_free or 0),
-                calls_groq=int(row.calls_groq or 0),
                 estimated_cost_usd=float(row.estimated_cost_usd or 0.0),
                 calls_gemini=int(getattr(row, "calls_gemini", 0) or 0),
             )
         except Exception:
             # On first deploy, table may not exist until migration runs.
-            return BudgetSnapshot(day_key, 0, 0, 0, 0.0)
+            return BudgetSnapshot(day_key, 0, 0, 0.0)
         finally:
             db.close()
 
@@ -133,7 +129,7 @@ class UsageBudgetService:
         keys = self._counter_keys(day_key)
         try:
             values = r.mget(
-                [keys["total"], keys["openrouter_free"], keys["groq"], keys["gemini"], keys["cost"]]
+                [keys["total"], keys["openrouter_free"], keys["gemini"], keys["cost"]]
             )
             if not values or any(v is None for v in values):
                 return None
@@ -141,9 +137,8 @@ class UsageBudgetService:
                 day_key=day_key,
                 calls_total=int(values[0] or 0),
                 calls_openrouter_free=int(values[1] or 0),
-                calls_groq=int(values[2] or 0),
-                calls_gemini=int(values[3] or 0),
-                estimated_cost_usd=float(values[4] or 0.0),
+                calls_gemini=int(values[2] or 0),
+                estimated_cost_usd=float(values[3] or 0.0),
             )
         except Exception:
             return None
@@ -158,12 +153,10 @@ class UsageBudgetService:
             pipe = r.pipeline(transaction=False)
             pipe.setnx(keys["total"], snapshot.calls_total)
             pipe.setnx(keys["openrouter_free"], snapshot.calls_openrouter_free)
-            pipe.setnx(keys["groq"], snapshot.calls_groq)
             pipe.setnx(keys["gemini"], snapshot.calls_gemini)
             pipe.setnx(keys["cost"], snapshot.estimated_cost_usd)
             pipe.expire(keys["total"], ttl_seconds)
             pipe.expire(keys["openrouter_free"], ttl_seconds)
-            pipe.expire(keys["groq"], ttl_seconds)
             pipe.expire(keys["gemini"], ttl_seconds)
             pipe.expire(keys["cost"], ttl_seconds)
             pipe.execute()
@@ -187,7 +180,6 @@ class UsageBudgetService:
         max_or_free = int(
             runtime_config_service.get_effective_value_cached("LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE") or 0
         )
-        max_groq = int(runtime_config_service.get_effective_value_cached("LLM_MAX_CALLS_PER_DAY_GROQ") or 0)
         max_gemini = int(runtime_config_service.get_effective_value_cached("LLM_MAX_CALLS_PER_DAY_GEMINI") or 0)
 
         if hard_budget > 0 and snapshot.estimated_cost_usd >= hard_budget:
@@ -197,9 +189,6 @@ class UsageBudgetService:
         if provider == "openrouter" and model_name.endswith(":free") and max_or_free > 0:
             if snapshot.calls_openrouter_free >= max_or_free:
                 return BudgetDecision(False, "max_calls_openrouter_free_reached", False, snapshot)
-        if provider == "groq" and max_groq > 0:
-            if snapshot.calls_groq >= max_groq:
-                return BudgetDecision(False, "max_calls_groq_reached", False, snapshot)
         if provider == "gemini" and max_gemini > 0:
             if snapshot.calls_gemini >= max_gemini:
                 return BudgetDecision(False, "max_calls_gemini_reached", False, snapshot)
@@ -212,9 +201,6 @@ class UsageBudgetService:
             soft_cap_reached = True
         if provider == "openrouter" and model_name.endswith(":free") and max_or_free > 0:
             if snapshot.calls_openrouter_free >= int(max_or_free * 0.85):
-                soft_cap_reached = True
-        if provider == "groq" and max_groq > 0:
-            if snapshot.calls_groq >= int(max_groq * 0.85):
                 soft_cap_reached = True
         if provider == "gemini" and max_gemini > 0:
             if snapshot.calls_gemini >= int(max_gemini * 0.85):
@@ -231,8 +217,6 @@ class UsageBudgetService:
         total_tokens: int,
     ) -> float:
         # Most current routes in this project are free-tier.
-        if provider == "groq":
-            return 0.0
         if provider == "gemini":
             # Temporary conservative rule: keep Gemini at $0 estimate until pricing
             # telemetry is wired model-by-model; avoids false hard-stop triggers.
@@ -338,14 +322,11 @@ class UsageBudgetService:
             pipe.incr(keys["total"], 1)
             if provider == "openrouter" and model_name.endswith(":free"):
                 pipe.incr(keys["openrouter_free"], 1)
-            if provider == "groq":
-                pipe.incr(keys["groq"], 1)
             if provider == "gemini":
                 pipe.incr(keys["gemini"], 1)
             pipe.incrbyfloat(keys["cost"], estimated_cost)
             pipe.expire(keys["total"], ttl_seconds)
             pipe.expire(keys["openrouter_free"], ttl_seconds)
-            pipe.expire(keys["groq"], ttl_seconds)
             pipe.expire(keys["gemini"], ttl_seconds)
             pipe.expire(keys["cost"], ttl_seconds)
             pipe.execute()

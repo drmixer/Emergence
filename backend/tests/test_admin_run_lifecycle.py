@@ -111,7 +111,6 @@ def _stub_budget(monkeypatch):
             day_key=date(2026, 2, 11),
             calls_total=0,
             calls_openrouter_free=0,
-            calls_groq=0,
             calls_gemini=0,
             estimated_cost_usd=0.0,
         ),

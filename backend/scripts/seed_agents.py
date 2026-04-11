@@ -35,14 +35,15 @@ MODEL_COHORT_PLAN = [
     {"count": 4, "tier": 2, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
     {"count": 2, "tier": 2, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
     {"count": 1, "tier": 2, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    # Tier 3 (13): Gemini Flash Lite + Mistral + small Groq share.
+    # Tier 3 (13): Gemini Flash Lite + Mistral + a small OpenRouter free share.
     {"count": 8, "tier": 3, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.0-flash-lite (direct gemini)"},
     {"count": 4, "tier": 3, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
-    {"count": 1, "tier": 3, "model_type": "gr_llama_3_1_8b_instant", "resolved_model": "llama-3.1-8b-instant (groq)"},
-    # Tier 4 (15): mostly OpenRouter free with additional Groq.
+    {"count": 1, "tier": 3, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
+    # Tier 4 (15): mostly OpenRouter free with additional direct Gemini/Mistral coverage.
     {"count": 6, "tier": 4, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
     {"count": 4, "tier": 4, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    {"count": 5, "tier": 4, "model_type": "gr_llama_3_1_8b_instant", "resolved_model": "llama-3.1-8b-instant (groq)"},
+    {"count": 3, "tier": 4, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.0-flash-lite (direct gemini)"},
+    {"count": 2, "tier": 4, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
 ]
 
 # Personality distribution (data only; not injected into prompts)

@@ -41,30 +41,19 @@ class Settings(BaseSettings):
 
     # LLM APIs
     OPENROUTER_API_KEY: str = ""
+    # Deprecated compatibility fields. They are intentionally ignored by routing/runtime code.
     GROQ_API_KEY: str = ""
     MISTRAL_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
     MISTRAL_BASE_URL: str = "https://api.mistral.ai/v1"
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     MISTRAL_SMALL_MODEL: str = "mistral-small-latest"
-    # LLM routing
-    # - "auto": use model mapping if known, otherwise prefer OpenRouter, then Mistral, then Groq
-    # - "openrouter": force OpenRouter for all unknown models
-    # - "groq": force Groq for all unknown models
-    # - "mistral": force direct Mistral for all unknown models
-    # - "gemini": force direct Gemini for all unknown models
     LLM_PROVIDER: str = "auto"
-    # When forcing Groq (or falling back), pick one of: llama-3.3-70b | llama-3.1-8b
     GROQ_DEFAULT_MODEL: str = "llama-3.1-8b"
-    # If Groq is selected, optionally allow falling back to OpenRouter on rate limits/errors.
-    # Keep this off in dev if you want "Groq-only" and to avoid OpenRouter charges.
     ALLOW_OPENROUTER_FALLBACK: bool = False
-    # Optional: send a small % of lightweight agents through Groq even when OpenRouter is available.
-    # Deterministic per-agent (based on agent id). Suggested: 0.05–0.10.
-    # Legacy knob for old model_type routing; keep 0.0 with pinned cohort assignments.
     GROQ_LIGHTWEIGHT_SHARE: float = 0.0
 
-    # Provider concurrency caps to reduce rate limiting (esp. Groq free tier).
+    # Provider concurrency caps to reduce rate limiting.
     GROQ_MAX_CONCURRENCY: int = 2
     OPENROUTER_MAX_CONCURRENCY: int = 6
     MISTRAL_MAX_CONCURRENCY: int = 4
@@ -144,6 +133,7 @@ class Settings(BaseSettings):
     FORCE_CHEAPEST_ROUTE: bool = False
     # Optional run label for llm_usage attribution rows. If empty, runtime generates one.
     SIMULATION_RUN_ID: str = ""
+    SIMULATION_RUN_CLASS: str = "standard_72h"
     # Optional research metadata labels used by report/tag automation.
     SIMULATION_CONDITION_NAME: str = ""
     SIMULATION_SEASON_NUMBER: int = 0

@@ -1885,7 +1885,6 @@ def usage_budget_status():
     snapshot = usage_budget.get_snapshot()
     calls_total = int(snapshot.calls_total or 0)
     calls_or_free = int(snapshot.calls_openrouter_free or 0)
-    calls_groq = int(snapshot.calls_groq or 0)
     calls_gemini = int(snapshot.calls_gemini or 0)
     cost_usd = float(snapshot.estimated_cost_usd or 0.0)
 
@@ -1893,7 +1892,6 @@ def usage_budget_status():
     hard_budget = float(getattr(settings, "LLM_DAILY_BUDGET_USD_HARD", 0.0) or 0.0)
     max_total = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_TOTAL", 0) or 0)
     max_or_free = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE", 0) or 0)
-    max_groq = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_GROQ", 0) or 0)
     max_gemini = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_GEMINI", 0) or 0)
 
     soft_budget_reached = bool(soft_budget > 0 and cost_usd >= soft_budget)
@@ -1902,8 +1900,6 @@ def usage_budget_status():
     hard_total_reached = bool(max_total > 0 and calls_total >= max_total)
     soft_or_free_reached = bool(max_or_free > 0 and calls_or_free >= int(max_or_free * 0.85))
     hard_or_free_reached = bool(max_or_free > 0 and calls_or_free >= max_or_free)
-    soft_groq_reached = bool(max_groq > 0 and calls_groq >= int(max_groq * 0.85))
-    hard_groq_reached = bool(max_groq > 0 and calls_groq >= max_groq)
     soft_gemini_reached = bool(max_gemini > 0 and calls_gemini >= int(max_gemini * 0.85))
     hard_gemini_reached = bool(max_gemini > 0 and calls_gemini >= max_gemini)
 
@@ -1912,7 +1908,6 @@ def usage_budget_status():
         "snapshot": {
             "calls_total": calls_total,
             "calls_openrouter_free": calls_or_free,
-            "calls_groq": calls_groq,
             "calls_gemini": calls_gemini,
             "estimated_cost_usd": cost_usd,
         },
@@ -1921,7 +1916,6 @@ def usage_budget_status():
             "daily_budget_usd_hard": hard_budget,
             "max_calls_per_day_total": max_total,
             "max_calls_per_day_openrouter_free": max_or_free,
-            "max_calls_per_day_groq": max_groq,
             "max_calls_per_day_gemini": max_gemini,
         },
         "utilization": {
@@ -1929,7 +1923,6 @@ def usage_budget_status():
             "budget_hard_pct": (_safe_ratio(cost_usd, hard_budget) * 100.0) if hard_budget > 0 else None,
             "calls_total_pct": (_safe_ratio(calls_total, max_total) * 100.0) if max_total > 0 else None,
             "calls_openrouter_free_pct": (_safe_ratio(calls_or_free, max_or_free) * 100.0) if max_or_free > 0 else None,
-            "calls_groq_pct": (_safe_ratio(calls_groq, max_groq) * 100.0) if max_groq > 0 else None,
             "calls_gemini_pct": (_safe_ratio(calls_gemini, max_gemini) * 100.0) if max_gemini > 0 else None,
         },
         "flags": {
@@ -1937,14 +1930,12 @@ def usage_budget_status():
                 soft_budget_reached
                 or soft_total_reached
                 or soft_or_free_reached
-                or soft_groq_reached
                 or soft_gemini_reached
             ),
             "hard_cap_reached": bool(
                 hard_budget_reached
                 or hard_total_reached
                 or hard_or_free_reached
-                or hard_groq_reached
                 or hard_gemini_reached
             ),
             "soft_budget_reached": soft_budget_reached,
@@ -1953,8 +1944,6 @@ def usage_budget_status():
             "hard_calls_total_reached": hard_total_reached,
             "soft_calls_openrouter_free_reached": soft_or_free_reached,
             "hard_calls_openrouter_free_reached": hard_or_free_reached,
-            "soft_calls_groq_reached": soft_groq_reached,
-            "hard_calls_groq_reached": hard_groq_reached,
             "soft_calls_gemini_reached": soft_gemini_reached,
             "hard_calls_gemini_reached": hard_gemini_reached,
         },
@@ -1972,8 +1961,9 @@ def usage_daily(
     Exposes:
     - calls/day by provider/model
     - estimated spend/day
-    - fallback rate
+    - provider/model fallback rate
     - checkpoint vs deterministic action ratio
+    - deterministic forced-idle vs routine-continuity counts
     """
     day_key = _resolve_day_key(day)
     start_ts, end_ts = _day_window_utc(day_key)
@@ -2005,7 +1995,7 @@ def usage_daily(
                 SELECT
                     COUNT(*) AS calls,
                     COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
                     COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                     COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                     COALESCE(SUM(total_tokens), 0) AS total_tokens,
@@ -2025,7 +2015,7 @@ def usage_daily(
                     provider,
                     COUNT(*) AS calls,
                     COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
                     COALESCE(SUM(total_tokens), 0) AS total_tokens,
                     COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
                 FROM llm_usage
@@ -2046,7 +2036,7 @@ def usage_daily(
                     COALESCE(resolved_model_name, model_name) AS model_name,
                     COUNT(*) AS calls,
                     COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
                     COALESCE(SUM(total_tokens), 0) AS total_tokens,
                     COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
                 FROM llm_usage
@@ -2064,7 +2054,8 @@ def usage_daily(
                 f"""
                 SELECT
                     COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
-                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_actions
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_forced_idle' THEN 1 ELSE 0 END), 0) AS deterministic_forced_idle_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') IN ('deterministic_routine_fallback', 'deterministic_fallback') THEN 1 ELSE 0 END), 0) AS deterministic_routine_fallback_actions
                 FROM events e
                 WHERE e.created_at >= :start_ts
                   AND e.created_at < :end_ts
@@ -2076,22 +2067,32 @@ def usage_daily(
 
         total_calls = int((totals.calls if totals else 0) or 0)
         success_calls = int((totals.success_calls if totals else 0) or 0)
-        fallback_calls = int((totals.fallback_calls if totals else 0) or 0)
+        provider_model_fallback_calls = int(
+            (totals.provider_model_fallback_calls if totals else 0) or 0
+        )
         checkpoint_actions = int((runtime_row.checkpoint_actions if runtime_row else 0) or 0)
-        deterministic_actions = int((runtime_row.deterministic_actions if runtime_row else 0) or 0)
+        deterministic_forced_idle_actions = int(
+            (runtime_row.deterministic_forced_idle_actions if runtime_row else 0) or 0
+        )
+        deterministic_routine_fallback_actions = int(
+            (runtime_row.deterministic_routine_fallback_actions if runtime_row else 0) or 0
+        )
+        deterministic_actions = deterministic_forced_idle_actions + deterministic_routine_fallback_actions
         runtime_total = checkpoint_actions + deterministic_actions
 
         by_provider = []
         for row in by_provider_rows:
             calls = int(row.calls or 0)
-            fallback = int(row.fallback_calls or 0)
+            provider_model_fallback = int(row.provider_model_fallback_calls or 0)
             by_provider.append(
                 {
                     "provider": row.provider,
                     "calls": calls,
                     "success_calls": int(row.success_calls or 0),
-                    "fallback_calls": fallback,
-                    "fallback_rate": _safe_ratio(fallback, calls),
+                    "provider_model_fallback_calls": provider_model_fallback,
+                    "provider_model_fallback_rate": _safe_ratio(provider_model_fallback, calls),
+                    "fallback_calls": provider_model_fallback,
+                    "fallback_rate": _safe_ratio(provider_model_fallback, calls),
                     "total_tokens": int(row.total_tokens or 0),
                     "estimated_cost_usd": float(row.estimated_cost_usd or 0.0),
                 }
@@ -2100,15 +2101,17 @@ def usage_daily(
         by_model = []
         for row in by_model_rows:
             calls = int(row.calls or 0)
-            fallback = int(row.fallback_calls or 0)
+            provider_model_fallback = int(row.provider_model_fallback_calls or 0)
             by_model.append(
                 {
                     "provider": row.provider,
                     "model_name": row.model_name,
                     "calls": calls,
                     "success_calls": int(row.success_calls or 0),
-                    "fallback_calls": fallback,
-                    "fallback_rate": _safe_ratio(fallback, calls),
+                    "provider_model_fallback_calls": provider_model_fallback,
+                    "provider_model_fallback_rate": _safe_ratio(provider_model_fallback, calls),
+                    "fallback_calls": provider_model_fallback,
+                    "fallback_rate": _safe_ratio(provider_model_fallback, calls),
                     "total_tokens": int(row.total_tokens or 0),
                     "estimated_cost_usd": float(row.estimated_cost_usd or 0.0),
                 }
@@ -2120,9 +2123,11 @@ def usage_daily(
             "llm_totals": {
                 "calls": total_calls,
                 "success_calls": success_calls,
-                "fallback_calls": fallback_calls,
+                "provider_model_fallback_calls": provider_model_fallback_calls,
+                "provider_model_fallback_rate": _safe_ratio(provider_model_fallback_calls, total_calls),
+                "fallback_calls": provider_model_fallback_calls,
                 "success_rate": _safe_ratio(success_calls, total_calls),
-                "fallback_rate": _safe_ratio(fallback_calls, total_calls),
+                "fallback_rate": _safe_ratio(provider_model_fallback_calls, total_calls),
                 "prompt_tokens": int((totals.prompt_tokens if totals else 0) or 0),
                 "completion_tokens": int((totals.completion_tokens if totals else 0) or 0),
                 "total_tokens": int((totals.total_tokens if totals else 0) or 0),
@@ -2132,10 +2137,18 @@ def usage_daily(
             "by_model": by_model,
             "runtime_actions": {
                 "checkpoint_actions": checkpoint_actions,
+                "deterministic_forced_idle_actions": deterministic_forced_idle_actions,
+                "deterministic_routine_fallback_actions": deterministic_routine_fallback_actions,
                 "deterministic_actions": deterministic_actions,
                 "total_runtime_actions": runtime_total,
                 "checkpoint_ratio": _safe_ratio(checkpoint_actions, runtime_total),
                 "deterministic_ratio": _safe_ratio(deterministic_actions, runtime_total),
+                "deterministic_forced_idle_ratio": _safe_ratio(
+                    deterministic_forced_idle_actions, runtime_total
+                ),
+                "deterministic_routine_fallback_ratio": _safe_ratio(
+                    deterministic_routine_fallback_actions, runtime_total
+                ),
             },
         }
     finally:
@@ -2206,7 +2219,7 @@ def run_detail(
                 SELECT
                   COUNT(*) AS calls,
                   COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-                  COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                  COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
                   COALESCE(SUM(total_tokens), 0) AS total_tokens,
                   COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
                 FROM llm_usage
@@ -2223,7 +2236,8 @@ def run_detail(
                 SELECT
                   COUNT(*) AS total_events,
                   COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
-                  COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_actions,
+                  COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_forced_idle' THEN 1 ELSE 0 END), 0) AS deterministic_forced_idle_actions,
+                  COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') IN ('deterministic_routine_fallback', 'deterministic_fallback') THEN 1 ELSE 0 END), 0) AS deterministic_routine_fallback_actions,
                   COALESCE(SUM(CASE WHEN e.event_type = 'create_proposal' THEN 1 ELSE 0 END), 0) AS proposal_actions,
                   COALESCE(SUM(CASE WHEN e.event_type = 'vote' THEN 1 ELSE 0 END), 0) AS vote_actions,
                   COALESCE(SUM(CASE WHEN e.event_type IN ('forum_post', 'forum_reply') THEN 1 ELSE 0 END), 0) AS forum_actions,
@@ -2274,6 +2288,16 @@ def run_detail(
             )
 
         llm_calls = int((llm_totals.calls if llm_totals else 0) or 0)
+        provider_model_fallback_calls = int(
+            (llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0
+        )
+        deterministic_forced_idle_actions = int(
+            (runtime_actions.deterministic_forced_idle_actions if runtime_actions else 0) or 0
+        )
+        deterministic_routine_fallback_actions = int(
+            (runtime_actions.deterministic_routine_fallback_actions if runtime_actions else 0) or 0
+        )
+        deterministic_actions = deterministic_forced_idle_actions + deterministic_routine_fallback_actions
         verification_state = "verified" if llm_calls > 0 and len(trace_items) > 0 else "partial"
         if llm_calls <= 0:
             verification_state = "unverified"
@@ -2308,14 +2332,18 @@ def run_detail(
             "llm": {
                 "calls": llm_calls,
                 "success_calls": int((llm_totals.success_calls if llm_totals else 0) or 0),
-                "fallback_calls": int((llm_totals.fallback_calls if llm_totals else 0) or 0),
+                "provider_model_fallback_calls": provider_model_fallback_calls,
+                "provider_model_fallback_rate": _safe_ratio(provider_model_fallback_calls, llm_calls),
+                "fallback_calls": provider_model_fallback_calls,
                 "total_tokens": int((llm_totals.total_tokens if llm_totals else 0) or 0),
                 "estimated_cost_usd": float((llm_totals.estimated_cost_usd if llm_totals else 0.0) or 0.0),
             },
             "activity": {
                 "total_events": int((runtime_actions.total_events if runtime_actions else 0) or 0),
                 "checkpoint_actions": int((runtime_actions.checkpoint_actions if runtime_actions else 0) or 0),
-                "deterministic_actions": int((runtime_actions.deterministic_actions if runtime_actions else 0) or 0),
+                "deterministic_forced_idle_actions": deterministic_forced_idle_actions,
+                "deterministic_routine_fallback_actions": deterministic_routine_fallback_actions,
+                "deterministic_actions": deterministic_actions,
                 "proposal_actions": int((runtime_actions.proposal_actions if runtime_actions else 0) or 0),
                 "vote_actions": int((runtime_actions.vote_actions if runtime_actions else 0) or 0),
                 "forum_actions": int((runtime_actions.forum_actions if runtime_actions else 0) or 0),
@@ -2674,7 +2702,7 @@ def model_attribution(
                     COALESCE(SUM(CASE WHEN provider = 'openrouter' THEN 1 ELSE 0 END), 0) AS openrouter_calls,
                     COALESCE(SUM(CASE WHEN provider = 'openrouter' AND byok_used IS TRUE THEN 1 ELSE 0 END), 0) AS byok_calls,
                     COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
                     COALESCE(SUM(total_tokens), 0) AS total_tokens,
                     COALESCE(AVG(total_tokens), 0) AS avg_tokens_per_call,
                     COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
@@ -2699,7 +2727,7 @@ def model_attribution(
                     COUNT(*) AS calls,
                     COALESCE(SUM(CASE WHEN byok_used IS TRUE THEN 1 ELSE 0 END), 0) AS byok_calls,
                     COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
-                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS fallback_calls,
+                    COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
                     COALESCE(SUM(total_tokens), 0) AS total_tokens,
                     COALESCE(AVG(total_tokens), 0) AS avg_tokens_per_call,
                     COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
@@ -2741,7 +2769,8 @@ def model_attribution(
                     COALESCE(SUM(CASE WHEN e.event_type IN ('vote', 'create_proposal', 'vote_enforcement', 'initiate_sanction', 'initiate_seizure', 'initiate_exile') THEN 1 ELSE 0 END), 0) AS governance_actions,
                     COALESCE(SUM(CASE WHEN e.event_type = 'trade' THEN 1 ELSE 0 END), 0) AS trade_actions,
                     COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'checkpoint' THEN 1 ELSE 0 END), 0) AS checkpoint_actions,
-                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_fallback' THEN 1 ELSE 0 END), 0) AS deterministic_fallback_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') = 'deterministic_forced_idle' THEN 1 ELSE 0 END), 0) AS deterministic_forced_idle_actions,
+                    COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'mode') IN ('deterministic_routine_fallback', 'deterministic_fallback') THEN 1 ELSE 0 END), 0) AS deterministic_routine_fallback_actions,
                     COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'llm_parse_ok') = 'false' THEN 1 ELSE 0 END), 0) AS llm_parse_fail_actions,
                     COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'llm_parse_likely_truncated') = 'true' THEN 1 ELSE 0 END), 0) AS llm_parse_likely_truncated_actions,
                     COALESCE(SUM(CASE WHEN (e.event_metadata -> 'runtime' ->> 'llm_parse_retries') ~ '^[0-9]+$' AND ((e.event_metadata -> 'runtime' ->> 'llm_parse_retries')::int) > 0 THEN 1 ELSE 0 END), 0) AS llm_parse_retry_actions,
@@ -2761,7 +2790,7 @@ def model_attribution(
         def _usage_row_to_dict(row):
             calls = int(row.calls or 0)
             success_calls = int(row.success_calls or 0)
-            fallback_calls = int(row.fallback_calls or 0)
+            provider_model_fallback_calls = int(row.provider_model_fallback_calls or 0)
             openrouter_calls = int(getattr(row, "openrouter_calls", 0) or 0)
             if openrouter_calls == 0 and str(getattr(row, "provider", "") or "") == "openrouter":
                 openrouter_calls = calls
@@ -2769,9 +2798,11 @@ def model_attribution(
             return {
                 "calls": calls,
                 "success_calls": success_calls,
-                "fallback_calls": fallback_calls,
+                "provider_model_fallback_calls": provider_model_fallback_calls,
                 "success_rate": (success_calls / calls) if calls else 0.0,
-                "fallback_rate": (fallback_calls / calls) if calls else 0.0,
+                "provider_model_fallback_rate": (provider_model_fallback_calls / calls) if calls else 0.0,
+                "fallback_calls": provider_model_fallback_calls,
+                "fallback_rate": (provider_model_fallback_calls / calls) if calls else 0.0,
                 "byok_calls": byok_calls,
                 "byok_rate": (byok_calls / calls) if calls else 0.0,
                 "byok_rate_openrouter": (byok_calls / openrouter_calls) if openrouter_calls else 0.0,
@@ -2803,7 +2834,10 @@ def model_attribution(
                 "governance_actions": int(row.governance_actions or 0),
                 "trade_actions": int(row.trade_actions or 0),
                 "checkpoint_actions": int(row.checkpoint_actions or 0),
-                "deterministic_fallback_actions": int(row.deterministic_fallback_actions or 0),
+                "deterministic_forced_idle_actions": int(row.deterministic_forced_idle_actions or 0),
+                "deterministic_routine_fallback_actions": int(
+                    row.deterministic_routine_fallback_actions or 0
+                ),
                 "llm_parse_fail_actions": int(row.llm_parse_fail_actions or 0),
                 "llm_parse_likely_truncated_actions": int(row.llm_parse_likely_truncated_actions or 0),
                 "llm_parse_retry_actions": int(row.llm_parse_retry_actions or 0),
