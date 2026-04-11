@@ -338,6 +338,87 @@ def test_list_agents_hides_weak_relationships_and_avoids_defaulting_everyone_to_
     db.close()
 
 
+def test_list_agents_hides_support_only_vote_alignment_until_signal_is_strong():
+    db = _build_db_session()
+    now = now_utc()
+
+    voter = Agent(
+        agent_number=1,
+        display_name="Alpha-01",
+        model_type="claude-sonnet-4",
+        tier=1,
+        personality_type="efficiency",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    author = Agent(
+        agent_number=42,
+        display_name="Paradox-42",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    db.add_all([voter, author])
+    db.flush()
+
+    db.add_all(
+        [
+            AgentInventory(agent_id=voter.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=voter.id, resource_type="energy", quantity=20),
+            AgentInventory(agent_id=author.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=author.id, resource_type="energy", quantity=20),
+        ]
+    )
+
+    proposals = []
+    for idx in range(4):
+        proposal = Proposal(
+            author_agent_id=author.id,
+            title=f"proposal-{idx}",
+            description="desc",
+            proposal_type="law",
+            status="active",
+            voting_closes_at=now + timedelta(hours=2),
+        )
+        proposals.append(proposal)
+        db.add(proposal)
+    db.flush()
+
+    for proposal in proposals:
+        db.add(Vote(proposal_id=proposal.id, agent_id=voter.id, vote="yes"))
+
+    db.add(
+        SimulationRun(
+            run_id="real-s1-r5",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="standard_72h",
+            season_id="season_01",
+            season_number=1,
+            started_at=now - timedelta(hours=3),
+            ended_at=None,
+        )
+    )
+    db.commit()
+
+    with _make_client(db) as client:
+        response = client.get("/api/agents")
+
+    assert response.status_code == 200
+    payload = response.json()
+    voter_payload = next(item for item in payload if int(item["agent_number"]) == 1)
+
+    assert voter_payload["legibility"]["relationships"]["allies"] == []
+
+    db.close()
+
+
 def test_agent_detail_lineage_defaults_when_missing():
     db = _build_db_session()
     now = now_utc()

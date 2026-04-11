@@ -71,6 +71,7 @@ RELATION_SIGNAL_LABELS = {
     "revival": ("revival", "revivals"),
 }
 MIN_RELATIONSHIP_SCORE_TO_DISPLAY = 3
+MIN_SUPPORT_ONLY_VOTES_TO_DISPLAY = 5
 MIN_PRODUCER_WORK_ACTIONS = 8
 MAX_NON_WORK_SIGNALS_FOR_PRODUCER = 2
 
@@ -185,7 +186,7 @@ def _relationship_title(kind: str, signals: dict[str, int]) -> str:
         if lead_signal == "trade":
             return "Trade partner"
         if lead_signal == "support_vote":
-            return "Governance ally"
+            return "Voting alignment"
         if lead_signal == "revival":
             return "Revival backer"
         return "Frequent collaborator"
@@ -193,8 +194,22 @@ def _relationship_title(kind: str, signals: dict[str, int]) -> str:
     if lead_signal == "conflict":
         return "Open rival"
     if lead_signal == "oppose_vote":
-        return "Governance opponent"
+        return "Voting clash"
     return "Recent opponent"
+
+
+def _should_display_relationship(*, score: int, signals: dict[str, int], kind: str) -> bool:
+    if score < MIN_RELATIONSHIP_SCORE_TO_DISPLAY:
+        return False
+
+    active_signals = {str(key): int(value) for key, value in signals.items() if int(value) > 0}
+    if not active_signals:
+        return False
+
+    if kind == "ally" and set(active_signals.keys()) == {"support_vote"}:
+        return int(active_signals.get("support_vote", 0)) >= MIN_SUPPORT_ONLY_VOTES_TO_DISPLAY
+
+    return True
 
 
 def _relationship_payload(
@@ -204,7 +219,7 @@ def _relationship_payload(
     signals: dict[str, int],
     kind: str,
 ) -> dict | None:
-    if target_agent is None or score < MIN_RELATIONSHIP_SCORE_TO_DISPLAY:
+    if target_agent is None or not _should_display_relationship(score=score, signals=signals, kind=kind):
         return None
 
     ordered_signals = sorted(

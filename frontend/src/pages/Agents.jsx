@@ -223,10 +223,10 @@ export default function Agents() {
                                 {(topAlly || topRival) && (
                                     <div className="agent-legibility-links">
                                         {topAlly && (
-                                            <span>Aligned: {topAlly.display_name}</span>
+                                            <span>Top tie: {topAlly.display_name} · {topAlly.relationship}</span>
                                         )}
                                         {topRival && (
-                                            <span>Opposed: {topRival.display_name}</span>
+                                            <span>Top friction: {topRival.display_name} · {topRival.relationship}</span>
                                         )}
                                     </div>
                                 )}

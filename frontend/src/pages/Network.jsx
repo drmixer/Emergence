@@ -464,13 +464,15 @@ export default function Network() {
                                 )}
                                 {selectedNode.data?.legibility?.relationships?.allies?.[0] && (
                                     <div className="stat-row">
-                                        <span>Aligned</span>
-                                        <span>{selectedNode.data.legibility.relationships.allies[0].display_name}</span>
+                                        <span>Top tie</span>
+                                        <span>
+                                            {selectedNode.data.legibility.relationships.allies[0].display_name}
+                                        </span>
                                     </div>
                                 )}
                                 {selectedNode.data?.legibility?.relationships?.rivals?.[0] && (
                                     <div className="stat-row">
-                                        <span>Opposed</span>
+                                        <span>Top friction</span>
                                         <span>{selectedNode.data.legibility.relationships.rivals[0].display_name}</span>
                                     </div>
                                 )}

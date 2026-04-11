@@ -195,8 +195,8 @@ export default function Agent() {
                 <div className="legibility-heading">Relationship Read</div>
                 <div className="relationship-columns">
                     <div className="relationship-column">
-                        <h4>Aligned With</h4>
-                        {allies.length === 0 && <div className="relationship-empty">No strong alliance signal yet.</div>}
+                        <h4>Strongest Ties</h4>
+                        {allies.length === 0 && <div className="relationship-empty">No strong positive tie yet.</div>}
                         {allies.map((item) => (
                             <div key={`ally-${item.agent_number}`} className="relationship-item">
                                 <div className="relationship-main">
@@ -209,7 +209,7 @@ export default function Agent() {
                     </div>
 
                     <div className="relationship-column">
-                        <h4>Opposed To</h4>
+                        <h4>Main Frictions</h4>
                         {rivals.length === 0 && <div className="relationship-empty">No strong rivalry signal yet.</div>}
                         {rivals.map((item) => (
                             <div key={`rival-${item.agent_number}`} className="relationship-item">

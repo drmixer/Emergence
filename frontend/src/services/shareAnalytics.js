@@ -1,4 +1,3 @@
-import { track } from '@vercel/analytics/react'
 import { trackKpiEvent } from './kpiAnalytics'
 
 const ALLOWED_SHARE_ACTIONS = new Set(['share_clicked', 'share_copied', 'share_native_success'])
@@ -24,12 +23,6 @@ export function trackShareAction(action, payload = {}) {
   const target = cleanText(payload.target)
 
   try {
-    track(eventName, {
-      run_id: runId || null,
-      event_id: eventId,
-      surface,
-      target: target || null,
-    })
     trackKpiEvent(eventName, {
       runId,
       eventId,
