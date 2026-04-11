@@ -1,6 +1,5 @@
 import { Suspense, createElement, lazy, useState } from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { Analytics } from '@vercel/analytics/react'
 import {
   Activity,
   Users,
@@ -86,7 +85,6 @@ function App() {
   return (
     <SubscriptionProvider>
       <div className="app-wrapper">
-        <Analytics />
         <SupportBanner />
         <FirstTimeOnboarding />
 
