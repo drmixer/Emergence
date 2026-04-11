@@ -60,7 +60,7 @@ EFFICIENCY_CURVE = {
 # This makes talking expensive, proposing costly, and idling actually strategic.
 ACTION_COSTS = {
     "idle": Decimal("0.0"),           # Free - conserving energy is valid strategy
-    "work": Decimal("0.0"),           # Free - produces resources, no overhead
+    "work": Decimal("0.5"),           # Production now has operating cost; prevents free resource loops
     "forum_post": Decimal("0.2"),     # Talking is cheap, but not free
     "forum_reply": Decimal("0.1"),    # Replies are lighter than new posts
     "direct_message": Decimal("0.1"), # Private communication
