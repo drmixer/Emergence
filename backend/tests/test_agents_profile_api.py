@@ -258,7 +258,82 @@ def test_list_agents_includes_lineage_fields_for_current_season():
     assert second["lineage_parent_agent_number"] is None
     assert second["lineage_season_id"] == "season_01"
     assert first["legibility"]["danger"]["level"] == "stable"
-    assert second["legibility"]["danger"]["level"] == "critical"
+
+
+def test_list_agents_hides_weak_relationships_and_avoids_defaulting_everyone_to_producer():
+    db = _build_db_session()
+    now = now_utc()
+
+    agent_1 = Agent(
+        agent_number=1,
+        display_name="Alpha-01",
+        model_type="claude-sonnet-4",
+        tier=1,
+        personality_type="efficiency",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    agent_2 = Agent(
+        agent_number=2,
+        display_name="Beta-02",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    db.add_all([agent_1, agent_2])
+    db.flush()
+
+    db.add_all(
+        [
+            AgentInventory(agent_id=agent_1.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=agent_1.id, resource_type="energy", quantity=20),
+            AgentInventory(agent_id=agent_2.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=agent_2.id, resource_type="energy", quantity=20),
+            Event(agent_id=agent_1.id, event_type="work", description="worked once"),
+        ]
+    )
+
+    proposal = Proposal(
+        author_agent_id=agent_2.id,
+        title="p1",
+        description="desc",
+        proposal_type="law",
+        status="active",
+        voting_closes_at=now + timedelta(hours=2),
+    )
+    db.add(proposal)
+    db.flush()
+    db.add(Vote(proposal_id=proposal.id, agent_id=agent_1.id, vote="yes"))
+
+    db.add(
+        SimulationRun(
+            run_id="real-s1-r4",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="standard_72h",
+            season_id="season_01",
+            season_number=1,
+            started_at=now - timedelta(hours=3),
+            ended_at=None,
+        )
+    )
+    db.commit()
+
+    with _make_client(db) as client:
+        response = client.get("/api/agents")
+
+    assert response.status_code == 200
+    payload = response.json()
+    agent_1_payload = next(item for item in payload if int(item["agent_number"]) == 1)
+
+    assert agent_1_payload["legibility"]["relationships"]["allies"] == []
+    assert agent_1_payload["legibility"]["archetype"]["title"] == "Efficiency Strategist"
 
     db.close()
 

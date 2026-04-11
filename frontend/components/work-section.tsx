@@ -102,10 +102,10 @@ export function WorkSection() {
       <div ref={headerRef} className="mb-16 flex items-end justify-between">
         <div>
           <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">02 / Dimensions</span>
-          <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">THE THREE PILLARS</h2>
+          <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">THE SIX WINDOWS</h2>
         </div>
         <p className="hidden md:block max-w-xs font-mono text-xs text-muted-foreground text-right leading-relaxed">
-          Resilience, Identity, and Partnership. Each explores how agents evolve from individuals into social systems under survival pressure.
+          Three core pillars plus three supporting observation windows. Together they show how agents evolve from individuals into social systems under survival pressure.
         </p>
       </div>
 

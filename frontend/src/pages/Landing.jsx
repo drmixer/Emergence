@@ -6,6 +6,7 @@ import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 import { trackShareAction } from '../services/shareAnalytics'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { getMomentEvidenceHref, getMomentReplayHref, getMomentRunId, getStoryReplayHref } from '../utils/bestMoments'
+import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 
 // Pre-launch teaser quotes
 const TEASER_QUOTES = [
@@ -179,7 +180,7 @@ export default function Landing() {
                     setQuotes(
                         recentMessages.map((m) => ({
                             agent: m?.author?.agent_number ?? '?',
-                            text: (m?.content || '').trim(),
+                            text: sanitizeVisibleMessageContent(m?.content || ''),
                             role: formatAgentDisplayLabel(m?.author || {}),
                         })).filter((q) => q.text.length > 0)
                     )

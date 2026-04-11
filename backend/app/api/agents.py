@@ -70,6 +70,9 @@ RELATION_SIGNAL_LABELS = {
     "conflict": ("conflict action", "conflict actions"),
     "revival": ("revival", "revivals"),
 }
+MIN_RELATIONSHIP_SCORE_TO_DISPLAY = 3
+MIN_PRODUCER_WORK_ACTIONS = 8
+MAX_NON_WORK_SIGNALS_FOR_PRODUCER = 2
 
 
 class AgentResponse(BaseModel):
@@ -201,7 +204,7 @@ def _relationship_payload(
     signals: dict[str, int],
     kind: str,
 ) -> dict | None:
-    if target_agent is None or score <= 0:
+    if target_agent is None or score < MIN_RELATIONSHIP_SCORE_TO_DISPLAY:
         return None
 
     ordered_signals = sorted(
@@ -233,28 +236,33 @@ def _derive_archetype(agent: Agent, metrics: dict, danger_level: str) -> dict:
     work = int(metrics.get("work", 0))
     conflict = int(metrics.get("conflict", 0))
     support = int(metrics.get("support", 0))
+    non_work = governance + trade + communication + conflict + support
 
-    if conflict >= max(governance, trade, communication, work, support) and conflict >= 2:
+    if conflict >= max(governance, trade, communication, work, support) and conflict >= 3:
         return {
             "title": "Enforcer",
             "summary": "Recent behavior centers on sanctions, seizures, exile attempts, or other direct pressure.",
         }
-    if governance >= max(trade, communication, work, conflict) and governance >= 2:
+    if governance >= max(trade, communication, work, conflict, support) and governance >= 3:
         return {
             "title": "Institution Builder",
             "summary": "Recent behavior is concentrated in proposals, votes, and other rule-shaping actions.",
         }
-    if (trade + support) >= max(governance, communication, work, conflict) and (trade + support) >= 2:
+    if (trade + support) >= max(governance, communication, work, conflict) and (trade + support) >= 4:
         return {
             "title": "Broker",
             "summary": "Recent behavior is driven by trades, transfers, and other support moves between agents.",
         }
-    if communication >= max(governance, trade, work, conflict) and communication >= 3:
+    if communication >= max(governance, trade, work, conflict, support) and communication >= 4:
         return {
             "title": "Coalition Voice",
             "summary": "Recent behavior is message-heavy, suggesting influence through conversation more than force.",
         }
-    if work >= max(governance, trade, communication, conflict) and work >= 2:
+    if (
+        work >= max(governance, trade, communication, conflict, support)
+        and work >= MIN_PRODUCER_WORK_ACTIONS
+        and non_work <= MAX_NON_WORK_SIGNALS_FOR_PRODUCER
+    ):
         return {
             "title": "Producer",
             "summary": "Recent behavior is dominated by work and resource generation rather than politics or conflict.",

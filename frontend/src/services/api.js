@@ -601,23 +601,79 @@ class APIService {
 
 export const api = new APIService(API_BASE)
 
-// SSE Event Stream
-export function subscribeToEvents(onEvent, onError) {
-    const eventSource = new EventSource(`${API_BASE}/api/events/stream`)
+async function fetchEventSnapshot(limit = 25) {
+    const response = await fetch(`${API_BASE}/api/events?limit=${limit}`, {
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    })
+    if (!response.ok) {
+        throw new Error(`Event polling failed: ${response.status}`)
+    }
+    const payload = await response.json()
+    return Array.isArray(payload) ? payload : []
+}
 
-    eventSource.onmessage = (event) => {
-        try {
-            const data = JSON.parse(event.data)
-            onEvent(data)
-        } catch (e) {
-            console.error('Failed to parse event:', e)
+// Event subscription fallback using polling.
+export function subscribeToEvents(onEvent, onError) {
+    let closed = false
+    let pollTimer = null
+    let connected = false
+    const seenIds = new Set()
+
+    const emitEvents = (items) => {
+        const ordered = [...items].sort((a, b) => {
+            const aTime = new Date(a?.created_at || 0).getTime()
+            const bTime = new Date(b?.created_at || 0).getTime()
+            return aTime - bTime
+        })
+
+        for (const item of ordered) {
+            const eventId = Number(item?.id || 0)
+            if (eventId > 0 && seenIds.has(eventId)) continue
+            if (eventId > 0) {
+                seenIds.add(eventId)
+            }
+            onEvent({
+                type: 'event',
+                ...item,
+            })
+        }
+
+        if (seenIds.size > 500) {
+            const newestIds = ordered
+                .map((item) => Number(item?.id || 0))
+                .filter((value) => value > 0)
+            seenIds.clear()
+            newestIds.forEach((value) => seenIds.add(value))
         }
     }
 
-    eventSource.onerror = (error) => {
-        console.error('SSE Error:', error)
-        if (onError) onError(error)
+    const poll = async () => {
+        try {
+            const items = await fetchEventSnapshot()
+            if (!connected) {
+                connected = true
+                onEvent({ type: 'connected', transport: 'poll' })
+            }
+            emitEvents(items)
+        } catch (error) {
+            connected = false
+            console.error('Event polling error:', error)
+            if (onError) onError(error)
+        } finally {
+            if (!closed) {
+                pollTimer = window.setTimeout(poll, 10000)
+            }
+        }
     }
 
-    return () => eventSource.close()
+    poll()
+
+    return () => {
+        closed = true
+        if (pollTimer) {
+            window.clearTimeout(pollTimer)
+        }
+    }
 }

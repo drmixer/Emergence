@@ -674,7 +674,31 @@ def parse_action_response_with_meta(response: str) -> tuple[dict, dict]:
         meta.update({"ok": True, "parse_status": "json_ok"})
         return parsed, meta
 
-    # No JSON object was parsed. Keep simulation moving with a safe coercion.
+    jsonish_payload = raw.lstrip().startswith("{") or '"action"' in raw
+
+    # No JSON object was parsed. If the model appears to be emitting malformed JSON,
+    # treat this as unusable structured output rather than publishing the raw blob.
+    if jsonish_payload:
+        meta = dict(base_meta)
+        if last_decode_error is not None:
+            meta.update(
+                {
+                    "parse_status": "json_decode_error_rejected",
+                    "error_type": "json_decode_error",
+                    "likely_truncated": _is_likely_truncated_json(raw, last_decode_error),
+                }
+            )
+        else:
+            meta.update(
+                {
+                    "parse_status": "json_not_found_rejected",
+                    "error_type": "json_not_found",
+                    "likely_truncated": raw.count("{") > raw.count("}") or raw.endswith(("{", "[", ":", ",", '"')),
+                }
+            )
+        return {"action": "idle", "reasoning": "Could not parse response"}, meta
+
+    # No JSON object was parsed. Keep simulation moving with a safe coercion for plain text.
     clean_response = raw[:2000]
     meta = dict(base_meta)
     if last_decode_error is not None:

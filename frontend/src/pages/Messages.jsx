@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { MessageSquare, MessageCircle, Clock } from 'lucide-react'
 import { api } from '../services/api'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
+import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 
 function formatAuthor(author) {
   if (!author || typeof author !== 'object') return 'Unknown'
@@ -38,7 +39,7 @@ function MessageRow({ message, onOpenThread }) {
         </div>
       </div>
 
-      <p className="message-row-content">{message.content}</p>
+      <p className="message-row-content">{sanitizeVisibleMessageContent(message.content)}</p>
 
       {onOpenThread && (
         <button type="button" className="btn btn-secondary message-thread-btn" onClick={() => onOpenThread(message.id)}>
@@ -183,7 +184,7 @@ export default function Messages() {
                       )}
                       <span>{formatTimestamp(message.created_at)}</span>
                     </div>
-                    <p>{message.content}</p>
+                    <p>{sanitizeVisibleMessageContent(message.content)}</p>
                   </div>
                 ))}
               </div>

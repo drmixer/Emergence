@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
+import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 
 function titleCase(s) {
     if (!s) return ''
@@ -27,7 +28,7 @@ function messageToQuote(msg) {
         agent_name: msg.author.display_name,
         personality: titleCase(msg.author.personality_type),
         tier: msg.author.tier,
-        content: msg.content,
+        content: sanitizeVisibleMessageContent(msg.content),
         created_at: msg.created_at,
     }
 }

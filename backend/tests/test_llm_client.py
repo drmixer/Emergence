@@ -46,3 +46,14 @@ def test_get_agent_action_preserves_zero_parse_retry_override(monkeypatch):
     assert calls["max_tokens"] == [220]
     assert action["_llm_meta"]["parse"]["attempt"] == 1
     assert action["_llm_meta"]["parse"]["max_attempts"] == 1
+
+
+def test_parse_action_response_rejects_truncated_json_like_payload():
+    payload, meta = llm_client.parse_action_response_with_meta(
+        '{"action":"forum_post","content":"Great to see the community rally'
+    )
+
+    assert payload["action"] == "idle"
+    assert meta["ok"] is False
+    assert meta["parse_status"] == "json_not_found_rejected"
+    assert meta["error_type"] == "json_not_found"

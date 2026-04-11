@@ -13,6 +13,7 @@ import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
 import { SubscribeButton } from '../components/Subscriptions'
 import { formatDistanceToNow } from 'date-fns'
 import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
+import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 
 const modelNames = {
     'claude-sonnet-4': 'Claude Sonnet 4',
@@ -327,7 +328,7 @@ export default function Agent() {
                         )}
                         {messages.map(msg => (
                             <div key={msg.id} className="message-item">
-                                <div className="message-content">{msg.content}</div>
+                                <div className="message-content">{sanitizeVisibleMessageContent(msg.content)}</div>
                                 <div className="message-time">
                                     {new Date(msg.created_at).toLocaleString()}
                                 </div>
