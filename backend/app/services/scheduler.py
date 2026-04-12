@@ -36,6 +36,7 @@ from app.services.survival_config import (
     death_threshold,
     dormant_energy_cost,
     dormant_food_cost,
+    reserve_auto_revive_enabled,
 )
 
 # Twitter bot integration (optional)
@@ -676,6 +677,7 @@ async def process_daily_consumption():
         living_agents = query.all()
         reserve_laws = active_survival_reserve_laws(db)
         reserve_resources = _reserve_resource_map(db) if reserve_laws else {}
+        reserve_auto_revive = reserve_auto_revive_enabled()
 
         agent_snapshots: list[tuple[Agent, AgentInventory | None, AgentInventory | None, Decimal, Decimal]] = []
         for agent in living_agents:
@@ -787,7 +789,7 @@ async def process_daily_consumption():
             # DORMANT AGENT PROCESSING
             # ================================================================
             elif agent.status == "dormant":
-                if reserve_laws:
+                if reserve_laws and reserve_auto_revive:
                     # Prefer reserve-backed revival when the pool can fund a full
                     # active-cycle deficit; otherwise fall back to dormant upkeep.
                     revived_via_reserve = False
@@ -854,6 +856,17 @@ async def process_daily_consumption():
                             )
                             logger.info("🌟 %s revived via shared reserve", agent_name)
                             continue
+                if reserve_laws and not reserve_auto_revive:
+                    food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_survival_reserve_support(
+                        db,
+                        agent=agent,
+                        food_inv=food_inv,
+                        energy_inv=energy_inv,
+                        required_food=dormant_food,
+                        required_energy=dormant_energy,
+                        reserve_resources=reserve_resources,
+                        event_metadata={"support_mode": "dormant_maintenance"},
+                    )
                 can_pay_reduced_food = food_amount >= dormant_food
                 can_pay_reduced_energy = energy_amount >= dormant_energy
                 

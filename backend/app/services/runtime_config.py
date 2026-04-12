@@ -102,6 +102,10 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=20,
         description="Consecutive unpaid dormant cycles before permanent death.",
     ),
+    "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": MutableSettingSpec(
+        python_type=bool,
+        description="Allow shared reserve to reactivate dormant agents automatically when it can fund a full active cycle.",
+    ),
     "PROPOSAL_VOTING_HOURS": MutableSettingSpec(
         python_type=float,
         min_value=0.05,

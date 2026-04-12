@@ -25,6 +25,24 @@ def _runtime_int(key: str, default: int, *, minimum: int) -> int:
         return max(minimum, int(default))
 
 
+def _runtime_bool(key: str, default: bool) -> bool:
+    raw_value = runtime_config_service.get_effective_value_cached(key)
+    if raw_value in (None, ""):
+        return bool(default)
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(raw_value, (int, float)):
+        if raw_value in (0, 1):
+            return bool(raw_value)
+    return bool(default)
+
+
 def active_food_cost() -> Decimal:
     return _runtime_decimal(
         "SURVIVAL_ACTIVE_FOOD_COST",
@@ -62,6 +80,13 @@ def death_threshold() -> int:
         "SURVIVAL_DEATH_THRESHOLD",
         settings.SURVIVAL_DEATH_THRESHOLD,
         minimum=1,
+    )
+
+
+def reserve_auto_revive_enabled() -> bool:
+    return _runtime_bool(
+        "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED",
+        settings.SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED,
     )
 
 

@@ -1,4 +1,4 @@
-.PHONY: sim-status sim-start sim-stop report-rebuild report-tech report-story report-plan report-export compare-condition tournament-select
+.PHONY: sim-status sim-start sim-stop sim-preset report-rebuild report-tech report-story report-plan report-export compare-condition tournament-select
 
 RUN_MODE ?= real
 RUN_ID ?=
@@ -6,12 +6,18 @@ RUN_CLASS ?=
 CONDITION ?=
 SEASON_NUMBER ?=
 EPOCH_ID ?=
+PRESET ?=
+ACTOR ?= make-operator
 
 sim-status:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/simulation_control.py status
 
 sim-stop:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/simulation_control.py stop
+
+sim-preset:
+	@if [ -z "$(PRESET)" ]; then echo "PRESET is required"; exit 1; fi
+	@cd backend && railway run -s backend -- venv/bin/python scripts/apply_scarcity_preset.py --preset "$(PRESET)" --actor "$(ACTOR)"
 
 sim-start:
 	@cd backend && \

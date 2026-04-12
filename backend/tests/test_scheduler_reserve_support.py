@@ -78,7 +78,8 @@ def _seed_reserve(db, *, food: str, energy: str) -> None:
     db.commit()
 
 
-def _configure_reserve(monkeypatch, session_factory) -> None:
+def _configure_reserve(monkeypatch, session_factory, *, runtime_values: dict[str, object] | None = None) -> None:
+    values = dict(runtime_values or {})
     monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
     monkeypatch.setattr(scheduler, "_twitter_ready", lambda: False)
     monkeypatch.setattr(scheduler, "active_survival_reserve_laws", lambda _db: [object()])
@@ -86,7 +87,7 @@ def _configure_reserve(monkeypatch, session_factory) -> None:
     monkeypatch.setattr(
         scheduler.runtime_config_service,
         "get_effective_value_cached",
-        lambda _key: "",
+        lambda key: values.get(key, ""),
     )
 
 
@@ -150,7 +151,11 @@ def test_reserve_prioritizes_active_agents_before_dormant_maintenance(session_fa
 
 
 def test_reserve_can_revive_dormant_agent_when_pool_covers_active_cycle(session_factory, monkeypatch):
-    _configure_reserve(monkeypatch, session_factory)
+    _configure_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={"SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": True},
+    )
 
     with session_factory() as db:
         dormant_agent = _seed_agent(
@@ -194,6 +199,45 @@ def test_reserve_can_revive_dormant_agent_when_pool_covers_active_cycle(session_
     assert reserve_decision["status_before"] == "dormant"
     assert reserve_decision["support_mode"] == "active_revival"
     assert reserve_decision["aid_granted"] is True
+
+
+def test_reserve_does_not_auto_revive_dormant_agent_when_disabled(session_factory, monkeypatch):
+    _configure_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={"SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": False},
+    )
+
+    with session_factory() as db:
+        dormant_agent = _seed_agent(
+            db,
+            agent_number=4,
+            status="dormant",
+            food="0.10",
+            energy="0.10",
+            starvation_cycles=2,
+        )
+        _seed_reserve(db, food="2.00", energy="2.00")
+        dormant_agent_id = dormant_agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["revived"] == 0
+    assert result["dormant_stable"] == 1
+    assert result["active_fed"] == 0
+
+    with session_factory() as db:
+        refreshed_agent = db.query(Agent).filter(Agent.id == dormant_agent_id).one()
+        reserve_aid = db.query(Event).filter(Event.event_type == "reserve_aid").one()
+        revive_events = db.query(Event).filter(Event.event_type == "agent_revived").count()
+
+    assert refreshed_agent.status == "dormant"
+    assert refreshed_agent.starvation_cycles == 2
+    assert reserve_aid.agent_id == dormant_agent_id
+    assert revive_events == 0
+    aid_meta = reserve_aid.event_metadata or {}
+    assert aid_meta["status_before"] == "dormant"
+    assert aid_meta["support_mode"] == "dormant_maintenance"
+    assert aid_meta["aid_granted"] is True
 
 
 def test_reserve_support_saves_smallest_active_deficit_first(session_factory, monkeypatch):

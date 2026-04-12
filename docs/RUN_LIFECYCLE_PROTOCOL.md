@@ -96,6 +96,12 @@ This cadence is intentionally conservative for budget control and reliability wh
 - Season-to-season continuity: selected identities can return next season through carryover/reset policy.
 - Practical framing: continuity for audience + hard consequences inside each run.
 
+## Scarcity and Reserve Policy
+- Standard research runs should preserve real dormancy consequences rather than quietly erasing them with automatic rescue loops.
+- Shared reserve support may cover active-cycle shortfalls or dormant maintenance when laws allow it.
+- Dormant agents should not auto-reactivate solely because the shared reserve can fund a full active cycle; recovery should require direct aid, trade, or explicit condition design.
+- Internal tuning canaries may use named scarcity presets (runtime overrides plus reset baselines), but those presets must be labeled in run metadata and excluded from standard-condition synthesis unless promoted deliberately.
+
 ## Agent Identity Policy (Canonical)
 - Canonical identity key is `agent_number` (`1..50` in the standard world).
 - Viewer label is an immutable codename plus canonical handle:
@@ -170,6 +176,7 @@ From repo root:
 ```bash
 # Runtime controls
 make sim-status
+make sim-preset PRESET=internal_scarcity_tight_v1
 make sim-start RUN_MODE=real
 make sim-stop
 

@@ -75,6 +75,7 @@ From repo root:
 ```bash
 # Simulation runtime controls
 make sim-status
+make sim-preset PRESET=internal_scarcity_tight_v1
 make sim-start RUN_MODE=real
 make sim-start RUN_MODE=real RUN_CLASS=deep_96h
 make sim-stop
