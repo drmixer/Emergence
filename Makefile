@@ -18,7 +18,7 @@ sim-stop:
 
 sim-preset:
 	@if [ -z "$(PRESET)" ]; then echo "PRESET is required"; exit 1; fi
-	@cd backend && railway run -s backend -- venv/bin/python scripts/apply_scarcity_preset.py --preset "$(PRESET)" --actor "$(ACTOR)"
+	@cd backend && railway run -s backend -- env PYTHONPATH=. venv/bin/python scripts/apply_scarcity_preset.py --preset "$(PRESET)" --actor "$(ACTOR)"
 
 sim-start:
 	@cd backend && \
