@@ -212,6 +212,23 @@ def _should_display_relationship(*, score: int, signals: dict[str, int], kind: s
     return True
 
 
+def _relationship_priority(*, kind: str, signals: dict[str, int]) -> int:
+    active_signals = {str(key) for key, value in signals.items() if int(value) > 0}
+    if not active_signals:
+        return 0
+
+    if kind == "ally":
+        if "trade" in active_signals or "revival" in active_signals:
+            return 3
+        if active_signals - {"support_vote"}:
+            return 2
+        return 1
+
+    if "conflict" in active_signals:
+        return 2
+    return 1
+
+
 def _relationship_payload(
     *,
     target_agent: Agent | None,
@@ -542,11 +559,25 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
 
         positive_targets = sorted(
             positive_scores.get(int(agent_id), {}).items(),
-            key=lambda item: (-int(item[1]), int(item[0])),
+            key=lambda item: (
+                -_relationship_priority(
+                    kind="ally",
+                    signals=dict(positive_signals[int(agent_id)][int(item[0])]),
+                ),
+                -int(item[1]),
+                int(item[0]),
+            ),
         )
         negative_targets = sorted(
             negative_scores.get(int(agent_id), {}).items(),
-            key=lambda item: (-int(item[1]), int(item[0])),
+            key=lambda item: (
+                -_relationship_priority(
+                    kind="rival",
+                    signals=dict(negative_signals[int(agent_id)][int(item[0])]),
+                ),
+                -int(item[1]),
+                int(item[0]),
+            ),
         )
 
         allies = []

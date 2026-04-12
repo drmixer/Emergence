@@ -419,6 +419,110 @@ def test_list_agents_hides_support_only_vote_alignment_until_signal_is_strong():
     db.close()
 
 
+def test_list_agents_prefers_trade_or_collaboration_over_vote_only_alignment():
+    db = _build_db_session()
+    now = now_utc()
+
+    focal = Agent(
+        agent_number=1,
+        display_name="Alpha-01",
+        model_type="claude-sonnet-4",
+        tier=1,
+        personality_type="efficiency",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    vote_author = Agent(
+        agent_number=42,
+        display_name="Paradox-42",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    trade_partner = Agent(
+        agent_number=7,
+        display_name="Beacon-07",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="stability",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    db.add_all([focal, vote_author, trade_partner])
+    db.flush()
+
+    db.add_all(
+        [
+            AgentInventory(agent_id=focal.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=focal.id, resource_type="energy", quantity=20),
+            AgentInventory(agent_id=vote_author.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=vote_author.id, resource_type="energy", quantity=20),
+            AgentInventory(agent_id=trade_partner.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=trade_partner.id, resource_type="energy", quantity=20),
+            Event(
+                agent_id=focal.id,
+                event_type="trade",
+                description="shared supplies",
+                event_metadata={"action": {"recipient_agent_id": 7}},
+            ),
+        ]
+    )
+
+    proposals = []
+    for idx in range(5):
+        proposal = Proposal(
+            author_agent_id=vote_author.id,
+            title=f"proposal-{idx}",
+            description="desc",
+            proposal_type="law",
+            status="active",
+            voting_closes_at=now + timedelta(hours=2),
+        )
+        proposals.append(proposal)
+        db.add(proposal)
+    db.flush()
+
+    for proposal in proposals:
+        db.add(Vote(proposal_id=proposal.id, agent_id=focal.id, vote="yes"))
+
+    db.add(
+        SimulationRun(
+            run_id="real-s1-r6",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="standard_72h",
+            season_id="season_01",
+            season_number=1,
+            started_at=now - timedelta(hours=3),
+            ended_at=None,
+        )
+    )
+    db.commit()
+
+    with _make_client(db) as client:
+        response = client.get("/api/agents")
+
+    assert response.status_code == 200
+    payload = response.json()
+    focal_payload = next(item for item in payload if int(item["agent_number"]) == 1)
+    allies = focal_payload["legibility"]["relationships"]["allies"]
+
+    assert allies[0]["agent_number"] == 7
+    assert allies[0]["relationship"] == "Trade partner"
+    assert allies[1]["agent_number"] == 42
+    assert allies[1]["relationship"] == "Voting alignment"
+
+    db.close()
+
+
 def test_agent_detail_lineage_defaults_when_missing():
     db = _build_db_session()
     now = now_utc()
