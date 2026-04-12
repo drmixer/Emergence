@@ -252,7 +252,11 @@ def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_cl
     monkeypatch.setattr(
         reports_api.runtime_config_service,
         "get_effective_value_cached",
-        lambda key: "run-live-1" if key == "SIMULATION_RUN_ID" else None,
+        lambda key: (
+            "run-live-1"
+            if key == "SIMULATION_RUN_ID"
+            else (True if key == "SIMULATION_ACTIVE" else (False if key == "SIMULATION_PAUSED" else None))
+        ),
     )
 
     with client:
@@ -333,7 +337,7 @@ def test_list_archived_runs_hides_tuning_runs_by_default(reports_client, monkeyp
     monkeypatch.setattr(
         reports_api.runtime_config_service,
         "get_effective_value_cached",
-        lambda _key: None,
+        lambda key: (False if key == "SIMULATION_ACTIVE" else (True if key == "SIMULATION_PAUSED" else None)),
     )
 
     with client:

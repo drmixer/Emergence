@@ -115,7 +115,13 @@ def list_archived_runs(
     include_tuning: bool = Query(False),
     db: Session = Depends(get_db),
 ):
-    active_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip() or None
+    simulation_active = bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
+    simulation_paused = bool(runtime_config_service.get_effective_value_cached("SIMULATION_PAUSED"))
+    active_run_id = (
+        str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip() or None
+        if simulation_active and not simulation_paused
+        else None
+    )
 
     summary_rows = (
         db.query(RunReportArtifact)
