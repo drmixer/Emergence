@@ -1,12 +1,37 @@
 export const ALLY_BUCKET_CONFIG = [
-  { key: 'trade_support', label: 'Trade / Support', shortLabel: 'Trade' },
-  { key: 'conversation_coordination', label: 'Conversation / Coordination', shortLabel: 'Coordination' },
-  { key: 'voting_alignment', label: 'Voting Alignment', shortLabel: 'Voting' },
+  {
+    key: 'trade_support',
+    label: 'Trade / Support',
+    shortLabel: 'Trade',
+    detailLabel: 'Material support tie',
+  },
+  {
+    key: 'conversation_coordination',
+    label: 'Conversation / Coordination',
+    shortLabel: 'Coordination',
+    detailLabel: 'Coordination tie',
+  },
+  {
+    key: 'voting_alignment',
+    label: 'Voting Alignment',
+    shortLabel: 'Voting',
+    detailLabel: 'Governance alignment',
+  },
 ]
 
 export const RIVAL_BUCKET_CONFIG = [
-  { key: 'open_conflict', label: 'Open Conflict', shortLabel: 'Conflict' },
-  { key: 'voting_clash', label: 'Voting Clash', shortLabel: 'Voting clash' },
+  {
+    key: 'open_conflict',
+    label: 'Open Conflict',
+    shortLabel: 'Conflict',
+    detailLabel: 'Direct conflict',
+  },
+  {
+    key: 'voting_clash',
+    label: 'Voting Clash',
+    shortLabel: 'Voting clash',
+    detailLabel: 'Governance opposition',
+  },
 ]
 
 function asRelationshipArray(value) {

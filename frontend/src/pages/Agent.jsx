@@ -207,7 +207,7 @@ export default function Agent() {
                                         <div className="relationship-item">
                                             <div className="relationship-main">
                                                 <strong>{item.display_name}</strong>
-                                                <span>{item.relationship}</span>
+                                                <span>{bucket.detailLabel || item.relationship}</span>
                                             </div>
                                             <div className="relationship-evidence">{item.evidence}</div>
                                         </div>
@@ -233,7 +233,7 @@ export default function Agent() {
                                         <div className="relationship-item">
                                             <div className="relationship-main">
                                                 <strong>{item.display_name}</strong>
-                                                <span>{item.relationship}</span>
+                                                <span>{bucket.detailLabel || item.relationship}</span>
                                             </div>
                                             <div className="relationship-evidence">{item.evidence}</div>
                                         </div>
