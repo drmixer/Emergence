@@ -5,6 +5,7 @@ import { api } from '../services/api'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
 import { formatDistanceToNow } from 'date-fns'
 import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
+import { ALLY_BUCKET_CONFIG, RIVAL_BUCKET_CONFIG, getRelationshipBucketMaps } from '../utils/relationshipBuckets'
 
 // Models for display
 const modelNames = {
@@ -175,8 +176,15 @@ export default function Agents() {
                             const danger = getDanger(agent)
                             const archetype = getArchetype(agent)
                             const relationships = getRelationships(agent)
-                            const topAlly = Array.isArray(relationships.allies) ? relationships.allies[0] : null
-                            const topRival = Array.isArray(relationships.rivals) ? relationships.rivals[0] : null
+                            const { allyBuckets, rivalBuckets } = getRelationshipBucketMaps(relationships)
+                            const positiveSummaries = ALLY_BUCKET_CONFIG
+                                .map((bucket) => allyBuckets[bucket.key] ? `${bucket.shortLabel}: ${allyBuckets[bucket.key].display_name}` : null)
+                                .filter(Boolean)
+                                .slice(0, 2)
+                            const frictionSummaries = RIVAL_BUCKET_CONFIG
+                                .map((bucket) => rivalBuckets[bucket.key] ? `${bucket.shortLabel}: ${rivalBuckets[bucket.key].display_name}` : null)
+                                .filter(Boolean)
+                                .slice(0, 1)
 
                             return (
                         <div className="agent-card">
@@ -220,14 +228,10 @@ export default function Agents() {
                                 <div className="agent-legibility-summary">
                                     {archetype.summary || 'Observed behavior is still mixed.'}
                                 </div>
-                                {(topAlly || topRival) && (
+                                {(positiveSummaries.length > 0 || frictionSummaries.length > 0) && (
                                     <div className="agent-legibility-links">
-                                        {topAlly && (
-                                            <span>Top tie: {topAlly.display_name} · {topAlly.relationship}</span>
-                                        )}
-                                        {topRival && (
-                                            <span>Top friction: {topRival.display_name} · {topRival.relationship}</span>
-                                        )}
+                                        {positiveSummaries.map((summary) => <span key={summary}>{summary}</span>)}
+                                        {frictionSummaries.map((summary) => <span key={summary}>{summary}</span>)}
                                     </div>
                                 )}
                             </div>

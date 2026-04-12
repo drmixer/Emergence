@@ -13,6 +13,7 @@ import ReactFlow, {
 } from 'reactflow'
 import { api } from '../services/api'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
+import { ALLY_BUCKET_CONFIG, RIVAL_BUCKET_CONFIG, getRelationshipBucketMaps } from '../utils/relationshipBuckets'
 
 // Personality colors for nodes
 const personalityColors = {
@@ -432,51 +433,60 @@ export default function Network() {
 
                     {selectedNode && (
                         <Panel position="top-right" className="selected-panel">
-                            <h3>{formatAgentDisplayLabel(selectedNode.data)}</h3>
-                            <div className="selected-stats">
-                                <div className="stat-row">
-                                    <span>Tier</span>
-                                    <span className={`tier-badge tier-${selectedNode.data.tier}`}>
-                                        Tier {selectedNode.data.tier}
-                                    </span>
-                                </div>
-                                <div className="stat-row">
-                                    <span>Personality</span>
-                                    <span className={`personality-tag ${selectedNode.data.personality_type}`}>
-                                        {selectedNode.data.personality_type}
-                                    </span>
-                                </div>
-                                <div className="stat-row">
-                                    <span>Connections</span>
-                                    <span>{selectedNode.data.connectionCount}</span>
-                                </div>
-                                {selectedNode.data?.legibility?.archetype?.title && (
-                                    <div className="stat-row">
-                                        <span>Archetype</span>
-                                        <span>{selectedNode.data.legibility.archetype.title}</span>
-                                    </div>
-                                )}
-                                {selectedNode.data?.legibility?.danger?.label && (
-                                    <div className="stat-row">
-                                        <span>Danger</span>
-                                        <span>{selectedNode.data.legibility.danger.label}</span>
-                                    </div>
-                                )}
-                                {selectedNode.data?.legibility?.relationships?.allies?.[0] && (
-                                    <div className="stat-row">
-                                        <span>Top tie</span>
-                                        <span>
-                                            {selectedNode.data.legibility.relationships.allies[0].display_name}
-                                        </span>
-                                    </div>
-                                )}
-                                {selectedNode.data?.legibility?.relationships?.rivals?.[0] && (
-                                    <div className="stat-row">
-                                        <span>Top friction</span>
-                                        <span>{selectedNode.data.legibility.relationships.rivals[0].display_name}</span>
-                                    </div>
-                                )}
-                            </div>
+                            {(() => {
+                                const relationships =
+                                  selectedNode.data?.legibility?.relationships && typeof selectedNode.data.legibility.relationships === 'object'
+                                    ? selectedNode.data.legibility.relationships
+                                    : {}
+                                const { allyBuckets, rivalBuckets } = getRelationshipBucketMaps(relationships)
+                                return (
+                                    <>
+                                        <h3>{formatAgentDisplayLabel(selectedNode.data)}</h3>
+                                        <div className="selected-stats">
+                                            <div className="stat-row">
+                                                <span>Tier</span>
+                                                <span className={`tier-badge tier-${selectedNode.data.tier}`}>
+                                                    Tier {selectedNode.data.tier}
+                                                </span>
+                                            </div>
+                                            <div className="stat-row">
+                                                <span>Personality</span>
+                                                <span className={`personality-tag ${selectedNode.data.personality_type}`}>
+                                                    {selectedNode.data.personality_type}
+                                                </span>
+                                            </div>
+                                            <div className="stat-row">
+                                                <span>Connections</span>
+                                                <span>{selectedNode.data.connectionCount}</span>
+                                            </div>
+                                            {selectedNode.data?.legibility?.archetype?.title && (
+                                                <div className="stat-row">
+                                                    <span>Archetype</span>
+                                                    <span>{selectedNode.data.legibility.archetype.title}</span>
+                                                </div>
+                                            )}
+                                            {selectedNode.data?.legibility?.danger?.label && (
+                                                <div className="stat-row">
+                                                    <span>Danger</span>
+                                                    <span>{selectedNode.data.legibility.danger.label}</span>
+                                                </div>
+                                            )}
+                                            {ALLY_BUCKET_CONFIG.map((bucket) => allyBuckets[bucket.key] ? (
+                                                <div className="stat-row" key={bucket.key}>
+                                                    <span>{bucket.shortLabel}</span>
+                                                    <span>{allyBuckets[bucket.key].display_name}</span>
+                                                </div>
+                                            ) : null)}
+                                            {RIVAL_BUCKET_CONFIG.map((bucket) => rivalBuckets[bucket.key] ? (
+                                                <div className="stat-row" key={bucket.key}>
+                                                    <span>{bucket.shortLabel}</span>
+                                                    <span>{rivalBuckets[bucket.key].display_name}</span>
+                                                </div>
+                                            ) : null)}
+                                        </div>
+                                    </>
+                                )
+                            })()}
                         </Panel>
                     )}
                 </ReactFlow>

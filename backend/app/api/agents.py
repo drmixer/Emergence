@@ -74,6 +74,15 @@ MIN_RELATIONSHIP_SCORE_TO_DISPLAY = 3
 MIN_SUPPORT_ONLY_VOTES_TO_DISPLAY = 5
 MIN_PRODUCER_WORK_ACTIONS = 8
 MAX_NON_WORK_SIGNALS_FOR_PRODUCER = 2
+ALLY_BUCKET_KEYS = (
+    "trade_support",
+    "conversation_coordination",
+    "voting_alignment",
+)
+RIVAL_BUCKET_KEYS = (
+    "open_conflict",
+    "voting_clash",
+)
 
 
 class AgentResponse(BaseModel):
@@ -185,6 +194,8 @@ def _relationship_title(kind: str, signals: dict[str, int]) -> str:
     if kind == "ally":
         if lead_signal == "trade":
             return "Trade partner"
+        if lead_signal in {"direct_message", "forum_reply"}:
+            return "Conversation ally"
         if lead_signal == "support_vote":
             return "Voting alignment"
         if lead_signal == "revival":
@@ -229,6 +240,40 @@ def _relationship_priority(*, kind: str, signals: dict[str, int]) -> int:
     return 1
 
 
+def _relationship_categories(*, kind: str, signals: dict[str, int]) -> list[str]:
+    active_signals = {str(key) for key, value in signals.items() if int(value) > 0}
+    categories: list[str] = []
+
+    if kind == "ally":
+        if "trade" in active_signals or "revival" in active_signals:
+            categories.append("trade_support")
+        if active_signals & {"direct_message", "forum_reply"}:
+            categories.append("conversation_coordination")
+        if "support_vote" in active_signals:
+            categories.append("voting_alignment")
+        return categories
+
+    if "conflict" in active_signals:
+        categories.append("open_conflict")
+    if "oppose_vote" in active_signals:
+        categories.append("voting_clash")
+    return categories
+
+
+def _empty_relationship_buckets(kind: str) -> dict[str, dict | None]:
+    keys = ALLY_BUCKET_KEYS if kind == "ally" else RIVAL_BUCKET_KEYS
+    return {str(key): None for key in keys}
+
+
+def _build_relationship_buckets(*, kind: str, payloads: list[dict]) -> dict[str, dict | None]:
+    buckets = _empty_relationship_buckets(kind)
+    for payload in payloads:
+        for category in payload.get("categories", []):
+            if category in buckets and buckets[category] is None:
+                buckets[category] = payload
+    return buckets
+
+
 def _relationship_payload(
     *,
     target_agent: Agent | None,
@@ -250,6 +295,7 @@ def _relationship_payload(
         "score": int(score),
         "relationship": _relationship_title(kind, signals),
         "evidence": evidence,
+        "categories": _relationship_categories(kind=kind, signals=signals),
     }
 
 
@@ -580,8 +626,8 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
             ),
         )
 
-        allies = []
-        for target_id, score in positive_targets[:2]:
+        all_positive_payloads: list[dict] = []
+        for target_id, score in positive_targets:
             payload = _relationship_payload(
                 target_agent=agents_by_id.get(int(target_id)),
                 score=int(score),
@@ -589,10 +635,10 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
                 kind="ally",
             )
             if payload:
-                allies.append(payload)
+                all_positive_payloads.append(payload)
 
-        rivals = []
-        for target_id, score in negative_targets[:2]:
+        all_negative_payloads: list[dict] = []
+        for target_id, score in negative_targets:
             payload = _relationship_payload(
                 target_agent=agents_by_id.get(int(target_id)),
                 score=int(score),
@@ -600,7 +646,10 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
                 kind="rival",
             )
             if payload:
-                rivals.append(payload)
+                all_negative_payloads.append(payload)
+
+        allies = all_positive_payloads[:2]
+        rivals = all_negative_payloads[:2]
 
         legibility_by_agent_id[int(agent_id)] = {
             "archetype": archetype,
@@ -614,6 +663,8 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
             "relationships": {
                 "allies": allies,
                 "rivals": rivals,
+                "ally_buckets": _build_relationship_buckets(kind="ally", payloads=all_positive_payloads),
+                "rival_buckets": _build_relationship_buckets(kind="rival", payloads=all_negative_payloads),
             },
             "derived_from_hours": LEGIBILITY_WINDOW_HOURS,
         }

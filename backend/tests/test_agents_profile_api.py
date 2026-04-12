@@ -166,6 +166,7 @@ def test_agent_detail_includes_profile_stats_and_carryover_lineage():
     assert legibility["archetype"]["title"] == "Institution Builder"
     assert legibility["danger"]["level"] == "stable"
     assert legibility["relationships"]["allies"][0]["agent_number"] == 7
+    assert legibility["relationships"]["ally_buckets"]["trade_support"]["agent_number"] == 7
 
     db.close()
 
@@ -415,6 +416,7 @@ def test_list_agents_hides_support_only_vote_alignment_until_signal_is_strong():
     voter_payload = next(item for item in payload if int(item["agent_number"]) == 1)
 
     assert voter_payload["legibility"]["relationships"]["allies"] == []
+    assert voter_payload["legibility"]["relationships"]["ally_buckets"]["voting_alignment"] is None
 
     db.close()
 
@@ -519,6 +521,8 @@ def test_list_agents_prefers_trade_or_collaboration_over_vote_only_alignment():
     assert allies[0]["relationship"] == "Trade partner"
     assert allies[1]["agent_number"] == 42
     assert allies[1]["relationship"] == "Voting alignment"
+    assert focal_payload["legibility"]["relationships"]["ally_buckets"]["trade_support"]["agent_number"] == 7
+    assert focal_payload["legibility"]["relationships"]["ally_buckets"]["voting_alignment"]["agent_number"] == 42
 
     db.close()
 

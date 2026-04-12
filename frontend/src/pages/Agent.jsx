@@ -14,6 +14,7 @@ import { SubscribeButton } from '../components/Subscriptions'
 import { formatDistanceToNow } from 'date-fns'
 import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { sanitizeVisibleMessageContent } from '../utils/messageContent'
+import { ALLY_BUCKET_CONFIG, RIVAL_BUCKET_CONFIG, getRelationshipBucketMaps } from '../utils/relationshipBuckets'
 
 const modelNames = {
     'claude-sonnet-4': 'Claude Sonnet 4',
@@ -76,6 +77,7 @@ export default function Agent() {
     const relationships = (legibility.relationships && typeof legibility.relationships === 'object') ? legibility.relationships : {}
     const allies = Array.isArray(relationships.allies) ? relationships.allies : []
     const rivals = Array.isArray(relationships.rivals) ? relationships.rivals : []
+    const { allyBuckets, rivalBuckets } = getRelationshipBucketMaps(relationships)
     const invalidActionRatePercent = Number(profileStats.invalid_action_rate || 0) * 100
     const daysSinceCreated = Number(profileStats.days_since_created || 0)
     const continuityBadges = []
@@ -193,6 +195,63 @@ export default function Agent() {
 
             <div className="card relationships-card">
                 <div className="legibility-heading">Relationship Read</div>
+                <div className="relationship-columns">
+                    <div className="relationship-column">
+                        <h4>Positive Ties</h4>
+                        {ALLY_BUCKET_CONFIG.map((bucket) => {
+                            const item = allyBuckets[bucket.key]
+                            return (
+                                <div key={bucket.key} className="relationship-bucket">
+                                    <div className="relationship-bucket-label">{bucket.label}</div>
+                                    {item ? (
+                                        <div className="relationship-item">
+                                            <div className="relationship-main">
+                                                <strong>{item.display_name}</strong>
+                                                <span>{item.relationship}</span>
+                                            </div>
+                                            <div className="relationship-evidence">{item.evidence}</div>
+                                        </div>
+                                    ) : (
+                                        <div className="relationship-empty">No strong signal yet.</div>
+                                    )}
+                                </div>
+                            )
+                        })}
+                        {allies.length === 0 && (
+                            <div className="relationship-footnote">No strong positive tie surfaced in the current window.</div>
+                        )}
+                    </div>
+
+                    <div className="relationship-column">
+                        <h4>Frictions</h4>
+                        {RIVAL_BUCKET_CONFIG.map((bucket) => {
+                            const item = rivalBuckets[bucket.key]
+                            return (
+                                <div key={bucket.key} className="relationship-bucket">
+                                    <div className="relationship-bucket-label">{bucket.label}</div>
+                                    {item ? (
+                                        <div className="relationship-item">
+                                            <div className="relationship-main">
+                                                <strong>{item.display_name}</strong>
+                                                <span>{item.relationship}</span>
+                                            </div>
+                                            <div className="relationship-evidence">{item.evidence}</div>
+                                        </div>
+                                    ) : (
+                                        <div className="relationship-empty">No strong signal yet.</div>
+                                    )}
+                                </div>
+                            )
+                        })}
+                        {rivals.length === 0 && (
+                            <div className="relationship-footnote">No strong rivalry signal surfaced in the current window.</div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="card relationships-card">
+                <div className="legibility-heading">Top Relationship Reads</div>
                 <div className="relationship-columns">
                     <div className="relationship-column">
                         <h4>Strongest Ties</h4>
@@ -572,6 +631,18 @@ export default function Agent() {
           margin-bottom: var(--spacing-sm);
         }
 
+        .relationship-bucket + .relationship-bucket {
+          margin-top: var(--spacing-md);
+        }
+
+        .relationship-bucket-label {
+          color: var(--text-muted);
+          font-size: 0.72rem;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          margin-bottom: 0.45rem;
+        }
+
         .relationship-item {
           padding: 0.85rem 1rem;
           background: rgba(255, 255, 255, 0.03);
@@ -602,6 +673,12 @@ export default function Agent() {
           color: var(--text-muted);
           font-size: 0.8rem;
           line-height: 1.45;
+        }
+
+        .relationship-footnote {
+          margin-top: var(--spacing-sm);
+          color: var(--text-muted);
+          font-size: 0.8rem;
         }
 
         .profile-stats-card h3 {
