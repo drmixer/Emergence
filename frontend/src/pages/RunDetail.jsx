@@ -111,6 +111,8 @@ export default function RunDetail() {
   }, [loading, error, data, runId, requestedEventId])
 
   const provenance = data?.provenance || {}
+  const runMetadata = data?.run_metadata || {}
+  const isTuningRun = Boolean(runMetadata?.protocol_deviation) && String(runMetadata?.deviation_reason || '').trim() === 'tuning_run'
   const verificationState = String(provenance.verification_state || 'unverified')
   const verificationMeta = verificationStyles[verificationState] || verificationStyles.unverified
   const VerificationIcon = verificationMeta.icon
@@ -305,6 +307,11 @@ export default function RunDetail() {
       {loading && <div className="empty-state">Loading run detail...</div>}
       {!loading && error && <div className="feed-notice">{error}</div>}
       {shareNotice && <div className="feed-notice success">{shareNotice}</div>}
+      {!loading && !error && isTuningRun && (
+        <div className="feed-notice">
+          This run is labeled as a tuning run and is excluded from the public archived-run history by default.
+        </div>
+      )}
 
       {!loading && !error && data && (
         <>

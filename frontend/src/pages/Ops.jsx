@@ -192,6 +192,7 @@ export default function Ops() {
   const [transferPolicyVersion, setTransferPolicyVersion] = useState('')
   const [epochId, setEpochId] = useState('')
   const [runClass, setRunClass] = useState('')
+  const [tuningRun, setTuningRun] = useState(false)
 
   const [draftValues, setDraftValues] = useState({})
   const [reason, setReason] = useState('')
@@ -466,6 +467,7 @@ export default function Ops() {
             transfer_policy_version: transferPolicyVersionValue,
             epoch_id: epochIdValue,
             run_class: runClassValue,
+            tuning_run: Boolean(tuningRun),
             reset_world: shouldReset,
             reason: reasonText || `ops_ui_start_${mode}`,
           },
@@ -1063,6 +1065,7 @@ export default function Ops() {
                         setTransferPolicyVersion(String(source.transfer_policy_version || '').trim())
                         setEpochId(String(source.epoch_id || '').trim())
                         setRunClass(String(source.run_class || '').trim())
+                        setTuningRun(Boolean(source.protocol_deviation) && String(source.deviation_reason || '').trim() === 'tuning_run')
                       }}
                     >
                       Load Current Metadata
@@ -1163,6 +1166,15 @@ export default function Ops() {
                         <option value="deep_96h">deep_96h</option>
                         <option value="special_exploratory">special_exploratory</option>
                       </select>
+                    </label>
+                    <label className="ops-checkbox ops-checkbox-inline">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(tuningRun)}
+                        onChange={(event) => setTuningRun(event.target.checked)}
+                        disabled={!writeEnabled || isProduction}
+                      />
+                      <span>Mark as tuning run</span>
                     </label>
                   </div>
                   <p className="ops-inline-help">Allowed characters for metadata IDs: letters, numbers, colon, underscore, and dash.</p>

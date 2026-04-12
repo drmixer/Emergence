@@ -110,6 +110,20 @@ def _existing_run_class(run_id: str | None) -> str | None:
         db.close()
 
 
+def _existing_run_tuning_state(run_id: str | None) -> bool | None:
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return None
+    db = SessionLocal()
+    try:
+        row = db.query(SimulationRun).filter(SimulationRun.run_id == clean_run_id).first()
+        if row is None:
+            return None
+        return bool(row.protocol_deviation and str(row.deviation_reason or "").strip() == "tuning_run")
+    finally:
+        db.close()
+
+
 def _upsert_run_registry_start(
     *,
     run_id: str,
@@ -117,6 +131,7 @@ def _upsert_run_registry_start(
     run_class: str | None,
     condition_name: str | None,
     season_number: int | None,
+    tuning_run: bool | None,
     reason: str,
 ) -> dict[str, Any]:
     clean_run_id = str(run_id or "").strip()
@@ -136,6 +151,7 @@ def _upsert_run_registry_start(
         clean_condition = _clean_optional_text(condition_name)
         clean_season_number = int(season_number or 0)
         season_value = clean_season_number if clean_season_number > 0 else None
+        resolved_tuning = bool(tuning_run)
         created = row is None
 
         if row is None:
@@ -146,6 +162,8 @@ def _upsert_run_registry_start(
                 condition_name=clean_condition,
                 season_number=season_value,
                 run_class=resolved_run_class,
+                protocol_deviation=resolved_tuning,
+                deviation_reason=("tuning_run" if resolved_tuning else None),
                 started_at=started_at,
                 start_reason=reason,
                 end_reason=None,
@@ -160,6 +178,8 @@ def _upsert_run_registry_start(
             row.condition_name = clean_condition
             row.season_number = season_value
             row.run_class = resolved_run_class
+            row.protocol_deviation = resolved_tuning
+            row.deviation_reason = ("tuning_run" if resolved_tuning else None)
             row.started_at = started_at
             row.start_reason = reason
             row.end_reason = None
@@ -227,6 +247,7 @@ def main() -> None:
     start.add_argument("--run-class", choices=("standard_72h", "deep_96h", "special_exploratory"), default=None)
     start.add_argument("--condition", default=None)
     start.add_argument("--season-number", type=int, default=None)
+    start.add_argument("--tuning-run", action="store_true")
 
     sub.add_parser("stop", help="Pause simulation processing.")
     sub.add_parser("status", help="Show effective simulation runtime state.")
@@ -268,6 +289,10 @@ def main() -> None:
             updates["SIMULATION_CONDITION_NAME"] = str(args.condition or "").strip()
         if args.season_number is not None:
             updates["SIMULATION_SEASON_NUMBER"] = int(args.season_number or 0)
+        resolved_tuning_run = bool(args.tuning_run)
+        if not resolved_tuning_run:
+            existing_tuning = _existing_run_tuning_state(args.run_id)
+            resolved_tuning_run = bool(existing_tuning)
 
         result = _update_runtime(
             updates,
@@ -282,6 +307,7 @@ def main() -> None:
                 str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None
             ),
             season_number=int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
+            tuning_run=resolved_tuning_run,
             reason="Operator start via simulation_control.py",
         )
         print(json.dumps(result, indent=2))

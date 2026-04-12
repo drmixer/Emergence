@@ -272,3 +272,80 @@ def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_cl
     assert payload["items"][0]["run_metadata"]["condition_name"] == "baseline_v2"
     assert payload["items"][0]["artifacts"]["technical_report"]["formats"] == ["markdown"]
     assert payload["items"][0]["artifacts"]["approachable_report"]["formats"] == ["markdown"]
+
+
+def test_list_archived_runs_hides_tuning_runs_by_default(reports_client, monkeypatch):
+    client, db_session, tmp_dir = reports_client
+
+    tuning_summary_file = tmp_dir / "runs" / "run-tuning-1" / "run_report_summary.json"
+    tuning_summary_file.parent.mkdir(parents=True, exist_ok=True)
+    tuning_summary_file.write_text(
+        """
+{
+  "run_id": "run-tuning-1",
+  "condition_name": "scarcity_canary_v1",
+  "season_number": 0,
+  "run_class": "special_exploratory",
+  "replicate_count": 1,
+  "generated_at_utc": "2026-04-08T03:30:00+00:00",
+  "run_started_at": "2026-04-08T01:00:00+00:00",
+  "run_ended_at": "2026-04-08T03:00:00+00:00",
+  "metrics": {
+    "total_events": 420,
+    "llm_calls": 88,
+    "deaths": 4,
+    "laws_passed": 3,
+    "estimated_cost_usd": 1.2345
+  }
+}
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    db_session.add_all(
+        [
+            SimulationRun(
+                run_id="run-tuning-1",
+                run_mode="real",
+                protocol_version="phase-2",
+                condition_name="scarcity_canary_v1",
+                season_number=None,
+                run_class="special_exploratory",
+                carryover_agent_count=0,
+                fresh_agent_count=50,
+                protocol_deviation=True,
+                deviation_reason="tuning_run",
+                started_at=datetime.fromisoformat("2026-04-08T01:00:00+00:00"),
+                ended_at=datetime.fromisoformat("2026-04-08T03:00:00+00:00"),
+            ),
+            RunReportArtifact(
+                run_id="run-tuning-1",
+                artifact_type="run_summary",
+                artifact_format="json",
+                artifact_path=str(tuning_summary_file),
+                status="completed",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        reports_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda _key: None,
+    )
+
+    with client:
+        response = client.get("/api/reports/archive/runs")
+        included_response = client.get("/api/reports/archive/runs?include_tuning=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 0
+    assert payload["hidden_tuning_count"] == 1
+
+    assert included_response.status_code == 200
+    included_payload = included_response.json()
+    assert included_payload["count"] == 1
+    assert included_payload["items"][0]["run_metadata"]["tuning_run"] is True

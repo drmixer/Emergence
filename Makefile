@@ -8,6 +8,7 @@ SEASON_NUMBER ?=
 EPOCH_ID ?=
 PRESET ?=
 ACTOR ?= make-operator
+TUNING_RUN ?=
 
 sim-status:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/simulation_control.py status
@@ -26,6 +27,7 @@ sim-start:
 	if [ -n "$(RUN_CLASS)" ]; then CMD="$$CMD --run-class \"$(RUN_CLASS)\""; fi; \
 	if [ -n "$(CONDITION)" ]; then CMD="$$CMD --condition \"$(CONDITION)\""; fi; \
 	if [ -n "$(SEASON_NUMBER)" ]; then CMD="$$CMD --season-number \"$(SEASON_NUMBER)\""; fi; \
+	if [ "$(TUNING_RUN)" = "1" ]; then CMD="$$CMD --tuning-run"; fi; \
 	eval $$CMD
 
 report-rebuild:

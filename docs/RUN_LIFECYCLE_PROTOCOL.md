@@ -101,6 +101,7 @@ This cadence is intentionally conservative for budget control and reliability wh
 - Shared reserve support may cover active-cycle shortfalls or dormant maintenance when laws allow it.
 - Dormant agents should not auto-reactivate solely because the shared reserve can fund a full active cycle; recovery should require direct aid, trade, or explicit condition design.
 - Internal tuning canaries may use named scarcity presets (runtime overrides plus reset baselines), but those presets must be labeled in run metadata and excluded from standard-condition synthesis unless promoted deliberately.
+- Public tuning/canary runs should be marked as protocol deviations with deviation reason `tuning_run`, so they can remain inspectable without being mixed into the public historical baseline by default.
 
 ## Agent Identity Policy (Canonical)
 - Canonical identity key is `agent_number` (`1..50` in the standard world).

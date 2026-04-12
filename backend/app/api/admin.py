@@ -338,6 +338,7 @@ class RunStartRequest(BaseModel):
     transfer_policy_version: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
     epoch_id: str | None = Field(default=None, max_length=64, pattern=_IDENTIFIER_PATTERN)
     run_class: Literal["standard_72h", "deep_96h", "special_exploratory"] | None = Field(default=None)
+    tuning_run: bool = Field(default=False)
     reset_world: bool = Field(default=False)
     reason: str | None = Field(default=None, max_length=500)
 
@@ -413,6 +414,8 @@ def _resolve_run_start_metadata(
         "transfer_policy_version": _clean_optional_identifier(request.transfer_policy_version),
         "epoch_id": _clean_optional_identifier(request.epoch_id),
         "run_class": coerce_run_class(request.run_class or existing_run_class or _DEFAULT_RUN_CLASS),
+        "protocol_deviation": bool(request.tuning_run),
+        "deviation_reason": ("tuning_run" if request.tuning_run else None),
     }
 
 
@@ -490,8 +493,8 @@ def _upsert_simulation_run_start(
             transfer_policy_version=metadata.get("transfer_policy_version"),
             epoch_id=metadata.get("epoch_id"),
             run_class=str(metadata.get("run_class") or _DEFAULT_RUN_CLASS),
-            protocol_deviation=False,
-            deviation_reason=None,
+            protocol_deviation=bool(metadata.get("protocol_deviation")),
+            deviation_reason=metadata.get("deviation_reason"),
             start_reason=start_reason,
             end_reason=None,
             started_at=started_at,
@@ -510,6 +513,8 @@ def _upsert_simulation_run_start(
         row.transfer_policy_version = metadata.get("transfer_policy_version")
         row.epoch_id = metadata.get("epoch_id")
         row.run_class = str(metadata.get("run_class") or row.run_class or _DEFAULT_RUN_CLASS)
+        row.protocol_deviation = bool(metadata.get("protocol_deviation"))
+        row.deviation_reason = metadata.get("deviation_reason")
         row.start_reason = start_reason
         row.end_reason = None
         row.ended_at = None
@@ -901,6 +906,7 @@ def start_simulation_run(
         "mode": mode,
         "run_id": run_id,
         "run_class": coerce_run_class(metadata.get("run_class")),
+        "tuning_run": bool(metadata.get("protocol_deviation")),
         "deterministic_failure_policy": deterministic_failure_policy_for_run_class(
             metadata.get("run_class")
         ),

@@ -96,6 +96,7 @@ export default function Reports() {
   const items = Array.isArray(archive?.items) ? archive.items : []
   const stats = archive?.stats || {}
   const activeRunId = String(archive?.active_run_id || '').trim()
+  const hiddenTuningCount = Number(archive?.hidden_tuning_count || 0)
 
   return (
     <div className="reports-page archive-page">
@@ -110,6 +111,11 @@ export default function Reports() {
       </div>
 
       {error && <div className="feed-notice">{error}</div>}
+      {!error && hiddenTuningCount > 0 && (
+        <div className="feed-notice">
+          {hiddenTuningCount} tuning run{hiddenTuningCount === 1 ? '' : 's'} hidden from the public archive.
+        </div>
+      )}
 
       {activeRunId && (
         <div className="card archive-current-run-card">

@@ -67,6 +67,9 @@ def _serialize_run_metadata(row: SimulationRun | None) -> dict[str, Any] | None:
         "parent_run_id": str(row.parent_run_id or "").strip() or None,
         "epoch_id": str(row.epoch_id or "").strip() or None,
         "run_class": str(row.run_class or "").strip() or None,
+        "protocol_deviation": bool(row.protocol_deviation),
+        "deviation_reason": str(row.deviation_reason or "").strip() or None,
+        "tuning_run": bool(row.protocol_deviation and str(row.deviation_reason or "").strip() == "tuning_run"),
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "ended_at": row.ended_at.isoformat() if row.ended_at else None,
     }
@@ -109,6 +112,7 @@ def _resolve_download_path(raw_path: str) -> Path:
 @router.get("/archive/runs")
 def list_archived_runs(
     limit: int = Query(24, ge=1, le=200),
+    include_tuning: bool = Query(False),
     db: Session = Depends(get_db),
 ):
     active_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip() or None
@@ -211,19 +215,30 @@ def list_archived_runs(
         if artifact_bucket["updated_at"] is None and row.updated_at:
             artifact_bucket["updated_at"] = row.updated_at.isoformat()
 
-    items = [
-        {
-            "run_id": run_id,
-            "summary": {
-                key: value
-                for key, value in summary.items()
-                if key != "sort_key"
-            },
-            "run_metadata": _serialize_run_metadata(run_registry.get(run_id)),
-            "artifacts": artifacts_by_run.get(run_id, {}),
-        }
-        for run_id, summary in summary_by_run.items()
-    ]
+    hidden_tuning_count = 0
+    items = []
+    for run_id, summary in summary_by_run.items():
+        run_row = run_registry.get(run_id)
+        is_tuning = bool(
+            run_row
+            and bool(run_row.protocol_deviation)
+            and str(run_row.deviation_reason or "").strip() == "tuning_run"
+        )
+        if is_tuning and not include_tuning:
+            hidden_tuning_count += 1
+            continue
+        items.append(
+            {
+                "run_id": run_id,
+                "summary": {
+                    key: value
+                    for key, value in summary.items()
+                    if key != "sort_key"
+                },
+                "run_metadata": _serialize_run_metadata(run_row),
+                "artifacts": artifacts_by_run.get(run_id, {}),
+            }
+        )
     items.sort(
         key=lambda item: float(summary_by_run.get(item["run_id"], {}).get("sort_key") or 0),
         reverse=True,
@@ -233,6 +248,7 @@ def list_archived_runs(
     return {
         "active_run_id": active_run_id,
         "count": len(items),
+        "hidden_tuning_count": hidden_tuning_count,
         "stats": {
             "completed_runs": len(items),
             "total_events": sum(int(item["summary"]["metrics"]["total_events"]) for item in items),

@@ -215,6 +215,31 @@ def test_run_start_and_stop_persist_research_metadata_and_end_reason(db_session,
     assert stopped.end_reason == "phase2_stop"
 
 
+def test_run_start_can_mark_tuning_run(db_session, monkeypatch):
+    client, runtime_stub = _make_admin_client(db_session, monkeypatch)
+
+    with client:
+        response = client.post(
+            "/api/admin/control/run/start",
+            json={
+                "mode": "real",
+                "run_id": "real-tuning-run",
+                "run_class": "special_exploratory",
+                "condition_name": "scarcity_tuning_v1",
+                "tuning_run": True,
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tuning_run"] is True
+
+    row = db_session.query(SimulationRun).filter_by(run_id="real-tuning-run").one()
+    assert row.protocol_deviation is True
+    assert row.deviation_reason == "tuning_run"
+    assert runtime_stub.effective["SIMULATION_RUN_ID"] == "real-tuning-run"
+
+
 def test_run_start_rejects_season_id_without_positive_season_number(db_session, monkeypatch):
     client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
 

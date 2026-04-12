@@ -401,6 +401,7 @@ class APIService {
                 transfer_policy_version: String(payload?.transfer_policy_version || '').trim() || null,
                 epoch_id: String(payload?.epoch_id || '').trim() || null,
                 run_class: String(payload?.run_class || '').trim() || null,
+                tuning_run: Boolean(payload?.tuning_run),
                 reset_world: Boolean(payload?.reset_world),
                 reason: String(payload?.reason || '').trim() || null,
             }),
