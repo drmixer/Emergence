@@ -178,6 +178,7 @@ From repo root:
 # Runtime controls
 make sim-status
 make sim-preset PRESET=internal_scarcity_tight_v1
+make sim-preset PRESET=internal_scarcity_tight_v2
 make sim-start RUN_MODE=real
 make sim-stop
 
