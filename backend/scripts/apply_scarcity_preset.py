@@ -25,7 +25,7 @@ def _apply_resource_targets(*, agent_targets: dict[str, float], pool_targets: di
                     WHERE resource_type = :resource_type
                     """
                 ),
-                {"resource_type": resource_type, "quantity": Decimal(str(value))},
+                {"resource_type": resource_type, "quantity": str(Decimal(str(value)))},
             )
 
         for resource_type, value in pool_targets.items():
@@ -34,18 +34,36 @@ def _apply_resource_targets(*, agent_targets: dict[str, float], pool_targets: di
                     """
                     UPDATE global_resources
                     SET in_common_pool = :quantity,
-                        total_amount = GREATEST(total_amount, :quantity)
+                        total_amount = CASE
+                            WHEN total_amount < :quantity THEN :quantity
+                            ELSE total_amount
+                        END
                     WHERE resource_type = :resource_type
                     """
                 ),
-                {"resource_type": resource_type, "quantity": Decimal(str(value))},
+                {"resource_type": resource_type, "quantity": str(Decimal(str(value)))},
             )
+
+        db.execute(
+            text(
+                """
+                UPDATE agents
+                SET status = 'active',
+                    starvation_cycles = 0,
+                    died_at = NULL,
+                    death_cause = NULL,
+                    sanctioned_until = NULL,
+                    exiled = FALSE
+                """
+            )
+        )
 
         db.commit()
         return {
             "applied": True,
             "agent_resource_targets": {k: float(v) for k, v in agent_targets.items()},
             "common_pool_targets": {k: float(v) for k, v in pool_targets.items()},
+            "agent_state_reset": True,
         }
     except Exception:
         db.rollback()
