@@ -77,6 +77,7 @@ From repo root:
 make sim-status
 make sim-preset PRESET=internal_scarcity_tight_v1
 make sim-preset PRESET=internal_scarcity_tight_v2
+make sim-preset PRESET=internal_scarcity_tight_v3
 make sim-start RUN_MODE=real
 make sim-start RUN_MODE=real RUN_CLASS=special_exploratory TUNING_RUN=1
 make sim-start RUN_MODE=real RUN_CLASS=deep_96h

@@ -129,6 +129,9 @@ class Settings(BaseSettings):
     SURVIVAL_RESERVE_ACTIVE_AID_ENABLED: bool = False
     SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED: bool = False
     SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED: bool = True
+    WORK_YIELD_FARM_BASE: float = 2.0
+    WORK_YIELD_GENERATE_BASE: float = 1.5
+    WORK_YIELD_GATHER_BASE: float = 0.5
     # Runtime ops controls (can be overridden via admin APIs).
     SIMULATION_RUN_MODE: str = "test"  # test | real
     SIMULATION_ACTIVE: bool = True

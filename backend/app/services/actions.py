@@ -90,6 +90,18 @@ def action_energy_cost(action_type: str, action: dict | None = None) -> Decimal:
     return (base_cost * hours).quantize(Decimal("0.01"))
 
 
+def work_base_yield(work_type: str) -> Decimal:
+    work_info = WORK_YIELDS[work_type]
+    raw_value = runtime_config_service.get_effective_value_cached(
+        f"WORK_YIELD_{str(work_type or '').strip().upper()}_BASE"
+    )
+    try:
+        value = Decimal(str(raw_value if raw_value not in (None, "") else work_info["base_yield"]))
+    except Exception:
+        value = Decimal(str(work_info["base_yield"]))
+    return max(Decimal("0.01"), value)
+
+
 RATE_LIMIT_REASON = "Rate limit exceeded (max actions per hour)"
 SANCTIONED_RATE_LIMIT_REASON = "You are SANCTIONED - limited to 1 action per hour"
 def get_action_rate_limit_state(db: Session, agent: Agent, *, now: Optional[datetime] = None) -> dict:
@@ -578,11 +590,10 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
     
     work_info = WORK_YIELDS[work_type]
     resource_type = work_info["resource"]
-    base_yield = work_info["base_yield"]
+    base_yield = work_base_yield(work_type)
     efficiency = EFFICIENCY_CURVE.get(hours, 0.7)
     
-    amount_produced = round(base_yield * hours * efficiency, 2)
-    produced_amount = Decimal(str(amount_produced))
+    produced_amount = (base_yield * Decimal(str(hours)) * Decimal(str(efficiency))).quantize(Decimal("0.01"))
     contribution_amount = Decimal("0")
     reserve_active = False
 

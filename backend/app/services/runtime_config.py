@@ -114,6 +114,24 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         python_type=bool,
         description="Allow reserve laws to automatically divert food and energy work output into the shared reserve.",
     ),
+    "WORK_YIELD_FARM_BASE": MutableSettingSpec(
+        python_type=float,
+        min_value=0.1,
+        max_value=10.0,
+        description="Base per-hour food yield for farm work.",
+    ),
+    "WORK_YIELD_GENERATE_BASE": MutableSettingSpec(
+        python_type=float,
+        min_value=0.1,
+        max_value=10.0,
+        description="Base per-hour energy yield for generate work.",
+    ),
+    "WORK_YIELD_GATHER_BASE": MutableSettingSpec(
+        python_type=float,
+        min_value=0.1,
+        max_value=10.0,
+        description="Base per-hour materials yield for gather work.",
+    ),
     "PROPOSAL_VOTING_HOURS": MutableSettingSpec(
         python_type=float,
         min_value=0.05,
