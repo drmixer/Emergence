@@ -128,6 +128,36 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "materials": 500.0,
         },
     ),
+    "internal_scarcity_tight_v4": ScarcityPreset(
+        name="internal_scarcity_tight_v4",
+        description=(
+            "Mixed-scarcity tuning canary that keeps the restored dormancy consequences from patch1 "
+            "while making food meaningfully tighter instead of relying on an energy-only bottleneck."
+        ),
+        runtime_overrides={
+            "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
+            "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
+            "SURVIVAL_DORMANT_FOOD_COST": 0.5,
+            "SURVIVAL_DORMANT_ENERGY_COST": 1.0,
+            "SURVIVAL_DEATH_THRESHOLD": 5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED": False,
+            "WORK_YIELD_FARM_BASE": 1.2,
+            "WORK_YIELD_GENERATE_BASE": 1.5,
+            "WORK_YIELD_GATHER_BASE": 0.5,
+        },
+        agent_resource_targets={
+            "food": 18.0,
+            "energy": 18.0,
+            "materials": 20.0,
+        },
+        common_pool_targets={
+            "food": 350.0,
+            "energy": 200.0,
+            "materials": 500.0,
+        },
+    ),
 }
 
 
