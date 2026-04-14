@@ -128,26 +128,67 @@ def test_reserve_prioritizes_active_agents_before_dormant_maintenance(session_fa
         dormant_agent_id = dormant_agent.id
 
     result = asyncio.run(scheduler.process_daily_consumption())
-    assert result["active_fed"] == 1
-    assert result["starving"] == 1
+    assert result["active_fed"] == 0
+    assert result["became_dormant"] == 1
+    assert result["dormant_stable"] == 1
 
     with session_factory() as db:
         refreshed_active = db.query(Agent).filter(Agent.id == active_agent_id).one()
         refreshed_dormant = db.query(Agent).filter(Agent.id == dormant_agent_id).one()
         reserve_aids = db.query(Event).filter(Event.event_type == "reserve_aid").all()
 
-    assert refreshed_active.status == "active"
-    assert refreshed_active.starvation_cycles == 0
+    assert refreshed_active.status == "dormant"
     assert refreshed_dormant.status == "dormant"
-    assert refreshed_dormant.starvation_cycles == 2
+    assert refreshed_dormant.starvation_cycles == 1
     assert len(reserve_aids) == 1
-    assert reserve_aids[0].agent_id == active_agent_id
+    assert reserve_aids[0].agent_id == dormant_agent_id
+    aid_meta = reserve_aids[0].event_metadata or {}
+    assert aid_meta["status_before"] == "dormant"
+    assert aid_meta["support_mode"] == "dormant_maintenance"
+    assert aid_meta["aid_granted"] is True
+    assert aid_meta["reserve_pool_energy_before"] == pytest.approx(1.95)
+    assert aid_meta["reserve_pool_energy_after"] == pytest.approx(1.80)
+
+
+def test_reserve_can_support_active_agents_when_runtime_override_enabled(session_factory, monkeypatch):
+    _configure_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={"SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True},
+    )
+
+    with session_factory() as db:
+        active_agent = _seed_agent(
+            db,
+            agent_number=6,
+            status="active",
+            food="2.00",
+            energy="0.10",
+        )
+        dormant_agent = _seed_agent(
+            db,
+            agent_number=7,
+            status="dormant",
+            food="0.10",
+            energy="0.10",
+            starvation_cycles=1,
+        )
+        _seed_reserve(db, food="0.20", energy="1.95")
+        active_agent_id = active_agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["active_fed"] == 1
+    assert result["starving"] == 1
+
+    with session_factory() as db:
+        refreshed_active = db.query(Agent).filter(Agent.id == active_agent_id).one()
+        reserve_aids = db.query(Event).filter(Event.event_type == "reserve_aid").all()
+
+    assert refreshed_active.status == "active"
+    assert len(reserve_aids) == 1
     aid_meta = reserve_aids[0].event_metadata or {}
     assert aid_meta["status_before"] == "active"
     assert aid_meta["support_mode"] == "active_maintenance"
-    assert aid_meta["aid_granted"] is True
-    assert aid_meta["reserve_pool_energy_before"] == pytest.approx(1.95)
-    assert aid_meta["reserve_pool_energy_after"] == pytest.approx(0.05)
 
 
 def test_reserve_can_revive_dormant_agent_when_pool_covers_active_cycle(session_factory, monkeypatch):
@@ -241,7 +282,11 @@ def test_reserve_does_not_auto_revive_dormant_agent_when_disabled(session_factor
 
 
 def test_reserve_support_saves_smallest_active_deficit_first(session_factory, monkeypatch):
-    _configure_reserve(monkeypatch, session_factory)
+    _configure_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={"SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True},
+    )
 
     with session_factory() as db:
         high_deficit_agent = _seed_agent(

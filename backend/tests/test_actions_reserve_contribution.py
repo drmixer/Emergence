@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.models.models import Agent, AgentInventory, GlobalResources
 from app.services import actions
+from app.services import law_effects
 
 
 @pytest.fixture
@@ -124,3 +125,81 @@ def test_reserve_contribution_uses_normal_rates_when_energy_buffer_is_healthy(se
     assert float(energy_inventory.quantity) == pytest.approx(1.12)
     assert float(food_pool.in_common_pool) == pytest.approx(0.20)
     assert float(energy_pool.in_common_pool) == pytest.approx(12.38)
+
+
+def test_work_action_energy_cost_scales_with_hours_for_validation(session_factory, monkeypatch):
+    monkeypatch.setattr(actions, "survival_reserve_law_active", lambda _db: False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=3)
+        energy_inventory = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.agent_id == agent.id, AgentInventory.resource_type == "energy")
+            .one()
+        )
+        energy_inventory.quantity = Decimal("1.40")
+        db.commit()
+
+        result = asyncio.run(
+            actions.validate_action(
+                db,
+                agent,
+                {"action": "work", "work_type": "generate", "hours": 3},
+            )
+        )
+
+    assert result["valid"] is False
+    assert "need 1.50" in result["reason"]
+
+
+def test_execute_work_deducts_hour_scaled_energy_cost(session_factory, monkeypatch):
+    monkeypatch.setattr(actions, "survival_reserve_law_active", lambda _db: False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=4)
+        energy_inventory = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.agent_id == agent.id, AgentInventory.resource_type == "energy")
+            .one()
+        )
+        energy_inventory.quantity = Decimal("2.00")
+        db.commit()
+
+        result = asyncio.run(
+            actions.execute_action(
+                db,
+                agent,
+                {"action": "work", "work_type": "generate", "hours": 3},
+            )
+        )
+
+        refreshed_energy = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.agent_id == agent.id, AgentInventory.resource_type == "energy")
+            .one()
+        )
+
+    assert result["success"] is True
+    assert result["energy_cost"] == pytest.approx(1.5)
+    assert float(refreshed_energy.quantity) == pytest.approx(4.55)
+
+
+def test_reserve_contribution_can_be_disabled_via_runtime_toggle(session_factory, monkeypatch):
+    monkeypatch.setattr(actions, "survival_reserve_law_active", lambda _db: True)
+    monkeypatch.setattr(law_effects, "reserve_auto_contribution_enabled", lambda: False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=5)
+
+        asyncio.run(actions._execute_work(db, agent, {"work_type": "generate", "hours": 1}))
+        db.commit()
+
+        energy_inventory = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.agent_id == agent.id, AgentInventory.resource_type == "energy")
+            .one()
+        )
+        energy_pool = db.query(GlobalResources).filter(GlobalResources.resource_type == "energy").one()
+
+    assert float(energy_inventory.quantity) == pytest.approx(1.50)
+    assert float(energy_pool.in_common_pool) == pytest.approx(0.00)

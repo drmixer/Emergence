@@ -29,7 +29,9 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "SURVIVAL_DORMANT_FOOD_COST": 0.25,
             "SURVIVAL_DORMANT_ENERGY_COST": 0.25,
             "SURVIVAL_DEATH_THRESHOLD": 5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": False,
             "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED": True,
         },
         agent_resource_targets={
             "food": 50.0,
@@ -54,7 +56,9 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "SURVIVAL_DORMANT_FOOD_COST": 0.5,
             "SURVIVAL_DORMANT_ENERGY_COST": 0.5,
             "SURVIVAL_DEATH_THRESHOLD": 5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": False,
             "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED": True,
         },
         agent_resource_targets={
             "food": 35.0,
@@ -79,7 +83,9 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "SURVIVAL_DORMANT_FOOD_COST": 0.5,
             "SURVIVAL_DORMANT_ENERGY_COST": 1.0,
             "SURVIVAL_DEATH_THRESHOLD": 5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": False,
             "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED": False,
         },
         agent_resource_targets={
             "food": 30.0,

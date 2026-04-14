@@ -90,5 +90,19 @@ def reserve_auto_revive_enabled() -> bool:
     )
 
 
+def reserve_active_aid_enabled() -> bool:
+    return _runtime_bool(
+        "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED",
+        settings.SURVIVAL_RESERVE_ACTIVE_AID_ENABLED,
+    )
+
+
+def reserve_auto_contribution_enabled() -> bool:
+    return _runtime_bool(
+        "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED",
+        settings.SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED,
+    )
+
+
 def low_resource_warning_threshold(cost: Decimal) -> Decimal:
     return max(cost, cost * Decimal("2"))

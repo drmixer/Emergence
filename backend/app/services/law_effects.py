@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.models.models import GlobalResources, Law
+from app.services.survival_config import reserve_auto_contribution_enabled
 
 
 SURVIVAL_RESERVE_CONTRIBUTION_BASE_RATES = {
@@ -45,6 +46,8 @@ def survival_reserve_law_active(db: Session) -> bool:
 
 
 def survival_reserve_contribution_rate(resource_type: str, *, energy_reserve: Decimal | None = None) -> Decimal:
+    if not reserve_auto_contribution_enabled():
+        return Decimal("0")
     normalized = str(resource_type or "").strip().lower()
     if energy_reserve is not None and Decimal(str(energy_reserve)) < SURVIVAL_RESERVE_LOW_ENERGY_THRESHOLD:
         return SURVIVAL_RESERVE_CONTRIBUTION_LOW_ENERGY_RATES.get(normalized, Decimal("0"))

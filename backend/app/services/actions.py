@@ -74,6 +74,22 @@ ACTION_COSTS = {
     "vote_enforcement": Decimal("0.3"),    # Slightly more than regular vote
 }
 
+
+def action_energy_cost(action_type: str, action: dict | None = None) -> Decimal:
+    base_cost = ACTION_COSTS.get(action_type, Decimal("0.0"))
+    if action_type != "work":
+        return base_cost
+
+    payload = action or {}
+    try:
+        hours = Decimal(str(payload.get("hours", 1)))
+    except Exception:
+        hours = Decimal("1")
+    if hours <= 0:
+        hours = Decimal("1")
+    return (base_cost * hours).quantize(Decimal("0.01"))
+
+
 RATE_LIMIT_REASON = "Rate limit exceeded (max actions per hour)"
 SANCTIONED_RATE_LIMIT_REASON = "You are SANCTIONED - limited to 1 action per hour"
 def get_action_rate_limit_state(db: Session, agent: Agent, *, now: Optional[datetime] = None) -> dict:
@@ -145,7 +161,7 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         }
     
     # Check energy cost for action (Phase 2: Teeth)
-    action_cost = ACTION_COSTS.get(action_type, Decimal("0.0"))
+    action_cost = action_energy_cost(action_type, action)
     if action_cost > 0:
         energy_inv = db.query(AgentInventory).filter(
             AgentInventory.agent_id == agent.id,
@@ -372,7 +388,7 @@ async def execute_action(db: Session, agent: Agent, action: dict) -> dict:
     db.add(agent_action)
     
     # Deduct energy cost for action (Phase 2: Teeth)
-    action_cost = ACTION_COSTS.get(action_type, Decimal("0.0"))
+    action_cost = action_energy_cost(action_type, action)
     if action_cost > 0:
         energy_inv = db.query(AgentInventory).filter(
             AgentInventory.agent_id == agent.id,

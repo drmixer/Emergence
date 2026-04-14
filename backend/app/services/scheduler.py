@@ -36,6 +36,7 @@ from app.services.survival_config import (
     death_threshold,
     dormant_energy_cost,
     dormant_food_cost,
+    reserve_active_aid_enabled,
     reserve_auto_revive_enabled,
 )
 
@@ -722,7 +723,7 @@ async def process_daily_consumption():
             # ACTIVE AGENT PROCESSING
             # ================================================================
             if agent.status == "active":
-                if reserve_laws:
+                if reserve_laws and reserve_active_aid_enabled():
                     food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_survival_reserve_support(
                         db,
                         agent=agent,

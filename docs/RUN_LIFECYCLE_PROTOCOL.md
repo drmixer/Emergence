@@ -98,9 +98,10 @@ This cadence is intentionally conservative for budget control and reliability wh
 
 ## Scarcity and Reserve Policy
 - Standard research runs should preserve real dormancy consequences rather than quietly erasing them with automatic rescue loops.
-- Shared reserve support may cover active-cycle shortfalls or dormant maintenance when laws allow it.
+- Shared reserve support should not quietly erase active-agent scarcity before dormancy. Automatic reserve rescue for active agents should remain disabled by default.
+- Shared reserve support may cover dormant maintenance when laws allow it.
 - Dormant agents should not auto-reactivate solely because the shared reserve can fund a full active cycle; recovery should require direct aid, trade, or explicit condition design.
-- Internal tuning canaries may use named scarcity presets (runtime overrides plus reset baselines), but those presets must be labeled in run metadata and excluded from standard-condition synthesis unless promoted deliberately.
+- Internal tuning canaries may use named scarcity presets (runtime overrides plus reset baselines), including temporarily disabling reserve auto-contribution when diagnosing production-buffer pathologies, but those presets must be labeled in run metadata and excluded from standard-condition synthesis unless promoted deliberately.
 - Public tuning/canary runs should be marked as protocol deviations with deviation reason `tuning_run`, so they can remain inspectable without being mixed into the public historical baseline by default.
 
 ## Agent Identity Policy (Canonical)
