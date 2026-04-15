@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.models.models import Agent, AgentInventory, Event
 from app.services import actions
+from app.services.survival_config import low_resource_warning_threshold
 
 
 def _session_factory():
@@ -95,3 +96,7 @@ def test_trade_revival_uses_configured_active_survival_threshold(monkeypatch):
         assert revive_event.agent_id == recipient.id
     finally:
         engine.dispose()
+
+
+def test_low_resource_warning_threshold_accepts_float_inputs():
+    assert low_resource_warning_threshold(2.0) == Decimal("4.0")

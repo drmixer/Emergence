@@ -1,18 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { Package, TrendingUp, TrendingDown } from 'lucide-react'
-import {
-    ResponsiveContainer,
-    AreaChart,
-    Area,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    PieChart,
-    Pie,
-    Cell,
-} from 'recharts'
 import { api } from '../services/api'
+
+const ResourcesCharts = lazy(() => import('../components/ResourcesCharts'))
 
 const COLORS = {
     tier1: '#f59e0b',
@@ -28,6 +18,7 @@ function formatNumber(n) {
 
 export default function Resources() {
     const [loading, setLoading] = useState(true)
+    const [secondaryLoading, setSecondaryLoading] = useState(true)
     const [error, setError] = useState(null)
     const [resources, setResources] = useState(null)
     const [history, setHistory] = useState(null)
@@ -35,27 +26,50 @@ export default function Resources() {
     const [agents, setAgents] = useState([])
 
     useEffect(() => {
+        let cancelled = false
+
         async function load() {
             setLoading(true)
+            setSecondaryLoading(true)
             setError(null)
             try {
-                const [res, hist, dist, agentList] = await Promise.all([
-                    api.getResources(),
+                const res = await api.getResources()
+                if (cancelled) return
+                setResources(res)
+            } catch (e) {
+                if (cancelled) return
+                setError(e)
+            } finally {
+                if (!cancelled) {
+                    setLoading(false)
+                }
+            }
+
+            try {
+                const [hist, dist, agentList] = await Promise.all([
                     api.getResourceHistory(),
                     api.getResourceDistribution(),
                     api.getAgents(),
                 ])
-                setResources(res)
+                if (cancelled) return
                 setHistory(hist)
                 setDistribution(dist)
                 setAgents(Array.isArray(agentList) ? agentList : [])
-            } catch (e) {
-                setError(e)
+            } catch {
+                if (cancelled) return
+                setHistory(null)
+                setDistribution(null)
+                setAgents([])
             } finally {
-                setLoading(false)
+                if (!cancelled) {
+                    setSecondaryLoading(false)
+                }
             }
         }
         load()
+        return () => {
+            cancelled = true
+        }
     }, [])
 
     const totals = resources?.totals || {}
@@ -181,89 +195,45 @@ export default function Resources() {
                 })}
             </div>
 
-            {/* Charts */}
-            <div className="content-grid">
-                {/* Net Production Chart */}
-                <div className="card">
-                    <div className="card-header">
-                        <h3>Net Resource Change</h3>
-                    </div>
-                    <div className="card-body">
-                        <div style={{ width: '100%', height: 300 }}>
-                            <ResponsiveContainer>
-                                <AreaChart data={historyChartData}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" opacity={0.2} />
-                                    <XAxis dataKey="day" stroke="var(--text-muted)" tick={{ fontSize: 12 }} />
-                                    <YAxis stroke="var(--text-muted)" tick={{ fontSize: 12 }} />
-                                    <Tooltip
-                                        contentStyle={{
-                                            background: 'var(--bg-card)',
-                                            border: '1px solid var(--border-color)',
-                                            borderRadius: 'var(--radius-md)',
-                                        }}
-                                    />
-                                    <Area type="monotone" dataKey="food" stackId="1" stroke="#10b981" fill="rgba(16, 185, 129, 0.25)" />
-                                    <Area type="monotone" dataKey="energy" stackId="1" stroke="#3b82f6" fill="rgba(59, 130, 246, 0.25)" />
-                                    <Area type="monotone" dataKey="materials" stackId="1" stroke="#8b5cf6" fill="rgba(139, 92, 246, 0.25)" />
-                                </AreaChart>
-                            </ResponsiveContainer>
+            {secondaryLoading ? (
+                <div className="content-grid">
+                    <div className="card">
+                        <div className="card-header">
+                            <h3>Net Resource Change</h3>
                         </div>
-                        <div className="chart-legend">
-                            <span><span className="legend-dot" style={{ background: '#10b981' }}></span> Food</span>
-                            <span><span className="legend-dot" style={{ background: '#3b82f6' }}></span> Energy</span>
-                            <span><span className="legend-dot" style={{ background: '#8b5cf6' }}></span> Materials</span>
+                        <div className="card-body">
+                            <div className="empty-state">Loading resource history…</div>
+                        </div>
+                    </div>
+                    <div className="card">
+                        <div className="card-header">
+                            <h3>Wealth by Tier</h3>
+                        </div>
+                        <div className="card-body">
+                            <div className="empty-state">Loading wealth distribution…</div>
                         </div>
                     </div>
                 </div>
-
-                {/* Distribution by Tier */}
-                <div className="card">
-                    <div className="card-header">
-                        <h3>Wealth by Tier</h3>
-                    </div>
-                    <div className="card-body">
-                        {tierPieData.length === 0 ? (
-                            <div className="empty-state">No distribution data yet.</div>
-                        ) : (
-                            <>
-                                <div style={{ width: '100%', height: 300 }}>
-                                    <ResponsiveContainer>
-                                        <PieChart>
-                                            <Pie
-                                                data={tierPieData}
-                                                innerRadius={60}
-                                                outerRadius={100}
-                                                paddingAngle={5}
-                                                dataKey="value"
-                                            >
-                                                {tierPieData.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={entry.color} />
-                                                ))}
-                                            </Pie>
-                                            <Tooltip
-                                                formatter={(value) => formatNumber(value)}
-                                                contentStyle={{
-                                                    background: 'var(--bg-card)',
-                                                    border: '1px solid var(--border-color)',
-                                                    borderRadius: 'var(--radius-md)',
-                                                }}
-                                            />
-                                        </PieChart>
-                                    </ResponsiveContainer>
+            ) : (
+                <Suspense
+                    fallback={
+                        <div className="content-grid">
+                            <div className="card">
+                                <div className="card-body">
+                                    <div className="empty-state">Loading charts…</div>
                                 </div>
-                                <div className="chart-legend">
-                                    {tierPieData.map(item => (
-                                        <span key={item.name}>
-                                            <span className="legend-dot" style={{ background: item.color }}></span>
-                                            {item.name}
-                                        </span>
-                                    ))}
+                            </div>
+                            <div className="card">
+                                <div className="card-body">
+                                    <div className="empty-state">Loading charts…</div>
                                 </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            </div>
+                            </div>
+                        </div>
+                    }
+                >
+                    <ResourcesCharts historyChartData={historyChartData} tierPieData={tierPieData} />
+                </Suspense>
+            )}
 
             {/* Detailed Distribution Table */}
             <div className="card" style={{ marginTop: 'var(--spacing-lg)' }}>
@@ -271,7 +241,9 @@ export default function Resources() {
                     <h3>Distribution by Tier</h3>
                 </div>
                 <div className="card-body">
-                    {distributionByTier.length === 0 ? (
+                    {secondaryLoading ? (
+                        <div className="empty-state">Loading distribution table…</div>
+                    ) : distributionByTier.length === 0 ? (
                         <div className="empty-state">No distribution data yet.</div>
                     ) : (
                         <table>
@@ -324,4 +296,3 @@ export default function Resources() {
         </div>
     )
 }
-

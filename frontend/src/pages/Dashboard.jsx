@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { Suspense, lazy, startTransition, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
     Users,
@@ -16,21 +16,13 @@ import {
     Equal
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import {
-    ResponsiveContainer,
-    LineChart,
-    Line,
-    CartesianGrid,
-    XAxis,
-    YAxis,
-    Tooltip,
-    Legend
-} from 'recharts'
 import { api } from '../services/api'
 import ActivityPulse from '../components/ActivityPulse'
 import { ResourceBar, CriticalAgentsBanner } from '../components/ResourceBar'
-import { SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
+import { SkeletonEventCard, SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
+
+const DashboardSocialDynamicsChart = lazy(() => import('../components/DashboardSocialDynamicsChart'))
 
 function sumWorldResource(resources, key) {
     const totals = resources?.totals || {}
@@ -65,23 +57,33 @@ export default function Dashboard() {
     const [socialDeltas, setSocialDeltas] = useState(null)
     const [classMobility, setClassMobility] = useState(null)
     const [loading, setLoading] = useState(true)
+    const [secondaryLoading, setSecondaryLoading] = useState(true)
     const [isLive, setIsLive] = useState(true)
     const [error, setError] = useState(null)
 
     useEffect(() => {
+        let cancelled = false
+
+        const resetSecondaryState = () => {
+            setProposals([])
+            setTopAgents([])
+            setCrises([])
+            setPlotTurns([])
+            setSocialSeries([])
+            setSocialDeltas(null)
+            setClassMobility(null)
+        }
+
         const fetchData = async () => {
             try {
+                setLoading(true)
+                setSecondaryLoading(true)
                 setError(null)
-                const [overview, resources, activeProposals, activityLeaderboard, crisisStrip, turns, socialDynamics, mobility] = await Promise.all([
+                const [overview, resources] = await Promise.all([
                     api.getAnalyticsOverview(),
                     api.getResources(),
-                    api.fetch('/api/proposals?status=active&limit=5'),
-                    api.fetch('/api/analytics/leaderboards/activity?limit=5&hours=24'),
-                    api.getCrisisStrip(6).catch(() => ({ items: [] })),
-                    api.getPlotTurns(6, 48, 60).catch(() => ({ items: [] })),
-                    api.getSocialDynamics(7).catch(() => ({ series: [], deltas_vs_prev_day: null })),
-                    api.getClassMobility(24).catch(() => null),
                 ])
+                if (cancelled) return
 
                 setIsLive(Boolean(overview?.events?.latest))
 
@@ -109,31 +111,89 @@ export default function Dashboard() {
                     maxMaterials: materialsMax,
                 })
                 setScope(overview?.scope && typeof overview.scope === 'object' ? overview.scope : null)
-
-                setProposals(Array.isArray(activeProposals) ? activeProposals : [])
-                setTopAgents(Array.isArray(activityLeaderboard) ? activityLeaderboard : [])
-                setCrises(Array.isArray(crisisStrip?.items) ? crisisStrip.items : [])
-                setPlotTurns(Array.isArray(turns?.items) ? turns.items : [])
-                setSocialSeries(Array.isArray(socialDynamics?.series) ? socialDynamics.series : [])
-                setSocialDeltas(socialDynamics?.deltas_vs_prev_day || null)
-                setClassMobility(mobility && typeof mobility === 'object' ? mobility : null)
             } catch (_error) {
+                if (cancelled) return
                 setError('Failed to load live data.')
                 setStats(null)
                 setScope(null)
-                setProposals([])
-                setTopAgents([])
-                setCrises([])
-                setPlotTurns([])
-                setSocialSeries([])
-                setSocialDeltas(null)
-                setClassMobility(null)
+                resetSecondaryState()
             } finally {
-                setLoading(false)
+                if (!cancelled) {
+                    setLoading(false)
+                }
+            }
+
+            try {
+                const results = await Promise.allSettled([
+                    api.fetch('/api/proposals?status=active&limit=5'),
+                    api.fetch('/api/analytics/leaderboards/activity?limit=5&hours=24'),
+                    api.getCrisisStrip(6),
+                    api.getPlotTurns(6, 48, 60),
+                    api.getSocialDynamics(7),
+                    api.getClassMobility(24),
+                ])
+                if (cancelled) return
+
+                const [
+                    activeProposalsResult,
+                    activityLeaderboardResult,
+                    crisisStripResult,
+                    turnsResult,
+                    socialDynamicsResult,
+                    mobilityResult,
+                ] = results
+
+                startTransition(() => {
+                    setProposals(
+                        activeProposalsResult.status === 'fulfilled' && Array.isArray(activeProposalsResult.value)
+                            ? activeProposalsResult.value
+                            : []
+                    )
+                    setTopAgents(
+                        activityLeaderboardResult.status === 'fulfilled' && Array.isArray(activityLeaderboardResult.value)
+                            ? activityLeaderboardResult.value
+                            : []
+                    )
+                    setCrises(
+                        crisisStripResult.status === 'fulfilled' && Array.isArray(crisisStripResult.value?.items)
+                            ? crisisStripResult.value.items
+                            : []
+                    )
+                    setPlotTurns(
+                        turnsResult.status === 'fulfilled' && Array.isArray(turnsResult.value?.items)
+                            ? turnsResult.value.items
+                            : []
+                    )
+                    setSocialSeries(
+                        socialDynamicsResult.status === 'fulfilled' && Array.isArray(socialDynamicsResult.value?.series)
+                            ? socialDynamicsResult.value.series
+                            : []
+                    )
+                    setSocialDeltas(
+                        socialDynamicsResult.status === 'fulfilled'
+                            ? socialDynamicsResult.value?.deltas_vs_prev_day || null
+                            : null
+                    )
+                    setClassMobility(
+                        mobilityResult.status === 'fulfilled' && mobilityResult.value && typeof mobilityResult.value === 'object'
+                            ? mobilityResult.value
+                            : null
+                    )
+                    setSecondaryLoading(false)
+                })
+            } catch {
+                if (cancelled) return
+                startTransition(() => {
+                    resetSecondaryState()
+                    setSecondaryLoading(false)
+                })
             }
         }
 
         fetchData()
+        return () => {
+            cancelled = true
+        }
     }, [])
 
     // Check for pre-launch state
@@ -213,10 +273,15 @@ export default function Dashboard() {
                             <AlertTriangle size={18} />
                             Crisis Strip
                         </h3>
-                        <span className="strip-meta">{crises.length} active</span>
+                        <span className="strip-meta">{secondaryLoading ? 'Loading...' : `${crises.length} active`}</span>
                     </div>
                     <div className="card-body">
-                        {crises.length === 0 ? (
+                        {secondaryLoading ? (
+                            <div className="crisis-skeleton-list">
+                                <SkeletonEventCard />
+                                <SkeletonEventCard />
+                            </div>
+                        ) : crises.length === 0 ? (
                             <div className="empty-state compact">No active crises right now.</div>
                         ) : (
                             <div className="crisis-strip-list">
@@ -347,7 +412,7 @@ export default function Dashboard() {
                         <Link to="/proposals" className="btn btn-secondary">View All</Link>
                     </div>
                     <div className="card-body">
-                        {loading ? (
+                        {loading || secondaryLoading ? (
                             <SkeletonTable rows={3} cols={4} />
                         ) : (
                             <table>
@@ -393,7 +458,7 @@ export default function Dashboard() {
                         <Link to="/agents" className="btn btn-secondary">View All</Link>
                     </div>
                     <div className="card-body">
-                        {loading ? (
+                        {loading || secondaryLoading ? (
                             <SkeletonTable rows={5} cols={4} />
                         ) : (
                             <table>
@@ -437,7 +502,7 @@ export default function Dashboard() {
                         <Link to="/highlights" className="btn btn-secondary">Highlights</Link>
                     </div>
                     <div className="card-body">
-                        {loading ? (
+                        {loading || secondaryLoading ? (
                             <SkeletonTable rows={4} cols={3} />
                         ) : plotTurns.length === 0 ? (
                             <div className="empty-state compact">No high-salience turns in the last 48h.</div>
@@ -480,27 +545,14 @@ export default function Dashboard() {
                         )}
                     </div>
                     <div className="card-body social-body">
-                        {socialChartData.length === 0 ? (
+                        {loading || secondaryLoading ? (
+                            <SkeletonTable rows={4} cols={3} />
+                        ) : socialChartData.length === 0 ? (
                             <div className="empty-state compact">No social dynamics history yet.</div>
                         ) : (
-                            <ResponsiveContainer width="100%" height={240}>
-                                <LineChart data={socialChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-                                    <XAxis dataKey="day" stroke="rgba(255,255,255,0.55)" />
-                                    <YAxis allowDecimals={false} stroke="rgba(255,255,255,0.55)" />
-                                    <Tooltip
-                                        contentStyle={{
-                                            background: 'rgba(8, 10, 18, 0.96)',
-                                            border: '1px solid rgba(255,255,255,0.12)',
-                                            borderRadius: '8px',
-                                        }}
-                                    />
-                                    <Legend />
-                                    <Line type="monotone" dataKey="conflict" name="Conflict" stroke="#ef4444" strokeWidth={2} dot={false} />
-                                    <Line type="monotone" dataKey="cooperation" name="Cooperation" stroke="#22c55e" strokeWidth={2} dot={false} />
-                                    <Line type="monotone" dataKey="alliances" name="Alliances" stroke="#60a5fa" strokeWidth={2} dot={false} />
-                                </LineChart>
-                            </ResponsiveContainer>
+                            <Suspense fallback={<SkeletonTable rows={4} cols={3} />}>
+                                <DashboardSocialDynamicsChart data={socialChartData} />
+                            </Suspense>
                         )}
                     </div>
                 </div>
@@ -512,21 +564,27 @@ export default function Dashboard() {
                         <h3>Inequality</h3>
                     </div>
                     <div className="card-body inequality-grid">
-                        <div className="inequality-main">
-                            <div className="inequality-value">{Number(inequality.gini || 0).toFixed(3)}</div>
-                            <div className="inequality-label">Gini coefficient</div>
-                        </div>
-                        <div className="inequality-stats">
-                            <div><span>P25</span><strong>{Number(inequality.p25 || 0).toFixed(1)}</strong></div>
-                            <div><span>Median</span><strong>{Number(inequality.median || 0).toFixed(1)}</strong></div>
-                            <div><span>P75</span><strong>{Number(inequality.p75 || 0).toFixed(1)}</strong></div>
-                            <div>
-                                <span>Trend</span>
-                                <strong className={(inequality.trend || 0) > 0 ? 'delta-up' : 'delta-down'}>
-                                    {(Number(inequality.trend || 0) > 0 ? '+' : '') + Number(inequality.trend || 0).toFixed(3)}
-                                </strong>
-                            </div>
-                        </div>
+                        {loading || secondaryLoading ? (
+                            <SkeletonTable rows={2} cols={2} />
+                        ) : (
+                            <>
+                                <div className="inequality-main">
+                                    <div className="inequality-value">{Number(inequality.gini || 0).toFixed(3)}</div>
+                                    <div className="inequality-label">Gini coefficient</div>
+                                </div>
+                                <div className="inequality-stats">
+                                    <div><span>P25</span><strong>{Number(inequality.p25 || 0).toFixed(1)}</strong></div>
+                                    <div><span>Median</span><strong>{Number(inequality.median || 0).toFixed(1)}</strong></div>
+                                    <div><span>P75</span><strong>{Number(inequality.p75 || 0).toFixed(1)}</strong></div>
+                                    <div>
+                                        <span>Trend</span>
+                                        <strong className={(inequality.trend || 0) > 0 ? 'delta-up' : 'delta-down'}>
+                                            {(Number(inequality.trend || 0) > 0 ? '+' : '') + Number(inequality.trend || 0).toFixed(3)}
+                                        </strong>
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
 
@@ -535,7 +593,9 @@ export default function Dashboard() {
                         <h3>Class Mobility</h3>
                     </div>
                     <div className="card-body">
-                        {!classMobility ? (
+                        {loading || secondaryLoading ? (
+                            <SkeletonTable rows={3} cols={3} />
+                        ) : !classMobility ? (
                             <div className="empty-state compact">No mobility data yet.</div>
                         ) : (
                             <>
@@ -591,6 +651,12 @@ export default function Dashboard() {
                 }
 
                 .crisis-strip-list {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                    gap: var(--spacing-md);
+                }
+
+                .crisis-skeleton-list {
                     display: grid;
                     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
                     gap: var(--spacing-md);

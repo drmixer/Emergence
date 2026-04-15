@@ -1,4 +1,4 @@
-import { Suspense, createElement, lazy, useState } from 'react'
+import { Suspense, createElement, lazy, useEffect, useState } from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
 import {
   Activity,
@@ -46,18 +46,43 @@ const Terms = lazy(() => import('./pages/Terms'))
 
 // Components
 const LiveFeed = lazy(() => import('./components/LiveFeed'))
+const FirstTimeOnboarding = lazy(() => import('./components/FirstTimeOnboarding'))
+const ToastProvider = lazy(() => import('./components/ToastNotifications'))
+const KeyboardNavigationListener = lazy(() => import('./components/KeyboardNavigationListener'))
 import SupportBanner from './components/SupportBanner'
-import FirstTimeOnboarding from './components/FirstTimeOnboarding'
-import ToastProvider from './components/ToastNotifications'
-import { useKeyboardNavigation } from './components/KeyboardNavigation'
 import { SubscriptionProvider, NotificationBell } from './components/Subscriptions'
 
+const APP_ICON_LINKS = [
+  { rel: 'icon', href: '/emergence-icon.svg', type: 'image/svg+xml' },
+  { rel: 'shortcut icon', href: '/logo.png', type: 'image/png' },
+  { rel: 'apple-touch-icon', href: '/logo.png' },
+]
+
+function syncAppIcons() {
+  if (typeof document === 'undefined') return
+
+  APP_ICON_LINKS.forEach(({ rel, href, type }) => {
+    let link = document.head.querySelector(`link[rel="${rel}"]`)
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = rel
+      document.head.appendChild(link)
+    }
+    if (type) {
+      link.type = type
+    } else {
+      link.removeAttribute('type')
+    }
+    link.href = href
+  })
+}
 
 function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
-  // Enable keyboard navigation
-  useKeyboardNavigation()
+  useEffect(() => {
+    syncAppIcons()
+  }, [])
 
   const navItems = [
     { path: '/dashboard', icon: Activity, label: 'Dashboard' },
@@ -86,7 +111,12 @@ function App() {
     <SubscriptionProvider>
       <div className="app-wrapper">
         <SupportBanner />
-        <FirstTimeOnboarding />
+        <Suspense fallback={null}>
+          <KeyboardNavigationListener />
+        </Suspense>
+        <Suspense fallback={null}>
+          <FirstTimeOnboarding />
+        </Suspense>
 
         {/* Mobile Header */}
         <header className="mobile-header">
@@ -245,7 +275,9 @@ function App() {
             </Suspense>
           </aside>
         </div>
-        <ToastProvider />
+        <Suspense fallback={null}>
+          <ToastProvider />
+        </Suspense>
       </div>
     </SubscriptionProvider>
   )

@@ -111,5 +111,6 @@ def reserve_auto_contribution_enabled() -> bool:
     )
 
 
-def low_resource_warning_threshold(cost: Decimal) -> Decimal:
-    return max(cost, cost * Decimal("2"))
+def low_resource_warning_threshold(cost: Decimal | int | float | str) -> Decimal:
+    normalized = Decimal(str(cost))
+    return max(normalized, normalized * Decimal("2"))

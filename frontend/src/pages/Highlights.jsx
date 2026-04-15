@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Star,
@@ -16,12 +16,13 @@ import {
   TimerReset,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import Recap from '../components/Recap'
-import QuoteCardGenerator from '../components/QuoteCard'
 import { api } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 import { getMomentEvidenceHref, getMomentReplayHref } from '../utils/bestMoments'
+
+const Recap = lazy(() => import('../components/Recap'))
+const QuoteCardGenerator = lazy(() => import('../components/QuoteCard'))
 
 const QUICK_BET_AMOUNT = 5
 
@@ -252,6 +253,8 @@ export default function Highlights() {
   const [emergenceMetrics, setEmergenceMetrics] = useState(null)
   const [shareNotice, setShareNotice] = useState('')
   const [loading, setLoading] = useState(true)
+  const [tabLoading, setTabLoading] = useState({})
+  const [loadedTabs, setLoadedTabs] = useState({})
   const [activeTab, setActiveTab] = useState(VALID_TABS.has(requestedTab) ? requestedTab : 'recap')
 
   useEffect(() => {
@@ -270,63 +273,132 @@ export default function Highlights() {
   }, [requestedReplayMode, requestedEventId])
 
   useEffect(() => {
-    async function load() {
+    let cancelled = false
+
+    async function loadBase() {
       setLoading(true)
+      setTabLoading({})
+      setLoadedTabs({})
+      setSummary(null)
+      setBestMoments([])
+      setPlotTurns([])
+      setReplayTurns([])
+      setReplayStory({ items: [], chapters: [] })
+      setReplayBuckets([])
+      setReplayIndex(-1)
+      setPredictionMarkets([])
+      setPredictionStats(null)
+      setPredictionNotice(null)
+      setPredictionError(null)
+      setOverview(null)
+      setEmergenceMetrics(null)
+
       try {
-        const overviewPayload = await api.getAnalyticsOverview().catch(() => null)
-        const liveRunId = String(overviewPayload?.scope?.active_run_id || '').trim()
-        const effectiveRunId = runFilter || liveRunId
         const archiveView = Boolean(runFilter)
-        const [latestSummary, bestMomentsPayload, turns, replay, replayStoryPayload, openMarkets, me, metricsPayload] = await Promise.all([
-          api.getLatestSummary(effectiveRunId).catch(() => null),
-          api.getBestMoments(6, 72, 55, effectiveRunId).catch(() => ({ items: [] })),
-          api.getPlotTurns(16, 72, 60, effectiveRunId).catch(() => ({ items: [] })),
-          api.getPlotTurnReplay(24, 55, 30, 240, effectiveRunId).catch(() => ({ items: [], buckets: [] })),
-          api.getReplayStory(24, 55, 8, effectiveRunId).catch(() => ({ items: [], chapters: [] })),
-          archiveView ? Promise.resolve([]) : api.getPredictionMarkets('open', 8).catch(() => []),
-          archiveView ? Promise.resolve(null) : api.getPredictionMe().catch(() => null),
-          archiveView ? Promise.resolve(null) : api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
-        ])
-
-        setSummary(latestSummary?.summary ? latestSummary : null)
-        setBestMoments(Array.isArray(bestMomentsPayload?.items) ? bestMomentsPayload.items : [])
-        setPlotTurns(Array.isArray(turns?.items) ? turns.items : [])
-        setReplayTurns(Array.isArray(replay?.items) ? replay.items : [])
-        setReplayStory({
-          items: Array.isArray(replayStoryPayload?.items) ? replayStoryPayload.items : [],
-          chapters: Array.isArray(replayStoryPayload?.chapters) ? replayStoryPayload.chapters : [],
-        })
-
-        const buckets = Array.isArray(replay?.buckets) ? replay.buckets : []
-        setReplayBuckets(buckets)
-        setReplayIndex(buckets.length > 0 ? buckets.length - 1 : -1)
-
+        const overviewPayload = archiveView ? null : await api.getAnalyticsOverview().catch(() => null)
+        if (cancelled) return
+        const liveRunId = String(overviewPayload?.scope?.active_run_id || '').trim()
         setActiveRunId(liveRunId)
-        setSelectedRunId(effectiveRunId)
-        setPredictionMarkets(Array.isArray(openMarkets) ? openMarkets : [])
-        setPredictionStats(me && typeof me === 'object' ? me : null)
+        setSelectedRunId(runFilter || liveRunId)
         setOverview(overviewPayload && typeof overviewPayload === 'object' ? overviewPayload : null)
-        setEmergenceMetrics(metricsPayload && typeof metricsPayload === 'object' ? metricsPayload : null)
       } catch {
-        setSummary(null)
-        setBestMoments([])
-        setPlotTurns([])
-        setReplayTurns([])
-        setReplayStory({ items: [], chapters: [] })
-        setReplayBuckets([])
-        setReplayIndex(-1)
+        if (cancelled) return
         setActiveRunId('')
-        setSelectedRunId('')
-        setPredictionMarkets([])
-        setPredictionStats(null)
+        setSelectedRunId(runFilter || '')
         setOverview(null)
-        setEmergenceMetrics(null)
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     }
-    load()
+
+    loadBase()
+    return () => {
+      cancelled = true
+    }
   }, [runFilter])
+
+  useEffect(() => {
+    if (loading) return
+    if (activeTab === 'recap' || activeTab === 'quotes') return
+    if (loadedTabs[activeTab]) return
+
+    let cancelled = false
+    const scopedRunId = String(selectedRunId || '').trim()
+    const archiveView = Boolean(runFilter)
+
+    async function loadTabData() {
+      setTabLoading((prev) => ({ ...prev, [activeTab]: true }))
+      try {
+        if (activeTab === 'highlights') {
+          const payload = await api.getBestMoments(6, 72, 55, scopedRunId).catch(() => ({ items: [] }))
+          if (cancelled) return
+          setBestMoments(Array.isArray(payload?.items) ? payload.items : [])
+        } else if (activeTab === 'summary') {
+          const payload = await api.getLatestSummary(scopedRunId).catch(() => null)
+          if (cancelled) return
+          setSummary(payload?.summary ? payload : null)
+        } else if (activeTab === 'plotTurns') {
+          const [turns, metricsPayload] = await Promise.all([
+            api.getPlotTurns(16, 72, 60, scopedRunId).catch(() => ({ items: [] })),
+            archiveView || emergenceMetrics
+              ? Promise.resolve(emergenceMetrics)
+              : api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
+          ])
+          if (cancelled) return
+          setPlotTurns(Array.isArray(turns?.items) ? turns.items : [])
+          if (!archiveView && !emergenceMetrics) {
+            setEmergenceMetrics(metricsPayload && typeof metricsPayload === 'object' ? metricsPayload : null)
+          }
+        } else if (activeTab === 'predictions') {
+          if (archiveView) {
+            setPredictionMarkets([])
+            setPredictionStats(null)
+          } else {
+            const [openMarkets, me] = await Promise.all([
+              api.getPredictionMarkets('open', 8).catch(() => []),
+              api.getPredictionMe().catch(() => null),
+            ])
+            if (cancelled) return
+            setPredictionMarkets(Array.isArray(openMarkets) ? openMarkets : [])
+            setPredictionStats(me && typeof me === 'object' ? me : null)
+          }
+        } else if (activeTab === 'replay') {
+          const [replay, replayStoryPayload, metricsPayload] = await Promise.all([
+            api.getPlotTurnReplay(24, 55, 30, 240, scopedRunId).catch(() => ({ items: [], buckets: [] })),
+            api.getReplayStory(24, 55, 8, scopedRunId).catch(() => ({ items: [], chapters: [] })),
+            archiveView || emergenceMetrics
+              ? Promise.resolve(emergenceMetrics)
+              : api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
+          ])
+          if (cancelled) return
+          setReplayTurns(Array.isArray(replay?.items) ? replay.items : [])
+          setReplayStory({
+            items: Array.isArray(replayStoryPayload?.items) ? replayStoryPayload.items : [],
+            chapters: Array.isArray(replayStoryPayload?.chapters) ? replayStoryPayload.chapters : [],
+          })
+          const buckets = Array.isArray(replay?.buckets) ? replay.buckets : []
+          setReplayBuckets(buckets)
+          setReplayIndex(buckets.length > 0 ? buckets.length - 1 : -1)
+          if (!archiveView && !emergenceMetrics) {
+            setEmergenceMetrics(metricsPayload && typeof metricsPayload === 'object' ? metricsPayload : null)
+          }
+        }
+
+        setLoadedTabs((prev) => ({ ...prev, [activeTab]: true }))
+      } finally {
+        if (!cancelled) {
+          setTabLoading((prev) => ({ ...prev, [activeTab]: false }))
+        }
+      }
+    }
+
+    loadTabData()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, emergenceMetrics, loadedTabs, loading, runFilter, selectedRunId])
 
   const handleQuickPrediction = async (marketId, prediction) => {
     const key = `${marketId}-${prediction}`
@@ -437,6 +509,11 @@ export default function Highlights() {
 
   const isArchiveView = Boolean(runFilter)
   const showLiveStateStrip = !isArchiveView && !!selectedRunId && selectedRunId === activeRunId
+  const highlightsLoading = loading || Boolean(tabLoading.highlights)
+  const summaryLoading = loading || Boolean(tabLoading.summary)
+  const plotTurnsLoading = loading || Boolean(tabLoading.plotTurns)
+  const predictionsLoading = loading || Boolean(tabLoading.predictions)
+  const replayLoading = loading || Boolean(tabLoading.replay)
 
   const stateStrip = useMemo(() => {
     const day = Number(overview?.day_number || 0)
@@ -553,7 +630,7 @@ export default function Highlights() {
     const replayReady = replayMode === 'story60'
       ? replayStoryMoments.length > 0
       : replayBuckets.length > 0
-    if (loading || activeTab !== 'replay' || !replayReady) return
+    if (replayLoading || activeTab !== 'replay' || !replayReady) return
     trackKpiEventOnce('replay_start', `replay_start:${selectedRunId || 'all'}:${replayMode}`, {
       runId: selectedRunId,
       surface: 'highlights_replay_tab',
@@ -561,10 +638,10 @@ export default function Highlights() {
         ? 'story60'
         : (requestedEventId > 0 ? 'focused_event' : 'default'),
     })
-  }, [loading, activeTab, replayMode, replayBuckets.length, replayStoryMoments.length, selectedRunId, requestedEventId])
+  }, [replayLoading, activeTab, replayMode, replayBuckets.length, replayStoryMoments.length, selectedRunId, requestedEventId])
 
   useEffect(() => {
-    if (loading || activeTab !== 'replay') return
+    if (replayLoading || activeTab !== 'replay') return
     const timelineCompleted = replayMode !== 'story60' && replayBuckets.length >= 2 && replayIndex === 0
     const storyCompleted =
       replayMode === 'story60' &&
@@ -578,7 +655,7 @@ export default function Highlights() {
       surface: 'highlights_replay_tab',
       target,
     })
-  }, [loading, activeTab, replayMode, replayBuckets.length, replayIndex, replayStoryMoments.length, storyMomentIndex, selectedRunId])
+  }, [replayLoading, activeTab, replayMode, replayBuckets.length, replayIndex, replayStoryMoments.length, storyMomentIndex, selectedRunId])
 
   return (
     <div className="highlights-page">
@@ -684,11 +761,15 @@ export default function Highlights() {
       {shareNotice && <div className="feed-notice success">{shareNotice}</div>}
 
       {activeTab === 'recap' && (
-        <Recap runId={selectedRunId} />
+        <Suspense fallback={<div className="empty-state">Loading recap…</div>}>
+          <Recap runId={selectedRunId} />
+        </Suspense>
       )}
 
       {activeTab === 'quotes' && (
-        <QuoteCardGenerator />
+        <Suspense fallback={<div className="empty-state">Loading quote cards…</div>}>
+          <QuoteCardGenerator />
+        </Suspense>
       )}
 
       {activeTab === 'highlights' && (
@@ -697,10 +778,10 @@ export default function Highlights() {
             <h3>Best Moments</h3>
             <p>The fastest way to understand why this run matters, with replay and evidence links on every card.</p>
           </div>
-          {loading && (
+          {highlightsLoading && (
             <div className="empty-state">Loading best moments…</div>
           )}
-          {!loading && bestMoments.length === 0 && (
+          {!highlightsLoading && bestMoments.length === 0 && (
             <div className="empty-state">No best moments yet.</div>
           )}
           {bestMoments.map((turn) => {
@@ -749,7 +830,7 @@ export default function Highlights() {
 
       {activeTab === 'summary' && (
         <div className="daily-summary">
-          {loading ? (
+          {summaryLoading ? (
             <div className="empty-state">Loading daily summary…</div>
           ) : !summary ? (
             <div className="empty-state">No daily summary yet.</div>
@@ -831,10 +912,10 @@ export default function Highlights() {
 
       {activeTab === 'plotTurns' && (
         <div className="plot-turns-panel">
-          {loading && (
+          {plotTurnsLoading && (
             <div className="empty-state">Loading plot turns…</div>
           )}
-          {!loading && plotTurns.length === 0 && (
+          {!plotTurnsLoading && plotTurns.length === 0 && (
             <div className="empty-state">No major plot turns yet.</div>
           )}
           {plotTurns.map((turn) => {
@@ -908,8 +989,8 @@ export default function Highlights() {
           {predictionNotice && <div className="feed-notice success">{predictionNotice}</div>}
           {predictionError && <div className="feed-notice error">{predictionError}</div>}
 
-          {loading && <div className="empty-state">Loading prediction markets…</div>}
-          {!loading && predictionMarkets.length === 0 && (
+          {predictionsLoading && <div className="empty-state">Loading prediction markets…</div>}
+          {!predictionsLoading && predictionMarkets.length === 0 && (
             <div className="empty-state">
               No open markets right now. <Link to="/predictions">Open full market</Link>.
             </div>
@@ -983,8 +1064,8 @@ export default function Highlights() {
 
       {activeTab === 'replay' && (
         <div className="replay-panel">
-          {loading && <div className="empty-state">Loading replay…</div>}
-          {!loading && replayBuckets.length === 0 && (
+          {replayLoading && <div className="empty-state">Loading replay…</div>}
+          {!replayLoading && replayBuckets.length === 0 && (
             <div className="empty-state">No replay data for the last 24 hours yet.</div>
           )}
 
