@@ -276,3 +276,84 @@ def test_collect_run_snapshot_uses_runtime_tagged_events_when_llm_usage_is_absen
         assert snapshot["key_moments"][0]["event_type"] == "reserve_aid"
     finally:
         db_session.close()
+
+
+def test_artifact_generation_derives_condition_and_season_from_run_registry(tmp_path, monkeypatch):
+    db_session = _build_snapshot_session()
+    try:
+        started_at = datetime(2026, 4, 15, 9, 0, tzinfo=timezone.utc)
+        ended_at = datetime(2026, 4, 15, 23, 0, tzinfo=timezone.utc)
+        agent = Agent(
+            agent_number=8,
+            display_name="Planner Agent",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add(agent)
+        db_session.flush()
+        db_session.add(
+            SimulationRun(
+                run_id="real-20260415T085921Z",
+                run_mode="real",
+                protocol_version="protocol_v1",
+                condition_name="real_scarcity_tuning_20260415_tight_v5_patch2",
+                season_number=4,
+                run_class="special_exploratory",
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+        )
+        db_session.execute(
+            text(
+                """
+                INSERT INTO llm_usage (
+                    run_id, agent_id, success, fallback_used, prompt_tokens, completion_tokens,
+                    total_tokens, estimated_cost_usd, provider, model_name, resolved_model_name, created_at
+                ) VALUES (
+                    :run_id, :agent_id, 1, 0, 10, 20, 30, 0.01, 'openrouter', 'gpt-oss-20b:free', NULL, :created_at
+                )
+                """
+            ),
+            {
+                "run_id": "real-20260415T085921Z",
+                "agent_id": agent.id,
+                "created_at": started_at + run_reports.timedelta(minutes=5),
+            },
+        )
+        db_session.add(
+            Event(
+                agent_id=agent.id,
+                event_type="reserve_aid",
+                description="evidence-backed survival support",
+                event_metadata={"runtime": {"run_id": "real-20260415T085921Z", "run_mode": "real"}},
+                created_at=started_at + run_reports.timedelta(minutes=6),
+            )
+        )
+        db_session.commit()
+
+        monkeypatch.setattr(run_reports, "_record_artifact", lambda *args, **kwargs: None)
+        def _artifact_dir_for_run(_run_id: str):
+            outdir = tmp_path / run_reports._slug_fragment(_run_id, fallback="run")
+            outdir.mkdir(parents=True, exist_ok=True)
+            return outdir
+
+        monkeypatch.setattr(run_reports, "_artifact_dir_for_run", _artifact_dir_for_run)
+
+        technical_payload = run_reports.generate_run_technical_artifact(
+            db_session,
+            run_id="real-20260415T085921Z",
+        )
+        planner_payload = run_reports.generate_next_run_plan_artifact(
+            db_session,
+            run_id="real-20260415T085921Z",
+        )
+
+        assert technical_payload["condition_name"] == "real_scarcity_tuning_20260415_tight_v5_patch2"
+        assert technical_payload["season_number"] == 4
+        assert "condition:real_scarcity_tuning_20260415_tight_v5_patch2" in (technical_payload.get("tags") or [])
+        assert planner_payload["condition_name"] == "real_scarcity_tuning_20260415_tight_v5_patch2"
+    finally:
+        db_session.close()

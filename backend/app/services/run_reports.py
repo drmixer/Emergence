@@ -752,6 +752,25 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
     }
 
 
+def _resolve_report_context(
+    *,
+    snapshot: dict[str, Any],
+    condition_name: str | None = None,
+    season_number: int | None = None,
+) -> tuple[str, int | None]:
+    resolved_condition = _clean_condition_name(
+        condition_name
+        if str(condition_name or "").strip()
+        else snapshot.get("condition_name")
+    )
+    resolved_season_number = _clean_season_number(
+        season_number
+        if season_number is not None
+        else snapshot.get("season_number")
+    )
+    return resolved_condition, resolved_season_number
+
+
 def _technical_markdown(payload: dict[str, Any]) -> str:
     llm = payload.get("llm") if isinstance(payload, dict) else {}
     activity = payload.get("activity") if isinstance(payload, dict) else {}
@@ -1316,10 +1335,12 @@ def generate_run_technical_artifact(
     season_number: int | None = None,
 ) -> dict[str, Any]:
     clean_run_id = _coerce_run_id(run_id)
-    clean_condition = _clean_condition_name(condition_name)
-    clean_season_number = _clean_season_number(season_number)
-
     snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    clean_condition, clean_season_number = _resolve_report_context(
+        snapshot=snapshot,
+        condition_name=condition_name,
+        season_number=season_number,
+    )
     replicate_count, run_class, claim_gate = _count_condition_replicates(
         db,
         condition_name=clean_condition,
@@ -1397,10 +1418,12 @@ def generate_run_story_artifact(
     season_number: int | None = None,
 ) -> dict[str, Any]:
     clean_run_id = _coerce_run_id(run_id)
-    clean_condition = _clean_condition_name(condition_name)
-    clean_season_number = _clean_season_number(season_number)
-
     snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    clean_condition, clean_season_number = _resolve_report_context(
+        snapshot=snapshot,
+        condition_name=condition_name,
+        season_number=season_number,
+    )
     replicate_count, run_class, claim_gate = _count_condition_replicates(
         db,
         condition_name=clean_condition,
@@ -1462,8 +1485,12 @@ def generate_next_run_plan_artifact(
     condition_name: str | None = None,
 ) -> dict[str, Any]:
     clean_run_id = _coerce_run_id(run_id)
-    clean_condition = _clean_condition_name(condition_name)
     current_snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    clean_condition, _clean_season_number = _resolve_report_context(
+        snapshot=current_snapshot,
+        condition_name=condition_name,
+        season_number=None,
+    )
     previous_snapshot = _collect_previous_run_snapshot(db, run_id=clean_run_id)
     replicate_count, _run_class, claim_gate = _count_condition_replicates(
         db,
@@ -1518,8 +1545,12 @@ def rebuild_run_bundle(
     season_number: int | None = None,
 ) -> RunBundleResult:
     clean_run_id = _coerce_run_id(run_id)
-    clean_condition = _clean_condition_name(condition_name)
-    clean_season_number = _clean_season_number(season_number)
+    initial_snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    clean_condition, clean_season_number = _resolve_report_context(
+        snapshot=initial_snapshot,
+        condition_name=condition_name,
+        season_number=season_number,
+    )
 
     technical_payload = generate_run_technical_artifact(
         db,
