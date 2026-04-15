@@ -35,6 +35,23 @@ def _with_runtime_metadata(metadata: dict | None = None) -> dict:
     return payload
 
 
+def world_event_generation_enabled() -> bool:
+    raw_value = runtime_config_service.get_effective_value_cached("WORLD_EVENT_GENERATION_ENABLED")
+    if raw_value in (None, ""):
+        return True
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(raw_value, (int, float)) and raw_value in (0, 1):
+        return bool(raw_value)
+    return True
+
+
 # Event definitions with weights and effects
 CRISIS_EVENTS = [
     {
@@ -182,6 +199,8 @@ class EventGenerator:
         
         Returns the event if one was generated, None otherwise.
         """
+        if not world_event_generation_enabled():
+            return None
         # 20% chance of event per check (configurable)
         if random.random() > 0.20:
             return None

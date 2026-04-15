@@ -132,6 +132,10 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=10.0,
         description="Base per-hour materials yield for gather work.",
     ),
+    "WORLD_EVENT_GENERATION_ENABLED": MutableSettingSpec(
+        python_type=bool,
+        description="Enable exogenous world-event generation in the worker loop.",
+    ),
     "PROPOSAL_VOTING_HOURS": MutableSettingSpec(
         python_type=float,
         min_value=0.05,
