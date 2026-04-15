@@ -151,7 +151,8 @@ export default function Landing() {
         activeAgents: 100
     })
     const [shareNotice, setShareNotice] = useState('')
-    const [isLoading, setIsLoading] = useState(true)
+    const [statsLoading, setStatsLoading] = useState(true)
+    const [momentsLoading, setMomentsLoading] = useState(true)
     const [isVisible, setIsVisible] = useState(false)
     const [isPreLaunch, setIsPreLaunch] = useState(true)
     const heroRef = useRef(null)
@@ -160,11 +161,7 @@ export default function Landing() {
     useEffect(() => {
         async function fetchStats() {
             try {
-                const [data, recentMessages, bestMomentsPayload] = await Promise.all([
-                    api.getLandingStats().catch(() => null),
-                    api.getMessages(5).catch(() => []),
-                    api.getBestMoments(3, 72, 55).catch(() => ({ items: [] })),
-                ])
+                const data = await api.getLandingStats().catch(() => null)
                 if (data) {
                     setStats({
                         day: data.day || 0,
@@ -175,7 +172,18 @@ export default function Landing() {
                     // Check if experiment has started (Day > 0 or has messages)
                     setIsPreLaunch(data.day === 0 && (data.messageCount || 0) === 0)
                 }
+            } catch (error) {
+                console.error('Failed to fetch landing stats:', error)
+                // Keep default values on error
+            } finally {
+                setStatsLoading(false)
+            }
 
+            try {
+                const [recentMessages, bestMomentsPayload] = await Promise.all([
+                    api.getMessages(5).catch(() => []),
+                    api.getBestMoments(3, 72, 55).catch(() => ({ items: [] })),
+                ])
                 if (Array.isArray(recentMessages) && recentMessages.length > 0) {
                     setQuotes(
                         recentMessages.map((m) => ({
@@ -190,10 +198,9 @@ export default function Landing() {
 
                 setBestMoments(Array.isArray(bestMomentsPayload?.items) ? bestMomentsPayload.items : [])
             } catch (error) {
-                console.error('Failed to fetch stats:', error)
-                // Keep default values on error
+                console.error('Failed to fetch landing preview content:', error)
             } finally {
-                setIsLoading(false)
+                setMomentsLoading(false)
             }
         }
         fetchStats()
@@ -352,22 +359,22 @@ export default function Landing() {
                     <div className="stats-bar">
                         <div className="stat-item">
                             <Zap className="stat-icon" size={18} />
-                            <span className="stat-value">{isLoading ? 'Loading…' : `Day ${stats.day}`}</span>
+                            <span className="stat-value">{statsLoading ? 'Loading…' : `Day ${stats.day}`}</span>
                         </div>
                         <div className="stat-divider" />
                         <div className="stat-item">
                             <MessageSquare className="stat-icon" size={18} />
-                            <span className="stat-value">{isLoading ? '…' : stats.messages.toLocaleString()} messages</span>
+                            <span className="stat-value">{statsLoading ? '…' : stats.messages.toLocaleString()} messages</span>
                         </div>
                         <div className="stat-divider" />
                         <div className="stat-item">
                             <Scale className="stat-icon" size={18} />
-                            <span className="stat-value">{isLoading ? '…' : stats.laws} laws passed</span>
+                            <span className="stat-value">{statsLoading ? '…' : stats.laws} laws passed</span>
                         </div>
                         <div className="stat-divider" />
                         <div className="stat-item">
                             <Users className="stat-icon" size={18} />
-                            <span className="stat-value">{isLoading ? '…' : stats.activeAgents} active</span>
+                            <span className="stat-value">{statsLoading ? '…' : stats.activeAgents} active</span>
                         </div>
                     </div>
                 )}
@@ -417,17 +424,17 @@ export default function Landing() {
                     </div>
 
                     <div className="hero-best-moments-grid">
-                        {isLoading && (
+                        {momentsLoading && (
                             <div className="hero-moment-empty">Loading notable moments...</div>
                         )}
-                        {!isLoading && bestMoments.length === 0 && (
+                        {!momentsLoading && bestMoments.length === 0 && (
                             <div className="hero-moment-empty">
                                 {isPreLaunch
                                     ? 'Best moments will appear as soon as the run starts producing evidence-backed events.'
                                     : 'No high-salience moments are available yet.'}
                             </div>
                         )}
-                        {!isLoading && bestMoments.map((turn) => {
+                        {!momentsLoading && bestMoments.map((turn) => {
                             const evidenceHref = getMomentEvidenceHref(turn)
                             const replayHref = getMomentReplayHref(turn)
 

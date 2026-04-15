@@ -1,4 +1,4 @@
-.PHONY: sim-status sim-start sim-stop sim-preset report-rebuild report-tech report-story report-plan report-export compare-condition tournament-select
+.PHONY: sim-status sim-start sim-stop sim-stop-schedule sim-stop-unschedule sim-preset report-rebuild report-tech report-story report-plan report-export compare-condition tournament-select
 
 RUN_MODE ?= real
 RUN_ID ?=
@@ -9,12 +9,22 @@ EPOCH_ID ?=
 PRESET ?=
 ACTOR ?= make-operator
 TUNING_RUN ?=
+STOP_AT ?=
 
 sim-status:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/simulation_control.py status
 
 sim-stop:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/simulation_control.py stop
+
+sim-stop-schedule:
+	@if [ -z "$(RUN_ID)" ]; then echo "RUN_ID is required"; exit 1; fi
+	@if [ -z "$(STOP_AT)" ]; then echo "STOP_AT is required"; exit 1; fi
+	@python3 backend/scripts/schedule_guarded_stop.py schedule --run-id "$(RUN_ID)" --stop-at "$(STOP_AT)" --project-root "$(CURDIR)"
+
+sim-stop-unschedule:
+	@if [ -z "$(RUN_ID)" ]; then echo "RUN_ID is required"; exit 1; fi
+	@python3 backend/scripts/schedule_guarded_stop.py unschedule --run-id "$(RUN_ID)"
 
 sim-preset:
 	@if [ -z "$(PRESET)" ]; then echo "PRESET is required"; exit 1; fi
