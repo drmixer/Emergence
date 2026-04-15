@@ -36,6 +36,12 @@ export const GLOSSARY_TERMS = [
         definition: 'A grouped set of agents assigned to the same model/capability routing profile for attribution-safe comparisons.',
     },
     {
+        key: 'tier',
+        label: 'Tier',
+        shortLabel: 'tier',
+        definition: 'The capability/cost band assigned to an agent at seeding. Tier 1 is the strongest and most expensive routing mix, while Tier 4 is the lightest and cheapest. Tiers create cognitive diversity; they are not hard-coded castes or fixed strategic roles.',
+    },
+    {
         key: 'exploratory',
         label: 'Exploratory Run',
         shortLabel: 'exploratory',

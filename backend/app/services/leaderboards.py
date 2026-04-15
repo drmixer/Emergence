@@ -4,10 +4,11 @@ Leaderboard Service
 Calculates and tracks various rankings and statistics for agents.
 """
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import case, desc, func
 
 from app.core.database import SessionLocal
 from app.models.models import Agent, AgentInventory, Event, Vote, Message, Proposal
@@ -18,6 +19,13 @@ from app.services.lineage import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _LeaderboardContext:
+    lineage_by_agent_number: dict[int, dict[str, Any]]
+    all_agents_by_id: dict[int, Agent]
+    active_agents_by_id: dict[int, Agent]
 
 
 def _agent_identity_payload(agent: Agent, lineage_by_agent_number: dict[int, dict[str, Any]]) -> dict[str, Any]:
@@ -38,91 +46,126 @@ def _agent_identity_payload(agent: Agent, lineage_by_agent_number: dict[int, dic
     }
 
 
-def get_wealth_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
+def _resolve_context(db: Session) -> _LeaderboardContext:
+    season_id = resolve_active_or_latest_season_id(db)
+    lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
+    agents = db.query(Agent).all()
+    all_agents_by_id = {int(agent.id): agent for agent in agents}
+    active_agents_by_id = {
+        int(agent.id): agent for agent in agents
+        if str(agent.status or "active") == "active"
+    }
+    return _LeaderboardContext(
+        lineage_by_agent_number=lineage_by_agent_number,
+        all_agents_by_id=all_agents_by_id,
+        active_agents_by_id=active_agents_by_id,
+    )
+
+
+def _ranked_entries(items: list[dict[str, Any]], *, sort_key: str, limit: int) -> list[dict[str, Any]]:
+    ranked = sorted(items, key=lambda item: (-float(item.get(sort_key) or 0), int(item.get("agent_number") or 0)))
+    for index, item in enumerate(ranked[:limit], start=1):
+        item["rank"] = index
+    return ranked[:limit]
+
+
+def get_wealth_leaderboard(
+    limit: int = 10,
+    *,
+    db: Session | None = None,
+    context: _LeaderboardContext | None = None,
+) -> List[Dict[str, Any]]:
     """
     Get agents ranked by total wealth (food + energy + materials).
     """
-    db = SessionLocal()
-    
+    managed_session = db is None
+    db = db or SessionLocal()
     try:
-        season_id = resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
-        agents = db.query(Agent).filter(Agent.status == "active").all()
-        
+        context = context or _resolve_context(db)
+        inventory_rows = db.query(
+            AgentInventory.agent_id,
+            func.coalesce(func.sum(AgentInventory.quantity), 0).label("total_wealth"),
+            func.coalesce(func.sum(case((AgentInventory.resource_type == "food", AgentInventory.quantity), else_=0)), 0).label("food"),
+            func.coalesce(func.sum(case((AgentInventory.resource_type == "energy", AgentInventory.quantity), else_=0)), 0).label("energy"),
+            func.coalesce(func.sum(case((AgentInventory.resource_type == "materials", AgentInventory.quantity), else_=0)), 0).label("materials"),
+        ).group_by(AgentInventory.agent_id).all()
+        inventory_by_agent_id = {
+            int(agent_id): {
+                "total_wealth": float(total_wealth or 0),
+                "food": float(food or 0),
+                "energy": float(energy or 0),
+                "materials": float(materials or 0),
+            }
+            for agent_id, total_wealth, food, energy, materials in inventory_rows
+        }
+
         wealth_data = []
-        for agent in agents:
-            inventory = db.query(AgentInventory).filter(
-                AgentInventory.agent_id == agent.id
-            ).all()
-            
-            total_wealth = sum(float(inv.quantity) for inv in inventory)
-            food = next((float(inv.quantity) for inv in inventory if inv.resource_type == "food"), 0)
-            energy = next((float(inv.quantity) for inv in inventory if inv.resource_type == "energy"), 0)
-            materials = next((float(inv.quantity) for inv in inventory if inv.resource_type == "materials"), 0)
-            
-            payload = _agent_identity_payload(agent, lineage_by_agent_number)
+        for agent in context.active_agents_by_id.values():
+            totals = inventory_by_agent_id.get(int(agent.id), {})
+            payload = _agent_identity_payload(agent, context.lineage_by_agent_number)
             payload.update(
                 {
-                    "total_wealth": total_wealth,
-                    "food": food,
-                    "energy": energy,
-                    "materials": materials,
+                    "total_wealth": float(totals.get("total_wealth", 0)),
+                    "food": float(totals.get("food", 0)),
+                    "energy": float(totals.get("energy", 0)),
+                    "materials": float(totals.get("materials", 0)),
                 }
             )
             wealth_data.append(payload)
-        
-        # Sort by total wealth
-        wealth_data.sort(key=lambda x: x["total_wealth"], reverse=True)
-        
-        # Add rank
-        for i, agent in enumerate(wealth_data[:limit]):
-            agent["rank"] = i + 1
-        
-        return wealth_data[:limit]
-        
+
+        return _ranked_entries(wealth_data, sort_key="total_wealth", limit=limit)
     finally:
-        db.close()
+        if managed_session:
+            db.close()
 
 
-def get_activity_leaderboard(hours: int = 24, limit: int = 10) -> List[Dict[str, Any]]:
+def get_activity_leaderboard(
+    hours: int = 24,
+    limit: int = 10,
+    *,
+    db: Session | None = None,
+    context: _LeaderboardContext | None = None,
+) -> List[Dict[str, Any]]:
     """
     Get agents ranked by number of actions in the last N hours.
     """
-    db = SessionLocal()
-    
+    managed_session = db is None
+    db = db or SessionLocal()
     try:
-        season_id = resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
+        context = context or _resolve_context(db)
         time_threshold = datetime.utcnow() - timedelta(hours=hours)
-        
-        activity = db.query(
+        activity_rows = db.query(
             Event.agent_id,
             func.count(Event.id).label('action_count')
         ).filter(
             Event.created_at >= time_threshold,
             Event.agent_id.isnot(None)
         ).group_by(Event.agent_id).order_by(desc('action_count')).limit(limit).all()
-        
+
         result = []
-        for i, (agent_id, action_count) in enumerate(activity):
-            agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        for agent_id, action_count in activity_rows:
+            agent = context.all_agents_by_id.get(int(agent_id))
             if agent:
-                payload = _agent_identity_payload(agent, lineage_by_agent_number)
+                payload = _agent_identity_payload(agent, context.lineage_by_agent_number)
                 payload.update(
                     {
-                        "rank": i + 1,
                         "action_count": int(action_count or 0),
                     }
                 )
                 result.append(payload)
-        
-        return result
-        
+
+        return _ranked_entries(result, sort_key="action_count", limit=limit)
     finally:
-        db.close()
+        if managed_session:
+            db.close()
 
 
-def get_influence_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
+def get_influence_leaderboard(
+    limit: int = 10,
+    *,
+    db: Session | None = None,
+    context: _LeaderboardContext | None = None,
+) -> List[Dict[str, Any]]:
     """
     Get agents ranked by "influence" - combination of:
     - Proposals created
@@ -130,35 +173,44 @@ def get_influence_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     - Messages that received replies
     - Laws authored
     """
-    db = SessionLocal()
-    
+    managed_session = db is None
+    db = db or SessionLocal()
     try:
-        season_id = resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
-        agents = db.query(Agent).all()
-        
+        context = context or _resolve_context(db)
+        proposal_rows = db.query(
+            Proposal.author_agent_id,
+            func.count(Proposal.id).label("proposal_count"),
+            func.coalesce(func.sum(case((Proposal.status == "passed", 1), else_=0)), 0).label("successful_count"),
+        ).group_by(Proposal.author_agent_id).all()
+        vote_rows = db.query(
+            Vote.agent_id,
+            func.count(Vote.id).label("vote_count"),
+        ).group_by(Vote.agent_id).all()
+        message_rows = db.query(
+            Message.author_agent_id,
+            func.count(Message.id).label("message_count"),
+        ).filter(
+            Message.message_type == "forum"
+        ).group_by(Message.author_agent_id).all()
+
+        proposal_counts = {
+            int(agent_id): {
+                "proposals": int(proposal_count or 0),
+                "successful_proposals": int(successful_count or 0),
+            }
+            for agent_id, proposal_count, successful_count in proposal_rows
+            if agent_id is not None
+        }
+        vote_counts = {int(agent_id): int(vote_count or 0) for agent_id, vote_count in vote_rows if agent_id is not None}
+        message_counts = {int(agent_id): int(message_count or 0) for agent_id, message_count in message_rows if agent_id is not None}
+
         influence_data = []
-        for agent in agents:
-            # Count proposals created
-            proposals = db.query(Proposal).filter(
-                Proposal.author_agent_id == agent.id
-            ).count()
-            
-            # Count successful proposals (passed)
-            successful_proposals = db.query(Proposal).filter(
-                Proposal.author_agent_id == agent.id,
-                Proposal.status == "passed"
-            ).count()
-            
-            # Count votes cast
-            votes = db.query(Vote).filter(Vote.agent_id == agent.id).count()
-            
-            # Count forum messages
-            messages = db.query(Message).filter(
-                Message.author_agent_id == agent.id,
-                Message.message_type == "forum"
-            ).count()
-            
+        for agent in context.all_agents_by_id.values():
+            proposals = proposal_counts.get(int(agent.id), {}).get("proposals", 0)
+            successful_proposals = proposal_counts.get(int(agent.id), {}).get("successful_proposals", 0)
+            votes = vote_counts.get(int(agent.id), 0)
+            messages = message_counts.get(int(agent.id), 0)
+
             # Calculate influence score
             # Successful proposals worth most, then proposals, then messages, then votes
             influence = (
@@ -169,7 +221,7 @@ def get_influence_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
             )
             
             if influence > 0:
-                payload = _agent_identity_payload(agent, lineage_by_agent_number)
+                payload = _agent_identity_payload(agent, context.lineage_by_agent_number)
                 payload.update(
                     {
                         "influence_score": int(influence),
@@ -180,100 +232,104 @@ def get_influence_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
                     }
                 )
                 influence_data.append(payload)
-        
-        # Sort by influence
-        influence_data.sort(key=lambda x: x["influence_score"], reverse=True)
-        
-        # Add rank
-        for i, agent in enumerate(influence_data[:limit]):
-            agent["rank"] = i + 1
-        
-        return influence_data[:limit]
-        
+
+        return _ranked_entries(influence_data, sort_key="influence_score", limit=limit)
     finally:
-        db.close()
+        if managed_session:
+            db.close()
 
 
-def get_producer_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
+def get_producer_leaderboard(
+    limit: int = 10,
+    *,
+    db: Session | None = None,
+    context: _LeaderboardContext | None = None,
+) -> List[Dict[str, Any]]:
     """
     Get agents ranked by total resources produced.
     Based on work events.
     """
-    db = SessionLocal()
-    
+    managed_session = db is None
+    db = db or SessionLocal()
     try:
-        season_id = resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
-        work_events = db.query(
+        context = context or _resolve_context(db)
+        work_rows = db.query(
             Event.agent_id,
             func.count(Event.id).label('work_count')
         ).filter(
             Event.event_type == "work"
         ).group_by(Event.agent_id).order_by(desc('work_count')).limit(limit).all()
-        
+
         result = []
-        for i, (agent_id, work_count) in enumerate(work_events):
-            agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        for agent_id, work_count in work_rows:
+            agent = context.all_agents_by_id.get(int(agent_id))
             if agent:
-                payload = _agent_identity_payload(agent, lineage_by_agent_number)
+                payload = _agent_identity_payload(agent, context.lineage_by_agent_number)
                 payload.update(
                     {
-                        "rank": i + 1,
                         "work_sessions": int(work_count or 0),
                     }
                 )
                 result.append(payload)
-        
-        return result
-        
+
+        return _ranked_entries(result, sort_key="work_sessions", limit=limit)
     finally:
-        db.close()
+        if managed_session:
+            db.close()
 
 
-def get_trader_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
+def get_trader_leaderboard(
+    limit: int = 10,
+    *,
+    db: Session | None = None,
+    context: _LeaderboardContext | None = None,
+) -> List[Dict[str, Any]]:
     """
     Get agents ranked by trading activity.
     """
-    db = SessionLocal()
-    
+    managed_session = db is None
+    db = db or SessionLocal()
     try:
-        season_id = resolve_active_or_latest_season_id(db)
-        lineage_by_agent_number = lineage_map_for_season(db, season_id=season_id)
-        trade_events = db.query(
+        context = context or _resolve_context(db)
+        trade_rows = db.query(
             Event.agent_id,
             func.count(Event.id).label('trade_count')
         ).filter(
             Event.event_type == "trade"
         ).group_by(Event.agent_id).order_by(desc('trade_count')).limit(limit).all()
-        
+
         result = []
-        for i, (agent_id, trade_count) in enumerate(trade_events):
-            agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        for agent_id, trade_count in trade_rows:
+            agent = context.all_agents_by_id.get(int(agent_id))
             if agent:
-                payload = _agent_identity_payload(agent, lineage_by_agent_number)
+                payload = _agent_identity_payload(agent, context.lineage_by_agent_number)
                 payload.update(
                     {
-                        "rank": i + 1,
                         "trades": int(trade_count or 0),
                     }
                 )
                 result.append(payload)
-        
-        return result
-        
+
+        return _ranked_entries(result, sort_key="trades", limit=limit)
     finally:
-        db.close()
+        if managed_session:
+            db.close()
 
 
 def get_all_leaderboards() -> Dict[str, List[Dict[str, Any]]]:
     """Get all leaderboard types."""
-    return {
-        "wealth": get_wealth_leaderboard(),
-        "activity": get_activity_leaderboard(),
-        "influence": get_influence_leaderboard(),
-        "producers": get_producer_leaderboard(),
-        "traders": get_trader_leaderboard(),
-    }
+    db = SessionLocal()
+    try:
+        context = _resolve_context(db)
+        return {
+            "wealth": get_wealth_leaderboard(db=db, context=context),
+            "activity": get_activity_leaderboard(db=db, context=context),
+            "influence": get_influence_leaderboard(db=db, context=context),
+            "producers": get_producer_leaderboard(db=db, context=context),
+            "traders": get_trader_leaderboard(db=db, context=context),
+        }
+    finally:
+        db.close()
 
 
 def get_agent_rankings(agent_id: int) -> Dict[str, Any]:

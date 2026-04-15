@@ -31,6 +31,22 @@ const ContinuityBadge = ({ entry }) => {
     return null
 }
 
+const integerFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
+const decimalFormatter = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+})
+
+function formatLeaderboardValue(value) {
+    const numericValue = Number(value)
+    if (!Number.isFinite(numericValue)) return '—'
+    const roundedInteger = Math.round(numericValue)
+    if (Math.abs(numericValue - roundedInteger) < 0.000001) {
+        return integerFormatter.format(roundedInteger)
+    }
+    return decimalFormatter.format(numericValue)
+}
+
 export default function Leaderboards() {
     const [leaderboards, setLeaderboards] = useState({ wealth: [], activity: [], influence: [], producers: [], traders: [] })
     const [activeBoard, setActiveBoard] = useState('wealth')
@@ -138,7 +154,7 @@ export default function Leaderboards() {
                             </div>
 
                             <div className="value-display">
-                                <div className="value-number">{entry[config.valueKey]}</div>
+                                <div className="value-number">{formatLeaderboardValue(entry[config.valueKey])}</div>
                                 <div className="value-label">{config.valueLabel}</div>
                             </div>
                         </Link>
@@ -152,21 +168,21 @@ export default function Leaderboards() {
                     <h4>Top Wealthy</h4>
                     <div className="quick-stat-value">{topWealthLabel}</div>
                     <div className="quick-stat-detail">
-                        {leaderboards.wealth[0] ? `${leaderboards.wealth[0]?.total_wealth} total resources` : '—'}
+                        {leaderboards.wealth[0] ? `${formatLeaderboardValue(leaderboards.wealth[0]?.total_wealth)} total resources` : '—'}
                     </div>
                 </div>
                 <div className="quick-stat-card">
                     <h4>Most Active</h4>
                     <div className="quick-stat-value">{topActivityLabel}</div>
                     <div className="quick-stat-detail">
-                        {leaderboards.activity[0] ? `${leaderboards.activity[0]?.action_count} actions` : '—'}
+                        {leaderboards.activity[0] ? `${formatLeaderboardValue(leaderboards.activity[0]?.action_count)} actions` : '—'}
                     </div>
                 </div>
                 <div className="quick-stat-card">
                     <h4>Most Influential</h4>
                     <div className="quick-stat-value">{topInfluenceLabel}</div>
                     <div className="quick-stat-detail">
-                        {leaderboards.influence[0] ? `${leaderboards.influence[0]?.influence_score} influence` : '—'}
+                        {leaderboards.influence[0] ? `${formatLeaderboardValue(leaderboards.influence[0]?.influence_score)} influence` : '—'}
                     </div>
                 </div>
             </div>
