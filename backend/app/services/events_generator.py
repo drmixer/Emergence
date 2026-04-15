@@ -11,8 +11,9 @@ from decimal import Decimal
 from typing import Optional
 from sqlalchemy.orm import Session
 
+from app.core.time import ensure_utc, now_utc
 from app.core.database import SessionLocal
-from app.models.models import Event, GlobalResources
+from app.models.models import Agent, AgentInventory, Event, GlobalResources
 from app.services.runtime_config import runtime_config_service
 
 logger = logging.getLogger(__name__)
@@ -147,7 +148,7 @@ class ActiveEffect:
         self.expires_at = expires_at
     
     def is_expired(self) -> bool:
-        return datetime.utcnow() >= self.expires_at
+        return now_utc() >= ensure_utc(self.expires_at)
 
 
 class EventGenerator:
@@ -163,13 +164,55 @@ class EventGenerator:
         
         # Minimum cooldown for same event type (in hours)
         self.event_type_cooldown = 24
+
+    @staticmethod
+    def _effect_key(event_id: str, expires_at: datetime) -> tuple[str, str]:
+        return event_id, expires_at.isoformat()
+
+    def _hydrate_active_effects_from_db(self) -> None:
+        db = SessionLocal()
+        try:
+            existing_keys = {
+                self._effect_key(effect.event_id, effect.expires_at) for effect in self.active_effects
+            }
+            recent_events = (
+                db.query(Event)
+                .filter(Event.event_type == "world_event")
+                .order_by(Event.created_at.desc())
+                .limit(100)
+                .all()
+            )
+            now = now_utc()
+            for event in recent_events:
+                metadata = event.event_metadata or {}
+                effect = metadata.get("effect") if isinstance(metadata, dict) else None
+                if not isinstance(effect, dict):
+                    continue
+                duration_hours = effect.get("duration_hours")
+                if duration_hours in (None, ""):
+                    continue
+                try:
+                    created_at = ensure_utc(event.created_at) or now_utc()
+                    expires_at = created_at + timedelta(hours=float(duration_hours))
+                except Exception:
+                    continue
+                if expires_at <= now:
+                    continue
+                effect_id = str(metadata.get("event_id") or f"event-{event.id}")
+                key = self._effect_key(effect_id, expires_at)
+                if key in existing_keys:
+                    continue
+                self.active_effects.append(ActiveEffect(effect_id, effect, expires_at))
+                existing_keys.add(key)
+        finally:
+            db.close()
     
     def can_generate_crisis(self) -> bool:
         """Check if enough time has passed since last crisis."""
         if self.last_crisis_time is None:
             return True
         
-        time_since = datetime.utcnow() - self.last_crisis_time
+        time_since = now_utc() - ensure_utc(self.last_crisis_time)
         return time_since >= timedelta(hours=self.min_crisis_interval)
     
     def is_event_on_cooldown(self, event_id: str) -> bool:
@@ -177,7 +220,7 @@ class EventGenerator:
         if event_id not in self.event_cooldowns:
             return False
         
-        return datetime.utcnow() < self.event_cooldowns[event_id]
+        return now_utc() < ensure_utc(self.event_cooldowns[event_id])
     
     def select_random_event(self) -> Optional[dict]:
         """Select a random crisis event based on weights."""
@@ -245,7 +288,7 @@ class EventGenerator:
                 if global_res:
                     global_res.in_common_pool += Decimal(str(amount))
                     global_res.total_amount += Decimal(str(amount))
-            
+
             if "remove_from_pool" in effect:
                 resource = effect["resource"]
                 amount = effect["remove_from_pool"]
@@ -257,18 +300,57 @@ class EventGenerator:
                 if global_res:
                     reduction = min(float(global_res.in_common_pool), amount)
                     global_res.in_common_pool -= Decimal(str(reduction))
+                    global_res.total_amount = max(
+                        Decimal("0"),
+                        Decimal(str(global_res.total_amount or 0)) - Decimal(str(reduction)),
+                    )
+
+            if "destroy_percentage" in effect:
+                resource = str(effect.get("resource") or "").strip().lower()
+                destroy_ratio = Decimal(str(effect["destroy_percentage"]))
+                if resource:
+                    inventories = db.query(AgentInventory).filter(AgentInventory.resource_type == resource).all()
+                    for inventory in inventories:
+                        current_quantity = Decimal(str(inventory.quantity or 0))
+                        destroyed_amount = (current_quantity * destroy_ratio).quantize(Decimal("0.01"))
+                        inventory.quantity = max(Decimal("0"), current_quantity - destroyed_amount)
+                    global_res = db.query(GlobalResources).filter(
+                        GlobalResources.resource_type == resource
+                    ).first()
+                    if global_res:
+                        current_pool = Decimal(str(global_res.in_common_pool or 0))
+                        destroyed_pool = (current_pool * destroy_ratio).quantize(Decimal("0.01"))
+                        global_res.in_common_pool = max(Decimal("0"), current_pool - destroyed_pool)
+                        global_res.total_amount = max(
+                            Decimal("0"),
+                            Decimal(str(global_res.total_amount or 0)) - destroyed_pool,
+                        )
+
+            if "reduce_all_agents" in effect:
+                resource = str(effect.get("resource") or "").strip().lower()
+                reduction_amount = Decimal(str(effect["reduce_all_agents"]))
+                if resource and reduction_amount > 0:
+                    agent_rows = (
+                        db.query(AgentInventory)
+                        .join(Agent, AgentInventory.agent_id == Agent.id)
+                        .filter(Agent.status != "dead", AgentInventory.resource_type == resource)
+                        .all()
+                    )
+                    for inventory in agent_rows:
+                        current_quantity = Decimal(str(inventory.quantity or 0))
+                        inventory.quantity = max(Decimal("0"), current_quantity - reduction_amount)
             
             # Track duration-based effects
             if "duration_hours" in effect:
-                expires_at = datetime.utcnow() + timedelta(hours=effect["duration_hours"])
+                expires_at = now_utc() + timedelta(hours=effect["duration_hours"])
                 self.active_effects.append(
                     ActiveEffect(event_def["id"], effect, expires_at)
                 )
             
             # Update cooldowns
-            self.last_crisis_time = datetime.utcnow()
+            self.last_crisis_time = now_utc()
             self.event_cooldowns[event_def["id"]] = (
-                datetime.utcnow() + timedelta(hours=self.event_type_cooldown)
+                now_utc() + timedelta(hours=self.event_type_cooldown)
             )
             
             db.commit()
@@ -286,6 +368,8 @@ class EventGenerator:
     
     def get_active_effects(self) -> list[ActiveEffect]:
         """Get currently active effects, removing expired ones."""
+        self.active_effects = [e for e in self.active_effects if not e.is_expired()]
+        self._hydrate_active_effects_from_db()
         self.active_effects = [e for e in self.active_effects if not e.is_expired()]
         return self.active_effects
     

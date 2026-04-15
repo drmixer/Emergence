@@ -25,6 +25,7 @@ from app.models.models import (
 )
 from app.services.archive_drafts import maybe_generate_scheduled_weekly_draft
 from app.services.emergence_metrics import persist_completed_day_snapshot
+from app.services.events_generator import event_generator
 from app.services.law_effects import active_survival_reserve_laws
 from app.services.run_reports import maybe_generate_scheduled_run_report_backfill
 from app.services.runtime_config import runtime_config_service
@@ -661,10 +662,11 @@ async def process_daily_consumption():
     
     try:
         logger.info("Processing daily survival cycle...")
-        active_food = active_food_cost()
-        active_energy = active_energy_cost()
-        dormant_food = dormant_food_cost()
-        dormant_energy = dormant_energy_cost()
+        consumption_modifier = Decimal(str(event_generator.get_consumption_modifier()))
+        active_food = (active_food_cost() * consumption_modifier).quantize(Decimal("0.01"))
+        active_energy = (active_energy_cost() * consumption_modifier).quantize(Decimal("0.01"))
+        dormant_food = (dormant_food_cost() * consumption_modifier).quantize(Decimal("0.01"))
+        dormant_energy = (dormant_energy_cost() * consumption_modifier).quantize(Decimal("0.01"))
         dormant_death_threshold = death_threshold()
         
         # Get all living agents (both active and dormant)

@@ -226,3 +226,47 @@ def test_work_yield_can_be_overridden_via_runtime_setting(session_factory, monke
         )
 
     assert float(food_inventory.quantity) == pytest.approx(1.25)
+
+
+def test_work_yield_is_modified_by_active_world_event(session_factory, monkeypatch):
+    monkeypatch.setattr(actions, "survival_reserve_law_active", lambda _db: False)
+    monkeypatch.setattr(actions.event_generator, "get_production_modifier", lambda resource: 0.5 if resource == "food" else 1.0)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=7)
+
+        asyncio.run(actions._execute_work(db, agent, {"work_type": "farm", "hours": 1}))
+        db.commit()
+
+        food_inventory = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.agent_id == agent.id, AgentInventory.resource_type == "food")
+            .one()
+        )
+
+    assert float(food_inventory.quantity) == pytest.approx(1.0)
+
+
+def test_validate_action_blocks_communication_when_world_event_disables_it(session_factory, monkeypatch):
+    monkeypatch.setattr(actions.event_generator, "is_communication_disabled", lambda: True)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=8)
+        energy_inventory = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.agent_id == agent.id, AgentInventory.resource_type == "energy")
+            .one()
+        )
+        energy_inventory.quantity = Decimal("1.00")
+        db.commit()
+
+        result = asyncio.run(
+            actions.validate_action(
+                db,
+                agent,
+                {"action": "forum_post", "content": "hello"},
+            )
+        )
+
+    assert result["valid"] is False
+    assert "temporarily disrupted" in result["reason"]

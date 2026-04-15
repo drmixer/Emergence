@@ -362,3 +362,29 @@ def test_active_survival_cost_runtime_override_can_force_dormancy(session_factor
 
     assert refreshed_agent.status == "dormant"
     assert dormant_event.agent_id == agent_id
+
+
+def test_consumption_modifier_from_world_event_can_force_dormancy(session_factory, monkeypatch):
+    _configure_no_reserve(monkeypatch, session_factory)
+    monkeypatch.setattr(scheduler.event_generator, "get_consumption_modifier", lambda: 2.0)
+
+    with session_factory() as db:
+        agent = _seed_agent(
+            db,
+            agent_number=8,
+            status="active",
+            food="3.00",
+            energy="3.00",
+        )
+        agent_id = agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["active_fed"] == 0
+    assert result["became_dormant"] == 1
+
+    with session_factory() as db:
+        refreshed_agent = db.query(Agent).filter(Agent.id == agent_id).one()
+        dormancy_event = db.query(Event).filter(Event.event_type == "became_dormant").one()
+
+    assert refreshed_agent.status == "dormant"
+    assert dormancy_event.event_metadata["reason"] == "lack of food"

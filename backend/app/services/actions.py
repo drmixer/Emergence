@@ -19,6 +19,7 @@ from app.services.law_effects import (
     survival_reserve_contribution_rate,
     survival_reserve_law_active,
 )
+from app.services.events_generator import event_generator
 from app.services.runtime_config import runtime_config_service
 from app.services.survival_config import active_energy_cost, active_food_cost
 
@@ -186,6 +187,9 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 "valid": False, 
                 "reason": f"Insufficient energy for {action_type} (need {action_cost}, have {energy_amount:.2f})"
             }
+
+    if action_type in {"forum_post", "forum_reply", "direct_message"} and event_generator.is_communication_disabled():
+        return {"valid": False, "reason": "Communications are temporarily disrupted by an active world event"}
     
     # Validate specific action types
     if action_type == "forum_post":
@@ -592,8 +596,14 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
     resource_type = work_info["resource"]
     base_yield = work_base_yield(work_type)
     efficiency = EFFICIENCY_CURVE.get(hours, 0.7)
-    
-    produced_amount = (base_yield * Decimal(str(hours)) * Decimal(str(efficiency))).quantize(Decimal("0.01"))
+    production_modifier = Decimal(str(event_generator.get_production_modifier(resource_type)))
+
+    produced_amount = (
+        base_yield
+        * Decimal(str(hours))
+        * Decimal(str(efficiency))
+        * production_modifier
+    ).quantize(Decimal("0.01"))
     contribution_amount = Decimal("0")
     reserve_active = False
 
@@ -651,6 +661,8 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
     
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
     description = f"{author_name} worked {hours}h {work_type}ing, produced {float(amount_kept):.2f} {resource_type}"
+    if production_modifier != Decimal("1.0"):
+        description += f" (environment modifier {float(production_modifier):.2f}x)"
     if reserve_active and contribution_amount > 0:
         description += (
             f" and contributed {float(contribution_amount):.2f} {resource_type} to the shared reserve"
