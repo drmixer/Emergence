@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from app.core.time import ensure_utc, now_utc
 from app.core.database import SessionLocal
@@ -175,13 +176,17 @@ class EventGenerator:
             existing_keys = {
                 self._effect_key(effect.event_id, effect.expires_at) for effect in self.active_effects
             }
-            recent_events = (
-                db.query(Event)
-                .filter(Event.event_type == "world_event")
-                .order_by(Event.created_at.desc())
-                .limit(100)
-                .all()
-            )
+            try:
+                recent_events = (
+                    db.query(Event)
+                    .filter(Event.event_type == "world_event")
+                    .order_by(Event.created_at.desc())
+                    .limit(100)
+                    .all()
+                )
+            except (OperationalError, ProgrammingError):
+                logger.debug("Skipping world-event hydration because event tables are unavailable")
+                return
             now = now_utc()
             for event in recent_events:
                 metadata = event.event_metadata or {}
