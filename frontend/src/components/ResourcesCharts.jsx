@@ -136,21 +136,28 @@ function LineAreaChart({ data }) {
 
 function DonutChart({ data }) {
     const total = data.reduce((sum, item) => sum + Number(item?.value || 0), 0)
-    let currentAngle = 0
+    const slices = data.reduce((acc, item) => {
+        const previousEndAngle = acc.length > 0 ? acc[acc.length - 1].endAngle : 0
+        const value = Number(item?.value || 0)
+        const angle = total > 0 ? (value / total) * 360 : 0
+        return [
+            ...acc,
+            {
+                ...item,
+                startAngle: previousEndAngle,
+                endAngle: previousEndAngle + angle,
+            },
+        ]
+    }, [])
 
     return (
         <svg viewBox="0 0 240 240" className="resource-donut-svg" role="img" aria-label="Wealth share by tier">
             <circle cx="120" cy="120" r="70" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="28" />
-            {data.map((item) => {
-                const value = Number(item?.value || 0)
-                const angle = total > 0 ? (value / total) * 360 : 0
-                const startAngle = currentAngle
-                const endAngle = currentAngle + angle
-                currentAngle = endAngle
+            {slices.map((item) => {
                 return (
                     <path
                         key={item.name}
-                        d={describeArc(120, 120, 70, startAngle, endAngle)}
+                        d={describeArc(120, 120, 70, item.startAngle, item.endAngle)}
                         fill="none"
                         stroke={item.color}
                         strokeWidth="28"
