@@ -97,6 +97,13 @@ def reserve_active_aid_enabled() -> bool:
     )
 
 
+def reserve_dormant_maintenance_enabled() -> bool:
+    return _runtime_bool(
+        "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED",
+        settings.SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED,
+    )
+
+
 def reserve_auto_contribution_enabled() -> bool:
     return _runtime_bool(
         "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED",

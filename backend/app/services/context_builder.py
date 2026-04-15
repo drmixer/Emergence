@@ -18,6 +18,9 @@ from app.services.survival_config import (
     dormant_energy_cost,
     dormant_food_cost,
     low_resource_warning_threshold,
+    reserve_active_aid_enabled,
+    reserve_auto_revive_enabled,
+    reserve_dormant_maintenance_enabled,
 )
 
 
@@ -425,7 +428,17 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     )
     if survival_reserve_law_active:
         context_parts.append("- Active reserve law effect: reserve contributions are energy-biased. Normally 10% of food and 25% of energy work output go to the shared reserve; when reserve energy runs low, food contribution drops and energy contribution rises.")
-        context_parts.append("- Reserve access effect: active agents may draw exact deficits to stay active; dormant agents may be stabilized or, if the pool is strong enough, revived back to active status.")
+        reserve_notes = []
+        if reserve_active_aid_enabled():
+            reserve_notes.append("active agents may draw exact deficits to stay active")
+        if reserve_dormant_maintenance_enabled():
+            reserve_notes.append("dormant agents may be stabilized at reduced upkeep")
+        if reserve_auto_revive_enabled():
+            reserve_notes.append("the pool may reactivate dormant agents if it can fund a full active cycle")
+        if reserve_notes:
+            context_parts.append(f"- Reserve access effect: {'; '.join(reserve_notes)}.")
+        else:
+            context_parts.append("- Reserve access effect: reserve exists for collective accounting, but no automatic maintenance or revival support is currently enabled.")
     context_parts.append("")
 
     if recent_reserve_events:

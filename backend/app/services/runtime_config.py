@@ -106,6 +106,10 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         python_type=bool,
         description="Allow shared reserve to cover active-agent survival shortfalls before dormancy.",
     ),
+    "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": MutableSettingSpec(
+        python_type=bool,
+        description="Allow shared reserve to cover dormant-agent upkeep deficits before starvation progresses.",
+    ),
     "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": MutableSettingSpec(
         python_type=bool,
         description="Allow shared reserve to reactivate dormant agents automatically when it can fund a full active cycle.",

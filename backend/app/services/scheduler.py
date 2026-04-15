@@ -39,6 +39,7 @@ from app.services.survival_config import (
     dormant_food_cost,
     reserve_active_aid_enabled,
     reserve_auto_revive_enabled,
+    reserve_dormant_maintenance_enabled,
 )
 
 # Twitter bot integration (optional)
@@ -681,6 +682,7 @@ async def process_daily_consumption():
         reserve_laws = active_survival_reserve_laws(db)
         reserve_resources = _reserve_resource_map(db) if reserve_laws else {}
         reserve_auto_revive = reserve_auto_revive_enabled()
+        reserve_dormant_maintenance = reserve_dormant_maintenance_enabled()
 
         agent_snapshots: list[tuple[Agent, AgentInventory | None, AgentInventory | None, Decimal, Decimal]] = []
         for agent in living_agents:
@@ -807,7 +809,7 @@ async def process_daily_consumption():
                         emit_shortfall_event=False,
                         event_metadata={"support_mode": "active_revival"},
                     )
-                    if not revived_via_reserve:
+                    if not revived_via_reserve and reserve_dormant_maintenance:
                         food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_survival_reserve_support(
                             db,
                             agent=agent,
@@ -859,7 +861,7 @@ async def process_daily_consumption():
                             )
                             logger.info("🌟 %s revived via shared reserve", agent_name)
                             continue
-                if reserve_laws and not reserve_auto_revive:
+                if reserve_laws and not reserve_auto_revive and reserve_dormant_maintenance:
                     food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_survival_reserve_support(
                         db,
                         agent=agent,

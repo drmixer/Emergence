@@ -9,6 +9,7 @@ def test_internal_scarcity_tight_preset_matches_tuning_plan():
     assert preset.runtime_overrides["SURVIVAL_DORMANT_FOOD_COST"] == 0.5
     assert preset.runtime_overrides["SURVIVAL_DORMANT_ENERGY_COST"] == 0.5
     assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is True
     assert preset.agent_resource_targets == {"food": 35.0, "energy": 30.0, "materials": 20.0}
@@ -23,6 +24,7 @@ def test_internal_scarcity_tight_v2_preset_matches_energy_first_plan():
     assert preset.runtime_overrides["SURVIVAL_DORMANT_FOOD_COST"] == 0.5
     assert preset.runtime_overrides["SURVIVAL_DORMANT_ENERGY_COST"] == 1.0
     assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is False
     assert preset.agent_resource_targets == {"food": 30.0, "energy": 18.0, "materials": 20.0}
@@ -35,6 +37,7 @@ def test_internal_scarcity_tight_v3_preset_broadens_food_pressure():
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_FOOD_COST"] == 3.0
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_ENERGY_COST"] == 4.0
     assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is False
     assert preset.runtime_overrides["WORK_YIELD_FARM_BASE"] == 1.6
@@ -49,6 +52,7 @@ def test_internal_scarcity_tight_v4_preset_shifts_to_mixed_scarcity():
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_FOOD_COST"] == 3.0
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_ENERGY_COST"] == 4.0
     assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is False
     assert preset.runtime_overrides["WORK_YIELD_FARM_BASE"] == 1.2
@@ -65,6 +69,7 @@ def test_internal_scarcity_tight_v5_preset_is_a_real_step_change():
     assert preset.runtime_overrides["SURVIVAL_DORMANT_FOOD_COST"] == 0.75
     assert preset.runtime_overrides["SURVIVAL_DORMANT_ENERGY_COST"] == 1.0
     assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is False
     assert preset.runtime_overrides["WORK_YIELD_FARM_BASE"] == 0.8
@@ -79,6 +84,7 @@ def test_standard_reset_preset_restores_named_baseline():
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_FOOD_COST"] == 2.0
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_ENERGY_COST"] == 2.0
     assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is False
+    assert preset.runtime_overrides.get("SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED", True) is True
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is False
     assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is True
     assert preset.agent_resource_targets["food"] == 50.0

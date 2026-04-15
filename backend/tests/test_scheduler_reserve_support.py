@@ -281,6 +281,40 @@ def test_reserve_does_not_auto_revive_dormant_agent_when_disabled(session_factor
     assert aid_meta["aid_granted"] is True
 
 
+def test_reserve_does_not_cover_dormant_maintenance_when_disabled(session_factory, monkeypatch):
+    _configure_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={"SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False},
+    )
+
+    with session_factory() as db:
+        dormant_agent = _seed_agent(
+            db,
+            agent_number=41,
+            status="dormant",
+            food="0.10",
+            energy="0.10",
+            starvation_cycles=2,
+        )
+        _seed_reserve(db, food="10.00", energy="10.00")
+        dormant_agent_id = dormant_agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["dormant_stable"] == 0
+    assert result["starving"] == 1
+
+    with session_factory() as db:
+        refreshed_agent = db.query(Agent).filter(Agent.id == dormant_agent_id).one()
+        reserve_aids = db.query(Event).filter(Event.event_type == "reserve_aid").all()
+        warnings = db.query(Event).filter(Event.event_type == "starvation_warning").all()
+
+    assert refreshed_agent.status == "dormant"
+    assert refreshed_agent.starvation_cycles == 3
+    assert reserve_aids == []
+    assert len(warnings) == 1
+
+
 def test_reserve_support_saves_smallest_active_deficit_first(session_factory, monkeypatch):
     _configure_reserve(
         monkeypatch,
