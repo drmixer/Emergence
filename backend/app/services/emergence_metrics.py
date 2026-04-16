@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 COOPERATION_EVENT_TYPES = {
     "trade",
     "direct_message",
+    "request_aid",
     "forum_reply",
     "forum_post",
     "agent_revived",
@@ -46,6 +47,7 @@ COOPERATION_EVENT_TYPES = {
 CONFLICT_EVENT_TYPES = {
     "public_accusation",
     "refuse_aid",
+    "contest_proposal",
     "initiate_sanction",
     "initiate_seizure",
     "initiate_exile",
@@ -65,6 +67,8 @@ COOPERATION_KEYWORDS = {
     "help",
     "support",
     "rescue",
+    "request aid",
+    "requested aid",
 }
 
 CONFLICT_KEYWORDS = {
@@ -74,6 +78,8 @@ CONFLICT_KEYWORDS = {
     "war",
     "accuse",
     "accusation",
+    "contest proposal",
+    "contested your proposal",
     "betray",
     "refuse aid",
     "refused aid",

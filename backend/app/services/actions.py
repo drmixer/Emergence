@@ -65,8 +65,10 @@ ACTION_COSTS = {
     "forum_post": Decimal("0.2"),     # Talking is cheap, but not free
     "forum_reply": Decimal("0.1"),    # Replies are lighter than new posts
     "direct_message": Decimal("0.1"), # Private communication
+    "request_aid": Decimal("0.1"),    # Direct request for support
     "public_accusation": Decimal("0.2"), # Public conflict signal
     "refuse_aid": Decimal("0.1"),     # Direct refusal / conflict signal
+    "contest_proposal": Decimal("0.2"), # Public opposition to a live proposal
     "vote": Decimal("0.2"),           # Participating in democracy costs effort
     "trade": Decimal("0.1"),          # Transaction overhead
     "create_proposal": Decimal("1.0"), # Proposing costs real effort - prevents spam
@@ -190,7 +192,7 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 "reason": f"Insufficient energy for {action_type} (need {action_cost}, have {energy_amount:.2f})"
             }
 
-    if action_type in {"forum_post", "forum_reply", "direct_message", "public_accusation", "refuse_aid"} and event_generator.is_communication_disabled():
+    if action_type in {"forum_post", "forum_reply", "direct_message", "request_aid", "public_accusation", "refuse_aid", "contest_proposal"} and event_generator.is_communication_disabled():
         return {"valid": False, "reason": "Communications are temporarily disrupted by an active world event"}
     
     # Validate specific action types
@@ -216,6 +218,34 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         recipient = db.query(Agent).filter(Agent.agent_number == recipient_id).first()
         if not recipient:
             return {"valid": False, "reason": "Recipient agent not found"}
+
+    elif action_type == "request_aid":
+        target_id = action.get("target_agent_id")
+        if not target_id:
+            return {"valid": False, "reason": "Aid request requires target_agent_id"}
+        target = db.query(Agent).filter(Agent.agent_number == target_id).first()
+        if not target:
+            return {"valid": False, "reason": "Target agent not found"}
+        if target.id == agent.id:
+            return {"valid": False, "reason": "Cannot request aid from yourself"}
+        if target.status == "dead":
+            return {"valid": False, "reason": "Cannot request aid from a dead agent"}
+        resource_type = str(action.get("resource_type") or "").strip().lower()
+        if resource_type not in {"food", "energy", "materials"}:
+            return {"valid": False, "reason": "Aid request requires resource_type food|energy|materials"}
+        try:
+            amount = Decimal(str(action.get("amount", 0)))
+        except Exception:
+            return {"valid": False, "reason": "Aid request amount must be numeric"}
+        if amount <= 0:
+            return {"valid": False, "reason": "Aid request amount must be > 0"}
+        if amount > Decimal("1000"):
+            return {"valid": False, "reason": "Aid request amount too large"}
+        reason = action.get("reason", "")
+        if not reason or len(reason) < 1:
+            return {"valid": False, "reason": "Aid request requires reason"}
+        if len(reason) > 1000:
+            return {"valid": False, "reason": "Aid request reason too long (max 1000 chars)"}
 
     elif action_type == "public_accusation":
         target_id = action.get("target_agent_id")
@@ -250,6 +280,23 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Aid refusal requires reason"}
         if len(reason) > 1000:
             return {"valid": False, "reason": "Aid refusal reason too long (max 1000 chars)"}
+
+    elif action_type == "contest_proposal":
+        proposal_id = action.get("proposal_id")
+        if not proposal_id:
+            return {"valid": False, "reason": "Proposal contest requires proposal_id"}
+        proposal = db.query(Proposal).filter(Proposal.id == proposal_id).first()
+        if not proposal:
+            return {"valid": False, "reason": "Proposal not found"}
+        if proposal.author_agent_id == agent.id:
+            return {"valid": False, "reason": "Cannot contest your own proposal"}
+        if proposal.status != "active":
+            return {"valid": False, "reason": "Can only contest an active proposal"}
+        reason = action.get("reason", "")
+        if not reason or len(reason) < 1:
+            return {"valid": False, "reason": "Proposal contest requires reason"}
+        if len(reason) > 1000:
+            return {"valid": False, "reason": "Proposal contest reason too long (max 1000 chars)"}
     
     elif action_type == "create_proposal":
         # Exiled agents cannot create proposals
@@ -468,11 +515,17 @@ async def execute_action(db: Session, agent: Agent, action: dict) -> dict:
     elif action_type == "direct_message":
         result = await _execute_direct_message(db, agent, action)
 
+    elif action_type == "request_aid":
+        result = await _execute_request_aid(db, agent, action)
+
     elif action_type == "public_accusation":
         result = await _execute_public_accusation(db, agent, action)
 
     elif action_type == "refuse_aid":
         result = await _execute_refuse_aid(db, agent, action)
+
+    elif action_type == "contest_proposal":
+        result = await _execute_contest_proposal(db, agent, action)
     
     elif action_type == "create_proposal":
         result = await _execute_create_proposal(db, agent, action)
@@ -575,6 +628,56 @@ async def _execute_direct_message(db: Session, agent: Agent, action: dict) -> di
     }
 
 
+async def _execute_request_aid(db: Session, agent: Agent, action: dict) -> dict:
+    """Request targeted aid from another agent."""
+    target = db.query(Agent).filter(
+        Agent.agent_number == action["target_agent_id"]
+    ).first()
+
+    author_name = agent.display_name or f"Agent #{agent.agent_number}"
+    target_name = target.display_name or f"Agent #{target.agent_number}"
+    resource_type = str(action.get("resource_type") or "").strip().lower()
+    amount = Decimal(str(action.get("amount")))
+    reason_text = " ".join((action.get("reason") or "").split())
+    message_content = (
+        f"I am requesting {amount.normalize()} {resource_type} from you. Reason: {reason_text}"
+    )
+
+    message = Message(
+        author_agent_id=agent.id,
+        content=message_content,
+        message_type="direct_message",
+        recipient_agent_id=target.id,
+    )
+    db.add(message)
+    db.flush()
+
+    db.add(
+        Event(
+            agent_id=target.id,
+            event_type="aid_request_received",
+            description=f"🆘 {author_name} requested {amount.normalize()} {resource_type} from you: {reason_text}",
+            event_metadata=_with_runtime_metadata(
+                {
+                    "requesting_agent_id": agent.id,
+                    "requesting_agent_number": agent.agent_number,
+                    "target_agent_id": target.id,
+                    "target_agent_number": target.agent_number,
+                    "resource_type": resource_type,
+                    "amount": str(amount),
+                    "message_id": message.id,
+                }
+            ),
+        )
+    )
+
+    return {
+        "success": True,
+        "description": f"{author_name} requested {amount.normalize()} {resource_type} from {target_name}",
+        "message_id": message.id,
+    }
+
+
 async def _execute_public_accusation(db: Session, agent: Agent, action: dict) -> dict:
     """Make a public accusation against another agent without formal enforcement."""
     target = db.query(Agent).filter(
@@ -664,6 +767,57 @@ async def _execute_refuse_aid(db: Session, agent: Agent, action: dict) -> dict:
         "success": True,
         "description": f"{author_name} refused aid to {target_name}",
         "message_id": message.id,
+    }
+
+
+async def _execute_contest_proposal(db: Session, agent: Agent, action: dict) -> dict:
+    """Publicly contest another agent's active proposal."""
+    proposal = db.query(Proposal).filter(Proposal.id == action["proposal_id"]).first()
+    proposal_author = db.query(Agent).filter(Agent.id == proposal.author_agent_id).first()
+
+    author_name = agent.display_name or f"Agent #{agent.agent_number}"
+    proposal_author_name = (
+        proposal_author.display_name or f"Agent #{proposal_author.agent_number}"
+        if proposal_author is not None
+        else f"Agent #{proposal.author_agent_id}"
+    )
+    reason_text = " ".join((action.get("reason") or "").split())
+    post_content = (
+        f"Contesting proposal \"{proposal.title}\" (#{proposal.id}) by {proposal_author_name}: {reason_text}"
+    )
+
+    message = Message(
+        author_agent_id=agent.id,
+        content=post_content,
+        message_type="forum_post",
+    )
+    db.add(message)
+    db.flush()
+
+    if proposal_author is not None and proposal_author.id != agent.id:
+        db.add(
+            Event(
+                agent_id=proposal_author.id,
+                event_type="proposal_contested_received",
+                description=f"⚖️ {author_name} publicly contested your proposal \"{proposal.title}\": {reason_text}",
+                event_metadata=_with_runtime_metadata(
+                    {
+                        "contesting_agent_id": agent.id,
+                        "contesting_agent_number": agent.agent_number,
+                        "proposal_id": proposal.id,
+                        "proposal_title": proposal.title,
+                        "proposal_author_agent_id": proposal.author_agent_id,
+                        "message_id": message.id,
+                    }
+                ),
+            )
+        )
+
+    return {
+        "success": True,
+        "description": f"{author_name} contested proposal: {proposal.title}",
+        "message_id": message.id,
+        "proposal_id": proposal.id,
     }
 
 

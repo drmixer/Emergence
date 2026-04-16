@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from app.core.database import SessionLocal, engine
 from app.core.time import now_utc
-from app.models.models import Event
+from app.models.models import Event, SimulationRun
 from app.services.run_reports import maybe_generate_run_closeout_bundle
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
@@ -59,6 +59,10 @@ class RunGuardrailService:
         if budget_decision.should_stop:
             return budget_decision
 
+        scheduled_stop_decision = self._check_scheduled_stop()
+        if scheduled_stop_decision.should_stop:
+            return scheduled_stop_decision
+
         provider_decision = self._check_provider_failures()
         if provider_decision.should_stop:
             return provider_decision
@@ -95,6 +99,58 @@ class RunGuardrailService:
             }
             return StopDecision(True, "hard_budget_exceeded", details)
         return StopDecision(False)
+
+    @staticmethod
+    def _parse_scheduled_stop_at(raw_value: Any) -> datetime | None:
+        text_value = str(raw_value or "").strip()
+        if not text_value:
+            return None
+        normalized = text_value.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            logger.warning("Ignoring invalid SIMULATION_AUTO_STOP_AT value: %s", text_value)
+            return None
+        if parsed.tzinfo is None:
+            logger.warning("Ignoring naive SIMULATION_AUTO_STOP_AT value: %s", text_value)
+            return None
+        return parsed.astimezone(timezone.utc)
+
+    def _check_scheduled_stop(self) -> StopDecision:
+        stop_at = self._parse_scheduled_stop_at(
+            runtime_config_service.get_effective_value_cached("SIMULATION_AUTO_STOP_AT")
+        )
+        scheduled_run_id = str(
+            runtime_config_service.get_effective_value_cached("SIMULATION_AUTO_STOP_RUN_ID") or ""
+        ).strip()
+        if stop_at is None or not scheduled_run_id:
+            return StopDecision(False)
+
+        current_run_id = str(
+            runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or ""
+        ).strip()
+        if current_run_id and current_run_id != scheduled_run_id:
+            self._clear_scheduled_stop(
+                reason="scheduled_stop_stale_run_mismatch",
+                details={
+                    "scheduled_run_id": scheduled_run_id,
+                    "active_run_id": current_run_id,
+                    "scheduled_stop_at": stop_at.isoformat(),
+                },
+            )
+            return StopDecision(False)
+
+        current_time = now_utc()
+        if current_time < stop_at:
+            return StopDecision(False)
+
+        details = {
+            "scheduled_run_id": scheduled_run_id,
+            "active_run_id": current_run_id or None,
+            "scheduled_stop_at": stop_at.isoformat(),
+            "checked_at": current_time.isoformat(),
+        }
+        return StopDecision(True, "scheduled_stop_reached", details)
 
     @staticmethod
     def _check_provider_failures() -> StopDecision:
@@ -201,9 +257,54 @@ class RunGuardrailService:
         return StopDecision(True, "db_pool_pressure", details)
 
     @staticmethod
+    def _mark_run_registry_stop(*, db, run_id: str, reason: str) -> None:
+        clean_run_id = str(run_id or "").strip()
+        if not clean_run_id:
+            return
+        row = db.query(SimulationRun).filter(SimulationRun.run_id == clean_run_id).first()
+        if row is None:
+            return
+        row.ended_at = now_utc()
+        row.end_reason = reason
+        db.add(row)
+
+    @staticmethod
+    def _clear_scheduled_stop(*, reason: str, details: dict[str, Any] | None = None) -> None:
+        db = SessionLocal()
+        try:
+            runtime_config_service.update_settings(
+                db,
+                {
+                    "SIMULATION_AUTO_STOP_AT": "",
+                    "SIMULATION_AUTO_STOP_RUN_ID": "",
+                },
+                changed_by="system:guardrail",
+                reason=reason,
+            )
+            if details:
+                db.add(
+                    Event(
+                        event_type="simulation_stop_schedule_cleared",
+                        description="Cleared stale simulation auto-stop schedule",
+                        event_metadata={"reason": reason, "details": details},
+                    )
+                )
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Failed to clear scheduled stop override: %s", exc)
+        finally:
+            db.close()
+
+    @staticmethod
     def _enforce_stop(decision: StopDecision) -> None:
         reason = decision.reason or "unknown_stop_condition"
-        reason_text = f"Stop condition tripped: {reason}"
+        if reason == "scheduled_stop_reached":
+            reason_text = "Scheduled stop reached"
+            run_end_reason = "Scheduled stop via run_guardrails"
+        else:
+            reason_text = f"Stop condition tripped: {reason}"
+            run_end_reason = reason_text
         run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
         condition_name = str(runtime_config_service.get_effective_value_cached("SIMULATION_CONDITION_NAME") or "").strip()
         season_number = int(runtime_config_service.get_effective_value_cached("SIMULATION_SEASON_NUMBER") or 0)
@@ -224,6 +325,8 @@ class RunGuardrailService:
                     {
                         "SIMULATION_ACTIVE": False,
                         "SIMULATION_PAUSED": True,
+                        "SIMULATION_AUTO_STOP_AT": "",
+                        "SIMULATION_AUTO_STOP_RUN_ID": "",
                     },
                     changed_by="system:guardrail",
                     reason=reason_text,
@@ -233,6 +336,17 @@ class RunGuardrailService:
                 logger.error(
                     "Failed to persist runtime stop overrides for guardrail: %s", exc
                 )
+
+            if run_id:
+                try:
+                    RunGuardrailService._mark_run_registry_stop(
+                        db=db,
+                        run_id=run_id,
+                        reason=run_end_reason,
+                    )
+                except Exception as exc:
+                    db.rollback()
+                    logger.error("Failed to mark run registry stop for guardrail: %s", exc)
 
             db.add(
                 Event(

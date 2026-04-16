@@ -14,10 +14,13 @@ def test_build_launch_agent_spec_uses_backend_venv_and_repo_tmp(tmp_path: Path):
     project_root = tmp_path / "repo"
     backend_dir = project_root / "backend"
     python_path = backend_dir / "venv" / "bin" / "python"
+    railway_path = tmp_path / "bin" / "railway"
     script_path = backend_dir / "scripts" / "schedule_guarded_stop.py"
     python_path.parent.mkdir(parents=True, exist_ok=True)
+    railway_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.parent.mkdir(parents=True, exist_ok=True)
     python_path.write_text("", encoding="utf-8")
+    railway_path.write_text("", encoding="utf-8")
     script_path.write_text("", encoding="utf-8")
 
     spec = build_launch_agent_spec(
@@ -25,25 +28,28 @@ def test_build_launch_agent_spec_uses_backend_venv_and_repo_tmp(tmp_path: Path):
         stop_at=parse_stop_at("2026-04-16T10:00:00-07:00"),
         project_root=project_root,
         script_path=script_path,
+        railway_path=railway_path,
     )
 
     assert spec.log_path == project_root / "tmp" / "auto-stop-real-20260415T085921Z.log"
     assert spec.program_arguments[0] == str(python_path.resolve())
     assert spec.program_arguments[1] == str(script_path.resolve())
     assert spec.program_arguments[2] == "execute"
+    assert spec.program_arguments[-2] == "--railway-path"
+    assert spec.program_arguments[-1] == str(railway_path.resolve())
 
 
 def test_execute_guarded_stop_stops_matching_run_and_unschedules(tmp_path: Path):
     calls: list[str] = []
 
-    def _status_fetcher(_project_root: Path) -> dict[str, object]:
+    def _status_fetcher(_project_root: Path, _railway_path: Path | None) -> dict[str, object]:
         calls.append("status")
         return {
             "simulation_active": True,
             "simulation_run_id": "real-20260415T085921Z",
         }
 
-    def _stop_runner(_project_root: Path) -> dict[str, object]:
+    def _stop_runner(_project_root: Path, _railway_path: Path | None) -> dict[str, object]:
         calls.append("stop")
         return {"stdout": "stopped"}
 
@@ -70,7 +76,7 @@ def test_execute_guarded_stop_stops_matching_run_and_unschedules(tmp_path: Path)
 def test_execute_guarded_stop_keeps_schedule_on_status_failure(tmp_path: Path):
     calls: list[str] = []
 
-    def _status_fetcher(_project_root: Path) -> dict[str, object]:
+    def _status_fetcher(_project_root: Path, _railway_path: Path | None) -> dict[str, object]:
         calls.append("status")
         raise RuntimeError("railway unavailable")
 

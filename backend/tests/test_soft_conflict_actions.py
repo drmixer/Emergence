@@ -143,6 +143,104 @@ def test_refuse_aid_creates_direct_message_and_target_notice(session_factory):
     assert "refused to provide aid" in notice.description
 
 
+def test_request_aid_creates_direct_message_and_target_notice(session_factory):
+    with session_factory() as db:
+        requester = _seed_agent(db, agent_number=7, display_name="Gamma-7")
+        target = _seed_agent(db, agent_number=8, display_name="Helix-8")
+        target_id = target.id
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                requester,
+                {
+                    "action": "request_aid",
+                    "target_agent_id": 8,
+                    "resource_type": "food",
+                    "amount": 3,
+                    "reason": "I will go dormant next cycle without help.",
+                },
+            )
+        )
+        assert validation["valid"] is True
+
+        result = asyncio.run(
+            actions.execute_action(
+                db,
+                requester,
+                {
+                    "action": "request_aid",
+                    "target_agent_id": 8,
+                    "resource_type": "food",
+                    "amount": 3,
+                    "reason": "I will go dormant next cycle without help.",
+                },
+            )
+        )
+
+        direct_message = db.query(Message).filter(Message.id == result["message_id"]).one()
+        notice = db.query(Event).filter(Event.event_type == "aid_request_received").one()
+
+    assert result["success"] is True
+    assert direct_message.message_type == "direct_message"
+    assert direct_message.recipient_agent_id == target_id
+    assert "requesting 3 food" in direct_message.content
+    assert notice.agent_id == target_id
+    assert "requested 3 food from you" in notice.description
+
+
+def test_contest_proposal_creates_forum_post_and_author_notice(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=9, display_name="Ion-9")
+        challenger = _seed_agent(db, agent_number=10, display_name="Juno-10")
+        author_id = author.id
+        proposal = actions.Proposal(
+            author_agent_id=author.id,
+            title="Emergency Reserve Expansion",
+            description="Expand reserve authority immediately.",
+            proposal_type="law",
+            voting_closes_at=actions.now_utc(),
+            status="active",
+        )
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                challenger,
+                {
+                    "action": "contest_proposal",
+                    "proposal_id": proposal.id,
+                    "reason": "This centralizes too much power too quickly.",
+                },
+            )
+        )
+        assert validation["valid"] is True
+
+        result = asyncio.run(
+            actions.execute_action(
+                db,
+                challenger,
+                {
+                    "action": "contest_proposal",
+                    "proposal_id": proposal.id,
+                    "reason": "This centralizes too much power too quickly.",
+                },
+            )
+        )
+
+        forum_post = db.query(Message).filter(Message.id == result["message_id"]).one()
+        notice = db.query(Event).filter(Event.event_type == "proposal_contested_received").one()
+
+    assert result["success"] is True
+    assert forum_post.message_type == "forum_post"
+    assert "Contesting proposal" in forum_post.content
+    assert notice.agent_id == author_id
+    assert "publicly contested your proposal" in notice.description
+
+
 def test_targeted_conflict_notice_appears_in_agent_context(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
 
@@ -167,3 +265,55 @@ def test_targeted_conflict_notice_appears_in_agent_context(session_factory, monk
 
     assert "publicly accused you" in context
     assert "Echo-5" in context
+
+
+def test_request_and_contest_signals_appear_in_agent_context(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        target = _seed_agent(db, agent_number=12, display_name="Lumen-12")
+        challenger = _seed_agent(db, agent_number=13, display_name="Muse-13")
+        proposal = actions.Proposal(
+            author_agent_id=author.id,
+            title="Shared Reserve Charter",
+            description="Create a permanent shared reserve rule.",
+            proposal_type="law",
+            voting_closes_at=actions.now_utc(),
+            status="active",
+        )
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+
+        asyncio.run(
+            actions.execute_action(
+                db,
+                challenger,
+                {
+                    "action": "contest_proposal",
+                    "proposal_id": proposal.id,
+                    "reason": "This proposal is too rigid.",
+                },
+            )
+        )
+        asyncio.run(
+            actions.execute_action(
+                db,
+                target,
+                {
+                    "action": "request_aid",
+                    "target_agent_id": 11,
+                    "resource_type": "energy",
+                    "amount": 2,
+                    "reason": "I need enough energy to avoid dormancy.",
+                },
+            )
+        )
+        db.refresh(author)
+
+        context = asyncio.run(context_builder.build_agent_context(db, author))
+
+    assert "SOCIAL PRESSURE AND ALIGNMENT:" in context
+    assert "requested 2 energy from you" in context
+    assert "publicly contested your proposal" in context

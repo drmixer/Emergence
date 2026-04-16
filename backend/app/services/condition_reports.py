@@ -45,6 +45,7 @@ CORE_METRICS = (
 CONFLICT_EVENT_TYPES = {
     "public_accusation",
     "refuse_aid",
+    "contest_proposal",
     "initiate_sanction",
     "initiate_seizure",
     "initiate_exile",
@@ -57,6 +58,7 @@ CONFLICT_EVENT_TYPES = {
 COOPERATION_EVENT_TYPES = {
     "trade",
     "direct_message",
+    "request_aid",
     "forum_reply",
     "forum_post",
     "agent_revived",

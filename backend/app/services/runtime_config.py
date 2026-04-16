@@ -48,6 +48,14 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=9999,
         description="Optional season number for research tagging/reporting.",
     ),
+    "SIMULATION_AUTO_STOP_AT": MutableSettingSpec(
+        python_type=str,
+        description="Optional ISO-8601 timestamp with timezone for Railway-side guarded stop.",
+    ),
+    "SIMULATION_AUTO_STOP_RUN_ID": MutableSettingSpec(
+        python_type=str,
+        description="Run id that must still be active when the scheduled stop timestamp is reached.",
+    ),
     "SIMULATION_ACTIVE": MutableSettingSpec(
         python_type=bool,
         description="Global run switch for worker loops (idle when false).",
@@ -289,6 +297,28 @@ def _coerce_value(key: str, raw_value: Any, spec: MutableSettingSpec) -> Any:
         if len(text) > 64:
             raise ValueError("must be <= 64 characters")
         value = text
+
+    if key == "SIMULATION_AUTO_STOP_RUN_ID":
+        text = str(value or "").strip()
+        if len(text) > 64:
+            raise ValueError("must be <= 64 characters")
+        value = text
+
+    if key == "SIMULATION_AUTO_STOP_AT":
+        text = str(value or "").strip()
+        if text:
+            from datetime import datetime, timezone
+
+            normalized = text.replace("Z", "+00:00")
+            try:
+                parsed = datetime.fromisoformat(normalized)
+            except ValueError as exc:
+                raise ValueError("must be ISO-8601 with timezone") from exc
+            if parsed.tzinfo is None:
+                raise ValueError("must include an explicit timezone offset")
+            value = parsed.astimezone(timezone.utc).isoformat()
+        else:
+            value = ""
 
     if key == "SIMULATION_RUN_CLASS":
         value = str(value or "").strip().lower()

@@ -84,8 +84,13 @@ make sim-start RUN_MODE=real
 make sim-start RUN_MODE=real RUN_CLASS=special_exploratory TUNING_RUN=1
 make sim-start RUN_MODE=real RUN_CLASS=deep_96h
 make sim-stop
+# Railway-side scheduled stop; does not depend on the local machine staying awake
 make sim-stop-schedule RUN_ID=real-20260415T085921Z STOP_AT=2026-04-16T10:00:00-07:00
-make sim-stop-unschedule RUN_ID=real-20260415T085921Z
+make sim-stop-unschedule
+
+# Local macOS launchd fallback if you explicitly want a machine-local guard
+make sim-stop-schedule-local RUN_ID=real-20260415T085921Z STOP_AT=2026-04-16T10:00:00-07:00
+make sim-stop-unschedule-local RUN_ID=real-20260415T085921Z
 
 # Run-scoped research outputs
 make report-rebuild RUN_ID=run-20260210T120000Z

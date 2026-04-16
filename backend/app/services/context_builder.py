@@ -31,6 +31,8 @@ SYSTEM_ALERT_CONTEXT_LIMIT = 3
 DIRECT_MESSAGE_SAMPLE_LIMIT = 16
 DIRECT_CONVERSATION_LIMIT = 3
 DIRECT_CONVERSATION_MESSAGE_LIMIT = 4
+SOCIAL_SIGNAL_CONTEXT_LIMIT = 4
+PROPOSAL_ALIGNMENT_LIMIT = 4
 
 
 def _preview_untrusted_text(text: str | None, limit: int = 120) -> str:
@@ -211,6 +213,87 @@ def _recent_direct_conversations(
     return selected_conversations
 
 
+def _recent_social_pressure_events(
+    db: Session,
+    agent: Agent,
+    *,
+    now,
+    perception_cutoff=None,
+) -> list[Event]:
+    query = db.query(Event).filter(
+        Event.agent_id == agent.id,
+        Event.event_type.in_(
+            [
+                "accusation_received",
+                "aid_request_received",
+                "aid_refusal_received",
+                "proposal_contested_received",
+            ]
+        ),
+        Event.created_at > now - timedelta(hours=24),
+    )
+    if perception_cutoff is not None:
+        query = query.filter(Event.created_at <= perception_cutoff)
+    return query.order_by(desc(Event.created_at)).limit(SOCIAL_SIGNAL_CONTEXT_LIMIT).all()
+
+
+def _recent_outgoing_social_actions(
+    db: Session,
+    agent: Agent,
+    *,
+    now,
+    perception_cutoff=None,
+) -> list[Event]:
+    query = db.query(Event).filter(
+        Event.agent_id == agent.id,
+        Event.event_type.in_(
+            [
+                "request_aid",
+                "public_accusation",
+                "refuse_aid",
+                "contest_proposal",
+            ]
+        ),
+        Event.created_at > now - timedelta(hours=24),
+    )
+    if perception_cutoff is not None:
+        query = query.filter(Event.created_at <= perception_cutoff)
+    return query.order_by(desc(Event.created_at)).limit(SOCIAL_SIGNAL_CONTEXT_LIMIT).all()
+
+
+def _recent_proposal_alignments(
+    db: Session,
+    agent: Agent,
+    *,
+    now,
+    perception_cutoff=None,
+) -> dict[str, list[str]]:
+    query = (
+        db.query(Vote, Proposal, Agent)
+        .join(Proposal, Proposal.id == Vote.proposal_id)
+        .join(Agent, Agent.id == Vote.agent_id)
+        .filter(
+            Proposal.author_agent_id == agent.id,
+            Vote.agent_id != agent.id,
+            Vote.created_at > now - timedelta(hours=24),
+            Vote.vote.in_(["yes", "no"]),
+        )
+    )
+    if perception_cutoff is not None:
+        query = query.filter(Vote.created_at <= perception_cutoff)
+
+    allies: list[str] = []
+    opponents: list[str] = []
+    for vote, proposal, voter in query.order_by(desc(Vote.created_at)).limit(16).all():
+        voter_name = voter.display_name or f"Agent #{voter.agent_number}"
+        summary = f"{voter_name} voted {vote.vote} on your proposal \"{proposal.title}\""
+        if vote.vote == "yes" and len(allies) < PROPOSAL_ALIGNMENT_LIMIT:
+            allies.append(summary)
+        elif vote.vote == "no" and len(opponents) < PROPOSAL_ALIGNMENT_LIMIT:
+            opponents.append(summary)
+    return {"allies": allies, "opponents": opponents}
+
+
 async def build_agent_context(db: Session, agent: Agent) -> str:
     """Build the context prompt for an agent's decision."""
     now = now_utc()
@@ -255,6 +338,25 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     if perception_lag_seconds > 0:
         recent_events_q = recent_events_q.filter(Event.created_at <= perception_cutoff)
     recent_events = recent_events_q.order_by(desc(Event.created_at)).limit(10).all()
+
+    recent_social_pressure = _recent_social_pressure_events(
+        db,
+        agent,
+        now=now,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+    )
+    recent_outgoing_social_actions = _recent_outgoing_social_actions(
+        db,
+        agent,
+        now=now,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+    )
+    recent_proposal_alignments = _recent_proposal_alignments(
+        db,
+        agent,
+        now=now,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+    )
     
     direct_conversations = _recent_direct_conversations(
         db,
@@ -622,6 +724,26 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         for event in recent_events[:3]:
             context_parts.append(f"  - {event.description}")
         context_parts.append("")
+
+    if recent_social_pressure or recent_outgoing_social_actions or recent_proposal_alignments["allies"] or recent_proposal_alignments["opponents"]:
+        context_parts.append("SOCIAL PRESSURE AND ALIGNMENT:")
+        if recent_social_pressure:
+            context_parts.append("  Incoming pressure or requests:")
+            for event in recent_social_pressure[:SOCIAL_SIGNAL_CONTEXT_LIMIT]:
+                context_parts.append(f"    - {event.description}")
+        if recent_outgoing_social_actions:
+            context_parts.append("  Your recent social moves:")
+            for event in recent_outgoing_social_actions[:SOCIAL_SIGNAL_CONTEXT_LIMIT]:
+                context_parts.append(f"    - {event.description}")
+        if recent_proposal_alignments["allies"]:
+            context_parts.append("  Recent allies on your proposals:")
+            for line in recent_proposal_alignments["allies"]:
+                context_parts.append(f"    - {line}")
+        if recent_proposal_alignments["opponents"]:
+            context_parts.append("  Recent opponents on your proposals:")
+            for line in recent_proposal_alignments["opponents"]:
+                context_parts.append(f"    - {line}")
+        context_parts.append("")
     
     # Global state
     context_parts.append("GLOBAL STATE:")
@@ -672,8 +794,8 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("⚡ ACTION COSTS (energy):")
     context_parts.append("  - idle: 0.0 (free)")
     context_parts.append("  - work: 0.5 per hour")
-    context_parts.append("  - refuse_aid/forum_reply/DM/trade: 0.1")
-    context_parts.append("  - forum_post/public_accusation/vote: 0.2")
+    context_parts.append("  - request_aid/refuse_aid/forum_reply/DM/trade: 0.1")
+    context_parts.append("  - forum_post/public_accusation/contest_proposal/vote: 0.2")
     context_parts.append("  - create_proposal: 1.0")
     context_parts.append("  - vote_enforcement: 0.3")
     context_parts.append("  - initiate_sanction: 2.0")
@@ -683,9 +805,13 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("")
 
     context_parts.append("CONFLICT AND PRESSURE:")
+    context_parts.append("  - You can ask specific agents for help with request_aid when survival pressure is immediate.")
     context_parts.append("  - Before formal enforcement, you can create social pressure with public_accusation or refuse_aid.")
+    context_parts.append("  - You can publicly challenge a live proposal with contest_proposal if you think it is dangerous, unfair, or poorly designed.")
     context_parts.append("  - public_accusation is a public forum action that names another agent and states your grievance.")
+    context_parts.append("  - request_aid is a direct request to one agent for a specific resource amount and reason.")
     context_parts.append("  - refuse_aid is a direct refusal to help another agent right now; it signals conflict without invoking law.")
+    context_parts.append("  - If someone recently accused you, refused you, contested your proposal, or asked you for aid, responding is often more salient than starting an unrelated new forum post.")
     context_parts.append("  - Formal punishment still requires a live law plus enforcement actions.")
     context_parts.append("")
     
@@ -700,8 +826,10 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append('  {"action":"create_proposal","title":"Emergency Aid Law","description":"Make shared aid mandatory for at-risk agents.","proposal_type":"law"}')
     context_parts.append('  {"action":"create_proposal","title":"Title","description":"Description","proposal_type":"law|allocation|rule|infrastructure|constitutional|other"}')
     context_parts.append('  {"action":"forum_post","content":"Your message here"}')
+    context_parts.append('  {"action":"request_aid","target_agent_id":42,"resource_type":"food","amount":3,"reason":"I will go dormant next cycle without help."}')
     context_parts.append('  {"action":"public_accusation","target_agent_id":42,"content":"You are hoarding shared food while others go dormant."}')
     context_parts.append('  {"action":"refuse_aid","target_agent_id":42,"reason":"I cannot spare food while I am close to dormancy myself."}')
+    context_parts.append('  {"action":"contest_proposal","proposal_id":123,"reason":"This proposal centralizes too much reserve power and needs revision."}')
     context_parts.append('  {"action":"work","work_type":"farm|generate|gather","hours":1}')
     context_parts.append('  {"action":"initiate_sanction","target_agent_id":42,"law_id":3,"violation_description":"Reason","sanction_cycles":3}')
     context_parts.append('  {"action":"vote_enforcement","enforcement_id":10,"vote":"support|oppose"}')

@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.time import now_utc
-from app.models.models import Agent, AgentInventory, Message
+from app.models.models import Agent, AgentInventory, Event, Message, Proposal
 from app.services import agent_loop, context_builder
 
 
@@ -179,3 +179,54 @@ def test_checkpoint_interrupts_on_recent_forum_reply(session_factory):
         reason = asyncio.run(processor._get_checkpoint_reason(db, agent))
 
     assert reason == "interrupt_forum_reply"
+
+
+def test_checkpoint_interrupts_on_recent_targeted_social_pressure(session_factory):
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        db.add(
+            Event(
+                agent_id=agent.id,
+                event_type="aid_refusal_received",
+                description="Delta-4 refused to provide aid.",
+                created_at=now_utc() - timedelta(minutes=5),
+            )
+        )
+        db.commit()
+        db.refresh(agent)
+
+        processor = agent_loop.AgentProcessor()
+        reason = asyncio.run(processor._get_checkpoint_reason(db, agent))
+
+    assert reason == "interrupt_aid_refusal_received"
+
+
+def test_checkpoint_interrupts_on_recent_proposal_contest(session_factory):
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        proposal = Proposal(
+            author_agent_id=agent.id,
+            title="Reserve Stabilization Law",
+            description="Create a common reserve rule.",
+            proposal_type="law",
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=6),
+            created_at=now_utc() - timedelta(hours=1),
+        )
+        db.add(proposal)
+        db.flush()
+        db.add(
+            Event(
+                agent_id=agent.id,
+                event_type="proposal_contested_received",
+                description="Cipher-3 publicly contested your proposal.",
+                created_at=now_utc() - timedelta(minutes=5),
+            )
+        )
+        db.commit()
+        db.refresh(agent)
+
+        processor = agent_loop.AgentProcessor()
+        reason = asyncio.run(processor._get_checkpoint_reason(db, agent))
+
+    assert reason == "interrupt_proposal_contested"

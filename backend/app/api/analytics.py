@@ -64,6 +64,7 @@ logger = logging.getLogger(__name__)
 CONFLICT_EVENT_TYPES = {
     "public_accusation",
     "refuse_aid",
+    "contest_proposal",
     "initiate_sanction",
     "initiate_seizure",
     "initiate_exile",
@@ -76,13 +77,14 @@ CONFLICT_EVENT_TYPES = {
 COOPERATION_EVENT_TYPES = {
     "trade",
     "direct_message",
+    "request_aid",
     "forum_reply",
     "forum_post",
     "agent_revived",
 }
 ALLIANCE_KEYWORDS = {"alliance", "ally", "coalition", "truce", "bloc"}
-CONFLICT_KEYWORDS = {"conflict", "hostile", "fight", "war", "betray", "accuse", "accusation", "refuse aid", "refused aid", "sanction", "exile", "retaliation"}
-COOPERATION_KEYWORDS = {"cooperate", "cooperation", "help", "support", "rescue", "aid"}
+CONFLICT_KEYWORDS = {"conflict", "hostile", "fight", "war", "betray", "accuse", "accusation", "contest proposal", "contested your proposal", "refuse aid", "refused aid", "sanction", "exile", "retaliation"}
+COOPERATION_KEYWORDS = {"cooperate", "cooperation", "help", "support", "rescue", "aid", "request aid", "requested aid"}
 PLOT_TURN_BASE_SCORES = {
     "law_passed": 95,
     "proposal_resolved": 90,
@@ -90,6 +92,8 @@ PLOT_TURN_BASE_SCORES = {
     "agent_died": 95,
     "public_accusation": 78,
     "refuse_aid": 72,
+    "contest_proposal": 74,
+    "request_aid": 65,
     "agent_exiled": 88,
     "agent_sanctioned": 82,
     "resources_seized": 80,

@@ -145,6 +145,10 @@ class Settings(BaseSettings):
     # Optional research metadata labels used by report/tag automation.
     SIMULATION_CONDITION_NAME: str = ""
     SIMULATION_SEASON_NUMBER: int = 0
+    # Optional Railway-side scheduled stop target. When reached, the worker
+    # stops the matching run without depending on a local launchd job.
+    SIMULATION_AUTO_STOP_AT: str = ""
+    SIMULATION_AUTO_STOP_RUN_ID: str = ""
     # Optional perception lag for agent context (in seconds). Adds information asymmetry.
     PERCEPTION_LAG_SECONDS: int = 120
 

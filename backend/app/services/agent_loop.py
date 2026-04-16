@@ -616,6 +616,9 @@ class AgentProcessor:
             return "interrupt_proposal_deadline"
         if self._has_pending_enforcement_interrupt(db, agent, now):
             return "interrupt_enforcement_targeted"
+        targeted_social_interrupt = self._recent_targeted_social_interrupt_reason(db, agent, now)
+        if targeted_social_interrupt is not None:
+            return targeted_social_interrupt
         if self._has_recent_direct_message_interrupt(db, agent, now):
             return "interrupt_direct_message"
         if self._has_recent_forum_reply_interrupt(db, agent, now):
@@ -669,7 +672,7 @@ class AgentProcessor:
                 strategy = "accumulate_materials"
         elif action_type in {"vote", "create_proposal", "initiate_sanction", "initiate_seizure", "initiate_exile", "vote_enforcement"}:
             strategy = "governance"
-        elif action_type in {"forum_post", "forum_reply", "direct_message", "public_accusation", "refuse_aid"}:
+        elif action_type in {"forum_post", "forum_reply", "direct_message", "request_aid", "public_accusation", "refuse_aid", "contest_proposal"}:
             strategy = "social_coordination"
         elif action_type == "trade":
             strategy = "resource_exchange"
@@ -772,6 +775,38 @@ class AgentProcessor:
             .first()
         )
         return recent_message is not None
+
+    def _recent_targeted_social_interrupt_reason(self, db: Session, agent: Agent, now) -> str | None:
+        window_start = self._social_interrupt_window_start(agent, now)
+        recent_event = (
+            db.query(Event.event_type)
+            .filter(
+                Event.agent_id == agent.id,
+                Event.created_at > window_start,
+                Event.created_at <= now,
+                Event.event_type.in_(
+                    [
+                        "accusation_received",
+                        "aid_request_received",
+                        "aid_refusal_received",
+                        "proposal_contested_received",
+                    ]
+                ),
+            )
+            .order_by(Event.created_at.desc(), Event.id.desc())
+            .first()
+        )
+        if recent_event is None:
+            return None
+
+        event_type = str(recent_event.event_type or "").strip()
+        mapping = {
+            "accusation_received": "interrupt_accusation_received",
+            "aid_request_received": "interrupt_aid_request_received",
+            "aid_refusal_received": "interrupt_aid_refusal_received",
+            "proposal_contested_received": "interrupt_proposal_contested",
+        }
+        return mapping.get(event_type)
 
     def _has_recent_forum_reply_interrupt(self, db: Session, agent: Agent, now) -> bool:
         window_start = self._social_interrupt_window_start(agent, now)

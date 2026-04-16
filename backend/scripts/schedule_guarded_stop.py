@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.services.guarded_stop_scheduler import (
     build_launch_agent_spec,
+    default_railway_path,
     default_label,
     default_plist_path,
     execute_guarded_stop,
@@ -37,6 +38,7 @@ def main() -> None:
     schedule.add_argument("--label", default=None)
     schedule.add_argument("--plist-path", default=None)
     schedule.add_argument("--log-path", default=None)
+    schedule.add_argument("--railway-path", default=None)
     schedule.add_argument("--dry-run", action="store_true")
 
     execute = sub.add_parser("execute", help="Guarded stop entrypoint invoked by launchd.")
@@ -46,6 +48,7 @@ def main() -> None:
     execute.add_argument("--label", required=True)
     execute.add_argument("--plist-path", required=True)
     execute.add_argument("--log-path", default=None)
+    execute.add_argument("--railway-path", default=None)
     execute.add_argument("--dry-run", action="store_true")
 
     unschedule = sub.add_parser("unschedule", help="Remove a previously scheduled local guarded stop.")
@@ -62,6 +65,7 @@ def main() -> None:
         label = str(args.label or "").strip() or default_label(args.run_id)
         plist_path = Path(args.plist_path).expanduser().resolve() if args.plist_path else default_plist_path(label)
         log_path = Path(args.log_path).expanduser().resolve() if args.log_path else None
+        railway_path = Path(args.railway_path).expanduser().resolve() if args.railway_path else default_railway_path()
         spec = build_launch_agent_spec(
             run_id=args.run_id,
             stop_at=stop_at,
@@ -70,6 +74,7 @@ def main() -> None:
             label=label,
             plist_path=plist_path,
             log_path=log_path,
+            railway_path=railway_path,
         )
         payload = {
             "command": "schedule",
@@ -78,6 +83,7 @@ def main() -> None:
             "label": spec.label,
             "plist_path": str(spec.plist_path),
             "log_path": str(spec.log_path),
+            "railway_path": str(railway_path),
             "program_arguments": spec.program_arguments,
         }
         if args.dry_run:
@@ -94,6 +100,7 @@ def main() -> None:
             project_root=project_root,
             label=str(args.label).strip(),
             plist_path=Path(args.plist_path).expanduser().resolve(),
+            railway_path=Path(args.railway_path).expanduser().resolve() if args.railway_path else default_railway_path(),
             dry_run=bool(args.dry_run),
         )
         if args.log_path:

@@ -11,6 +11,7 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import sys
 from typing import Any
@@ -56,6 +57,8 @@ def _status_payload() -> dict[str, Any]:
             ),
             "simulation_condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or ""),
             "simulation_season_number": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
+            "simulation_auto_stop_at": str(effective.get("SIMULATION_AUTO_STOP_AT") or "").strip() or None,
+            "simulation_auto_stop_run_id": str(effective.get("SIMULATION_AUTO_STOP_RUN_ID") or "").strip() or None,
             "action_count": int((counts_row.action_count if counts_row else 0) or 0),
             "llm_usage_count": int((counts_row.llm_usage_count if counts_row else 0) or 0),
             "last_action_at": counts_row.last_action_at.isoformat() if counts_row and counts_row.last_action_at else None,
@@ -85,10 +88,23 @@ def _update_runtime(updates: dict[str, Any], reason: str) -> dict[str, Any]:
                 "SIMULATION_RUN_CLASS": coerce_run_class(effective.get("SIMULATION_RUN_CLASS")),
                 "SIMULATION_CONDITION_NAME": str(effective.get("SIMULATION_CONDITION_NAME") or ""),
                 "SIMULATION_SEASON_NUMBER": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
+                "SIMULATION_AUTO_STOP_AT": str(effective.get("SIMULATION_AUTO_STOP_AT") or "").strip() or None,
+                "SIMULATION_AUTO_STOP_RUN_ID": str(effective.get("SIMULATION_AUTO_STOP_RUN_ID") or "").strip() or None,
             },
         }
     finally:
         db.close()
+
+
+def _parse_stop_at(raw_value: str) -> str:
+    clean_value = str(raw_value or "").strip()
+    if not clean_value:
+        raise ValueError("stop_at is required")
+    normalized = clean_value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        raise ValueError("stop_at must include an explicit timezone offset")
+    return parsed.astimezone(timezone.utc).isoformat()
 
 
 def _clean_optional_text(value: Any) -> str | None:
@@ -251,6 +267,10 @@ def main() -> None:
 
     sub.add_parser("stop", help="Pause simulation processing.")
     sub.add_parser("status", help="Show effective simulation runtime state.")
+    schedule_stop = sub.add_parser("schedule-stop", help="Schedule a Railway-side guarded stop for a specific run.")
+    schedule_stop.add_argument("--stop-at", required=True, help="ISO-8601 timestamp with timezone, e.g. 2026-04-16T14:20:00-07:00")
+    schedule_stop.add_argument("--run-id", default=None, help="Run id to stop. Defaults to the currently active run id.")
+    sub.add_parser("clear-stop-schedule", help="Clear the Railway-side guarded stop override.")
 
     args = parser.parse_args()
 
@@ -262,7 +282,12 @@ def main() -> None:
         status_before = _status_payload()
         run_id_before = str(status_before.get("simulation_run_id") or "").strip()
         result = _update_runtime(
-            {"SIMULATION_ACTIVE": False, "SIMULATION_PAUSED": True},
+            {
+                "SIMULATION_ACTIVE": False,
+                "SIMULATION_PAUSED": True,
+                "SIMULATION_AUTO_STOP_AT": "",
+                "SIMULATION_AUTO_STOP_RUN_ID": "",
+            },
             "Operator stop via simulation_control.py",
         )
         result["run_registry"] = _mark_run_registry_stop(
@@ -309,6 +334,35 @@ def main() -> None:
             season_number=int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
             tuning_run=resolved_tuning_run,
             reason="Operator start via simulation_control.py",
+        )
+        print(json.dumps(result, indent=2))
+        print(json.dumps(_status_payload(), indent=2))
+        return
+
+    if args.command == "schedule-stop":
+        status_before = _status_payload()
+        target_run_id = str(args.run_id or status_before.get("simulation_run_id") or "").strip()
+        if not target_run_id:
+            raise SystemExit("schedule-stop requires --run-id or an active simulation_run_id")
+        stop_at_utc = _parse_stop_at(args.stop_at)
+        result = _update_runtime(
+            {
+                "SIMULATION_AUTO_STOP_AT": stop_at_utc,
+                "SIMULATION_AUTO_STOP_RUN_ID": target_run_id,
+            },
+            "Operator schedule-stop via simulation_control.py",
+        )
+        print(json.dumps(result, indent=2))
+        print(json.dumps(_status_payload(), indent=2))
+        return
+
+    if args.command == "clear-stop-schedule":
+        result = _update_runtime(
+            {
+                "SIMULATION_AUTO_STOP_AT": "",
+                "SIMULATION_AUTO_STOP_RUN_ID": "",
+            },
+            "Operator cleared scheduled stop via simulation_control.py",
         )
         print(json.dumps(result, indent=2))
         print(json.dumps(_status_payload(), indent=2))

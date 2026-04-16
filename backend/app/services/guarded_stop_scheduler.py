@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any, Callable
@@ -66,6 +67,28 @@ def default_python_path(project_root: Path) -> Path:
     return Path(sys.executable).resolve()
 
 
+def default_railway_path() -> Path:
+    env_path = str(os.environ.get("RAILWAY_BIN") or "").strip()
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+
+    resolved = shutil.which("railway")
+    if resolved:
+        return Path(resolved).resolve()
+
+    common_candidates = [
+        Path("/opt/homebrew/bin/railway"),
+        Path("/usr/local/bin/railway"),
+    ]
+    for candidate in common_candidates:
+        if candidate.exists():
+            return candidate.resolve()
+
+    raise FileNotFoundError(
+        "Unable to resolve railway binary. Set RAILWAY_BIN or install Railway CLI."
+    )
+
+
 def build_launch_agent_spec(
     *,
     run_id: str,
@@ -76,11 +99,13 @@ def build_launch_agent_spec(
     plist_path: Path | None = None,
     log_path: Path | None = None,
     python_path: Path | None = None,
+    railway_path: Path | None = None,
 ) -> LaunchAgentSpec:
     resolved_label = str(label or "").strip() or default_label(run_id)
     resolved_plist = (plist_path or default_plist_path(resolved_label)).expanduser().resolve()
     resolved_log = (log_path or default_log_path(project_root, run_id)).expanduser().resolve()
     resolved_python = (python_path or default_python_path(project_root)).expanduser().resolve()
+    resolved_railway = (railway_path or default_railway_path()).expanduser().resolve()
     resolved_script = script_path.expanduser().resolve()
     return LaunchAgentSpec(
         label=resolved_label,
@@ -103,6 +128,8 @@ def build_launch_agent_spec(
             str(resolved_plist),
             "--log-path",
             str(resolved_log),
+            "--railway-path",
+            str(resolved_railway),
         ],
     )
 
@@ -186,9 +213,9 @@ def uninstall_launch_agent(*, label: str, plist_path: Path, remove_file: bool = 
     }
 
 
-def _railway_control_command(subcommand: str) -> list[str]:
+def _railway_control_command(subcommand: str, railway_path: Path | None = None) -> list[str]:
     return [
-        "railway",
+        str((railway_path or default_railway_path()).expanduser().resolve()),
         "run",
         "-s",
         "backend",
@@ -199,17 +226,17 @@ def _railway_control_command(subcommand: str) -> list[str]:
     ]
 
 
-def fetch_remote_status(project_root: Path) -> dict[str, Any]:
+def fetch_remote_status(project_root: Path, railway_path: Path | None = None) -> dict[str, Any]:
     result = _run_command(
-        _railway_control_command("status"),
+        _railway_control_command("status", railway_path),
         cwd=project_root / "backend",
     )
     return json.loads(result.stdout)
 
 
-def stop_remote_run(project_root: Path) -> dict[str, Any]:
+def stop_remote_run(project_root: Path, railway_path: Path | None = None) -> dict[str, Any]:
     result = _run_command(
-        _railway_control_command("stop"),
+        _railway_control_command("stop", railway_path),
         cwd=project_root / "backend",
     )
     return {"stdout": result.stdout.strip(), "stderr": result.stderr.strip()}
@@ -222,10 +249,11 @@ def execute_guarded_stop(
     project_root: Path,
     label: str,
     plist_path: Path,
+    railway_path: Path | None = None,
     dry_run: bool = False,
     now: datetime | None = None,
-    status_fetcher: Callable[[Path], dict[str, Any]] = fetch_remote_status,
-    stop_runner: Callable[[Path], dict[str, Any]] = stop_remote_run,
+    status_fetcher: Callable[[Path, Path | None], dict[str, Any]] = fetch_remote_status,
+    stop_runner: Callable[[Path, Path | None], dict[str, Any]] = stop_remote_run,
     unscheduler: Callable[..., dict[str, Any]] = uninstall_launch_agent,
 ) -> dict[str, Any]:
     current_time = now or datetime.now(timezone.utc)
@@ -242,7 +270,7 @@ def execute_guarded_stop(
         }
 
     try:
-        status = status_fetcher(project_root)
+        status = status_fetcher(project_root, railway_path)
     except Exception as exc:
         return {
             "result": "retrying",
@@ -265,7 +293,7 @@ def execute_guarded_stop(
                 "would_unschedule": True,
             }
         try:
-            stop_result = stop_runner(project_root)
+            stop_result = stop_runner(project_root, railway_path)
         except Exception as exc:
             return {
                 "result": "retrying",
