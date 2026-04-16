@@ -67,3 +67,17 @@ def test_deterministic_vote_tallies_can_differ_for_same_proposal_type():
         )
 
     assert tally(first_rule) != tally(second_rule)
+
+
+def test_unaffordable_routine_action_falls_back_to_idle():
+    action = {
+        "action": "work",
+        "work_type": "farm",
+        "hours": 1,
+        "reasoning": "Routine execution: restore low food reserves.",
+    }
+
+    result = RoutineExecutor._coerce_affordable_action({"energy": 0.0}, action)
+
+    assert result["action"] == "idle"
+    assert "conserving energy" in result["reasoning"].lower()

@@ -33,6 +33,8 @@ MEANINGFUL_ACTION_EVENT_TYPES = {
     "forum_post",
     "forum_reply",
     "direct_message",
+    "public_accusation",
+    "refuse_aid",
     "create_proposal",
     "vote",
     "work",
@@ -44,6 +46,8 @@ MEANINGFUL_ACTION_EVENT_TYPES = {
 }
 LEGIBILITY_WINDOW_HOURS = 72
 LEGIBILITY_CONFLICT_EVENT_TYPES = {
+    "public_accusation",
+    "refuse_aid",
     "enforcement_initiated",
     "initiate_sanction",
     "initiate_seizure",

@@ -65,7 +65,7 @@ def _seed_active_agent(db, *, agent_number: int = 1) -> Agent:
     return agent
 
 
-def test_rate_limit_backoff_suppresses_consecutive_invalid_actions(monkeypatch, session_factory):
+def test_rate_limit_budget_preflight_sets_backoff_without_invalid_action(monkeypatch, session_factory):
     with session_factory() as db:
         agent = _seed_active_agent(db)
         db.add(
@@ -99,7 +99,7 @@ def test_rate_limit_backoff_suppresses_consecutive_invalid_actions(monkeypatch, 
     monkeypatch.setattr(
         agent_loop.routine_executor,
         "build_action",
-        lambda _db, _agent: {"action": "idle"},
+        lambda _db, _agent: pytest.fail("routine action should not be built while rate-limited"),
     )
 
     processor = agent_loop.AgentProcessor()
@@ -107,13 +107,13 @@ def test_rate_limit_backoff_suppresses_consecutive_invalid_actions(monkeypatch, 
     asyncio.run(processor._process_agent_turn(agent_id))
     with session_factory() as db:
         invalid_count_after_first = db.query(Event).filter(Event.event_type == "invalid_action").count()
-    assert invalid_count_after_first == 1
+    assert invalid_count_after_first == 0
     assert agent_id in processor._rate_limit_backoff_until
 
     asyncio.run(processor._process_agent_turn(agent_id))
     with session_factory() as db:
         invalid_count_after_second = db.query(Event).filter(Event.event_type == "invalid_action").count()
-    assert invalid_count_after_second == 1
+    assert invalid_count_after_second == 0
 
 
 def test_context_includes_action_budget_remaining_and_reset(session_factory, monkeypatch):

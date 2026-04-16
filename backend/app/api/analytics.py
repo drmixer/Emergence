@@ -62,6 +62,8 @@ logger = logging.getLogger(__name__)
 
 # Section 7 viewer-surface heuristics.
 CONFLICT_EVENT_TYPES = {
+    "public_accusation",
+    "refuse_aid",
     "initiate_sanction",
     "initiate_seizure",
     "initiate_exile",
@@ -79,13 +81,15 @@ COOPERATION_EVENT_TYPES = {
     "agent_revived",
 }
 ALLIANCE_KEYWORDS = {"alliance", "ally", "coalition", "truce", "bloc"}
-CONFLICT_KEYWORDS = {"conflict", "hostile", "fight", "war", "betray", "sanction", "exile", "retaliation"}
+CONFLICT_KEYWORDS = {"conflict", "hostile", "fight", "war", "betray", "accuse", "accusation", "refuse aid", "refused aid", "sanction", "exile", "retaliation"}
 COOPERATION_KEYWORDS = {"cooperate", "cooperation", "help", "support", "rescue", "aid"}
 PLOT_TURN_BASE_SCORES = {
     "law_passed": 95,
     "proposal_resolved": 90,
     "world_event": 92,
     "agent_died": 95,
+    "public_accusation": 78,
+    "refuse_aid": 72,
     "agent_exiled": 88,
     "agent_sanctioned": 82,
     "resources_seized": 80,

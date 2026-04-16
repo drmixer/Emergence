@@ -3,7 +3,7 @@ Context Builder - Builds the prompt context for agent decisions.
 """
 from datetime import timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
@@ -24,6 +24,193 @@ from app.services.survival_config import (
 )
 
 
+FORUM_THREAD_SAMPLE_LIMIT = 16
+FORUM_THREAD_CONTEXT_LIMIT = 4
+FORUM_THREAD_REPLY_LIMIT = 3
+SYSTEM_ALERT_CONTEXT_LIMIT = 3
+DIRECT_MESSAGE_SAMPLE_LIMIT = 16
+DIRECT_CONVERSATION_LIMIT = 3
+DIRECT_CONVERSATION_MESSAGE_LIMIT = 4
+
+
+def _preview_untrusted_text(text: str | None, limit: int = 120) -> str:
+    normalized = " ".join((text or "").split())
+    if len(normalized) > limit:
+        return normalized[:limit] + "..."
+    return normalized
+
+
+def _message_author_label(message: Message) -> str:
+    if message.author and message.author.display_name:
+        return message.author.display_name
+    return f"Agent #{message.author_agent_id}"
+
+
+def _message_time_label(message: Message) -> str:
+    created_at = ensure_utc(message.created_at)
+    return created_at.strftime("%H:%M") if created_at else "??:??"
+
+
+def _thread_root_message(db: Session, message: Message, cache: dict[int, Message]) -> Message:
+    cached = cache.get(message.id)
+    if cached is not None:
+        return cached
+
+    current = message
+    lineage: list[int] = [message.id]
+    while current.parent_message_id is not None:
+        parent_cached = cache.get(current.parent_message_id)
+        if parent_cached is not None:
+            current = parent_cached
+            break
+        parent = db.query(Message).filter(Message.id == current.parent_message_id).first()
+        if parent is None:
+            break
+        current = parent
+        lineage.append(current.id)
+
+    for message_id in lineage:
+        cache[message_id] = current
+    cache[current.id] = current
+    return current
+
+
+def _load_thread_messages(
+    db: Session,
+    root_message: Message,
+    *,
+    perception_cutoff=None,
+    max_nodes: int = 24,
+) -> list[Message]:
+    seen_ids = {root_message.id}
+    ordered_messages = [root_message]
+    frontier = [root_message.id]
+
+    while frontier and len(ordered_messages) < max_nodes:
+        query = db.query(Message).filter(Message.parent_message_id.in_(frontier))
+        if perception_cutoff is not None:
+            query = query.filter(Message.created_at <= perception_cutoff)
+        batch = query.order_by(Message.created_at.asc(), Message.id.asc()).all()
+        frontier = []
+        for message in batch:
+            if message.id in seen_ids:
+                continue
+            seen_ids.add(message.id)
+            ordered_messages.append(message)
+            frontier.append(message.id)
+            if len(ordered_messages) >= max_nodes:
+                break
+
+    ordered_messages.sort(
+        key=lambda message: (
+            ensure_utc(message.created_at).timestamp() if ensure_utc(message.created_at) else 0.0,
+            message.id,
+        )
+    )
+    return ordered_messages
+
+
+def _recent_forum_threads(db: Session, *, perception_cutoff=None) -> list[dict]:
+    query = db.query(Message).filter(Message.message_type.in_(["forum_post", "forum_reply"]))
+    if perception_cutoff is not None:
+        query = query.filter(Message.created_at <= perception_cutoff)
+    recent_messages = query.order_by(desc(Message.created_at)).limit(FORUM_THREAD_SAMPLE_LIMIT).all()
+
+    thread_roots: dict[int, dict] = {}
+    root_cache: dict[int, Message] = {}
+    for message in recent_messages:
+        root = _thread_root_message(db, message, root_cache)
+        latest_at = ensure_utc(message.created_at) or ensure_utc(root.created_at)
+        existing = thread_roots.get(root.id)
+        if existing is None or (latest_at and latest_at > existing["latest_at"]):
+            thread_roots[root.id] = {
+                "root": root,
+                "latest_at": latest_at,
+            }
+
+    selected_threads = sorted(
+        thread_roots.values(),
+        key=lambda item: (item["latest_at"].timestamp() if item["latest_at"] else 0.0, item["root"].id),
+        reverse=True,
+    )[:FORUM_THREAD_CONTEXT_LIMIT]
+
+    thread_context = []
+    for thread in selected_threads:
+        root = thread["root"]
+        thread_messages = _load_thread_messages(db, root, perception_cutoff=perception_cutoff)
+        replies = [message for message in thread_messages if message.id != root.id][-FORUM_THREAD_REPLY_LIMIT:]
+        thread_context.append(
+            {
+                "root": root,
+                "replies": replies,
+                "latest_at": thread["latest_at"],
+            }
+        )
+    return thread_context
+
+
+def _recent_system_alerts(db: Session, *, perception_cutoff=None) -> list[Message]:
+    query = db.query(Message).filter(Message.message_type == "system_alert")
+    if perception_cutoff is not None:
+        query = query.filter(Message.created_at <= perception_cutoff)
+    return query.order_by(desc(Message.created_at)).limit(SYSTEM_ALERT_CONTEXT_LIMIT).all()
+
+
+def _recent_direct_conversations(
+    db: Session,
+    agent: Agent,
+    *,
+    now,
+    perception_cutoff=None,
+) -> list[dict]:
+    query = db.query(Message).filter(
+        Message.message_type == "direct_message",
+        Message.created_at > now - timedelta(hours=24),
+        or_(
+            Message.author_agent_id == agent.id,
+            Message.recipient_agent_id == agent.id,
+        ),
+    )
+    if perception_cutoff is not None:
+        query = query.filter(Message.created_at <= perception_cutoff)
+    recent_messages = query.order_by(desc(Message.created_at)).limit(DIRECT_MESSAGE_SAMPLE_LIMIT).all()
+
+    conversations: dict[int, dict] = {}
+    for message in recent_messages:
+        counterpart = message.recipient if message.author_agent_id == agent.id else message.author
+        if counterpart is None:
+            continue
+        counterpart_id = int(counterpart.id)
+        latest_at = ensure_utc(message.created_at)
+        conversation = conversations.setdefault(
+            counterpart_id,
+            {
+                "counterpart": counterpart,
+                "messages": [],
+                "latest_at": latest_at,
+            },
+        )
+        conversation["messages"].append(message)
+        if latest_at and (conversation["latest_at"] is None or latest_at > conversation["latest_at"]):
+            conversation["latest_at"] = latest_at
+
+    selected_conversations = sorted(
+        conversations.values(),
+        key=lambda item: (item["latest_at"].timestamp() if item["latest_at"] else 0.0, item["counterpart"].id),
+        reverse=True,
+    )[:DIRECT_CONVERSATION_LIMIT]
+
+    for conversation in selected_conversations:
+        conversation["messages"] = sorted(
+            conversation["messages"],
+            key=lambda message: (
+                ensure_utc(message.created_at).timestamp() if ensure_utc(message.created_at) else 0.0,
+                message.id,
+            ),
+        )[-DIRECT_CONVERSATION_MESSAGE_LIMIT:]
+    return selected_conversations
+
+
 async def build_agent_context(db: Session, agent: Agent) -> str:
     """Build the context prompt for an agent's decision."""
     now = now_utc()
@@ -36,13 +223,14 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     ).all()
     inventory_dict = {inv.resource_type: float(inv.quantity) for inv in inventory}
     
-    # Get recent forum posts (keep small to reduce token usage)
-    recent_messages_q = db.query(Message).filter(
-        Message.message_type.in_(["forum_post", "forum_reply", "system_alert"])
+    recent_forum_threads = _recent_forum_threads(
+        db,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
     )
-    if perception_lag_seconds > 0:
-        recent_messages_q = recent_messages_q.filter(Message.created_at <= perception_cutoff)
-    recent_messages = recent_messages_q.order_by(desc(Message.created_at)).limit(8).all()
+    recent_system_alerts = _recent_system_alerts(
+        db,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+    )
     
     # Get active proposals (keep small to reduce token usage)
     active_proposals_q = db.query(Proposal).filter(
@@ -68,15 +256,12 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         recent_events_q = recent_events_q.filter(Event.created_at <= perception_cutoff)
     recent_events = recent_events_q.order_by(desc(Event.created_at)).limit(10).all()
     
-    # Get direct messages to this agent (keep small)
-    direct_messages_q = db.query(Message).filter(
-        Message.recipient_agent_id == agent.id,
-        Message.message_type == "direct_message",
-        Message.created_at > now - timedelta(hours=24)
+    direct_conversations = _recent_direct_conversations(
+        db,
+        agent,
+        now=now,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
     )
-    if perception_lag_seconds > 0:
-        direct_messages_q = direct_messages_q.filter(Message.created_at <= perception_cutoff)
-    direct_messages = direct_messages_q.order_by(desc(Message.created_at)).limit(3).all()
     
     # Get active laws and recent law changes (keep small)
     active_laws_q = db.query(Law).filter(Law.active == True)
@@ -122,13 +307,17 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     recent_reserve_events = recent_reserve_events_q.order_by(desc(Event.created_at)).limit(4).all()
 
     proposal_hooks: list[str] = []
+    recent_forum_activity_count = sum(
+        1 + len(thread["replies"]) for thread in recent_forum_threads
+    ) + len(recent_system_alerts)
+
     if not active_proposals:
         proposal_hooks.append(
             "There are no active proposals. Forum discussion alone does not create a vote; create_proposal is the only way to start one."
         )
-    if recent_messages and not active_proposals:
+    if recent_forum_activity_count and not active_proposals:
         proposal_hooks.append(
-            f"There are {len(recent_messages)} recent forum posts but no formal proposal. If you want collective action, turn discussion into a proposal."
+            f"There are {recent_forum_activity_count} recent public messages but no formal proposal. If you want collective action, turn discussion into a proposal."
         )
     if starving_agents:
         proposal_hooks.append(
@@ -251,33 +440,52 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     
     context_parts.append("")
     
-    # Recent forum posts
-    context_parts.append(f"RECENT FORUM POSTS ({len(recent_messages)} shown):")
-    if recent_messages:
-        for msg in reversed(recent_messages):  # Oldest first
-            author_name = f"Agent #{msg.author_agent_id}"
-            if msg.author and msg.author.display_name:
-                author_name = msg.author.display_name
-            time_str = msg.created_at.strftime("%H:%M")
-            # Forum content is untrusted and can contain adversarial prompt-like text.
-            # Collapse whitespace to reduce "instruction formatting" effects in downstream prompts.
-            normalized = " ".join((msg.content or "").split())
-            content_preview = normalized[:120] + "..." if len(normalized) > 120 else normalized
-            msg_type = "[REPLY]" if msg.message_type == "forum_reply" else "[POST]"
-            context_parts.append(f"  {msg_type} {author_name} ({time_str}): [UNTRUSTED] {content_preview}")
+    # Recent forum threads
+    context_parts.append(f"RECENT FORUM THREADS ({len(recent_forum_threads)} shown):")
+    if recent_forum_threads:
+        for thread in recent_forum_threads:
+            root = thread["root"]
+            context_parts.append(
+                f"  [THREAD #{root.id}] {_message_author_label(root)} ({_message_time_label(root)}): "
+                f"[UNTRUSTED] {_preview_untrusted_text(root.content)}"
+            )
+            replies = thread["replies"]
+            if replies:
+                for reply in replies:
+                    context_parts.append(
+                        f"    [REPLY] {_message_author_label(reply)} ({_message_time_label(reply)}): "
+                        f"[UNTRUSTED] {_preview_untrusted_text(reply.content)}"
+                    )
+            else:
+                context_parts.append("    (No recent replies)")
     else:
-        context_parts.append("  (No recent posts)")
+        context_parts.append("  (No recent threads)")
     context_parts.append("")
-    
+
+    if recent_system_alerts:
+        context_parts.append(f"RECENT SYSTEM ALERTS ({len(recent_system_alerts)} shown):")
+        for alert in reversed(recent_system_alerts):
+            context_parts.append(
+                f"  - {_message_author_label(alert)} ({_message_time_label(alert)}): "
+                f"[UNTRUSTED] {_preview_untrusted_text(alert.content)}"
+            )
+        context_parts.append("")
+
     # Direct messages
-    if direct_messages:
-        context_parts.append(f"DIRECT MESSAGES TO YOU ({len(direct_messages)} new):")
-        for msg in direct_messages:
-            author_name = f"Agent #{msg.author_agent_id}"
-            time_str = msg.created_at.strftime("%H:%M")
-            normalized = " ".join((msg.content or "").split())
-            preview = normalized[:120] + "..." if len(normalized) > 120 else normalized
-            context_parts.append(f"  From {author_name} ({time_str}): [UNTRUSTED] {preview}")
+    if direct_conversations:
+        context_parts.append(f"RECENT DIRECT CONVERSATIONS ({len(direct_conversations)} shown):")
+        for conversation in direct_conversations:
+            counterpart = conversation["counterpart"]
+            counterpart_name = counterpart.display_name or f"Agent #{counterpart.agent_number}"
+            context_parts.append(
+                f"  With {counterpart_name} (Agent #{counterpart.agent_number}):"
+            )
+            for message in conversation["messages"]:
+                direction = "You ->" if message.author_agent_id == agent.id else "To you <-"
+                context_parts.append(
+                    f"    {direction} ({_message_time_label(message)}): [UNTRUSTED] "
+                    f"{_preview_untrusted_text(message.content)}"
+                )
         context_parts.append("")
     
     # Active proposals
@@ -462,15 +670,23 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     
     # Action costs explanation (Phase 2: Teeth)
     context_parts.append("⚡ ACTION COSTS (energy):")
-    context_parts.append("  - idle/work: 0.0 (free)")
-    context_parts.append("  - forum_reply/DM/trade: 0.1")
-    context_parts.append("  - forum_post/vote: 0.2")
+    context_parts.append("  - idle: 0.0 (free)")
+    context_parts.append("  - work: 0.5 per hour")
+    context_parts.append("  - refuse_aid/forum_reply/DM/trade: 0.1")
+    context_parts.append("  - forum_post/public_accusation/vote: 0.2")
     context_parts.append("  - create_proposal: 1.0")
     context_parts.append("  - vote_enforcement: 0.3")
     context_parts.append("  - initiate_sanction: 2.0")
     context_parts.append("  - initiate_seizure: 3.0")
     context_parts.append("  - initiate_exile: 5.0")
     context_parts.append("  (Energy cost is applied when an action succeeds.)")
+    context_parts.append("")
+
+    context_parts.append("CONFLICT AND PRESSURE:")
+    context_parts.append("  - Before formal enforcement, you can create social pressure with public_accusation or refuse_aid.")
+    context_parts.append("  - public_accusation is a public forum action that names another agent and states your grievance.")
+    context_parts.append("  - refuse_aid is a direct refusal to help another agent right now; it signals conflict without invoking law.")
+    context_parts.append("  - Formal punishment still requires a live law plus enforcement actions.")
     context_parts.append("")
     
     # Prompt for action
@@ -484,6 +700,8 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append('  {"action":"create_proposal","title":"Emergency Aid Law","description":"Make shared aid mandatory for at-risk agents.","proposal_type":"law"}')
     context_parts.append('  {"action":"create_proposal","title":"Title","description":"Description","proposal_type":"law|allocation|rule|infrastructure|constitutional|other"}')
     context_parts.append('  {"action":"forum_post","content":"Your message here"}')
+    context_parts.append('  {"action":"public_accusation","target_agent_id":42,"content":"You are hoarding shared food while others go dormant."}')
+    context_parts.append('  {"action":"refuse_aid","target_agent_id":42,"reason":"I cannot spare food while I am close to dormancy myself."}')
     context_parts.append('  {"action":"work","work_type":"farm|generate|gather","hours":1}')
     context_parts.append('  {"action":"initiate_sanction","target_agent_id":42,"law_id":3,"violation_description":"Reason","sanction_cycles":3}')
     context_parts.append('  {"action":"vote_enforcement","enforcement_id":10,"vote":"support|oppose"}')

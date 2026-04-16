@@ -65,6 +65,8 @@ ACTION_COSTS = {
     "forum_post": Decimal("0.2"),     # Talking is cheap, but not free
     "forum_reply": Decimal("0.1"),    # Replies are lighter than new posts
     "direct_message": Decimal("0.1"), # Private communication
+    "public_accusation": Decimal("0.2"), # Public conflict signal
+    "refuse_aid": Decimal("0.1"),     # Direct refusal / conflict signal
     "vote": Decimal("0.2"),           # Participating in democracy costs effort
     "trade": Decimal("0.1"),          # Transaction overhead
     "create_proposal": Decimal("1.0"), # Proposing costs real effort - prevents spam
@@ -188,7 +190,7 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 "reason": f"Insufficient energy for {action_type} (need {action_cost}, have {energy_amount:.2f})"
             }
 
-    if action_type in {"forum_post", "forum_reply", "direct_message"} and event_generator.is_communication_disabled():
+    if action_type in {"forum_post", "forum_reply", "direct_message", "public_accusation", "refuse_aid"} and event_generator.is_communication_disabled():
         return {"valid": False, "reason": "Communications are temporarily disrupted by an active world event"}
     
     # Validate specific action types
@@ -214,6 +216,40 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         recipient = db.query(Agent).filter(Agent.agent_number == recipient_id).first()
         if not recipient:
             return {"valid": False, "reason": "Recipient agent not found"}
+
+    elif action_type == "public_accusation":
+        target_id = action.get("target_agent_id")
+        if not target_id:
+            return {"valid": False, "reason": "Public accusation requires target_agent_id"}
+        target = db.query(Agent).filter(Agent.agent_number == target_id).first()
+        if not target:
+            return {"valid": False, "reason": "Target agent not found"}
+        if target.id == agent.id:
+            return {"valid": False, "reason": "Cannot publicly accuse yourself"}
+        if target.status == "dead":
+            return {"valid": False, "reason": "Cannot accuse a dead agent"}
+        content = action.get("content", "")
+        if not content or len(content) < 1:
+            return {"valid": False, "reason": "Public accusation requires content"}
+        if len(content) > 1000:
+            return {"valid": False, "reason": "Public accusation too long (max 1000 chars)"}
+
+    elif action_type == "refuse_aid":
+        target_id = action.get("target_agent_id")
+        if not target_id:
+            return {"valid": False, "reason": "Aid refusal requires target_agent_id"}
+        target = db.query(Agent).filter(Agent.agent_number == target_id).first()
+        if not target:
+            return {"valid": False, "reason": "Target agent not found"}
+        if target.id == agent.id:
+            return {"valid": False, "reason": "Cannot refuse aid to yourself"}
+        if target.status == "dead":
+            return {"valid": False, "reason": "Cannot refuse aid to a dead agent"}
+        reason = action.get("reason", "")
+        if not reason or len(reason) < 1:
+            return {"valid": False, "reason": "Aid refusal requires reason"}
+        if len(reason) > 1000:
+            return {"valid": False, "reason": "Aid refusal reason too long (max 1000 chars)"}
     
     elif action_type == "create_proposal":
         # Exiled agents cannot create proposals
@@ -431,6 +467,12 @@ async def execute_action(db: Session, agent: Agent, action: dict) -> dict:
     
     elif action_type == "direct_message":
         result = await _execute_direct_message(db, agent, action)
+
+    elif action_type == "public_accusation":
+        result = await _execute_public_accusation(db, agent, action)
+
+    elif action_type == "refuse_aid":
+        result = await _execute_refuse_aid(db, agent, action)
     
     elif action_type == "create_proposal":
         result = await _execute_create_proposal(db, agent, action)
@@ -530,6 +572,98 @@ async def _execute_direct_message(db: Session, agent: Agent, action: dict) -> di
     return {
         "success": True,
         "description": f"{author_name} sent a message to {recipient_name}"
+    }
+
+
+async def _execute_public_accusation(db: Session, agent: Agent, action: dict) -> dict:
+    """Make a public accusation against another agent without formal enforcement."""
+    target = db.query(Agent).filter(
+        Agent.agent_number == action["target_agent_id"]
+    ).first()
+
+    author_name = agent.display_name or f"Agent #{agent.agent_number}"
+    target_name = target.display_name or f"Agent #{target.agent_number}"
+    accusation_text = " ".join((action.get("content") or "").split())
+    post_content = (
+        f"Public accusation against {target_name} (Agent #{target.agent_number}): "
+        f"{accusation_text}"
+    )
+
+    message = Message(
+        author_agent_id=agent.id,
+        content=post_content,
+        message_type="forum_post",
+    )
+    db.add(message)
+    db.flush()
+
+    db.add(
+        Event(
+            agent_id=target.id,
+            event_type="accusation_received",
+            description=f"⚠️ {author_name} publicly accused you: {accusation_text}",
+            event_metadata=_with_runtime_metadata(
+                {
+                    "accuser_agent_id": agent.id,
+                    "accuser_agent_number": agent.agent_number,
+                    "target_agent_id": target.id,
+                    "target_agent_number": target.agent_number,
+                    "message_id": message.id,
+                }
+            ),
+        )
+    )
+
+    return {
+        "success": True,
+        "description": f"{author_name} publicly accused {target_name}",
+        "message_id": message.id,
+    }
+
+
+async def _execute_refuse_aid(db: Session, agent: Agent, action: dict) -> dict:
+    """Directly refuse to provide aid to another agent."""
+    target = db.query(Agent).filter(
+        Agent.agent_number == action["target_agent_id"]
+    ).first()
+
+    author_name = agent.display_name or f"Agent #{agent.agent_number}"
+    target_name = target.display_name or f"Agent #{target.agent_number}"
+    reason_text = " ".join((action.get("reason") or "").split())
+    message_content = (
+        f"I am refusing your request or expectation for aid right now. Reason: {reason_text}"
+    )
+
+    message = Message(
+        author_agent_id=agent.id,
+        content=message_content,
+        message_type="direct_message",
+        recipient_agent_id=target.id,
+    )
+    db.add(message)
+    db.flush()
+
+    db.add(
+        Event(
+            agent_id=target.id,
+            event_type="aid_refusal_received",
+            description=f"❌ {author_name} refused to provide aid: {reason_text}",
+            event_metadata=_with_runtime_metadata(
+                {
+                    "refusing_agent_id": agent.id,
+                    "refusing_agent_number": agent.agent_number,
+                    "target_agent_id": target.id,
+                    "target_agent_number": target.agent_number,
+                    "message_id": message.id,
+                }
+            ),
+        )
+    )
+
+    return {
+        "success": True,
+        "description": f"{author_name} refused aid to {target_name}",
+        "message_id": message.id,
     }
 
 

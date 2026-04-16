@@ -11,13 +11,14 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import ObjectDeletedError
+from sqlalchemy.sql import select
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.time import ensure_utc, now_utc
-from app.models.models import Agent, AgentInventory, Proposal, Event, Vote, Enforcement
+from app.models.models import Agent, AgentInventory, Proposal, Event, Vote, Enforcement, Message
 from app.services.llm_client import get_agent_action
-from app.services.actions import execute_action, validate_action
+from app.services.actions import execute_action, get_action_rate_limit_state, validate_action
 from app.services.context_builder import build_agent_context
 from app.services.agent_memory import agent_memory_service
 from app.services.run_policy import (
@@ -67,6 +68,7 @@ class AgentProcessor:
     CHECKPOINT_INTERRUPT_COOLDOWN_MINUTES = 10
     PROPOSAL_DEADLINE_INTERRUPT_MINUTES = 120
     CRISIS_EVENT_LOOKBACK_MINUTES = 60
+    SOCIAL_INTERRUPT_LOOKBACK_MINUTES = 90
     STARVATION_INTERRUPT_THRESHOLD = 2.0
     
     def __init__(self):
@@ -179,6 +181,11 @@ class AgentProcessor:
                 if self._is_rate_limit_backoff_active(agent_id):
                     return
 
+                action_budget = get_action_rate_limit_state(db, agent)
+                if action_budget["actions_remaining_this_hour"] <= 0:
+                    self._apply_rate_limit_backoff_from_state(agent_id, action_budget)
+                    return
+
                 checkpoint_reason = await self._get_checkpoint_reason(db, agent)
                 if checkpoint_reason:
                     runtime_mode = "checkpoint"
@@ -268,47 +275,79 @@ class AgentProcessor:
 
                 validation = await validate_action(db, agent, action_data)
                 if not validation["valid"]:
-                    self._apply_rate_limit_backoff(agent_id, validation, runtime_metadata=runtime_metadata)
-                    # If checkpoint output is invalid, use the run-class-aware deterministic policy.
-                    if checkpoint_reason:
-                        fallback_action = build_terminal_llm_failure_action(
-                            agent_id=agent_id,
-                            reason=f"Checkpoint action rejected: {validation['reason']}",
-                            run_class=run_class,
-                            failure_stage="invalid_checkpoint_output",
-                        )
-                        fallback_meta = fallback_action.pop("_deterministic_meta", None)
-                        if isinstance(fallback_meta, dict):
-                            runtime_mode = str(fallback_meta.get("runtime_mode") or runtime_mode)
-                            runtime_metadata["mode"] = runtime_mode
-                            runtime_metadata["continuity_protection"] = bool(
-                                fallback_meta.get("continuity_protection")
+                    if validation.get("reason_code") == "rate_limit":
+                        self._apply_rate_limit_backoff(agent_id, validation, runtime_metadata=runtime_metadata)
+                        return
+                    if self._is_energy_constraint(validation, action_data):
+                        idle_fallback = self._build_constraint_idle_action(validation["reason"])
+                        idle_validation = await validate_action(db, agent, idle_fallback)
+                        if idle_validation["valid"]:
+                            action_data = idle_fallback
+                            validation = idle_validation
+                    if not validation["valid"]:
+                        self._apply_rate_limit_backoff(agent_id, validation, runtime_metadata=runtime_metadata)
+                        # If checkpoint output is invalid, use the run-class-aware deterministic policy.
+                        if checkpoint_reason:
+                            fallback_action = build_terminal_llm_failure_action(
+                                agent_id=agent_id,
+                                reason=f"Checkpoint action rejected: {validation['reason']}",
+                                run_class=run_class,
+                                failure_stage="invalid_checkpoint_output",
                             )
-                            runtime_metadata["failure_stage"] = fallback_meta.get("failure_stage")
-                            runtime_metadata["failure_reason"] = fallback_meta.get("failure_reason")
-                        fallback_validation = await validate_action(db, agent, fallback_action)
-                        if fallback_validation["valid"]:
-                            action_data = fallback_action
-                            validation = fallback_validation
+                            fallback_meta = fallback_action.pop("_deterministic_meta", None)
+                            if isinstance(fallback_meta, dict):
+                                runtime_mode = str(fallback_meta.get("runtime_mode") or runtime_mode)
+                                runtime_metadata["mode"] = runtime_mode
+                                runtime_metadata["continuity_protection"] = bool(
+                                    fallback_meta.get("continuity_protection")
+                                )
+                                runtime_metadata["failure_stage"] = fallback_meta.get("failure_stage")
+                                runtime_metadata["failure_reason"] = fallback_meta.get("failure_reason")
+                            fallback_validation = await validate_action(db, agent, fallback_action)
+                            if fallback_validation["valid"]:
+                                action_data = fallback_action
+                                validation = fallback_validation
+                            else:
+                                if fallback_validation.get("reason_code") == "rate_limit":
+                                    self._apply_rate_limit_backoff(
+                                        agent_id,
+                                        fallback_validation,
+                                        runtime_metadata=runtime_metadata,
+                                    )
+                                    return
+                                if self._is_energy_constraint(fallback_validation, fallback_action):
+                                    idle_after_fallback = self._build_constraint_idle_action(
+                                        fallback_validation["reason"]
+                                    )
+                                    idle_after_fallback_validation = await validate_action(
+                                        db, agent, idle_after_fallback
+                                    )
+                                    if idle_after_fallback_validation["valid"]:
+                                        action_data = idle_after_fallback
+                                        validation = idle_after_fallback_validation
+                                if not fallback_validation["valid"] and not validation["valid"]:
+                                    self._apply_rate_limit_backoff(
+                                        agent_id,
+                                        fallback_validation,
+                                        runtime_metadata=runtime_metadata,
+                                    )
+                                    await self._log_invalid_action(
+                                        db,
+                                        agent_id,
+                                        action_data,
+                                        fallback_validation["reason"],
+                                        runtime_metadata=runtime_metadata,
+                                    )
+                                    return
                         else:
-                            self._apply_rate_limit_backoff(agent_id, fallback_validation, runtime_metadata=runtime_metadata)
                             await self._log_invalid_action(
                                 db,
                                 agent_id,
                                 action_data,
-                                fallback_validation["reason"],
+                                validation["reason"],
                                 runtime_metadata=runtime_metadata,
                             )
                             return
-                    else:
-                        await self._log_invalid_action(
-                            db,
-                            agent_id,
-                            action_data,
-                            validation["reason"],
-                            runtime_metadata=runtime_metadata,
-                        )
-                        return
 
                 result = await execute_action(db, agent, action_data)
                 try:
@@ -441,7 +480,6 @@ class AgentProcessor:
         if validation.get("reason_code") != "rate_limit":
             return
 
-        now = now_utc()
         next_reset_at: Optional[datetime] = None
         next_reset_raw = validation.get("next_reset_at")
         if isinstance(next_reset_raw, str):
@@ -451,6 +489,41 @@ class AgentProcessor:
                 next_reset_at = None
 
         retry_after_seconds = max(0, int(validation.get("retry_after_seconds") or 0))
+        self._set_rate_limit_backoff(
+            agent_id,
+            next_reset_at=next_reset_at,
+            retry_after_seconds=retry_after_seconds,
+            runtime_metadata=runtime_metadata,
+        )
+
+    def _apply_rate_limit_backoff_from_state(
+        self,
+        agent_id: int,
+        rate_limit_state: dict,
+        *,
+        runtime_metadata: Optional[dict] = None,
+    ) -> None:
+        next_reset_at = ensure_utc(rate_limit_state.get("next_reset_at"))
+        now = now_utc()
+        retry_after_seconds = 60
+        if next_reset_at and next_reset_at > now:
+            retry_after_seconds = max(1, int((next_reset_at - now).total_seconds()))
+        self._set_rate_limit_backoff(
+            agent_id,
+            next_reset_at=next_reset_at,
+            retry_after_seconds=retry_after_seconds,
+            runtime_metadata=runtime_metadata,
+        )
+
+    def _set_rate_limit_backoff(
+        self,
+        agent_id: int,
+        *,
+        next_reset_at: Optional[datetime],
+        retry_after_seconds: int,
+        runtime_metadata: Optional[dict] = None,
+    ) -> None:
+        now = now_utc()
         buffer_seconds = max(
             0,
             int(getattr(settings, "ACTION_RATE_LIMIT_COOLDOWN_BUFFER_SECONDS", 0) or 0),
@@ -471,6 +544,19 @@ class AgentProcessor:
             runtime_metadata["rate_limit_backoff_until"] = cooldown_until.isoformat()
             if next_reset_at:
                 runtime_metadata["rate_limit_next_reset_at"] = next_reset_at.isoformat()
+
+    @staticmethod
+    def _is_energy_constraint(validation: dict, action_data: Optional[dict]) -> bool:
+        reason = str(validation.get("reason") or "")
+        action_type = str((action_data or {}).get("action") or "")
+        return bool(reason.startswith("Insufficient energy")) and action_type != "idle"
+
+    @staticmethod
+    def _build_constraint_idle_action(reason: str) -> dict:
+        return {
+            "action": "idle",
+            "reasoning": f"Conserving energy because the planned action was not affordable: {reason}",
+        }
     
     async def _log_error(self, agent_id: int, error: str):
         """Log an error during processing."""
@@ -530,6 +616,10 @@ class AgentProcessor:
             return "interrupt_proposal_deadline"
         if self._has_pending_enforcement_interrupt(db, agent, now):
             return "interrupt_enforcement_targeted"
+        if self._has_recent_direct_message_interrupt(db, agent, now):
+            return "interrupt_direct_message"
+        if self._has_recent_forum_reply_interrupt(db, agent, now):
+            return "interrupt_forum_reply"
         if self._has_recent_crisis_interrupt(db, now):
             return "interrupt_crisis_event"
         return None
@@ -579,7 +669,7 @@ class AgentProcessor:
                 strategy = "accumulate_materials"
         elif action_type in {"vote", "create_proposal", "initiate_sanction", "initiate_seizure", "initiate_exile", "vote_enforcement"}:
             strategy = "governance"
-        elif action_type in {"forum_post", "forum_reply", "direct_message"}:
+        elif action_type in {"forum_post", "forum_reply", "direct_message", "public_accusation", "refuse_aid"}:
             strategy = "social_coordination"
         elif action_type == "trade":
             strategy = "resource_exchange"
@@ -660,6 +750,47 @@ class AgentProcessor:
             .first()
         )
         return recent is not None
+
+    def _social_interrupt_window_start(self, agent: Agent, now) -> datetime:
+        lookback_start = now - timedelta(minutes=self.SOCIAL_INTERRUPT_LOOKBACK_MINUTES)
+        last_checkpoint_at = ensure_utc(agent.last_checkpoint_at)
+        if last_checkpoint_at is None:
+            return lookback_start
+        return max(lookback_start, last_checkpoint_at)
+
+    def _has_recent_direct_message_interrupt(self, db: Session, agent: Agent, now) -> bool:
+        window_start = self._social_interrupt_window_start(agent, now)
+        recent_message = (
+            db.query(Message.id)
+            .filter(
+                Message.message_type == "direct_message",
+                Message.recipient_agent_id == agent.id,
+                Message.author_agent_id != agent.id,
+                Message.created_at > window_start,
+                Message.created_at <= now,
+            )
+            .first()
+        )
+        return recent_message is not None
+
+    def _has_recent_forum_reply_interrupt(self, db: Session, agent: Agent, now) -> bool:
+        window_start = self._social_interrupt_window_start(agent, now)
+        agent_message_ids = select(Message.id).where(
+            Message.author_agent_id == agent.id,
+            Message.message_type.in_(["forum_post", "forum_reply"]),
+        )
+        recent_reply = (
+            db.query(Message.id)
+            .filter(
+                Message.message_type == "forum_reply",
+                Message.author_agent_id != agent.id,
+                Message.parent_message_id.in_(agent_message_ids),
+                Message.created_at > window_start,
+                Message.created_at <= now,
+            )
+            .first()
+        )
+        return recent_reply is not None
 
 
 # Singleton processor instance

@@ -44,6 +44,8 @@ COOPERATION_EVENT_TYPES = {
 }
 
 CONFLICT_EVENT_TYPES = {
+    "public_accusation",
+    "refuse_aid",
     "initiate_sanction",
     "initiate_seizure",
     "initiate_exile",
@@ -70,7 +72,11 @@ CONFLICT_KEYWORDS = {
     "hostile",
     "fight",
     "war",
+    "accuse",
+    "accusation",
     "betray",
+    "refuse aid",
+    "refused aid",
     "sanction",
     "seizure",
     "exile",

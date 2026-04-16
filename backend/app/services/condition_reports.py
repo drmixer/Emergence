@@ -43,6 +43,8 @@ CORE_METRICS = (
 )
 
 CONFLICT_EVENT_TYPES = {
+    "public_accusation",
+    "refuse_aid",
     "initiate_sanction",
     "initiate_seizure",
     "initiate_exile",

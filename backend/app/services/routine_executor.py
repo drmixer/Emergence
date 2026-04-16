@@ -10,6 +10,7 @@ import hashlib
 from sqlalchemy.orm import Session
 
 from app.models.models import Agent, AgentInventory, Proposal, Vote
+from app.services.actions import action_energy_cost
 
 
 class RoutineExecutor:
@@ -75,39 +76,69 @@ class RoutineExecutor:
         energy = resources.get("energy", 0.0)
         materials = resources.get("materials", 0.0)
 
+        def affordable(action: dict, *, fallback_reason: str | None = None) -> dict:
+            return self._coerce_affordable_action(resources, action, fallback_reason=fallback_reason)
+
         # Survival-first deterministic behavior.
         if food < 2.0:
-            return self._work_action("farm", "Routine execution: restore low food reserves.")
+            return affordable(
+                self._work_action("farm", "Routine execution: restore low food reserves."),
+            )
         if energy < 2.0:
-            return self._work_action("generate", "Routine execution: restore low energy reserves.")
+            return affordable(
+                self._work_action("generate", "Routine execution: restore low energy reserves."),
+            )
 
         urgent = self._urgent_unvoted_proposal(db, agent)
         if urgent is not None:
-            return {
-                "action": "vote",
-                "proposal_id": urgent.id,
-                "vote": self._deterministic_vote(agent, urgent),
-                "reasoning": "Routine execution: voting before proposal deadline.",
-            }
+            return affordable(
+                {
+                    "action": "vote",
+                    "proposal_id": urgent.id,
+                    "vote": self._deterministic_vote(agent, urgent),
+                    "reasoning": "Routine execution: voting before proposal deadline.",
+                },
+                fallback_reason="Routine execution: conserving energy until a governance action is affordable.",
+            )
 
         strategy = str((agent.current_intent or {}).get("strategy") or "stabilize")
         if strategy == "accumulate_food":
-            return self._work_action("farm", "Routine execution: continue food accumulation strategy.")
+            return affordable(
+                self._work_action("farm", "Routine execution: continue food accumulation strategy."),
+            )
         if strategy == "accumulate_energy":
-            return self._work_action("generate", "Routine execution: continue energy accumulation strategy.")
+            return affordable(
+                self._work_action("generate", "Routine execution: continue energy accumulation strategy."),
+            )
         if strategy == "accumulate_materials":
-            return self._work_action("gather", "Routine execution: continue materials accumulation strategy.")
+            return affordable(
+                self._work_action("gather", "Routine execution: continue materials accumulation strategy."),
+            )
         if strategy == "conserve_energy":
             return {"action": "idle", "reasoning": "Routine execution: conserving energy between checkpoints."}
         if strategy in {"governance", "social_coordination"}:
             # Keep civic agents productive between strategic replans.
-            return self._work_action(self._lowest_resource_work_type(food, energy, materials), "Routine execution: maintain baseline production while monitoring governance.")
+            return affordable(
+                self._work_action(
+                    self._lowest_resource_work_type(food, energy, materials),
+                    "Routine execution: maintain baseline production while monitoring governance.",
+                ),
+            )
         if strategy == "resource_exchange":
             if materials < 12.0:
-                return self._work_action("gather", "Routine execution: building trade inventory.")
-            return self._work_action("farm", "Routine execution: preparing food inventory for possible trade.")
+                return affordable(
+                    self._work_action("gather", "Routine execution: building trade inventory."),
+                )
+            return affordable(
+                self._work_action("farm", "Routine execution: preparing food inventory for possible trade."),
+            )
 
-        return self._work_action(self._lowest_resource_work_type(food, energy, materials), "Routine execution: maintain balanced resources.")
+        return affordable(
+            self._work_action(
+                self._lowest_resource_work_type(food, energy, materials),
+                "Routine execution: maintain balanced resources.",
+            ),
+        )
 
     @staticmethod
     def _work_action(work_type: str, reasoning: str) -> dict:
@@ -183,6 +214,25 @@ class RoutineExecutor:
     def _lowest_resource_work_type(food: float, energy: float, materials: float) -> str:
         levels = {"farm": food, "generate": energy, "gather": materials}
         return min(levels, key=levels.get)
+
+    @staticmethod
+    def _coerce_affordable_action(
+        resources: dict[str, float],
+        action: dict,
+        *,
+        fallback_reason: str | None = None,
+    ) -> dict:
+        action_type = str((action or {}).get("action") or "idle")
+        required_energy = float(action_energy_cost(action_type, action))
+        available_energy = float(resources.get("energy", 0.0) or 0.0)
+        if available_energy + 1e-9 >= required_energy:
+            return action
+
+        return {
+            "action": "idle",
+            "reasoning": fallback_reason
+            or "Routine execution: conserving energy until a meaningful action is affordable.",
+        }
 
 
 routine_executor = RoutineExecutor()

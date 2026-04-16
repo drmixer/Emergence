@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
 
     # Simulation settings
-    AGENT_LOOP_DELAY_SECONDS: int = 150  # 2.5 minutes
+    AGENT_LOOP_DELAY_SECONDS: int = 180  # 3 minutes
     DAY_LENGTH_MINUTES: int = 60  # 1 real hour = 1 sim day
     # Can be fractional in dev for faster end-to-end testing (e.g. 0.25 = 15 minutes).
     PROPOSAL_VOTING_HOURS: float = 24.0
