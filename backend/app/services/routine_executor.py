@@ -6,6 +6,7 @@ This keeps agents active between strategic LLM checkpoints.
 from __future__ import annotations
 
 from datetime import timedelta
+import hashlib
 from sqlalchemy.orm import Session
 
 from app.models.models import Agent, AgentInventory, Proposal, Vote
@@ -15,6 +16,58 @@ class RoutineExecutor:
     """Build deterministic low-level actions from current intent + world state."""
 
     URGENT_PROPOSAL_WINDOW_MINUTES = 90
+    _PROPOSAL_TYPE_BIAS = {
+        "efficiency": {"infrastructure": 2, "law": 1, "rule": 0, "allocation": 0, "constitutional": -1, "other": 0},
+        "equality": {"allocation": 2, "law": 1, "rule": 1, "infrastructure": 0, "constitutional": 0, "other": 0},
+        "freedom": {"constitutional": -2, "rule": -2, "law": -1, "allocation": 0, "infrastructure": 0, "other": 0},
+        "stability": {"law": 2, "rule": 2, "constitutional": 1, "allocation": 1, "infrastructure": 0, "other": 0},
+        "neutral": {"law": 0, "rule": 0, "allocation": 0, "infrastructure": 0, "constitutional": 0, "other": 0},
+    }
+    _KEYWORD_BIAS = {
+        "efficiency": {
+            "automatic": 1,
+            "automatically": 1,
+            "reduce": 1,
+            "stability": 1,
+            "resilience": 1,
+            "reminder": -1,
+        },
+        "equality": {
+            "shared": 1,
+            "contribute": 1,
+            "allocation": 2,
+            "support": 1,
+            "aid": 2,
+            "surplus": 1,
+            "reserve": 1,
+        },
+        "freedom": {
+            "require": -2,
+            "required": -2,
+            "mandatory": -2,
+            "must": -2,
+            "automatic": -1,
+            "automatically": -1,
+            "voluntary": 2,
+            "encourage": 1,
+            "optional": 2,
+            "reminder": 1,
+        },
+        "stability": {
+            "require": 1,
+            "required": 1,
+            "mandatory": 1,
+            "must": 1,
+            "emergency": 1,
+            "drought": 1,
+            "reserve": 1,
+            "stability": 1,
+            "resilience": 1,
+            "voluntary": -1,
+            "optional": -1,
+        },
+        "neutral": {},
+    }
 
     def build_action(self, db: Session, agent: Agent) -> dict:
         resources = self._resource_levels(db, agent.id)
@@ -98,16 +151,33 @@ class RoutineExecutor:
     def _deterministic_vote(agent: Agent, proposal: Proposal) -> str:
         personality = str(agent.personality_type or "neutral")
         ptype = str(proposal.proposal_type or "other")
+        content = f"{str(proposal.title or '').lower()} {str(proposal.description or '').lower()}".strip()
+        seed = (
+            f"{int(getattr(agent, 'agent_number', 0) or 0)}|{personality}|{ptype}|{content}"
+        )
+        digest = hashlib.sha256(seed.encode("utf-8")).digest()
+        roll = digest[0] / 255.0
 
-        if personality == "efficiency":
-            return "yes" if ptype in {"infrastructure", "law"} else "abstain"
-        if personality == "equality":
-            return "yes" if ptype in {"allocation", "law"} else "abstain"
-        if personality == "freedom":
-            return "no" if ptype in {"constitutional", "rule"} else "abstain"
-        if personality == "stability":
-            return "yes" if ptype in {"law", "rule", "constitutional"} else "abstain"
-        return "abstain"
+        score = RoutineExecutor._PROPOSAL_TYPE_BIAS.get(personality, {}).get(ptype, 0)
+        for keyword, weight in RoutineExecutor._KEYWORD_BIAS.get(personality, {}).items():
+            if keyword in content:
+                score += weight
+
+        # Add a small deterministic per-proposal jitter so routine fallback voting
+        # does not collapse every proposal of the same coarse type into one tally.
+        score += (digest[1] % 3) - 1
+
+        if score >= 2:
+            return "yes"
+        if score <= -2:
+            return "no"
+        if score == 1:
+            return "yes" if roll < 0.6 else "abstain"
+        if score == -1:
+            return "no" if roll < 0.6 else "abstain"
+        if roll < 0.7:
+            return "abstain"
+        return "yes" if roll < 0.85 else "no"
 
     @staticmethod
     def _lowest_resource_work_type(food: float, energy: float, materials: float) -> str:
