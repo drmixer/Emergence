@@ -35,22 +35,66 @@ def _status_payload() -> dict[str, Any]:
     db = SessionLocal()
     try:
         effective = runtime_config_service.get_effective(db)
-        counts_row = db.execute(
+        global_counts_row = db.execute(
             text(
                 """
                 SELECT
-                  (SELECT COUNT(*) FROM agent_actions) AS action_count,
-                  (SELECT COUNT(*) FROM llm_usage) AS llm_usage_count,
-                  (SELECT MAX(created_at) FROM agent_actions) AS last_action_at,
-                  (SELECT MAX(created_at) FROM llm_usage) AS last_llm_call_at
+                  (SELECT COUNT(*) FROM agent_actions) AS global_action_count,
+                  (SELECT COUNT(*) FROM llm_usage) AS global_llm_usage_count,
+                  (SELECT MAX(created_at) FROM agent_actions) AS global_last_action_at,
+                  (SELECT MAX(created_at) FROM llm_usage) AS global_last_llm_call_at
                 """
             )
         ).first()
+        current_run_id = str(effective.get("SIMULATION_RUN_ID") or "").strip()
+        run_row = None
+        current_run_counts_row = None
+        if current_run_id:
+            run_row = (
+                db.query(SimulationRun)
+                .filter(SimulationRun.run_id == current_run_id)
+                .first()
+            )
+            if run_row is not None and run_row.started_at is not None:
+                current_run_counts_row = db.execute(
+                    text(
+                        """
+                        SELECT
+                          (
+                            SELECT COUNT(*)
+                            FROM agent_actions
+                            WHERE created_at >= :started_at
+                              AND (:ended_at IS NULL OR created_at <= :ended_at)
+                          ) AS action_count,
+                          (
+                            SELECT COUNT(*)
+                            FROM llm_usage
+                            WHERE run_id = :run_id
+                          ) AS llm_usage_count,
+                          (
+                            SELECT MAX(created_at)
+                            FROM agent_actions
+                            WHERE created_at >= :started_at
+                              AND (:ended_at IS NULL OR created_at <= :ended_at)
+                          ) AS last_action_at,
+                          (
+                            SELECT MAX(created_at)
+                            FROM llm_usage
+                            WHERE run_id = :run_id
+                          ) AS last_llm_call_at
+                        """
+                    ),
+                    {
+                        "run_id": current_run_id,
+                        "started_at": run_row.started_at,
+                        "ended_at": run_row.ended_at,
+                    },
+                ).first()
         return {
             "simulation_active": bool(effective.get("SIMULATION_ACTIVE", True)),
             "simulation_paused": bool(effective.get("SIMULATION_PAUSED", False)),
             "simulation_run_mode": str(effective.get("SIMULATION_RUN_MODE") or ""),
-            "simulation_run_id": str(effective.get("SIMULATION_RUN_ID") or ""),
+            "simulation_run_id": current_run_id,
             "simulation_run_class": coerce_run_class(effective.get("SIMULATION_RUN_CLASS")),
             "deterministic_failure_policy": deterministic_failure_policy_for_run_class(
                 effective.get("SIMULATION_RUN_CLASS")
@@ -59,10 +103,34 @@ def _status_payload() -> dict[str, Any]:
             "simulation_season_number": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
             "simulation_auto_stop_at": str(effective.get("SIMULATION_AUTO_STOP_AT") or "").strip() or None,
             "simulation_auto_stop_run_id": str(effective.get("SIMULATION_AUTO_STOP_RUN_ID") or "").strip() or None,
-            "action_count": int((counts_row.action_count if counts_row else 0) or 0),
-            "llm_usage_count": int((counts_row.llm_usage_count if counts_row else 0) or 0),
-            "last_action_at": counts_row.last_action_at.isoformat() if counts_row and counts_row.last_action_at else None,
-            "last_llm_call_at": counts_row.last_llm_call_at.isoformat() if counts_row and counts_row.last_llm_call_at else None,
+            "run_started_at": run_row.started_at.isoformat() if run_row and run_row.started_at else None,
+            "run_ended_at": run_row.ended_at.isoformat() if run_row and run_row.ended_at else None,
+            "action_count": int((current_run_counts_row.action_count if current_run_counts_row else 0) or 0),
+            "llm_usage_count": int((current_run_counts_row.llm_usage_count if current_run_counts_row else 0) or 0),
+            "last_action_at": (
+                current_run_counts_row.last_action_at.isoformat()
+                if current_run_counts_row and current_run_counts_row.last_action_at
+                else None
+            ),
+            "last_llm_call_at": (
+                current_run_counts_row.last_llm_call_at.isoformat()
+                if current_run_counts_row and current_run_counts_row.last_llm_call_at
+                else None
+            ),
+            "global_action_count": int((global_counts_row.global_action_count if global_counts_row else 0) or 0),
+            "global_llm_usage_count": int(
+                (global_counts_row.global_llm_usage_count if global_counts_row else 0) or 0
+            ),
+            "global_last_action_at": (
+                global_counts_row.global_last_action_at.isoformat()
+                if global_counts_row and global_counts_row.global_last_action_at
+                else None
+            ),
+            "global_last_llm_call_at": (
+                global_counts_row.global_last_llm_call_at.isoformat()
+                if global_counts_row and global_counts_row.global_last_llm_call_at
+                else None
+            ),
         }
     finally:
         db.close()
