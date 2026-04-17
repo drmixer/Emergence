@@ -14,6 +14,7 @@ from app.models.models import (
     AgentInventory,
     AgentLineage,
     AgentMemory,
+    AgentRelationshipMemory,
     Law,
     Proposal,
     SeasonSnapshot,
@@ -47,6 +48,7 @@ def db_session():
     Agent.__table__.create(bind=engine)
     AgentInventory.__table__.create(bind=engine)
     AgentMemory.__table__.create(bind=engine)
+    AgentRelationshipMemory.__table__.create(bind=engine)
     Proposal.__table__.create(bind=engine)
     Vote.__table__.create(bind=engine)
     Law.__table__.create(bind=engine)
@@ -167,6 +169,27 @@ def test_seed_next_season_confirmed_apply_normalizes_state_and_writes_lineage(db
     _seed_agents(db_session, total=10, active={1, 2, 3, 4})
 
     author = db_session.query(Agent).filter_by(agent_number=1).one()
+    ally = db_session.query(Agent).filter_by(agent_number=2).one()
+    fresh_slot = db_session.query(Agent).filter_by(agent_number=10).one()
+    db_session.add_all(
+        [
+            AgentRelationshipMemory(
+                agent_id=author.id,
+                other_agent_id=ally.id,
+                aid_received_from_other_count=2,
+            ),
+            AgentRelationshipMemory(
+                agent_id=author.id,
+                other_agent_id=fresh_slot.id,
+                aid_refusals_received_from_other_count=1,
+            ),
+            AgentRelationshipMemory(
+                agent_id=fresh_slot.id,
+                other_agent_id=author.id,
+                accusations_received_from_other_count=1,
+            ),
+        ]
+    )
     proposal = Proposal(
         author_agent_id=author.id,
         title="Active Proposal",
@@ -249,6 +272,11 @@ def test_seed_next_season_confirmed_apply_normalizes_state_and_writes_lineage(db
     assert carryover_memory.summary_text == "memory-1"
     assert fresh_memory.summary_text == ""
     assert fresh_memory.last_checkpoint_number == 0
+
+    surviving_relationships = db_session.query(AgentRelationshipMemory).all()
+    assert len(surviving_relationships) == 1
+    assert surviving_relationships[0].agent_id == carryover_agent.id
+    assert surviving_relationships[0].other_agent_id == ally.id
 
     expected_food = Decimal(str(settings.STARTING_FOOD))
     expected_energy = Decimal(str(settings.STARTING_ENERGY))

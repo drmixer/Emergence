@@ -106,6 +106,47 @@ class AgentMemory(Base):
     agent = relationship("Agent", back_populates="memory")
 
 
+class AgentRelationshipMemory(Base):
+    """Structured per-agent relationship summary about another agent."""
+    __tablename__ = "agent_relationship_memory"
+
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    other_agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+
+    aid_requests_made_to_other_count = Column(Integer, nullable=False, default=0)
+    aid_requests_received_from_other_count = Column(Integer, nullable=False, default=0)
+    aid_refusals_made_to_other_count = Column(Integer, nullable=False, default=0)
+    aid_refusals_received_from_other_count = Column(Integer, nullable=False, default=0)
+    aid_given_to_other_count = Column(Integer, nullable=False, default=0)
+    aid_received_from_other_count = Column(Integer, nullable=False, default=0)
+
+    accusations_made_against_other_count = Column(Integer, nullable=False, default=0)
+    accusations_received_from_other_count = Column(Integer, nullable=False, default=0)
+    proposal_contests_made_against_other_count = Column(Integer, nullable=False, default=0)
+    proposal_contests_received_from_other_count = Column(Integer, nullable=False, default=0)
+
+    proposal_supports_for_other_count = Column(Integer, nullable=False, default=0)
+    proposal_supports_from_other_count = Column(Integer, nullable=False, default=0)
+    proposal_oppositions_against_other_count = Column(Integer, nullable=False, default=0)
+    proposal_oppositions_from_other_count = Column(Integer, nullable=False, default=0)
+
+    trade_sent_to_other_count = Column(Integer, nullable=False, default=0)
+    trade_received_from_other_count = Column(Integer, nullable=False, default=0)
+
+    last_positive_contact_at = Column(DateTime(timezone=True), nullable=True)
+    last_negative_contact_at = Column(DateTime(timezone=True), nullable=True)
+    last_interaction_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("agent_id", "other_agent_id", name="uq_agent_relationship_memory_pair"),
+        CheckConstraint("agent_id <> other_agent_id", name="ck_agent_relationship_memory_not_self"),
+        Index("idx_agent_relationship_memory_agent_last_interaction", "agent_id", "last_interaction_at"),
+    )
+
+
 class EmergenceMetricSnapshot(Base):
     """Persisted daily emergence metrics for trend tracking."""
     __tablename__ = "emergence_metric_snapshots"

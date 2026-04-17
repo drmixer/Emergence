@@ -16,6 +16,7 @@ from app.models.models import (
     AgentInventory,
     AgentLineage,
     AgentMemory,
+    AgentRelationshipMemory,
     Law,
     Proposal,
     SeasonSnapshot,
@@ -374,8 +375,17 @@ def seed_next_season(
 
     memory_rows = db.query(AgentMemory).all()
     memory_by_agent_id: dict[int, AgentMemory] = {int(row.agent_id): row for row in memory_rows}
-
     agents = db.query(Agent).all()
+    relationship_rows = db.query(AgentRelationshipMemory).all()
+    fresh_agent_ids = {
+        int(agent.id)
+        for agent in agents
+        if int(agent.agent_number) in fresh_numbers_set
+    }
+    for row in relationship_rows:
+        if int(row.agent_id) in fresh_agent_ids or int(row.other_agent_id) in fresh_agent_ids:
+            db.delete(row)
+
     for agent in agents:
         agent_number = int(agent.agent_number)
         if agent_number not in target_numbers:

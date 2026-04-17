@@ -265,6 +265,12 @@ def test_targeted_conflict_notice_appears_in_agent_context(session_factory, monk
 
     assert "publicly accused you" in context
     assert "Echo-5" in context
+    assert "STRATEGIC AUTONOMY AND RECIPROCITY:" in context
+    assert "You are not required to be generous, agreeable, or neutral." in context
+    assert (
+        "If someone publicly challenges you or your proposal, defending yourself, replying, criticizing them, or rallying support are all valid responses."
+        in context
+    )
 
 
 def test_request_and_contest_signals_appear_in_agent_context(session_factory, monkeypatch):
@@ -317,3 +323,85 @@ def test_request_and_contest_signals_appear_in_agent_context(session_factory, mo
     assert "SOCIAL PRESSURE AND ALIGNMENT:" in context
     assert "requested 2 energy from you" in context
     assert "publicly contested your proposal" in context
+    assert "Cooperation is optional." in context
+    assert "You do not owe aid automatically." in context
+    assert (
+        "If someone publicly challenges you or your proposal, defending yourself, replying, criticizing them, or rallying support are all valid responses."
+        in context
+    )
+
+
+def test_relationship_memory_summary_appears_in_agent_context(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        focal = _seed_agent(db, agent_number=21, display_name="Nova-21")
+        ally = _seed_agent(db, agent_number=22, display_name="Orion-22")
+        rival = _seed_agent(db, agent_number=23, display_name="Pyre-23")
+
+        proposal = actions.Proposal(
+            author_agent_id=focal.id,
+            title="Reserve Access Law",
+            description="Keep a survival reserve active.",
+            proposal_type="law",
+            voting_closes_at=actions.now_utc(),
+            status="active",
+        )
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+
+        asyncio.run(
+            actions.execute_action(
+                db,
+                ally,
+                {
+                    "action": "trade",
+                    "recipient_agent_id": 21,
+                    "resource_type": "food",
+                    "amount": 2,
+                },
+            )
+        )
+        asyncio.run(
+            actions.execute_action(
+                db,
+                ally,
+                {
+                    "action": "vote",
+                    "proposal_id": proposal.id,
+                    "vote": "yes",
+                },
+            )
+        )
+        asyncio.run(
+            actions.execute_action(
+                db,
+                rival,
+                {
+                    "action": "refuse_aid",
+                    "target_agent_id": 21,
+                    "reason": "I will not weaken my own position for you.",
+                },
+            )
+        )
+        asyncio.run(
+            actions.execute_action(
+                db,
+                rival,
+                {
+                    "action": "contest_proposal",
+                    "proposal_id": proposal.id,
+                    "reason": "Your reserve plan favors the wrong group.",
+                },
+            )
+        )
+
+        context = asyncio.run(context_builder.build_agent_context(db, focal))
+
+    assert "RELATIONSHIP MEMORY:" in context
+    assert "Trusted allies:" in context
+    assert "Orion-22: helped you 1x" in context
+    assert "Active rivals:" in context
+    assert "Pyre-23: refused you 1x" in context
+    assert "Recent unresolved tensions:" in context

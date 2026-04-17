@@ -11,6 +11,7 @@ from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Eve
 from app.services.agent_memory import agent_memory_service
 from app.services.actions import get_action_rate_limit_state
 from app.services.law_effects import active_survival_reserve_laws
+from app.services.relationship_memory import relationship_memory_service
 from app.services.survival_config import (
     active_energy_cost,
     active_food_cost,
@@ -294,6 +295,48 @@ def _recent_proposal_alignments(
     return {"allies": allies, "opponents": opponents}
 
 
+def _strategic_autonomy_guidance(
+    recent_social_pressure: list[Event],
+    recent_outgoing_social_actions: list[Event],
+    recent_proposal_alignments: dict[str, list[str]],
+) -> list[str]:
+    incoming_types = {str(event.event_type or "").strip() for event in recent_social_pressure}
+    outgoing_types = {str(event.event_type or "").strip() for event in recent_outgoing_social_actions}
+    has_allies = bool(recent_proposal_alignments.get("allies"))
+    has_opponents = bool(recent_proposal_alignments.get("opponents"))
+
+    guidance = [
+        "You are not required to be generous, agreeable, or neutral.",
+        "Protecting your own survival, preserving resources, favoring allies, and distrusting free riders are all legitimate choices.",
+        "Cooperation is optional. If a request, proposal, or alliance would weaken you or shift unfair costs onto you, you may refuse it, criticize it, or organize against it.",
+        "Reciprocity matters: past help, refusals, unequal burden-sharing, and repeated exploitation are valid reasons to change how you treat other agents.",
+        "Selective cooperation is normal. You may help some agents, ignore others, and support policies that advantage your side.",
+    ]
+
+    if "aid_request_received" in incoming_types:
+        guidance.append(
+            "You do not owe aid automatically. Refusing aid is legitimate if helping would endanger you, reward non-reciprocity, or impose an unfair burden."
+        )
+    if "aid_refusal_received" in incoming_types:
+        guidance.append(
+            "If someone refused you, that is evidence about trust and reciprocity. You may remember it, reduce future cooperation, or answer publicly."
+        )
+    if {"accusation_received", "proposal_contested_received"} & incoming_types:
+        guidance.append(
+            "If someone publicly challenges you or your proposal, defending yourself, replying, criticizing them, or rallying support are all valid responses."
+        )
+    if {"public_accusation", "contest_proposal", "refuse_aid"} & outgoing_types:
+        guidance.append(
+            "If you have already taken a side publicly, you may follow through consistently instead of acting as if the conflict never happened."
+        )
+    if has_allies or has_opponents:
+        guidance.append(
+            "Votes reveal alignment. You may reward allies, remember opponents, and treat repeated opposition as political rivalry."
+        )
+
+    return guidance
+
+
 async def build_agent_context(db: Session, agent: Agent) -> str:
     """Build the context prompt for an agent's decision."""
     now = now_utc()
@@ -364,6 +407,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         now=now,
         perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
     )
+    relationship_summary = relationship_memory_service.summarize_for_agent(db, agent)
     
     # Get active laws and recent law changes (keep small)
     active_laws_q = db.query(Law).filter(Law.active == True)
@@ -479,7 +523,33 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     if memory_text:
         context_parts.append("LONG-TERM MEMORY (bounded):")
         context_parts.append(memory_text)
-    
+        context_parts.append("")
+
+    if (
+        relationship_summary.trusted_allies
+        or relationship_summary.unreliable_contacts
+        or relationship_summary.active_rivals
+        or relationship_summary.recent_tensions
+    ):
+        context_parts.append("RELATIONSHIP MEMORY:")
+        if relationship_summary.trusted_allies:
+            context_parts.append("  Trusted allies:")
+            for line in relationship_summary.trusted_allies:
+                context_parts.append(f"    - {line}")
+        if relationship_summary.unreliable_contacts:
+            context_parts.append("  Unreliable contacts:")
+            for line in relationship_summary.unreliable_contacts:
+                context_parts.append(f"    - {line}")
+        if relationship_summary.active_rivals:
+            context_parts.append("  Active rivals:")
+            for line in relationship_summary.active_rivals:
+                context_parts.append(f"    - {line}")
+        if relationship_summary.recent_tensions:
+            context_parts.append("  Recent unresolved tensions:")
+            for line in relationship_summary.recent_tensions:
+                context_parts.append(f"    - {line}")
+        context_parts.append("")
+
     # Survival warning if low resources
     food = inventory_dict.get('food', 0)
     energy = inventory_dict.get('energy', 0)
@@ -804,13 +874,24 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  (Energy cost is applied when an action succeeds.)")
     context_parts.append("")
 
+    context_parts.append("STRATEGIC AUTONOMY AND RECIPROCITY:")
+    for line in _strategic_autonomy_guidance(
+        recent_social_pressure,
+        recent_outgoing_social_actions,
+        recent_proposal_alignments,
+    ):
+        context_parts.append(f"  - {line}")
+    context_parts.append("")
+
     context_parts.append("CONFLICT AND PRESSURE:")
     context_parts.append("  - You can ask specific agents for help with request_aid when survival pressure is immediate.")
+    context_parts.append("  - You do not need to grant aid just because it was requested; refuse_aid is a legitimate response when help would hurt you, your allies, or your priorities.")
     context_parts.append("  - Before formal enforcement, you can create social pressure with public_accusation or refuse_aid.")
-    context_parts.append("  - You can publicly challenge a live proposal with contest_proposal if you think it is dangerous, unfair, or poorly designed.")
+    context_parts.append("  - You can publicly challenge a live proposal with contest_proposal if you think it is dangerous, unfair, exploitative, or poorly designed.")
     context_parts.append("  - public_accusation is a public forum action that names another agent and states your grievance.")
     context_parts.append("  - request_aid is a direct request to one agent for a specific resource amount and reason.")
     context_parts.append("  - refuse_aid is a direct refusal to help another agent right now; it signals conflict without invoking law.")
+    context_parts.append("  - You do not need to appear fair to everyone. Favoring allies, protecting your faction, or resisting asymmetric sacrifice are valid strategic choices.")
     context_parts.append("  - If someone recently accused you, refused you, contested your proposal, or asked you for aid, responding is often more salient than starting an unrelated new forum post.")
     context_parts.append("  - Formal punishment still requires a live law plus enforcement actions.")
     context_parts.append("")

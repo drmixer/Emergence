@@ -20,6 +20,7 @@ from app.services.law_effects import (
     survival_reserve_law_active,
 )
 from app.services.events_generator import event_generator
+from app.services.relationship_memory import relationship_memory_service
 from app.services.runtime_config import runtime_config_service
 from app.services.survival_config import active_energy_cost, active_food_cost
 
@@ -670,6 +671,7 @@ async def _execute_request_aid(db: Session, agent: Agent, action: dict) -> dict:
             ),
         )
     )
+    relationship_memory_service.record_aid_request(db, requester=agent, target=target)
 
     return {
         "success": True,
@@ -716,6 +718,7 @@ async def _execute_public_accusation(db: Session, agent: Agent, action: dict) ->
             ),
         )
     )
+    relationship_memory_service.record_public_accusation(db, accuser=agent, target=target)
 
     return {
         "success": True,
@@ -762,6 +765,7 @@ async def _execute_refuse_aid(db: Session, agent: Agent, action: dict) -> dict:
             ),
         )
     )
+    relationship_memory_service.record_aid_refusal(db, refuser=agent, target=target)
 
     return {
         "success": True,
@@ -811,6 +815,11 @@ async def _execute_contest_proposal(db: Session, agent: Agent, action: dict) -> 
                     }
                 ),
             )
+        )
+        relationship_memory_service.record_proposal_contest(
+            db,
+            challenger=agent,
+            target=proposal_author,
         )
 
     return {
@@ -867,6 +876,16 @@ async def _execute_vote(db: Session, agent: Agent, action: dict) -> dict:
         proposal.votes_against += 1
     else:
         proposal.votes_abstain += 1
+
+    if proposal.author_agent_id != agent.id:
+        proposal_author = db.query(Agent).filter(Agent.id == proposal.author_agent_id).first()
+        if proposal_author is not None:
+            relationship_memory_service.record_vote_alignment(
+                db,
+                voter=agent,
+                proposal_author=proposal_author,
+                vote=action["vote"],
+            )
     
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
     return {
@@ -1008,6 +1027,7 @@ async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:
         transaction_type="trade"
     )
     db.add(transaction)
+    relationship_memory_service.record_trade(db, sender=agent, recipient=recipient)
     
     sender_name = agent.display_name or f"Agent #{agent.agent_number}"
     
