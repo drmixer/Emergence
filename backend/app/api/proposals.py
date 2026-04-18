@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import get_db
 from app.models.models import Proposal, Vote, Agent
+from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 
 router = APIRouter()
 
@@ -67,6 +68,7 @@ def list_proposals(
     status: Optional[str] = Query(None, description="active|passed|failed|expired"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    scope: str = Query("active_run", description="active_run|all"),
     db: Session = Depends(get_db),
 ):
     """List proposals with optional status filter."""
@@ -91,6 +93,8 @@ def list_proposals(
         .options(selectinload(Proposal.author))
         .order_by(desc(Proposal.created_at))
     )
+    if scope != "all":
+        query = apply_live_run_window(query, Proposal.created_at, get_live_run_window(db))
     if status:
         query = query.filter(Proposal.status == status)
 

@@ -17,6 +17,7 @@ from app.services.lineage import (
     lineage_payload_for_agent_number,
     resolve_active_or_latest_season_id,
 )
+from app.services.live_run_scope import LiveRunWindow, get_live_run_window
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,16 @@ def _ranked_entries(items: list[dict[str, Any]], *, sort_key: str, limit: int) -
     for index, item in enumerate(ranked[:limit], start=1):
         item["rank"] = index
     return ranked[:limit]
+
+
+def _apply_run_window(query, column, run_window: LiveRunWindow | None):
+    if run_window is None:
+        return query
+    if run_window.started_at is not None:
+        query = query.filter(column >= run_window.started_at)
+    if run_window.ended_at is not None:
+        query = query.filter(column <= run_window.ended_at)
+    return query
 
 
 def get_wealth_leaderboard(
@@ -125,6 +136,7 @@ def get_activity_leaderboard(
     *,
     db: Session | None = None,
     context: _LeaderboardContext | None = None,
+    run_window: LiveRunWindow | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Get agents ranked by number of actions in the last N hours.
@@ -134,13 +146,20 @@ def get_activity_leaderboard(
     try:
         context = context or _resolve_context(db)
         time_threshold = datetime.utcnow() - timedelta(hours=hours)
-        activity_rows = db.query(
+        activity_query = db.query(
             Event.agent_id,
             func.count(Event.id).label('action_count')
         ).filter(
             Event.created_at >= time_threshold,
             Event.agent_id.isnot(None)
-        ).group_by(Event.agent_id).order_by(desc('action_count')).limit(limit).all()
+        )
+        activity_rows = (
+            _apply_run_window(activity_query, Event.created_at, run_window)
+            .group_by(Event.agent_id)
+            .order_by(desc('action_count'))
+            .limit(limit)
+            .all()
+        )
 
         result = []
         for agent_id, action_count in activity_rows:
@@ -165,6 +184,7 @@ def get_influence_leaderboard(
     *,
     db: Session | None = None,
     context: _LeaderboardContext | None = None,
+    run_window: LiveRunWindow | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Get agents ranked by "influence" - combination of:
@@ -177,20 +197,32 @@ def get_influence_leaderboard(
     db = db or SessionLocal()
     try:
         context = context or _resolve_context(db)
-        proposal_rows = db.query(
+        proposal_rows = _apply_run_window(
+            db.query(
             Proposal.author_agent_id,
             func.count(Proposal.id).label("proposal_count"),
             func.coalesce(func.sum(case((Proposal.status == "passed", 1), else_=0)), 0).label("successful_count"),
+            ),
+            Proposal.created_at,
+            run_window,
         ).group_by(Proposal.author_agent_id).all()
-        vote_rows = db.query(
+        vote_rows = _apply_run_window(
+            db.query(
             Vote.agent_id,
             func.count(Vote.id).label("vote_count"),
+            ),
+            Vote.created_at,
+            run_window,
         ).group_by(Vote.agent_id).all()
-        message_rows = db.query(
+        message_rows = _apply_run_window(
+            db.query(
             Message.author_agent_id,
             func.count(Message.id).label("message_count"),
         ).filter(
             Message.message_type == "forum"
+            ),
+            Message.created_at,
+            run_window,
         ).group_by(Message.author_agent_id).all()
 
         proposal_counts = {
@@ -244,6 +276,7 @@ def get_producer_leaderboard(
     *,
     db: Session | None = None,
     context: _LeaderboardContext | None = None,
+    run_window: LiveRunWindow | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Get agents ranked by total resources produced.
@@ -253,11 +286,15 @@ def get_producer_leaderboard(
     db = db or SessionLocal()
     try:
         context = context or _resolve_context(db)
-        work_rows = db.query(
+        work_rows = _apply_run_window(
+            db.query(
             Event.agent_id,
             func.count(Event.id).label('work_count')
         ).filter(
             Event.event_type == "work"
+            ),
+            Event.created_at,
+            run_window,
         ).group_by(Event.agent_id).order_by(desc('work_count')).limit(limit).all()
 
         result = []
@@ -283,6 +320,7 @@ def get_trader_leaderboard(
     *,
     db: Session | None = None,
     context: _LeaderboardContext | None = None,
+    run_window: LiveRunWindow | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Get agents ranked by trading activity.
@@ -291,11 +329,15 @@ def get_trader_leaderboard(
     db = db or SessionLocal()
     try:
         context = context or _resolve_context(db)
-        trade_rows = db.query(
+        trade_rows = _apply_run_window(
+            db.query(
             Event.agent_id,
             func.count(Event.id).label('trade_count')
         ).filter(
             Event.event_type == "trade"
+            ),
+            Event.created_at,
+            run_window,
         ).group_by(Event.agent_id).order_by(desc('trade_count')).limit(limit).all()
 
         result = []
@@ -316,27 +358,34 @@ def get_trader_leaderboard(
             db.close()
 
 
-def get_all_leaderboards() -> Dict[str, List[Dict[str, Any]]]:
+def get_all_leaderboards(*, scope: str = "active_run") -> Dict[str, List[Dict[str, Any]]]:
     """Get all leaderboard types."""
     db = SessionLocal()
     try:
         context = _resolve_context(db)
+        run_window = get_live_run_window(db) if scope != "all" else None
         return {
             "wealth": get_wealth_leaderboard(db=db, context=context),
-            "activity": get_activity_leaderboard(db=db, context=context),
-            "influence": get_influence_leaderboard(db=db, context=context),
-            "producers": get_producer_leaderboard(db=db, context=context),
-            "traders": get_trader_leaderboard(db=db, context=context),
+            "activity": get_activity_leaderboard(db=db, context=context, run_window=run_window),
+            "influence": get_influence_leaderboard(db=db, context=context, run_window=run_window),
+            "producers": get_producer_leaderboard(db=db, context=context, run_window=run_window),
+            "traders": get_trader_leaderboard(db=db, context=context, run_window=run_window),
         }
     finally:
         db.close()
 
 
-def get_agent_rankings(agent_id: int) -> Dict[str, Any]:
+def get_agent_rankings(agent_id: int, *, scope: str = "active_run") -> Dict[str, Any]:
     """Get all rankings for a specific agent."""
-    wealth = get_wealth_leaderboard(limit=100)
-    activity = get_activity_leaderboard(limit=100)
-    influence = get_influence_leaderboard(limit=100)
+    db = SessionLocal()
+    try:
+        context = _resolve_context(db)
+        run_window = get_live_run_window(db) if scope != "all" else None
+        wealth = get_wealth_leaderboard(limit=100, db=db, context=context)
+        activity = get_activity_leaderboard(limit=100, db=db, context=context, run_window=run_window)
+        influence = get_influence_leaderboard(limit=100, db=db, context=context, run_window=run_window)
+    finally:
+        db.close()
     
     def find_rank(leaderboard: List[Dict], agent_id: int) -> int:
         for entry in leaderboard:

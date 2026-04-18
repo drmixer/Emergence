@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.models import Event
+from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 from app.services.lineage import (
     agent_number_map,
     lineage_map_for_season,
@@ -61,10 +62,13 @@ def list_events(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     type: Optional[str] = Query(None, description="Filter by event_type"),
+    scope: str = Query("active_run", description="active_run|all"),
     db: Session = Depends(get_db),
 ):
     """Paginated event log."""
     query = db.query(Event).order_by(desc(Event.created_at))
+    if scope != "all":
+        query = apply_live_run_window(query, Event.created_at, get_live_run_window(db))
     if type:
         query = query.filter(Event.event_type == type)
 

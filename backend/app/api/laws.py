@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.models.models import Law, Proposal, Agent
+from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 
 router = APIRouter()
 
@@ -70,6 +71,7 @@ def list_laws(
     active: Optional[bool] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    scope: str = Query("active_run", description="active_run|all"),
     db: Session = Depends(get_db),
 ):
     """List laws with optional active filter."""
@@ -78,6 +80,8 @@ def list_laws(
         .options(joinedload(Law.author), joinedload(Law.proposal))
         .order_by(desc(Law.passed_at))
     )
+    if scope != "all":
+        query = apply_live_run_window(query, Law.passed_at, get_live_run_window(db))
     if active is not None:
         query = query.filter(Law.active.is_(active))
 
@@ -123,4 +127,3 @@ def get_law(law_id: int, db: Session = Depends(get_db)):
         author=_agent_info(law.author),
         proposal=_proposal_info(law.proposal) if law.proposal else None,
     )
-

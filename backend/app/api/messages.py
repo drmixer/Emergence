@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.models.models import Agent, Message
+from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 
 router = APIRouter()
 
@@ -75,6 +76,7 @@ def list_messages(
     message_type: Optional[str] = Query(
         None, description="forum_post|forum_reply|direct_message"
     ),
+    scope: str = Query("active_run", description="active_run|all"),
     db: Session = Depends(get_db),
 ):
     """
@@ -87,6 +89,8 @@ def list_messages(
         .options(joinedload(Message.author))
         .order_by(desc(Message.created_at))
     )
+    if scope != "all":
+        query = apply_live_run_window(query, Message.created_at, get_live_run_window(db))
 
     if message_type:
         query = query.filter(Message.message_type == message_type)

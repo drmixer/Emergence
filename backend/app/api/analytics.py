@@ -39,8 +39,9 @@ from app.services.usage_budget import usage_budget
 from app.services.emergence_metrics import compute_emergence_metrics
 from app.services.kpi_rollups import record_kpi_event
 from app.services.report_artifacts import load_json_artifact
-from app.services.simulation_time import get_simulation_day_number
+from app.services.simulation_time import get_simulation_day_number, get_simulation_day_number_from_bounds
 from app.services.runtime_config import runtime_config_service
+from app.services.live_run_scope import LiveRunWindow, apply_live_run_window, get_live_run_window
 from app.core.database import SessionLocal
 from app.models.models import (
     Event,
@@ -871,12 +872,30 @@ def _collect_scored_plot_turns(
     return scored
 
 
+def _resolve_live_run_window(db, scope: str) -> LiveRunWindow | None:
+    if str(scope or "active_run").strip().lower() == "all":
+        return None
+    return get_live_run_window(db)
+
+
+def _clamp_window_start(window_start: datetime, run_window: LiveRunWindow | None) -> datetime:
+    if run_window and run_window.started_at and run_window.started_at > window_start:
+        return run_window.started_at
+    return window_start
+
+
+def _clamp_window_end(window_end: datetime, run_window: LiveRunWindow | None) -> datetime:
+    if run_window and run_window.ended_at and run_window.ended_at < window_end:
+        return run_window.ended_at
+    return window_end
+
+
 # ===== LEADERBOARDS =====
 
 @router.get("/leaderboards")
-def get_leaderboards():
+def get_leaderboards(scope: str = Query("active_run", description="active_run|all")):
     """Get all leaderboard types."""
-    return get_all_leaderboards()
+    return get_all_leaderboards(scope=scope)
 
 
 @router.get("/leaderboards/wealth")
@@ -888,34 +907,63 @@ def leaderboard_wealth(limit: int = Query(10, le=50)):
 @router.get("/leaderboards/activity")
 def leaderboard_activity(
     limit: int = Query(10, le=50),
-    hours: int = Query(24, le=168)
+    hours: int = Query(24, le=168),
+    scope: str = Query("active_run", description="active_run|all"),
 ):
     """Get agents ranked by recent activity."""
-    return get_activity_leaderboard(hours, limit)
+    db = SessionLocal()
+    try:
+        return get_activity_leaderboard(hours, limit, db=db, run_window=_resolve_live_run_window(db, scope))
+    finally:
+        db.close()
 
 
 @router.get("/leaderboards/influence")
-def leaderboard_influence(limit: int = Query(10, le=50)):
+def leaderboard_influence(
+    limit: int = Query(10, le=50),
+    scope: str = Query("active_run", description="active_run|all"),
+):
     """Get agents ranked by influence score."""
-    return get_influence_leaderboard(limit)
+    db = SessionLocal()
+    try:
+        return get_influence_leaderboard(limit, db=db, run_window=_resolve_live_run_window(db, scope))
+    finally:
+        db.close()
 
 
 @router.get("/leaderboards/producers")
-def leaderboard_producers(limit: int = Query(10, le=50)):
+def leaderboard_producers(
+    limit: int = Query(10, le=50),
+    scope: str = Query("active_run", description="active_run|all"),
+):
     """Get agents ranked by production."""
-    return get_producer_leaderboard(limit)
+    db = SessionLocal()
+    try:
+        return get_producer_leaderboard(limit, db=db, run_window=_resolve_live_run_window(db, scope))
+    finally:
+        db.close()
 
 
 @router.get("/leaderboards/traders")
-def leaderboard_traders(limit: int = Query(10, le=50)):
+def leaderboard_traders(
+    limit: int = Query(10, le=50),
+    scope: str = Query("active_run", description="active_run|all"),
+):
     """Get agents ranked by trading activity."""
-    return get_trader_leaderboard(limit)
+    db = SessionLocal()
+    try:
+        return get_trader_leaderboard(limit, db=db, run_window=_resolve_live_run_window(db, scope))
+    finally:
+        db.close()
 
 
 @router.get("/agents/{agent_id}/rankings")
-def agent_rankings(agent_id: int):
+def agent_rankings(
+    agent_id: int,
+    scope: str = Query("active_run", description="active_run|all"),
+):
     """Get ranking positions for a specific agent."""
-    return get_agent_rankings(agent_id)
+    return get_agent_rankings(agent_id, scope=scope)
 
 
 # ===== FEATURED EVENTS =====
@@ -1277,6 +1325,7 @@ def plot_turns(
     hours: int = Query(48, ge=1, le=24 * 14),
     min_salience: int = Query(60, ge=1, le=100),
     run_id: Optional[str] = Query(None, max_length=64),
+    scope: str = Query("active_run", description="active_run|all"),
 ):
     """
     High-salience events suitable for a viewer-facing "Plot Turns" panel.
@@ -1286,13 +1335,16 @@ def plot_turns(
 
     db = SessionLocal()
     try:
+        run_window = _resolve_live_run_window(db, scope)
+        effective_run_id = str(run_id or "").strip() or (run_window.run_id if run_window else None)
+        window_start = _clamp_window_start(window_start, run_window)
         scored = _collect_scored_plot_turns(
             db,
             window_start=window_start,
             now=now,
             min_salience=min_salience,
             candidate_limit=max(40, limit * 12),
-            run_id=run_id,
+            run_id=effective_run_id,
         )
 
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
@@ -1300,7 +1352,7 @@ def plot_turns(
         return {
             "window_hours": hours,
             "min_salience": min_salience,
-            "run_id": run_id,
+            "run_id": effective_run_id,
             "count": len(payload),
             "items": payload,
         }
@@ -1315,6 +1367,7 @@ def plot_turns_replay(
     bucket_minutes: int = Query(30, ge=10, le=120),
     limit: int = Query(220, ge=20, le=500),
     run_id: Optional[str] = Query(None, max_length=64),
+    scope: str = Query("active_run", description="active_run|all"),
 ):
     """
     Chronological high-salience replay stream with bucketed counts for time-scrub UI.
@@ -1322,18 +1375,22 @@ def plot_turns_replay(
     now = now_utc()
     window_start = now - timedelta(hours=hours)
     bucket_seconds = int(bucket_minutes * 60)
-    total_seconds = max(1, int((now - window_start).total_seconds()))
-    bucket_count = max(1, (total_seconds + bucket_seconds - 1) // bucket_seconds)
 
     db = SessionLocal()
     try:
+        run_window = _resolve_live_run_window(db, scope)
+        effective_run_id = str(run_id or "").strip() or (run_window.run_id if run_window else None)
+        window_start = _clamp_window_start(window_start, run_window)
+        window_end = _clamp_window_end(now, run_window)
+        total_seconds = max(1, int((window_end - window_start).total_seconds()))
+        bucket_count = max(1, (total_seconds + bucket_seconds - 1) // bucket_seconds)
         scored = _collect_scored_plot_turns(
             db,
             window_start=window_start,
-            now=now,
+            now=window_end,
             min_salience=min_salience,
             candidate_limit=max(limit * 6, 240),
-            run_id=run_id,
+            run_id=effective_run_id,
         )
         scored.sort(key=lambda item: (item[1], item[0]))
         if len(scored) > limit:
@@ -1344,7 +1401,7 @@ def plot_turns_replay(
         buckets = []
         for idx in range(bucket_count):
             bucket_start = window_start + timedelta(seconds=idx * bucket_seconds)
-            bucket_end = min(now, bucket_start + timedelta(seconds=bucket_seconds))
+            bucket_end = min(window_end, bucket_start + timedelta(seconds=bucket_seconds))
             buckets.append(
                 {
                     "index": idx,
@@ -1377,7 +1434,7 @@ def plot_turns_replay(
             "min_salience": min_salience,
             "bucket_minutes": bucket_minutes,
             "bucket_count": bucket_count,
-            "run_id": run_id,
+            "run_id": effective_run_id,
             "count": len(events),
             "items": events,
             "buckets": buckets,
@@ -1392,6 +1449,7 @@ def plot_turns_replay_story(
     min_salience: int = Query(55, ge=1, le=100),
     limit: int = Query(8, ge=4, le=10),
     run_id: Optional[str] = Query(None, max_length=64),
+    scope: str = Query("active_run", description="active_run|all"),
 ):
     """
     Curated, chaptered replay story for a quick viewer-facing run summary.
@@ -1401,19 +1459,22 @@ def plot_turns_replay_story(
 
     db = SessionLocal()
     try:
+        run_window = _resolve_live_run_window(db, scope)
+        effective_run_id = str(run_id or "").strip() or (run_window.run_id if run_window else None)
+        window_start = _clamp_window_start(window_start, run_window)
         scored = _collect_scored_plot_turns(
             db,
             window_start=window_start,
             now=now,
             min_salience=min_salience,
             candidate_limit=max(limit * 8, 240),
-            run_id=run_id,
+            run_id=effective_run_id,
         )
         story = _build_replay_story_payload([item[2] for item in scored], target_count=limit)
         return {
             "window_hours": hours,
             "min_salience": min_salience,
-            "run_id": run_id,
+            "run_id": effective_run_id,
             "count": len(story["items"]),
             "chapter_count": len(story["chapters"]),
             "items": story["items"],
@@ -1429,6 +1490,7 @@ def best_moments(
     hours: int = Query(72, ge=1, le=24 * 14),
     min_salience: int = Query(55, ge=1, le=100),
     run_id: Optional[str] = Query(None, max_length=64),
+    scope: str = Query("active_run", description="active_run|all"),
 ):
     """
     Curated, viewer-facing top moments selected from the plot-turn salience stream.
@@ -1438,19 +1500,22 @@ def best_moments(
 
     db = SessionLocal()
     try:
+        run_window = _resolve_live_run_window(db, scope)
+        effective_run_id = str(run_id or "").strip() or (run_window.run_id if run_window else None)
+        window_start = _clamp_window_start(window_start, run_window)
         scored = _collect_scored_plot_turns(
             db,
             window_start=window_start,
             now=now,
             min_salience=min_salience,
             candidate_limit=max(60, limit * 18),
-            run_id=run_id,
+            run_id=effective_run_id,
         )
         moments = _select_best_moments_payloads([item[2] for item in scored], limit)
         return {
             "window_hours": hours,
             "min_salience": min_salience,
-            "run_id": run_id,
+            "run_id": effective_run_id,
             "count": len(moments),
             "items": moments,
         }
@@ -1459,30 +1524,44 @@ def best_moments(
 
 
 @router.get("/social-dynamics")
-def social_dynamics(days: int = Query(7, ge=3, le=30)):
+def social_dynamics(
+    days: int = Query(7, ge=3, le=30),
+    scope: str = Query("active_run", description="active_run|all"),
+):
     """
     Daily social signal series: alliance/conflict/cooperation deltas + coalition churn.
     """
     now = now_utc()
-    start_day = now.date() - timedelta(days=days - 1)
-    window_start = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
-
-    day_keys = [(start_day + timedelta(days=idx)).isoformat() for idx in range(days)]
-    buckets = {
-        day_key: {
-            "day_key": day_key,
-            "conflict_events": 0,
-            "cooperation_events": 0,
-            "alliance_signals": 0,
-            "coalition_churn": None,
-            "inequality_trend": None,
-        }
-        for day_key in day_keys
-    }
-
     db = SessionLocal()
     try:
-        events = db.query(Event).filter(Event.created_at >= window_start).all()
+        run_window = _resolve_live_run_window(db, scope)
+        window_end = _clamp_window_end(now, run_window)
+        start_day = window_end.date() - timedelta(days=days - 1)
+        window_start = _clamp_window_start(
+            datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc),
+            run_window,
+        )
+        start_date = window_start.date()
+        end_date = window_end.date()
+        day_span = max(1, (end_date - start_date).days + 1)
+        day_keys = [(start_date + timedelta(days=idx)).isoformat() for idx in range(day_span)]
+        buckets = {
+            day_key: {
+                "day_key": day_key,
+                "conflict_events": 0,
+                "cooperation_events": 0,
+                "alliance_signals": 0,
+                "coalition_churn": None,
+                "inequality_trend": None,
+            }
+            for day_key in day_keys
+        }
+
+        events = (
+            apply_live_run_window(db.query(Event).filter(Event.created_at >= window_start), Event.created_at, run_window)
+            .filter(Event.created_at <= window_end)
+            .all()
+        )
         for event in events:
             created_at = ensure_utc(event.created_at)
             if not created_at:
@@ -1502,8 +1581,12 @@ def social_dynamics(days: int = Query(7, ge=3, le=30)):
 
         try:
             snapshots = (
-                db.query(EmergenceMetricSnapshot)
-                .filter(EmergenceMetricSnapshot.created_at >= window_start)
+                apply_live_run_window(
+                    db.query(EmergenceMetricSnapshot).filter(EmergenceMetricSnapshot.created_at >= window_start),
+                    EmergenceMetricSnapshot.created_at,
+                    run_window,
+                )
+                .filter(EmergenceMetricSnapshot.created_at <= window_end)
                 .order_by(EmergenceMetricSnapshot.created_at.asc())
                 .all()
             )
@@ -1544,7 +1627,7 @@ def social_dynamics(days: int = Query(7, ge=3, le=30)):
         return {
             "days": days,
             "window_start_utc": window_start.isoformat(),
-            "window_end_utc": now.isoformat(),
+            "window_end_utc": window_end.isoformat(),
             "series": series,
             "latest": latest,
             "deltas_vs_prev_day": deltas,
@@ -1554,15 +1637,20 @@ def social_dynamics(days: int = Query(7, ge=3, le=30)):
 
 
 @router.get("/class-mobility")
-def class_mobility(hours: int = Query(24, ge=1, le=24 * 14)):
+def class_mobility(
+    hours: int = Query(24, ge=1, le=24 * 14),
+    scope: str = Query("active_run", description="active_run|all"),
+):
     """
     Inequality + mobility proxy cards for the viewer dashboard.
     """
     now = now_utc()
-    window_start = now - timedelta(hours=hours)
 
     db = SessionLocal()
     try:
+        run_window = _resolve_live_run_window(db, scope)
+        window_end = _clamp_window_end(now, run_window)
+        window_start = _clamp_window_start(window_end - timedelta(hours=hours), run_window)
         agents = db.query(Agent).all()
         inventories = db.query(AgentInventory).all()
 
@@ -1611,8 +1699,15 @@ def class_mobility(hours: int = Query(24, ge=1, le=24 * 14)):
 
         status_event_types = {"awakened", "became_dormant", "agent_died", "agent_revived"}
         status_events = (
-            db.query(Event)
-            .filter(Event.created_at >= window_start, Event.event_type.in_(tuple(status_event_types)))
+            apply_live_run_window(
+                db.query(Event).filter(
+                    Event.created_at >= window_start,
+                    Event.event_type.in_(tuple(status_event_types)),
+                ),
+                Event.created_at,
+                run_window,
+            )
+            .filter(Event.created_at <= window_end)
             .all()
         )
         status_change_counts = {
@@ -1632,7 +1727,11 @@ def class_mobility(hours: int = Query(24, ge=1, le=24 * 14)):
 
         try:
             latest_snapshot = (
-                db.query(EmergenceMetricSnapshot)
+                apply_live_run_window(
+                    db.query(EmergenceMetricSnapshot),
+                    EmergenceMetricSnapshot.created_at,
+                    run_window,
+                )
                 .order_by(EmergenceMetricSnapshot.simulation_day.desc())
                 .first()
             )
@@ -1663,7 +1762,7 @@ def class_mobility(hours: int = Query(24, ge=1, le=24 * 14)):
         return {
             "window_hours": hours,
             "window_start_utc": window_start.isoformat(),
-            "window_end_utc": now.isoformat(),
+            "window_end_utc": window_end.isoformat(),
             "status_counts": {
                 **status_counts,
                 "living": living_agents,
@@ -1697,33 +1796,73 @@ def overview():
     """Key simulation stats for dashboards."""
     db = SessionLocal()
     try:
-        active_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip() or None
+        run_window = get_live_run_window(db)
+        active_run_id = run_window.run_id
 
         total_agents = db.query(Agent).count()
         active_agents = db.query(Agent).filter(Agent.status == "active").count()
         dormant_agents = db.query(Agent).filter(Agent.status == "dormant").count()
         dead_agents = db.query(Agent).filter(Agent.status == "dead").count()
 
-        total_messages = db.query(Message).count()
-        forum_posts = db.query(Message).filter(Message.message_type == "forum_post").count()
-        forum_replies = db.query(Message).filter(Message.message_type == "forum_reply").count()
-        direct_messages = db.query(Message).filter(Message.message_type == "direct_message").count()
+        total_messages = apply_live_run_window(db.query(Message), Message.created_at, run_window).count()
+        forum_posts = apply_live_run_window(
+            db.query(Message).filter(Message.message_type == "forum_post"),
+            Message.created_at,
+            run_window,
+        ).count()
+        forum_replies = apply_live_run_window(
+            db.query(Message).filter(Message.message_type == "forum_reply"),
+            Message.created_at,
+            run_window,
+        ).count()
+        direct_messages = apply_live_run_window(
+            db.query(Message).filter(Message.message_type == "direct_message"),
+            Message.created_at,
+            run_window,
+        ).count()
 
-        total_proposals = db.query(Proposal).count()
-        active_proposals = db.query(Proposal).filter(Proposal.status == "active").count()
-        passed_proposals = db.query(Proposal).filter(Proposal.status == "passed").count()
-        failed_proposals = db.query(Proposal).filter(Proposal.status == "failed").count()
+        total_proposals = apply_live_run_window(db.query(Proposal), Proposal.created_at, run_window).count()
+        active_proposals = apply_live_run_window(
+            db.query(Proposal).filter(Proposal.status == "active"),
+            Proposal.created_at,
+            run_window,
+        ).count()
+        passed_proposals = apply_live_run_window(
+            db.query(Proposal).filter(Proposal.status == "passed"),
+            Proposal.created_at,
+            run_window,
+        ).count()
+        failed_proposals = apply_live_run_window(
+            db.query(Proposal).filter(Proposal.status == "failed"),
+            Proposal.created_at,
+            run_window,
+        ).count()
 
-        total_laws = db.query(Law).count()
-        active_laws = db.query(Law).filter(Law.active.is_(True)).count()
+        total_laws = apply_live_run_window(db.query(Law), Law.passed_at, run_window).count()
+        active_laws = apply_live_run_window(
+            db.query(Law).filter(Law.active.is_(True)),
+            Law.passed_at,
+            run_window,
+        ).count()
 
-        most_recent_event = db.query(Event).order_by(Event.created_at.desc()).first()
-        first_event = db.query(Event).order_by(Event.created_at.asc()).first()
+        most_recent_event = apply_live_run_window(
+            db.query(Event).order_by(Event.created_at.desc()),
+            Event.created_at,
+            run_window,
+        ).first()
+        first_event = apply_live_run_window(
+            db.query(Event).order_by(Event.created_at.asc()),
+            Event.created_at,
+            run_window,
+        ).first()
 
         first_at = ensure_utc(first_event.created_at) if first_event and first_event.created_at else None
         latest_at = ensure_utc(most_recent_event.created_at) if most_recent_event and most_recent_event.created_at else None
 
-        day_number = get_simulation_day_number(db)
+        if run_window.started_at is not None:
+            day_number = get_simulation_day_number_from_bounds(run_window.started_at, latest_at)
+        else:
+            day_number = get_simulation_day_number(db)
 
         # Critical agents: count agents with low food/energy (thresholds match the context-builder warning).
         critical_food = (
@@ -1763,12 +1902,12 @@ def overview():
         return {
             "day_number": day_number,
             "scope": {
-                "summary": "Agent status and resources reflect the live world state. Message, proposal, and law totals are cumulative within the currently loaded simulation database.",
+                "summary": "Agent status and resources reflect the live world state. Message, proposal, law, and day totals are scoped to the active run window.",
                 "agent_state_scope": "live_world_state",
                 "resource_scope": "live_world_state",
-                "message_scope": "cumulative_database_history",
-                "proposal_scope": "cumulative_database_history",
-                "law_scope": "cumulative_database_history",
+                "message_scope": "active_run_window",
+                "proposal_scope": "active_run_window",
+                "law_scope": "active_run_window",
                 "active_run_id": active_run_id,
             },
             "agents": {

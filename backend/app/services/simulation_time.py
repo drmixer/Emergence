@@ -75,6 +75,20 @@ def get_simulation_day_number(db: Session) -> int:
     return int(elapsed // get_simulation_day_delta()) + 1
 
 
+def get_simulation_day_number_from_bounds(anchor, latest_at=None) -> int:
+    """Derive a simulation day number from explicit window bounds."""
+    clean_anchor = ensure_utc(anchor)
+    if clean_anchor is None:
+        return 0
+
+    clean_latest = ensure_utc(latest_at) or clean_anchor
+    if clean_latest <= clean_anchor:
+        return 1
+
+    elapsed = clean_latest - clean_anchor
+    return int(elapsed // get_simulation_day_delta()) + 1
+
+
 def get_completed_simulation_day_count(db: Session) -> int:
     """Return the number of fully completed simulation days based on persisted activity."""
     anchor = get_simulation_anchor(db)
