@@ -1,4 +1,4 @@
-import { Suspense, lazy, startTransition, useEffect, useState } from 'react'
+import { Suspense, lazy, startTransition, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
     Users,
@@ -16,7 +16,7 @@ import {
     Equal
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import { api } from '../services/api'
+import { api, subscribeToEvents } from '../services/api'
 import ActivityPulse from '../components/ActivityPulse'
 import { ResourceBar, CriticalAgentsBanner } from '../components/ResourceBar'
 import { SkeletonEventCard, SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
@@ -33,6 +33,9 @@ function sumWorldResource(resources, key) {
 }
 
 function formatRemaining(seconds) {
+    if (seconds === null || seconds === undefined) {
+        return 'Live'
+    }
     const safe = Math.max(0, Number(seconds || 0))
     const hours = Math.floor(safe / 3600)
     const minutes = Math.floor((safe % 3600) / 60)
@@ -60,6 +63,7 @@ export default function Dashboard() {
     const [secondaryLoading, setSecondaryLoading] = useState(true)
     const [isLive, setIsLive] = useState(true)
     const [error, setError] = useState(null)
+    const refreshTimerRef = useRef(null)
 
     useEffect(() => {
         let cancelled = false
@@ -74,56 +78,67 @@ export default function Dashboard() {
             setClassMobility(null)
         }
 
-        const fetchData = async () => {
+        const applyOverviewAndResources = (overview, resources) => {
+            setIsLive(Boolean(overview?.events?.latest))
+
+            const capacity = overview?.resources?.capacity_estimate || {}
+            const foodMax = Number(capacity.food || 0) || 1
+            const energyMax = Number(capacity.energy || 0) || 1
+            const materialsMax = Number(capacity.materials || 0) || 1
+
+            setStats({
+                activeAgents: overview?.agents?.active ?? 0,
+                dormantAgents: overview?.agents?.dormant ?? 0,
+                deadAgents: overview?.agents?.dead ?? 0,
+                activeProposals: overview?.proposals?.active ?? 0,
+                passedLaws: overview?.laws?.total ?? 0,
+                totalMessages: overview?.messages?.total ?? 0,
+                dayNumber: overview?.day_number ?? 0,
+                lastActivity: overview?.events?.latest ?? null,
+                criticalFoodAgents: overview?.critical?.food_agents ?? 0,
+                criticalEnergyAgents: overview?.critical?.energy_agents ?? 0,
+                totalFood: sumWorldResource(resources, 'food'),
+                maxFood: foodMax,
+                totalEnergy: sumWorldResource(resources, 'energy'),
+                maxEnergy: energyMax,
+                totalMaterials: sumWorldResource(resources, 'materials'),
+                maxMaterials: materialsMax,
+            })
+            setScope(overview?.scope && typeof overview.scope === 'object' ? overview.scope : null)
+        }
+
+        const fetchPrimary = async ({ showLoading = false } = {}) => {
             try {
-                setLoading(true)
-                setSecondaryLoading(true)
-                setError(null)
+                if (showLoading) {
+                    setLoading(true)
+                    setError(null)
+                }
                 const [overview, resources] = await Promise.all([
                     api.getAnalyticsOverview(),
                     api.getResources(),
                 ])
                 if (cancelled) return
-
-                setIsLive(Boolean(overview?.events?.latest))
-
-                const capacity = overview?.resources?.capacity_estimate || {}
-                const foodMax = Number(capacity.food || 0) || 1
-                const energyMax = Number(capacity.energy || 0) || 1
-                const materialsMax = Number(capacity.materials || 0) || 1
-
-                setStats({
-                    activeAgents: overview?.agents?.active ?? 0,
-                    dormantAgents: overview?.agents?.dormant ?? 0,
-                    deadAgents: overview?.agents?.dead ?? 0,
-                    activeProposals: overview?.proposals?.active ?? 0,
-                    passedLaws: overview?.laws?.total ?? 0,
-                    totalMessages: overview?.messages?.total ?? 0,
-                    dayNumber: overview?.day_number ?? 0,
-                    lastActivity: overview?.events?.latest ?? null,
-                    criticalFoodAgents: overview?.critical?.food_agents ?? 0,
-                    criticalEnergyAgents: overview?.critical?.energy_agents ?? 0,
-                    totalFood: sumWorldResource(resources, 'food'),
-                    maxFood: foodMax,
-                    totalEnergy: sumWorldResource(resources, 'energy'),
-                    maxEnergy: energyMax,
-                    totalMaterials: sumWorldResource(resources, 'materials'),
-                    maxMaterials: materialsMax,
-                })
-                setScope(overview?.scope && typeof overview.scope === 'object' ? overview.scope : null)
+                applyOverviewAndResources(overview, resources)
             } catch (_error) {
                 if (cancelled) return
-                setError('Failed to load live data.')
-                setStats(null)
-                setScope(null)
-                resetSecondaryState()
+                if (showLoading) {
+                    setError('Failed to load live data.')
+                    setStats(null)
+                    setScope(null)
+                    resetSecondaryState()
+                }
             } finally {
-                if (!cancelled) {
+                if (showLoading && !cancelled) {
                     setLoading(false)
                 }
             }
+        }
 
+        const fetchSecondary = async ({ showLoading = false } = {}) => {
             try {
+                if (showLoading) {
+                    setSecondaryLoading(true)
+                }
                 const results = await Promise.allSettled([
                     api.fetch('/api/proposals?status=active&limit=5'),
                     api.fetch('/api/analytics/leaderboards/activity?limit=5&hours=24'),
@@ -179,20 +194,66 @@ export default function Dashboard() {
                             ? mobilityResult.value
                             : null
                     )
-                    setSecondaryLoading(false)
+                    if (showLoading) {
+                        setSecondaryLoading(false)
+                    }
                 })
             } catch {
                 if (cancelled) return
                 startTransition(() => {
-                    resetSecondaryState()
-                    setSecondaryLoading(false)
+                    if (showLoading) {
+                        resetSecondaryState()
+                        setSecondaryLoading(false)
+                    }
                 })
             }
         }
 
-        fetchData()
+        const refreshLiveSnapshot = async () => {
+            try {
+                const [overview, resources, activeProposals, crisisPayload] = await Promise.all([
+                    api.getAnalyticsOverview(),
+                    api.getResources(),
+                    api.fetch('/api/proposals?status=active&limit=5'),
+                    api.getCrisisStrip(6),
+                ])
+                if (cancelled) return
+
+                startTransition(() => {
+                    applyOverviewAndResources(overview, resources)
+                    setProposals(Array.isArray(activeProposals) ? activeProposals : [])
+                    setCrises(Array.isArray(crisisPayload?.items) ? crisisPayload.items : [])
+                })
+            } catch {
+                // Ignore refresh failures; the mounted data remains usable.
+            }
+        }
+
+        const scheduleRefresh = () => {
+            if (refreshTimerRef.current) {
+                return
+            }
+            refreshTimerRef.current = window.setTimeout(() => {
+                refreshTimerRef.current = null
+                void refreshLiveSnapshot()
+            }, 1500)
+        }
+
+        void fetchPrimary({ showLoading: true })
+        void fetchSecondary({ showLoading: true })
+        const unsubscribe = subscribeToEvents((event) => {
+            if (event?.type === 'event') {
+                scheduleRefresh()
+            }
+        })
+
         return () => {
             cancelled = true
+            unsubscribe()
+            if (refreshTimerRef.current) {
+                window.clearTimeout(refreshTimerRef.current)
+                refreshTimerRef.current = null
+            }
         }
     }, [])
 

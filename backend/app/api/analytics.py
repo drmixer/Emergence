@@ -1162,6 +1162,26 @@ def crisis_strip(limit: int = Query(6, ge=1, le=20)):
     db = SessionLocal()
     try:
         living_agents = int(db.query(Agent).filter(Agent.status != "dead").count())
+        critical_food = (
+            db.query(AgentInventory)
+            .join(Agent, Agent.id == AgentInventory.agent_id)
+            .filter(
+                Agent.status != "dead",
+                AgentInventory.resource_type == "food",
+                AgentInventory.quantity < 2,
+            )
+            .count()
+        )
+        critical_energy = (
+            db.query(AgentInventory)
+            .join(Agent, Agent.id == AgentInventory.agent_id)
+            .filter(
+                Agent.status != "dead",
+                AgentInventory.resource_type == "energy",
+                AgentInventory.quantity < 2,
+            )
+            .count()
+        )
         recent_world_events = (
             db.query(Event)
             .filter(Event.event_type == "world_event")
@@ -1193,6 +1213,7 @@ def crisis_strip(limit: int = Query(6, ge=1, le=20)):
             strip_items.append(
                 {
                     "event_id": event_id,
+                    "kind": "world_event",
                     "name": name,
                     "description": description,
                     "effect": effect,
@@ -1203,8 +1224,40 @@ def crisis_strip(limit: int = Query(6, ge=1, le=20)):
                 }
             )
 
+        if critical_food > 0:
+            strip_items.append(
+                {
+                    "event_id": "critical_food_agents",
+                    "kind": "resource_pressure",
+                    "name": "Food Scarcity Pressure",
+                    "description": f"{int(critical_food)} living agent(s) are at critical food levels.",
+                    "effect": {"resource_type": "food", "pressure": "critical"},
+                    "affected_agents": int(critical_food),
+                    "seconds_remaining": None,
+                    "expires_at": None,
+                    "started_at": None,
+                }
+            )
+
+        if critical_energy > 0:
+            strip_items.append(
+                {
+                    "event_id": "critical_energy_agents",
+                    "kind": "resource_pressure",
+                    "name": "Energy Scarcity Pressure",
+                    "description": f"{int(critical_energy)} living agent(s) are at critical energy levels.",
+                    "effect": {"resource_type": "energy", "pressure": "critical"},
+                    "affected_agents": int(critical_energy),
+                    "seconds_remaining": None,
+                    "expires_at": None,
+                    "started_at": None,
+                }
+            )
+
         strip_items.sort(
             key=lambda item: (
+                0 if item.get("kind") == "world_event" else 1,
+                -int(item.get("affected_agents") or 0),
                 -int(item.get("seconds_remaining") or 0),
                 str(item.get("name") or ""),
             )
@@ -1675,12 +1728,22 @@ def overview():
         # Critical agents: count agents with low food/energy (thresholds match the context-builder warning).
         critical_food = (
             db.query(AgentInventory)
-            .filter(AgentInventory.resource_type == "food", AgentInventory.quantity < 2)
+            .join(Agent, Agent.id == AgentInventory.agent_id)
+            .filter(
+                Agent.status != "dead",
+                AgentInventory.resource_type == "food",
+                AgentInventory.quantity < 2,
+            )
             .count()
         )
         critical_energy = (
             db.query(AgentInventory)
-            .filter(AgentInventory.resource_type == "energy", AgentInventory.quantity < 2)
+            .join(Agent, Agent.id == AgentInventory.agent_id)
+            .filter(
+                Agent.status != "dead",
+                AgentInventory.resource_type == "energy",
+                AgentInventory.quantity < 2,
+            )
             .count()
         )
 
