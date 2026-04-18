@@ -299,11 +299,15 @@ def _strategic_autonomy_guidance(
     recent_social_pressure: list[Event],
     recent_outgoing_social_actions: list[Event],
     recent_proposal_alignments: dict[str, list[str]],
+    relationship_summary,
 ) -> list[str]:
     incoming_types = {str(event.event_type or "").strip() for event in recent_social_pressure}
     outgoing_types = {str(event.event_type or "").strip() for event in recent_outgoing_social_actions}
     has_allies = bool(recent_proposal_alignments.get("allies"))
     has_opponents = bool(recent_proposal_alignments.get("opponents"))
+    has_unreliable_contacts = bool(getattr(relationship_summary, "unreliable_contacts", []))
+    has_active_rivals = bool(getattr(relationship_summary, "active_rivals", []))
+    has_recent_tensions = bool(getattr(relationship_summary, "recent_tensions", []))
 
     guidance = [
         "You are not required to be generous, agreeable, or neutral.",
@@ -311,6 +315,7 @@ def _strategic_autonomy_guidance(
         "Cooperation is optional. If a request, proposal, or alliance would weaken you or shift unfair costs onto you, you may refuse it, criticize it, or organize against it.",
         "Reciprocity matters: past help, refusals, unequal burden-sharing, and repeated exploitation are valid reasons to change how you treat other agents.",
         "Selective cooperation is normal. You may help some agents, ignore others, and support policies that advantage your side.",
+        "Do not reset to neutral just to seem polite. If another agent has imposed costs on you, refused you, or repeatedly opposed you, you may carry that forward into your next choice.",
     ]
 
     if "aid_request_received" in incoming_types:
@@ -332,6 +337,14 @@ def _strategic_autonomy_guidance(
     if has_allies or has_opponents:
         guidance.append(
             "Votes reveal alignment. You may reward allies, remember opponents, and treat repeated opposition as political rivalry."
+        )
+    if has_unreliable_contacts:
+        guidance.append(
+            "Repeated requests without reciprocity are a real burden. You may deprioritize unreliable contacts, deny them aid, or resist plans that favor them."
+        )
+    if has_active_rivals or has_recent_tensions:
+        guidance.append(
+            "Relationship memory is actionable. If someone is already a rival or recent source of tension, you may answer them directly, oppose their proposals, or refuse to help them instead of behaving as if each turn starts fresh."
         )
 
     return guidance
@@ -879,6 +892,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         recent_social_pressure,
         recent_outgoing_social_actions,
         recent_proposal_alignments,
+        relationship_summary,
     ):
         context_parts.append(f"  - {line}")
     context_parts.append("")

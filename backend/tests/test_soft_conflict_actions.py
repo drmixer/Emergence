@@ -267,6 +267,7 @@ def test_targeted_conflict_notice_appears_in_agent_context(session_factory, monk
     assert "Echo-5" in context
     assert "STRATEGIC AUTONOMY AND RECIPROCITY:" in context
     assert "You are not required to be generous, agreeable, or neutral." in context
+    assert "Do not reset to neutral just to seem polite." in context
     assert (
         "If someone publicly challenges you or your proposal, defending yourself, replying, criticizing them, or rallying support are all valid responses."
         in context
@@ -405,3 +406,5 @@ def test_relationship_memory_summary_appears_in_agent_context(session_factory, m
     assert "Active rivals:" in context
     assert "Pyre-23: refused you 1x" in context
     assert "Recent unresolved tensions:" in context
+    assert "Relationship memory is actionable." in context
+    assert "Repeated requests without reciprocity are a real burden." in context
