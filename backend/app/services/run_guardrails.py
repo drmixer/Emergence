@@ -160,6 +160,12 @@ class RunGuardrailService:
             )
             or 0
         )
+        failure_rate_threshold = float(
+            runtime_config_service.get_effective_value_cached(
+                "STOP_PROVIDER_FAILURE_RATE_THRESHOLD"
+            )
+            or 0.0
+        )
         window_minutes = int(
             runtime_config_service.get_effective_value_cached(
                 "STOP_PROVIDER_FAILURE_WINDOW_MINUTES"
@@ -170,19 +176,27 @@ class RunGuardrailService:
             return StopDecision(False)
 
         since_ts = now_utc() - timedelta(minutes=window_minutes)
+        current_run_id = str(
+            runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or ""
+        ).strip()
         db = SessionLocal()
         try:
+            params: dict[str, Any] = {"since_ts": since_ts}
+            where_clauses = ["created_at >= :since_ts"]
+            if current_run_id:
+                where_clauses.append("run_id = :run_id")
+                params["run_id"] = current_run_id
             row = db.execute(
                 text(
-                    """
+                    f"""
                     SELECT
                         COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_count,
                         COALESCE(SUM(CASE WHEN success THEN 0 ELSE 1 END), 0) AS failure_count
                     FROM llm_usage
-                    WHERE created_at >= :since_ts
+                    WHERE {' AND '.join(where_clauses)}
                     """
                 ),
-                {"since_ts": since_ts},
+                params,
             ).first()
         except Exception as exc:
             logger.warning("Provider-failure stop check unavailable: %s", exc)
@@ -197,9 +211,13 @@ class RunGuardrailService:
 
         total = successes + failures
         failure_rate = (failures / total) if total > 0 else 1.0
+        if failure_rate < failure_rate_threshold:
+            return StopDecision(False)
         details = {
+            "run_id": current_run_id or None,
             "window_minutes": window_minutes,
             "failure_threshold": threshold,
+            "failure_rate_threshold": round(failure_rate_threshold, 4),
             "failures": failures,
             "successes": successes,
             "failure_rate": round(failure_rate, 4),

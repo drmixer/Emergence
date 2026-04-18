@@ -16,31 +16,6 @@ import { showEventToast } from './ToastNotifications'
 const backgroundEventTypes = new Set(['work', 'idle'])
 const noisyEventTypes = new Set(['invalid_action', 'processing_error'])
 
-const sociallySalientEventTypes = new Set([
-    'forum_post',
-    'forum_reply',
-    'direct_message',
-    'create_proposal',
-    'proposal_created',
-    'vote',
-    'law_passed',
-    'trade',
-    'became_dormant',
-    'awakened',
-    'agent_revived',
-    'agent_died',
-    'faction_formed',
-    'crisis',
-    'world_event',
-    'daily_summary',
-    'enforcement_initiated',
-    'vote_enforcement',
-    'resources_seized',
-    'agent_sanctioned',
-    'agent_exiled',
-    'set_name',
-])
-
 const eventIcons = {
     forum_post: MessageSquare,
     forum_reply: MessageSquare,
@@ -106,9 +81,8 @@ function EventCard({ event }) {
 
 export default function LiveFeed() {
     const [events, setEvents] = useState([])
-    const [showBackground, setShowBackground] = useState(false)
-    const [showSystemNoise, setShowSystemNoise] = useState(false)
-    const [showHiddenControls, setShowHiddenControls] = useState(false)
+    const [showBackground, setShowBackground] = useState(true)
+    const [showSystemNoise, setShowSystemNoise] = useState(true)
     const [connected, setConnected] = useState(false)
     const [error, setError] = useState(null)
     const [isPreLaunch, setIsPreLaunch] = useState(true)
@@ -127,20 +101,8 @@ export default function LiveFeed() {
             if (!t) return false
             if (backgroundEventTypes.has(t)) return showBackground
             if (noisyEventTypes.has(t)) return showSystemNoise
-            return sociallySalientEventTypes.has(t)
+            return true
         })
-    }, [events, showBackground, showSystemNoise])
-
-    const hiddenCounts = useMemo(() => {
-        let bg = 0
-        let system = 0
-        for (const e of events) {
-            const t = e?.event_type
-            if (!t) continue
-            if (!showBackground && backgroundEventTypes.has(t)) bg += 1
-            if (!showSystemNoise && noisyEventTypes.has(t)) system += 1
-        }
-        return { bg, system }
     }, [events, showBackground, showSystemNoise])
 
     useEffect(() => {
@@ -201,37 +163,24 @@ export default function LiveFeed() {
                 </div>
             </div>
 
-            {(hiddenCounts.bg > 0 || hiddenCounts.system > 0) && (
-                <div
-                    className="feed-notice"
-                    style={{ cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => setShowHiddenControls((v) => !v)}
-                    title="Show/hide controls for background + system events"
-                >
-                    Hidden: {hiddenCounts.bg} bg, {hiddenCounts.system} system
-                </div>
-            )}
-
-            {showHiddenControls && (
-                <div className="feed-notice" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
-                        <input
-                            type="checkbox"
-                            checked={showBackground}
-                            onChange={(e) => setShowBackground(e.target.checked)}
-                        />
-                        Background
-                    </label>
-                    <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
-                        <input
-                            type="checkbox"
-                            checked={showSystemNoise}
-                            onChange={(e) => setShowSystemNoise(e.target.checked)}
-                        />
-                        System
-                    </label>
-                </div>
-            )}
+            <div className="feed-notice" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                        type="checkbox"
+                        checked={showBackground}
+                        onChange={(e) => setShowBackground(e.target.checked)}
+                    />
+                    Background
+                </label>
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                        type="checkbox"
+                        checked={showSystemNoise}
+                        onChange={(e) => setShowSystemNoise(e.target.checked)}
+                    />
+                    System
+                </label>
+            </div>
 
             {error && (
                 <div className="feed-notice">

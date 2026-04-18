@@ -77,9 +77,10 @@ class Settings(BaseSettings):
     # If enabled, worker halts the run when any stop condition is tripped.
     STOP_CONDITION_ENFORCEMENT_ENABLED: bool = True
     # Repeated provider failure guardrail:
-    # if failed llm_usage rows in the trailing window exceed this threshold, stop the run.
+    # stop only when both failed llm_usage count and failure rate cross the configured thresholds.
     STOP_PROVIDER_FAILURE_WINDOW_MINUTES: int = 15
     STOP_PROVIDER_FAILURE_THRESHOLD: int = 25
+    STOP_PROVIDER_FAILURE_RATE_THRESHOLD: float = 0.60
     # DB pressure guardrail:
     # if QueuePool utilization remains above threshold for N consecutive checks, stop the run.
     STOP_DB_POOL_UTILIZATION_THRESHOLD: float = 0.95

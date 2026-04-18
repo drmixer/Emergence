@@ -242,6 +242,12 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=50000,
         description="Failed LLM calls in window required to stop the run.",
     ),
+    "STOP_PROVIDER_FAILURE_RATE_THRESHOLD": MutableSettingSpec(
+        python_type=float,
+        min_value=0.0,
+        max_value=1.0,
+        description="Failure-rate floor required before repeated provider failures stop the run.",
+    ),
     "STOP_DB_POOL_UTILIZATION_THRESHOLD": MutableSettingSpec(
         python_type=float,
         min_value=0.5,

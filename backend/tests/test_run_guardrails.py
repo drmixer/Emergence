@@ -13,6 +13,7 @@ def _install_runtime_values(monkeypatch, overrides: dict):
         "SIMULATION_ACTIVE": True,
         "LLM_DAILY_BUDGET_USD_HARD": 1.0,
         "STOP_PROVIDER_FAILURE_THRESHOLD": 999999,
+        "STOP_PROVIDER_FAILURE_RATE_THRESHOLD": 0.6,
         "STOP_PROVIDER_FAILURE_WINDOW_MINUTES": 15,
         "STOP_DB_POOL_UTILIZATION_THRESHOLD": 0.95,
         "STOP_DB_POOL_CONSECUTIVE_CHECKS": 3,
@@ -163,3 +164,64 @@ def test_scheduled_stop_clears_when_run_id_no_longer_matches(monkeypatch):
     assert decision.should_stop is False
     assert len(cleared) == 1
     assert cleared[0]["reason"] == "scheduled_stop_stale_run_mismatch"
+
+
+class _FakeResult:
+    def __init__(self, row):
+        self._row = row
+
+    def first(self):
+        return self._row
+
+
+class _FakeDB:
+    def __init__(self, row):
+        self.row = row
+        self.calls = []
+
+    def execute(self, statement, params):
+        self.calls.append({"statement": str(statement), "params": dict(params)})
+        return _FakeResult(self.row)
+
+    def close(self):
+        return None
+
+
+def test_provider_failure_stop_requires_failure_rate_threshold(monkeypatch):
+    _install_runtime_values(
+        monkeypatch,
+        {
+            "STOP_PROVIDER_FAILURE_THRESHOLD": 25,
+            "STOP_PROVIDER_FAILURE_RATE_THRESHOLD": 0.6,
+            "SIMULATION_RUN_ID": "real-20260418T011806Z",
+        },
+    )
+    fake_db = _FakeDB(type("Row", (), {"success_count": 56, "failure_count": 25})())
+    monkeypatch.setattr("app.services.run_guardrails.SessionLocal", lambda: fake_db)
+
+    decision = RunGuardrailService._check_provider_failures()
+
+    assert decision.should_stop is False
+    assert len(fake_db.calls) == 1
+    assert fake_db.calls[0]["params"]["run_id"] == "real-20260418T011806Z"
+
+
+def test_provider_failure_stop_triggers_when_count_and_rate_both_breach(monkeypatch):
+    _install_runtime_values(
+        monkeypatch,
+        {
+            "STOP_PROVIDER_FAILURE_THRESHOLD": 25,
+            "STOP_PROVIDER_FAILURE_RATE_THRESHOLD": 0.6,
+            "SIMULATION_RUN_ID": "real-20260418T011806Z",
+        },
+    )
+    fake_db = _FakeDB(type("Row", (), {"success_count": 10, "failure_count": 25})())
+    monkeypatch.setattr("app.services.run_guardrails.SessionLocal", lambda: fake_db)
+
+    decision = RunGuardrailService._check_provider_failures()
+
+    assert decision.should_stop is True
+    assert decision.reason == "provider_failures_repeated"
+    assert decision.details["run_id"] == "real-20260418T011806Z"
+    assert decision.details["failure_rate_threshold"] == 0.6
+    assert decision.details["failure_rate"] == round(25 / 35, 4)
