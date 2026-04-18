@@ -69,6 +69,7 @@ class AgentProcessor:
     PROPOSAL_DEADLINE_INTERRUPT_MINUTES = 120
     CRISIS_EVENT_LOOKBACK_MINUTES = 60
     SOCIAL_INTERRUPT_LOOKBACK_MINUTES = 90
+    LOW_PRIORITY_SOCIAL_ADVANCE_MINUTES = 20
     STARVATION_INTERRUPT_THRESHOLD = 2.0
     
     def __init__(self):
@@ -157,6 +158,7 @@ class AgentProcessor:
             system_prompt: Optional[str] = None
             context: Optional[str] = None
             checkpoint_number_hint: Optional[int] = None
+            checkpoint_schedule_updated = False
             run_class = current_run_class()
 
             db = SessionLocal()
@@ -186,6 +188,9 @@ class AgentProcessor:
                     self._apply_rate_limit_backoff_from_state(agent_id, action_budget)
                     return
 
+                checkpoint_schedule_updated = self._apply_low_priority_social_checkpoint_acceleration(
+                    db, agent
+                )
                 checkpoint_reason = await self._get_checkpoint_reason(db, agent)
                 if checkpoint_reason:
                     runtime_mode = "checkpoint"
@@ -194,6 +199,8 @@ class AgentProcessor:
                     model_type = agent.model_type
                     system_prompt = f"{LLM_GUARDRAIL_PREFIX}\n{agent.system_prompt}"
                 else:
+                    if checkpoint_schedule_updated:
+                        db.commit()
                     action_data = routine_executor.build_action(db, agent)
             finally:
                 db.close()
@@ -619,13 +626,34 @@ class AgentProcessor:
         targeted_social_interrupt = self._recent_targeted_social_interrupt_reason(db, agent, now)
         if targeted_social_interrupt is not None:
             return targeted_social_interrupt
-        if self._has_recent_direct_message_interrupt(db, agent, now):
-            return "interrupt_direct_message"
-        if self._has_recent_forum_reply_interrupt(db, agent, now):
-            return "interrupt_forum_reply"
         if self._has_recent_crisis_interrupt(db, now):
             return "interrupt_crisis_event"
         return None
+
+    def _apply_low_priority_social_checkpoint_acceleration(self, db: Session, agent: Agent) -> bool:
+        """Pull the next checkpoint closer when softer social signals accumulate.
+
+        This keeps agents socially responsive without forcing immediate checkpoint storms
+        on every incoming aid request, DM, or forum reply.
+        """
+        now = now_utc()
+        next_checkpoint_at = ensure_utc(agent.next_checkpoint_at)
+        if next_checkpoint_at is None:
+            return False
+        if not self._has_recent_low_priority_social_signal(db, agent, now):
+            return False
+
+        target_checkpoint_at = now + timedelta(minutes=self.LOW_PRIORITY_SOCIAL_ADVANCE_MINUTES)
+        if next_checkpoint_at <= target_checkpoint_at:
+            return False
+
+        agent.next_checkpoint_at = target_checkpoint_at
+        agent.intent_expires_at = target_checkpoint_at
+        current_intent = dict(agent.current_intent or {})
+        current_intent["horizon_expires_at"] = target_checkpoint_at.isoformat()
+        current_intent["social_signal_batched_at"] = now.isoformat()
+        agent.current_intent = current_intent
+        return True
 
     def _apply_checkpoint_state(self, agent: Agent, checkpoint_reason: str, action_data: dict) -> None:
         checkpoint_at = now_utc()
@@ -787,7 +815,6 @@ class AgentProcessor:
                 Event.event_type.in_(
                     [
                         "accusation_received",
-                        "aid_request_received",
                         "aid_refusal_received",
                         "proposal_contested_received",
                     ]
@@ -802,11 +829,31 @@ class AgentProcessor:
         event_type = str(recent_event.event_type or "").strip()
         mapping = {
             "accusation_received": "interrupt_accusation_received",
-            "aid_request_received": "interrupt_aid_request_received",
             "aid_refusal_received": "interrupt_aid_refusal_received",
             "proposal_contested_received": "interrupt_proposal_contested",
         }
         return mapping.get(event_type)
+
+    def _has_recent_low_priority_social_signal(self, db: Session, agent: Agent, now) -> bool:
+        return (
+            self._has_recent_aid_request_signal(db, agent, now)
+            or self._has_recent_direct_message_interrupt(db, agent, now)
+            or self._has_recent_forum_reply_interrupt(db, agent, now)
+        )
+
+    def _has_recent_aid_request_signal(self, db: Session, agent: Agent, now) -> bool:
+        window_start = self._social_interrupt_window_start(agent, now)
+        recent_event = (
+            db.query(Event.id)
+            .filter(
+                Event.agent_id == agent.id,
+                Event.event_type == "aid_request_received",
+                Event.created_at > window_start,
+                Event.created_at <= now,
+            )
+            .first()
+        )
+        return recent_event is not None
 
     def _has_recent_forum_reply_interrupt(self, db: Session, agent: Agent, now) -> bool:
         window_start = self._social_interrupt_window_start(agent, now)

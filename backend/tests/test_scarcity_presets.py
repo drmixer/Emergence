@@ -81,6 +81,7 @@ def test_internal_scarcity_tight_v5_preset_is_a_real_step_change():
 def test_internal_scarcity_tight_v6_preset_tightens_food_without_changing_death_semantics():
     preset = get_scarcity_preset("internal_scarcity_tight_v6")
 
+    assert preset.runtime_overrides["AGENT_LOOP_DELAY_SECONDS"] == 180
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_FOOD_COST"] == 5.0
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_ENERGY_COST"] == 4.0
     assert preset.runtime_overrides["SURVIVAL_DORMANT_FOOD_COST"] == 1.0

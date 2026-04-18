@@ -202,6 +202,7 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "while tightening food upkeep and farm throughput further without changing death semantics."
         ),
         runtime_overrides={
+            "AGENT_LOOP_DELAY_SECONDS": 180,
             "SURVIVAL_ACTIVE_FOOD_COST": 5.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
             "SURVIVAL_DORMANT_FOOD_COST": 1.0,

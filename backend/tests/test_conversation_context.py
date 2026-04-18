@@ -129,7 +129,7 @@ def test_context_includes_thread_root_and_bilateral_dm_history(session_factory, 
     assert "To you <-" in context
 
 
-def test_checkpoint_interrupts_on_recent_direct_message(session_factory):
+def test_recent_direct_message_accelerates_next_checkpoint_without_immediate_interrupt(session_factory):
     with session_factory() as db:
         agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
         counterpart = _seed_agent(db, agent_number=2, display_name="Beacon-2")
@@ -146,12 +146,18 @@ def test_checkpoint_interrupts_on_recent_direct_message(session_factory):
         db.refresh(agent)
 
         processor = agent_loop.AgentProcessor()
+        accelerated = processor._apply_low_priority_social_checkpoint_acceleration(db, agent)
         reason = asyncio.run(processor._get_checkpoint_reason(db, agent))
 
-    assert reason == "interrupt_direct_message"
+    assert accelerated is True
+    assert reason is None
+    assert agent.next_checkpoint_at is not None
+    assert agent.next_checkpoint_at <= now_utc() + timedelta(
+        minutes=processor.LOW_PRIORITY_SOCIAL_ADVANCE_MINUTES + 1
+    )
 
 
-def test_checkpoint_interrupts_on_recent_forum_reply(session_factory):
+def test_recent_forum_reply_accelerates_next_checkpoint_without_immediate_interrupt(session_factory):
     with session_factory() as db:
         agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
         counterpart = _seed_agent(db, agent_number=2, display_name="Beacon-2")
@@ -176,9 +182,41 @@ def test_checkpoint_interrupts_on_recent_forum_reply(session_factory):
         db.refresh(agent)
 
         processor = agent_loop.AgentProcessor()
+        accelerated = processor._apply_low_priority_social_checkpoint_acceleration(db, agent)
         reason = asyncio.run(processor._get_checkpoint_reason(db, agent))
 
-    assert reason == "interrupt_forum_reply"
+    assert accelerated is True
+    assert reason is None
+    assert agent.next_checkpoint_at is not None
+    assert agent.next_checkpoint_at <= now_utc() + timedelta(
+        minutes=processor.LOW_PRIORITY_SOCIAL_ADVANCE_MINUTES + 1
+    )
+
+
+def test_recent_aid_request_accelerates_next_checkpoint_without_immediate_interrupt(session_factory):
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        db.add(
+            Event(
+                agent_id=agent.id,
+                event_type="aid_request_received",
+                description="Beacon-2 requested food support.",
+                created_at=now_utc() - timedelta(minutes=5),
+            )
+        )
+        db.commit()
+        db.refresh(agent)
+
+        processor = agent_loop.AgentProcessor()
+        accelerated = processor._apply_low_priority_social_checkpoint_acceleration(db, agent)
+        reason = asyncio.run(processor._get_checkpoint_reason(db, agent))
+
+    assert accelerated is True
+    assert reason is None
+    assert agent.next_checkpoint_at is not None
+    assert agent.next_checkpoint_at <= now_utc() + timedelta(
+        minutes=processor.LOW_PRIORITY_SOCIAL_ADVANCE_MINUTES + 1
+    )
 
 
 def test_checkpoint_interrupts_on_recent_targeted_social_pressure(session_factory):
