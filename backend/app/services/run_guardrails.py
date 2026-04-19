@@ -18,6 +18,8 @@ from app.services.usage_budget import usage_budget
 
 logger = logging.getLogger(__name__)
 
+RUN_CLASS_SPECIAL_EXPLORATORY = "special_exploratory"
+
 
 @dataclass(frozen=True)
 class StopDecision:
@@ -78,6 +80,42 @@ class RunGuardrailService:
         if decision.should_stop:
             self._enforce_stop(decision)
         return decision
+
+    @staticmethod
+    def _provider_failure_policy() -> dict[str, Any]:
+        base_threshold = int(
+            runtime_config_service.get_effective_value_cached(
+                "STOP_PROVIDER_FAILURE_THRESHOLD"
+            )
+            or 0
+        )
+        base_failure_rate_threshold = float(
+            runtime_config_service.get_effective_value_cached(
+                "STOP_PROVIDER_FAILURE_RATE_THRESHOLD"
+            )
+            or 0.0
+        )
+        run_class = str(
+            runtime_config_service.get_effective_value_cached("SIMULATION_RUN_CLASS") or ""
+        ).strip().lower()
+
+        effective_threshold = base_threshold
+        effective_failure_rate_threshold = base_failure_rate_threshold
+        policy_label = "default"
+
+        if run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
+            effective_threshold = max(base_threshold, base_threshold * 2)
+            effective_failure_rate_threshold = max(base_failure_rate_threshold, 0.75)
+            policy_label = "special_exploratory_relaxed"
+
+        return {
+            "run_class": run_class or None,
+            "base_threshold": base_threshold,
+            "base_failure_rate_threshold": base_failure_rate_threshold,
+            "effective_threshold": effective_threshold,
+            "effective_failure_rate_threshold": effective_failure_rate_threshold,
+            "policy_label": policy_label,
+        }
 
     @staticmethod
     def _check_budget_hard_stop() -> StopDecision:
@@ -154,18 +192,9 @@ class RunGuardrailService:
 
     @staticmethod
     def _check_provider_failures() -> StopDecision:
-        threshold = int(
-            runtime_config_service.get_effective_value_cached(
-                "STOP_PROVIDER_FAILURE_THRESHOLD"
-            )
-            or 0
-        )
-        failure_rate_threshold = float(
-            runtime_config_service.get_effective_value_cached(
-                "STOP_PROVIDER_FAILURE_RATE_THRESHOLD"
-            )
-            or 0.0
-        )
+        policy = RunGuardrailService._provider_failure_policy()
+        threshold = int(policy["effective_threshold"] or 0)
+        failure_rate_threshold = float(policy["effective_failure_rate_threshold"] or 0.0)
         window_minutes = int(
             runtime_config_service.get_effective_value_cached(
                 "STOP_PROVIDER_FAILURE_WINDOW_MINUTES"
@@ -215,9 +244,13 @@ class RunGuardrailService:
             return StopDecision(False)
         details = {
             "run_id": current_run_id or None,
+            "run_class": policy["run_class"],
+            "policy_label": policy["policy_label"],
             "window_minutes": window_minutes,
             "failure_threshold": threshold,
             "failure_rate_threshold": round(failure_rate_threshold, 4),
+            "base_failure_threshold": int(policy["base_threshold"] or 0),
+            "base_failure_rate_threshold": round(float(policy["base_failure_rate_threshold"] or 0.0), 4),
             "failures": failures,
             "successes": successes,
             "failure_rate": round(failure_rate, 4),

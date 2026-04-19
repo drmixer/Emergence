@@ -223,6 +223,7 @@ def _build_snapshot_session():
                     provider TEXT NULL,
                     model_name TEXT NULL,
                     resolved_model_name TEXT NULL,
+                    error_type TEXT NULL,
                     created_at TIMESTAMP NULL
                 )
                 """
@@ -355,5 +356,65 @@ def test_artifact_generation_derives_condition_and_season_from_run_registry(tmp_
         assert technical_payload["season_number"] == 4
         assert "condition:real_scarcity_tuning_20260415_tight_v5_patch2" in (technical_payload.get("tags") or [])
         assert planner_payload["condition_name"] == "real_scarcity_tuning_20260415_tight_v5_patch2"
+    finally:
+        db_session.close()
+
+
+def test_collect_run_snapshot_includes_provider_failures_and_worst_window():
+    db_session = _build_snapshot_session()
+    try:
+        started_at = datetime(2026, 4, 18, 8, 0, tzinfo=timezone.utc)
+        agent = Agent(
+            agent_number=9,
+            display_name="Reliability Agent",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add(agent)
+        db_session.flush()
+        db_session.add(
+            SimulationRun(
+                run_id="real-20260418T071530Z",
+                run_mode="real",
+                protocol_version="protocol_v1",
+                condition_name="real_scarcity_tuning_20260417_tight_v6_social_memory_patch2",
+                run_class="special_exploratory",
+                started_at=started_at,
+            )
+        )
+        db_session.execute(
+            text(
+                """
+                INSERT INTO llm_usage (
+                    run_id, agent_id, success, fallback_used, prompt_tokens, completion_tokens,
+                    total_tokens, estimated_cost_usd, provider, model_name, resolved_model_name, error_type, created_at
+                ) VALUES
+                    (:run_id, :agent_id, 1, 0, 10, 20, 30, 0.01, 'gemini', 'flash', NULL, NULL, :t1),
+                    (:run_id, :agent_id, 0, 0, 10, 20, 30, 0.01, 'gemini', 'flash', NULL, 'RateLimitError', :t2),
+                    (:run_id, :agent_id, 0, 0, 10, 20, 30, 0.01, 'openrouter', 'gpt-oss-20b:free', NULL, 'InternalServerError', :t2),
+                    (:run_id, :agent_id, 1, 0, 10, 20, 30, 0.01, 'openrouter', 'gpt-oss-20b:free', NULL, NULL, :t3)
+                """
+            ),
+            {
+                "run_id": "real-20260418T071530Z",
+                "agent_id": agent.id,
+                "t1": started_at + run_reports.timedelta(minutes=1),
+                "t2": started_at + run_reports.timedelta(minutes=7),
+                "t3": started_at + run_reports.timedelta(minutes=19),
+            },
+        )
+        db_session.commit()
+
+        snapshot = run_reports._collect_run_snapshot(db_session, run_id="real-20260418T071530Z")
+
+        by_provider = {row["provider"]: row for row in snapshot["llm"]["by_provider"]}
+        assert snapshot["llm"]["failure_calls"] == 2
+        assert by_provider["gemini"]["failure_calls"] == 1
+        assert by_provider["gemini"]["rate_limit_failures"] == 1
+        assert by_provider["openrouter"]["failure_calls"] == 1
+        assert snapshot["llm"]["worst_failure_window"]["failure_calls"] >= 1
     finally:
         db_session.close()

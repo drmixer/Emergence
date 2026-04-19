@@ -57,6 +57,7 @@ This cadence is intentionally conservative for budget control and reliability wh
   - `standard_72h`: no provider/model fallback; failure policy = `idle_on_llm_failure`
   - `deep_96h`: no provider/model fallback; failure policy = `idle_on_llm_failure`
   - `special_exploratory`: no provider/model fallback; failure policy = `routine_on_llm_failure`
+- Provider-failure stop guardrails may be looser for `special_exploratory` runs than for claim-bearing runs, but those thresholds must remain run-class-explicit and visible in reporting.
 - `special_exploratory` routine fallback must be disclosed as continuity protection in run framing and artifacts.
 - Fallback behavior must be treated as protocol behavior and documented in internal and public-facing materials when it changes.
 
@@ -71,6 +72,7 @@ This cadence is intentionally conservative for budget control and reliability wh
   - more permissive
   - non-claim-bearing by default
   - may accept more continuity protection for audience experience
+  - may tolerate higher provider-failure stop thresholds before halting the run
 
 ## Research Claim Discipline for Failure Handling
 - Research-grade interpretation requires that failures remain visible in the data.

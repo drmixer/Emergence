@@ -510,6 +510,8 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
               provider,
               COUNT(*) AS calls,
               COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+              COALESCE(SUM(CASE WHEN success THEN 0 ELSE 1 END), 0) AS failure_calls,
+              COALESCE(SUM(CASE WHEN NOT success AND error_type = 'RateLimitError' THEN 1 ELSE 0 END), 0) AS rate_limit_failures,
               COALESCE(SUM(CASE WHEN fallback_used THEN 1 ELSE 0 END), 0) AS provider_model_fallback_calls,
               COALESCE(SUM(total_tokens), 0) AS total_tokens,
               COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
@@ -521,6 +523,19 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         ),
         {"run_id": run_id},
     ).fetchall()
+
+    llm_window_rows = db.execute(
+        text(
+            """
+            SELECT created_at, success
+            FROM llm_usage
+            WHERE run_id = :run_id
+            ORDER BY created_at ASC
+            """
+        ),
+        {"run_id": run_id},
+    ).fetchall()
+    worst_window = _worst_failure_window(llm_window_rows)
 
     model_rows = db.execute(
         text(
@@ -665,6 +680,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
     llm_payload = {
         "calls": calls,
         "success_calls": int((llm_totals.success_calls if llm_totals else 0) or 0),
+        "failure_calls": max(0, calls - int((llm_totals.success_calls if llm_totals else 0) or 0)),
         "provider_model_fallback_calls": int(
             (llm_totals.provider_model_fallback_calls if llm_totals else 0) or 0
         ),
@@ -690,6 +706,13 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
                 "provider": str(row.provider or ""),
                 "calls": int(row.calls or 0),
                 "success_calls": int(row.success_calls or 0),
+                "failure_calls": int(row.failure_calls or 0),
+                "rate_limit_failures": int(row.rate_limit_failures or 0),
+                "failure_rate": (
+                    round(float(row.failure_calls or 0) / float(row.calls or 1), 4)
+                    if int(row.calls or 0) > 0
+                    else 0.0
+                ),
                 "provider_model_fallback_calls": int(row.provider_model_fallback_calls or 0),
                 "fallback_calls": int(row.provider_model_fallback_calls or 0),
                 "total_tokens": int(row.total_tokens or 0),
@@ -697,6 +720,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
             }
             for row in provider_rows
         ],
+        "worst_failure_window": worst_window,
         "by_model": [
             {
                 "provider": str(row.provider or ""),
@@ -752,6 +776,46 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
     }
 
 
+def _worst_failure_window(rows: list[Any], *, window_minutes: int = 15) -> dict[str, Any] | None:
+    buckets: dict[datetime, dict[str, int]] = {}
+    for row in rows:
+        created_at = _coerce_utc_datetime(getattr(row, "created_at", None))
+        if created_at is None:
+            continue
+        window_start = created_at.replace(
+            minute=(created_at.minute // window_minutes) * window_minutes,
+            second=0,
+            microsecond=0,
+        )
+        bucket = buckets.setdefault(window_start, {"success_calls": 0, "failure_calls": 0})
+        if bool(getattr(row, "success", False)):
+            bucket["success_calls"] += 1
+        else:
+            bucket["failure_calls"] += 1
+
+    if not buckets:
+        return None
+
+    best_start, best_counts = max(
+        buckets.items(),
+        key=lambda item: (
+            (item[1]["failure_calls"] / (item[1]["success_calls"] + item[1]["failure_calls"]))
+            if (item[1]["success_calls"] + item[1]["failure_calls"]) > 0
+            else 0.0,
+            item[1]["failure_calls"],
+            item[0],
+        ),
+    )
+    total = best_counts["success_calls"] + best_counts["failure_calls"]
+    return {
+        "window_start": best_start.isoformat(),
+        "window_end": (best_start + timedelta(minutes=window_minutes)).isoformat(),
+        "success_calls": int(best_counts["success_calls"]),
+        "failure_calls": int(best_counts["failure_calls"]),
+        "failure_rate": round((best_counts["failure_calls"] / total) if total > 0 else 0.0, 4),
+    }
+
+
 def _resolve_report_context(
     *,
     snapshot: dict[str, Any],
@@ -788,6 +852,7 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
         "## LLM Totals",
         f"- Calls: {int((llm or {}).get('calls') or 0):,}",
         f"- Success calls: {int((llm or {}).get('success_calls') or 0):,}",
+        f"- Failure calls: {int((llm or {}).get('failure_calls') or 0):,}",
         f"- Provider/model fallback calls: {int((llm or {}).get('provider_model_fallback_calls') or 0):,}",
         f"- Total tokens: {int((llm or {}).get('total_tokens') or 0):,}",
         f"- Estimated cost (USD): {float((llm or {}).get('estimated_cost_usd') or 0.0):.6f}",
@@ -812,8 +877,24 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
             "- "
             + f"{row.get('provider')}: calls={int(row.get('calls') or 0)}, "
             + f"success={int(row.get('success_calls') or 0)}, "
+            + f"failures={int(row.get('failure_calls') or 0)}, "
+            + f"rate_limit_failures={int(row.get('rate_limit_failures') or 0)}, "
+            + f"failure_rate={float(row.get('failure_rate') or 0.0):.4f}, "
             + f"provider_model_fallback={int(row.get('provider_model_fallback_calls') or 0)}, "
             + f"cost_usd={float(row.get('estimated_cost_usd') or 0.0):.6f}"
+        )
+    worst_window = llm.get("worst_failure_window") or {}
+    if worst_window:
+        rows.extend(
+            [
+                "",
+                "## Worst Failure Window",
+                "- "
+                + f"{worst_window.get('window_start')} -> {worst_window.get('window_end')}: "
+                + f"success={int(worst_window.get('success_calls') or 0)}, "
+                + f"failures={int(worst_window.get('failure_calls') or 0)}, "
+                + f"failure_rate={float(worst_window.get('failure_rate') or 0.0):.4f}",
+            ]
         )
     rows.extend(["", "## Model Breakdown"])
     for row in llm.get("by_model") or []:
@@ -1600,7 +1681,7 @@ def rebuild_run_bundle(
             {
                 "heading": "Provider and Model Reliability",
                 "paragraphs": [
-                    f"{row.get('provider')} | calls={row.get('calls')} | success={row.get('success_calls')} | provider_model_fallback={row.get('provider_model_fallback_calls')} | cost_usd={float(row.get('estimated_cost_usd') or 0.0):.6f}"
+                    f"{row.get('provider')} | calls={row.get('calls')} | success={row.get('success_calls')} | failures={row.get('failure_calls')} | rate_limit_failures={row.get('rate_limit_failures')} | failure_rate={float(row.get('failure_rate') or 0.0):.4f} | provider_model_fallback={row.get('provider_model_fallback_calls')} | cost_usd={float(row.get('estimated_cost_usd') or 0.0):.6f}"
                     for row in (technical_payload.get("llm") or {}).get("by_provider", [])
                 ]
                 or ["No provider usage rows were found for this run."],

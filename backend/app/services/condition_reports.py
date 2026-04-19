@@ -319,13 +319,121 @@ def _llm_totals_for_run(db: Session, *, run_id: str, started_at: Any, ended_at: 
         },
     ).first()
 
+    provider_rows = db.execute(
+        text(
+            """
+            SELECT
+              provider,
+              COUNT(*) AS calls,
+              COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) AS success_calls,
+              COALESCE(SUM(CASE WHEN success THEN 0 ELSE 1 END), 0) AS failure_calls,
+              COALESCE(SUM(CASE WHEN NOT success AND error_type = 'RateLimitError' THEN 1 ELSE 0 END), 0) AS rate_limit_failures
+            FROM llm_usage
+            WHERE run_id = :run_id
+              AND created_at >= :started_at
+              AND created_at <= :ended_at
+            GROUP BY provider
+            ORDER BY calls DESC, provider ASC
+            """
+        ),
+        {
+            "run_id": run_id,
+            "started_at": started_at,
+            "ended_at": ended_at,
+        },
+    ).fetchall()
+
+    llm_window_rows = db.execute(
+        text(
+            """
+            SELECT created_at, success
+            FROM llm_usage
+            WHERE run_id = :run_id
+              AND created_at >= :started_at
+              AND created_at <= :ended_at
+            ORDER BY created_at ASC
+            """
+        ),
+        {
+            "run_id": run_id,
+            "started_at": started_at,
+            "ended_at": ended_at,
+        },
+    ).fetchall()
+    worst_window = _worst_failure_window(llm_window_rows)
+
     return {
         "calls": int((row.calls if row else 0) or 0),
         "success_calls": int((row.success_calls if row else 0) or 0),
+        "failure_calls": int(((int((row.calls if row else 0) or 0)) - int((row.success_calls if row else 0) or 0)) or 0),
         "provider_model_fallback_calls": int((row.provider_model_fallback_calls if row else 0) or 0),
         "fallback_calls": int((row.provider_model_fallback_calls if row else 0) or 0),
         "total_tokens": int((row.total_tokens if row else 0) or 0),
         "estimated_cost_usd": float((row.estimated_cost_usd if row else 0.0) or 0.0),
+        "by_provider": [
+            {
+                "provider": str(row.provider or ""),
+                "calls": int(row.calls or 0),
+                "success_calls": int(row.success_calls or 0),
+                "failure_calls": int(row.failure_calls or 0),
+                "rate_limit_failures": int(row.rate_limit_failures or 0),
+                "failure_rate": (
+                    round(float(row.failure_calls or 0) / float(row.calls or 1), 4)
+                    if int(row.calls or 0) > 0
+                    else 0.0
+                ),
+            }
+            for row in provider_rows
+        ],
+        "worst_failure_window": worst_window,
+    }
+
+
+def _worst_failure_window(rows: list[Any], *, window_minutes: int = 15) -> dict[str, Any] | None:
+    buckets: dict[datetime, dict[str, int]] = {}
+    for row in rows:
+        created_at = row.created_at if isinstance(row.created_at, datetime) else None
+        if created_at is None:
+            text_value = str(getattr(row, "created_at", "") or "").strip()
+            if not text_value:
+                continue
+            try:
+                created_at = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+            except Exception:
+                continue
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        window_start = created_at.replace(
+            minute=(created_at.minute // window_minutes) * window_minutes,
+            second=0,
+            microsecond=0,
+        )
+        bucket = buckets.setdefault(window_start, {"success_calls": 0, "failure_calls": 0})
+        if bool(getattr(row, "success", False)):
+            bucket["success_calls"] += 1
+        else:
+            bucket["failure_calls"] += 1
+
+    if not buckets:
+        return None
+
+    best_start, best_counts = max(
+        buckets.items(),
+        key=lambda item: (
+            (item[1]["failure_calls"] / (item[1]["success_calls"] + item[1]["failure_calls"]))
+            if (item[1]["success_calls"] + item[1]["failure_calls"]) > 0
+            else 0.0,
+            item[1]["failure_calls"],
+            item[0],
+        ),
+    )
+    total = best_counts["success_calls"] + best_counts["failure_calls"]
+    return {
+        "window_start": best_start.isoformat(),
+        "window_end": (best_start + timedelta(minutes=window_minutes)).isoformat(),
+        "success_calls": int(best_counts["success_calls"]),
+        "failure_calls": int(best_counts["failure_calls"]),
+        "failure_rate": round((best_counts["failure_calls"] / total) if total > 0 else 0.0, 4),
     }
 
 
@@ -403,6 +511,7 @@ def generate_run_report_summary(
     metrics = {
         "llm_calls": int(llm["calls"]),
         "success_calls": int(llm["success_calls"]),
+        "failure_calls": int(llm["failure_calls"]),
         "provider_model_fallback_calls": int(llm["provider_model_fallback_calls"]),
         "fallback_calls": int(llm["fallback_calls"]),
         "total_tokens": int(llm["total_tokens"]),
@@ -444,6 +553,8 @@ def generate_run_report_summary(
         "duration_bucket_hours": resolved_duration_bucket_hours,
         "claim_gate": readiness,
         "metrics": metrics,
+        "provider_reliability": list(llm.get("by_provider") or []),
+        "worst_failure_window": llm.get("worst_failure_window"),
         "caveats": caveats,
     }
 
@@ -472,6 +583,24 @@ def render_run_report_markdown(payload: dict[str, Any]) -> str:
         else:
             display = f"{int(value or 0):,}"
         rows.append(f"| {label} | {display} |")
+
+    rows.extend(["", "## Provider Reliability"])
+    for row in (payload.get("provider_reliability") or []):
+        rows.append(
+            f"- {row.get('provider')}: calls={int(row.get('calls') or 0)}, "
+            f"success={int(row.get('success_calls') or 0)}, "
+            f"failures={int(row.get('failure_calls') or 0)}, "
+            f"rate_limit_failures={int(row.get('rate_limit_failures') or 0)}, "
+            f"failure_rate={float(row.get('failure_rate') or 0.0):.4f}"
+        )
+    worst_window = payload.get("worst_failure_window") or {}
+    if worst_window:
+        rows.append(
+            f"- Worst 15-minute window (UTC): {worst_window.get('window_start')} -> {worst_window.get('window_end')} "
+            f"| success={int(worst_window.get('success_calls') or 0)} "
+            f"| failures={int(worst_window.get('failure_calls') or 0)} "
+            f"| failure_rate={float(worst_window.get('failure_rate') or 0.0):.4f}"
+        )
 
     rows.extend(["", "## Caveats"])
     for caveat in payload.get("caveats") or []:

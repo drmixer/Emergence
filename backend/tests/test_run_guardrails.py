@@ -11,6 +11,7 @@ def _install_runtime_values(monkeypatch, overrides: dict):
         "STOP_CONDITION_ENFORCEMENT_ENABLED": True,
         "SIMULATION_PAUSED": False,
         "SIMULATION_ACTIVE": True,
+        "SIMULATION_RUN_CLASS": "standard_72h",
         "LLM_DAILY_BUDGET_USD_HARD": 1.0,
         "STOP_PROVIDER_FAILURE_THRESHOLD": 999999,
         "STOP_PROVIDER_FAILURE_RATE_THRESHOLD": 0.6,
@@ -225,3 +226,42 @@ def test_provider_failure_stop_triggers_when_count_and_rate_both_breach(monkeypa
     assert decision.details["run_id"] == "real-20260418T011806Z"
     assert decision.details["failure_rate_threshold"] == 0.6
     assert decision.details["failure_rate"] == round(25 / 35, 4)
+
+
+def test_provider_failure_stop_is_relaxed_for_special_exploratory(monkeypatch):
+    _install_runtime_values(
+        monkeypatch,
+        {
+            "STOP_PROVIDER_FAILURE_THRESHOLD": 25,
+            "STOP_PROVIDER_FAILURE_RATE_THRESHOLD": 0.6,
+            "SIMULATION_RUN_ID": "real-20260418T071530Z",
+            "SIMULATION_RUN_CLASS": "special_exploratory",
+        },
+    )
+    fake_db = _FakeDB(type("Row", (), {"success_count": 22, "failure_count": 34})())
+    monkeypatch.setattr("app.services.run_guardrails.SessionLocal", lambda: fake_db)
+
+    decision = RunGuardrailService._check_provider_failures()
+
+    assert decision.should_stop is False
+
+
+def test_provider_failure_stop_still_triggers_for_special_exploratory_on_severe_outage(monkeypatch):
+    _install_runtime_values(
+        monkeypatch,
+        {
+            "STOP_PROVIDER_FAILURE_THRESHOLD": 25,
+            "STOP_PROVIDER_FAILURE_RATE_THRESHOLD": 0.6,
+            "SIMULATION_RUN_ID": "real-20260418T071530Z",
+            "SIMULATION_RUN_CLASS": "special_exploratory",
+        },
+    )
+    fake_db = _FakeDB(type("Row", (), {"success_count": 10, "failure_count": 60})())
+    monkeypatch.setattr("app.services.run_guardrails.SessionLocal", lambda: fake_db)
+
+    decision = RunGuardrailService._check_provider_failures()
+
+    assert decision.should_stop is True
+    assert decision.details["policy_label"] == "special_exploratory_relaxed"
+    assert decision.details["failure_threshold"] == 50
+    assert decision.details["failure_rate_threshold"] == 0.75
