@@ -4,6 +4,10 @@
     align-items: center;
 }
 
+.glossary-inline.open {
+    z-index: 80;
+}
+
 .glossary-trigger {
     display: inline-flex;
     align-items: center;
@@ -27,10 +31,11 @@
 
 .glossary-popover {
     position: absolute;
-    left: 0;
+    left: 50%;
     top: calc(100% + 8px);
+    transform: translateX(-50%);
     z-index: 40;
-    width: min(320px, 75vw);
+    width: min(320px, calc(100vw - 32px));
     display: none;
     flex-direction: column;
     gap: 6px;
@@ -67,4 +72,16 @@
 
 .glossary-popover-link:hover {
     text-decoration: underline;
+}
+
+.card:has(.glossary-inline),
+.agent-card:has(.glossary-inline) {
+    overflow: visible;
+}
+
+@media (max-width: 720px) {
+    .glossary-popover {
+        left: 0;
+        transform: none;
+    }
 }

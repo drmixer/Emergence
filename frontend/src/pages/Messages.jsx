@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { MessageSquare, MessageCircle, Clock } from 'lucide-react'
 import { api } from '../services/api'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
@@ -51,6 +51,7 @@ function MessageRow({ message, onOpenThread }) {
 }
 
 export default function Messages() {
+  const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('forum')
   const [forumPosts, setForumPosts] = useState([])
   const [replies, setReplies] = useState([])
@@ -94,7 +95,7 @@ export default function Messages() {
 
   const visibleMessages = activeTab === 'forum' ? forumPosts : activeTab === 'replies' ? replies : mixedPublic
 
-  const openThread = async (messageId) => {
+  const openThread = useCallback(async (messageId) => {
     if (!messageId) return
     setThreadLoading(true)
     setThreadError('')
@@ -108,7 +109,19 @@ export default function Messages() {
     } finally {
       setThreadLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    const requestedTab = String(searchParams.get('tab') || '').trim()
+    if (requestedTab === 'forum' || requestedTab === 'replies' || requestedTab === 'all') {
+      setActiveTab(requestedTab)
+    }
+
+    const requestedThreadId = Number(searchParams.get('thread') || 0)
+    if (requestedThreadId > 0) {
+      void openThread(requestedThreadId)
+    }
+  }, [openThread, searchParams])
 
   return (
     <div className="messages-page">

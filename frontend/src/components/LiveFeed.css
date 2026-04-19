@@ -81,9 +81,20 @@
     transition: all var(--transition-normal);
 }
 
+.event-card-link {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+}
+
 .event-card:hover {
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(255, 255, 255, 0.06);
+}
+
+.event-card-link .event-card:hover {
+    border-color: rgba(147, 197, 253, 0.28);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
 }
 
 .event-icon {

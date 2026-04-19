@@ -625,7 +625,8 @@ async def _execute_direct_message(db: Session, agent: Agent, action: dict) -> di
     recipient_name = recipient.display_name or f"Agent #{recipient.agent_number}"
     return {
         "success": True,
-        "description": f"{author_name} sent a message to {recipient_name}"
+        "description": f"{author_name} sent a message to {recipient_name}",
+        "message_id": message.id,
     }
 
 

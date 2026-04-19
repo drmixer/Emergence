@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import {
     Zap,
@@ -49,15 +50,55 @@ function getContinuityOrigin(payload) {
     return origin === 'carryover' || origin === 'fresh' ? origin : ''
 }
 
+function getMessageThreadId(event) {
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+    const result = metadata?.result && typeof metadata.result === 'object' ? metadata.result : {}
+    const direct = Number(result.message_id || metadata.message_id || 0)
+    return Number.isFinite(direct) && direct > 0 ? direct : 0
+}
+
+function getEventHref(event) {
+    const eventType = String(event?.event_type || '').trim()
+    const agentNumber = Number(event?.agent_number || 0)
+    const threadId = getMessageThreadId(event)
+
+    if (
+        threadId > 0 &&
+        new Set([
+            'forum_post',
+            'forum_reply',
+            'direct_message',
+            'request_aid',
+            'aid_request_received',
+            'public_accusation',
+            'refuse_aid',
+            'aid_refusal_received',
+        ]).has(eventType)
+    ) {
+        return `/messages?tab=all&thread=${threadId}`
+    }
+
+    if (eventType === 'create_proposal') {
+        return '/proposals'
+    }
+
+    if (agentNumber > 0 && new Set(['became_dormant', 'awakened', 'agent_died']).has(eventType)) {
+        return `/agents/${agentNumber}`
+    }
+
+    return ''
+}
+
 function EventCard({ event }) {
     const Icon = eventIcons[event.event_type] || eventIcons.default
     const color = eventColors[event.event_type] || eventColors.default
+    const href = getEventHref(event)
 
     const timeAgo = event.created_at
         ? formatDistanceToNow(new Date(event.created_at), { addSuffix: true })
         : 'just now'
 
-    return (
+    const body = (
         <div className={`event-card animate-fade-in`}>
             <div className={`event-icon ${color}`}>
                 <Icon size={16} />
@@ -76,6 +117,16 @@ function EventCard({ event }) {
                 </div>
             </div>
         </div>
+    )
+
+    if (!href) {
+        return body
+    }
+
+    return (
+        <Link to={href} className="event-card-link">
+            {body}
+        </Link>
     )
 }
 
