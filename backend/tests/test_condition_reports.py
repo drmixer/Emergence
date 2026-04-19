@@ -25,19 +25,21 @@ def _seed_llm_usage_rows(db_session, *, run_id: str, agent_id: int, calls: int, 
             text(
                 """
                 INSERT INTO llm_usage (
-                    run_id, agent_id, success, fallback_used, total_tokens, estimated_cost_usd, created_at
+                    run_id, agent_id, provider, success, fallback_used, total_tokens, estimated_cost_usd, error_type, created_at
                 ) VALUES (
-                    :run_id, :agent_id, :success, :fallback_used, :total_tokens, :estimated_cost_usd, :created_at
+                    :run_id, :agent_id, :provider, :success, :fallback_used, :total_tokens, :estimated_cost_usd, :error_type, :created_at
                 )
                 """
             ),
             {
                 "run_id": run_id,
                 "agent_id": agent_id,
+                "provider": "gemini",
                 "success": True,
                 "fallback_used": False,
                 "total_tokens": 100,
                 "estimated_cost_usd": float(cost_per_call),
+                "error_type": None,
                 "created_at": created_at,
             },
         )
@@ -99,10 +101,12 @@ def _build_session():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
                     agent_id INTEGER NULL,
+                    provider TEXT NULL,
                     success BOOLEAN NOT NULL DEFAULT 1,
                     fallback_used BOOLEAN NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL DEFAULT 0,
                     estimated_cost_usd REAL NOT NULL DEFAULT 0,
+                    error_type TEXT NULL,
                     created_at TIMESTAMP NULL
                 )
                 """
