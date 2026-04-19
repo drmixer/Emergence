@@ -24,10 +24,6 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: "/emergence-icon.svg",
-        type: "image/svg+xml",
-      },
-      {
         url: "/logo.png",
         type: "image/png",
       },

@@ -53,7 +53,7 @@ import SupportBanner from './components/SupportBanner'
 import { SubscriptionProvider, NotificationBell } from './components/Subscriptions'
 
 const APP_ICON_LINKS = [
-  { rel: 'icon', href: '/emergence-icon.svg', type: 'image/svg+xml' },
+  { rel: 'icon', href: '/logo.png', type: 'image/png' },
   { rel: 'shortcut icon', href: '/logo.png', type: 'image/png' },
   { rel: 'apple-touch-icon', href: '/logo.png' },
 ]

@@ -125,6 +125,7 @@ export default function Agents() {
                         <option value="">All</option>
                         <option value="active">Active</option>
                         <option value="dormant">Dormant</option>
+                        <option value="dead">Dead</option>
                     </select>
                 </div>
 
