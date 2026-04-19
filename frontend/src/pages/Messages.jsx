@@ -55,6 +55,7 @@ export default function Messages() {
   const [activeTab, setActiveTab] = useState('forum')
   const [forumPosts, setForumPosts] = useState([])
   const [replies, setReplies] = useState([])
+  const [directMessages, setDirectMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [threadLoading, setThreadLoading] = useState(false)
@@ -67,15 +68,18 @@ export default function Messages() {
       setLoading(true)
       setError('')
       try {
-        const [posts, forumReplies] = await Promise.all([
+        const [posts, forumReplies, direct] = await Promise.all([
           api.getMessages(80, 'forum_post'),
           api.getMessages(120, 'forum_reply'),
+          api.getMessages(120, 'direct_message'),
         ])
         setForumPosts(Array.isArray(posts) ? posts : [])
         setReplies(Array.isArray(forumReplies) ? forumReplies : [])
+        setDirectMessages(Array.isArray(direct) ? direct : [])
       } catch (_err) {
         setForumPosts([])
         setReplies([])
+        setDirectMessages([])
         setError('Failed to load discussions.')
       } finally {
         setLoading(false)
@@ -84,16 +88,23 @@ export default function Messages() {
     loadMessages()
   }, [])
 
-  const mixedPublic = useMemo(() => {
-    const merged = [...forumPosts, ...replies]
+  const allMessages = useMemo(() => {
+    const merged = [...forumPosts, ...replies, ...directMessages]
     return merged.sort((a, b) => {
       const aTs = new Date(a?.created_at || 0).getTime()
       const bTs = new Date(b?.created_at || 0).getTime()
       return bTs - aTs
     })
-  }, [forumPosts, replies])
+  }, [directMessages, forumPosts, replies])
 
-  const visibleMessages = activeTab === 'forum' ? forumPosts : activeTab === 'replies' ? replies : mixedPublic
+  const visibleMessages =
+    activeTab === 'forum'
+      ? forumPosts
+      : activeTab === 'replies'
+        ? replies
+        : activeTab === 'direct'
+          ? directMessages
+          : allMessages
 
   const openThread = useCallback(async (messageId) => {
     if (!messageId) return
@@ -113,7 +124,7 @@ export default function Messages() {
 
   useEffect(() => {
     const requestedTab = String(searchParams.get('tab') || '').trim()
-    if (requestedTab === 'forum' || requestedTab === 'replies' || requestedTab === 'all') {
+    if (requestedTab === 'forum' || requestedTab === 'replies' || requestedTab === 'direct' || requestedTab === 'all') {
       setActiveTab(requestedTab)
     }
 
@@ -128,9 +139,9 @@ export default function Messages() {
       <div className="page-header">
         <h1>
           <MessageSquare size={30} />
-          Agent Discussions
+          Agent Messages
         </h1>
-        <p className="page-description">Public forum posts and replies from the simulation.</p>
+        <p className="page-description">Public and direct agent messages from the simulation.</p>
       </div>
 
       <div className="message-tabs">
@@ -142,9 +153,13 @@ export default function Messages() {
           <MessageCircle size={16} />
           Replies
         </button>
+        <button type="button" className={`tab-btn ${activeTab === 'direct' ? 'active' : ''}`} onClick={() => setActiveTab('direct')}>
+          <MessageCircle size={16} />
+          Direct Messages
+        </button>
         <button type="button" className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
           <MessageCircle size={16} />
-          All Public
+          All Messages
         </button>
       </div>
 
@@ -154,7 +169,8 @@ export default function Messages() {
             <h3>
               {activeTab === 'forum' && 'Forum Posts'}
               {activeTab === 'replies' && 'Forum Replies'}
-              {activeTab === 'all' && 'All Public Messages'}
+              {activeTab === 'direct' && 'Direct Messages'}
+              {activeTab === 'all' && 'All Messages'}
             </h3>
             {!loading && <span className="strip-meta">{visibleMessages.length} shown</span>}
           </div>

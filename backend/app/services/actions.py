@@ -620,6 +620,7 @@ async def _execute_direct_message(db: Session, agent: Agent, action: dict) -> di
         recipient_agent_id=recipient.id
     )
     db.add(message)
+    db.flush()
     
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
     recipient_name = recipient.display_name or f"Agent #{recipient.agent_number}"
@@ -968,7 +969,12 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
     db.add(transaction)
     
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
-    description = f"{author_name} worked {hours}h {work_type}ing, produced {float(amount_kept):.2f} {resource_type}"
+    work_type_label = {
+        "farm": "farming",
+        "generate": "generating",
+        "gather": "gathering",
+    }.get(work_type, f"{work_type}ing")
+    description = f"{author_name} worked {hours}h {work_type_label}, produced {float(amount_kept):.2f} {resource_type}"
     if production_modifier != Decimal("1.0"):
         description += f" (environment modifier {float(production_modifier):.2f}x)"
     if reserve_active and contribution_amount > 0:

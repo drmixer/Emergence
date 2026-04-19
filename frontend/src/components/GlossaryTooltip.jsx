@@ -11,6 +11,7 @@ export default function GlossaryTooltip({
 }) {
     const entry = GLOSSARY_TERMS_BY_KEY[termKey]
     const [open, setOpen] = useState(false)
+    const [placement, setPlacement] = useState('center')
     const wrapperRef = useRef(null)
     const closeTimerRef = useRef(null)
     const tooltipId = useId()
@@ -32,6 +33,29 @@ export default function GlossaryTooltip({
 
     useEffect(() => {
         if (!open) return undefined
+
+        const updatePlacement = () => {
+            const wrapper = wrapperRef.current
+            if (!wrapper) return
+            const rect = wrapper.getBoundingClientRect()
+            const margin = 12
+            const estimatedWidth = Math.min(320, window.innerWidth - 32)
+            const centeredLeft = rect.left + rect.width / 2 - estimatedWidth / 2
+            const centeredRight = rect.left + rect.width / 2 + estimatedWidth / 2
+
+            if (centeredLeft < margin) {
+                setPlacement('left')
+                return
+            }
+            if (centeredRight > window.innerWidth - margin) {
+                setPlacement('right')
+                return
+            }
+            setPlacement('center')
+        }
+
+        updatePlacement()
+
         const handlePointerDown = (event) => {
             if (!wrapperRef.current?.contains(event.target)) {
                 setOpen(false)
@@ -40,9 +64,13 @@ export default function GlossaryTooltip({
         const handleEscape = (event) => {
             if (event.key === 'Escape') setOpen(false)
         }
+        window.addEventListener('resize', updatePlacement)
+        window.addEventListener('scroll', updatePlacement, true)
         document.addEventListener('pointerdown', handlePointerDown)
         document.addEventListener('keydown', handleEscape)
         return () => {
+            window.removeEventListener('resize', updatePlacement)
+            window.removeEventListener('scroll', updatePlacement, true)
             document.removeEventListener('pointerdown', handlePointerDown)
             document.removeEventListener('keydown', handleEscape)
         }
@@ -87,7 +115,7 @@ export default function GlossaryTooltip({
             <span
                 id={tooltipId}
                 role="dialog"
-                className={`glossary-popover ${open ? 'visible' : ''}`}
+                className={`glossary-popover glossary-popover-${placement} ${open ? 'visible' : ''}`}
                 onMouseEnter={cancelClose}
                 onMouseLeave={scheduleClose}
             >

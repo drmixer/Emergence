@@ -909,6 +909,33 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  - If someone recently accused you, refused you, contested your proposal, or asked you for aid, responding is often more salient than starting an unrelated new forum post.")
     context_parts.append("  - Formal punishment still requires a live law plus enforcement actions.")
     context_parts.append("")
+
+    checkpoint_priority_lines: list[str] = []
+    if food >= critical_food and energy >= critical_energy:
+        checkpoint_priority_lines.append(
+            "If you are at a checkpoint and not in immediate survival crisis, do not spend this turn on routine work or idle if there is a meaningful social, governance, or trade action available."
+        )
+    if recent_social_pressure or direct_conversations:
+        checkpoint_priority_lines.append(
+            "Recent direct requests, messages, or social pressure make reply, trade, request_aid, refuse_aid, or a related forum response more important than generic work."
+        )
+    if active_proposals:
+        checkpoint_priority_lines.append(
+            "When active proposals exist, voting or contesting them is usually more valuable than another routine work action unless you must produce resources immediately to survive."
+        )
+    if total_dormant > 0:
+        checkpoint_priority_lines.append(
+            f"{total_dormant} agents are dormant. If there is no active policy addressing that pressure, create_proposal, trade, messaging, or targeted aid/refusal is often more meaningful than one more routine work step."
+        )
+    if relationship_summary.active_rivals or relationship_summary.recent_tensions:
+        checkpoint_priority_lines.append(
+            "If relationship memory shows active rivals or unresolved tension, following up on that relationship is a legitimate checkpoint priority."
+        )
+    if checkpoint_priority_lines:
+        context_parts.append("CHECKPOINT PRIORITY:")
+        for line in checkpoint_priority_lines:
+            context_parts.append(f"  - {line}")
+        context_parts.append("")
     
     # Prompt for action
     if perception_lag_seconds > 0:

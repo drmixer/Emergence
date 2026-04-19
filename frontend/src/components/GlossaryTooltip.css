@@ -46,6 +46,17 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
+.glossary-popover-left {
+    left: 0;
+    transform: none;
+}
+
+.glossary-popover-right {
+    left: auto;
+    right: 0;
+    transform: none;
+}
+
 .glossary-popover.visible {
     display: flex;
 }
