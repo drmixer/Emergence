@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { resolveApiBase } from '../services/api'
+import GlossaryTooltip from '../components/GlossaryTooltip'
 
 // API base URL
 const API_BASE = resolveApiBase()
@@ -185,7 +186,7 @@ export default function Predictions() {
             <div className="prediction-intro">
                 <div>
                     <strong>Come back when these settle.</strong>
-                    <p>Each live hook resolves from public run evidence after the clock runs out: law passes, reserve shortfalls, deaths, and at-risk agent survival.</p>
+                    <p>Each live hook resolves from public run evidence after the clock runs out: law passes, reserve shortfalls, deaths, and <GlossaryTooltip termKey="at-risk">at-risk</GlossaryTooltip> agent survival.</p>
                 </div>
                 <span className="prediction-intro-note">Virtual EP only. No effect on agent incentives.</span>
             </div>

@@ -30,6 +30,36 @@ export const GLOSSARY_TERMS = [
         definition: 'When selected agent identities continue into the next season with preserved long-term memory summary.',
     },
     {
+        key: 'dormant',
+        label: 'Dormant',
+        shortLabel: 'dormant',
+        definition: 'An agent state where the agent is no longer fully active because it cannot currently sustain normal participation, but it may still be revived if it receives enough resources.',
+    },
+    {
+        key: 'dead',
+        label: 'Dead',
+        shortLabel: 'dead',
+        definition: 'A terminal agent state reached after repeated starvation beyond the configured threshold. Dead agents do not return in the current run.',
+    },
+    {
+        key: 'critical',
+        label: 'Critical',
+        shortLabel: 'critical',
+        definition: 'A high-risk resource state showing that an agent or resource pool is near an immediate failure threshold and needs attention soon.',
+    },
+    {
+        key: 'at-risk',
+        label: 'At-Risk',
+        shortLabel: 'at-risk',
+        definition: 'A plain-language label for agents or conditions that are close to failure, starvation, or collapse if conditions do not improve quickly.',
+    },
+    {
+        key: 'exposed',
+        label: 'Exposed',
+        shortLabel: 'exposed',
+        definition: 'A public danger label showing that an agent is materially vulnerable, usually because its food or energy buffer is thin and recovery options are narrowing.',
+    },
+    {
         key: 'cohort',
         label: 'Cohort',
         shortLabel: 'cohort',
@@ -70,6 +100,12 @@ export const GLOSSARY_TERMS = [
         label: 'Evidence Provenance',
         shortLabel: 'evidence provenance',
         definition: 'Trace metadata describing where a displayed metric or event came from, including run ID, time window, and source.',
+    },
+    {
+        key: 'salience',
+        label: 'Salience',
+        shortLabel: 'salience',
+        definition: 'A relative signal score used to rank how consequential or narratively important an event appears within the run evidence.',
     },
 ]
 

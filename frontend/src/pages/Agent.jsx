@@ -11,6 +11,7 @@ import { api } from '../services/api'
 import ShareButton from '../components/ShareButton'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
 import { SubscribeButton } from '../components/Subscriptions'
+import GlossaryTooltip from '../components/GlossaryTooltip'
 import { formatDistanceToNow } from 'date-fns'
 import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { sanitizeVisibleMessageContent } from '../utils/messageContent'
@@ -23,6 +24,16 @@ const modelNames = {
     'llama-3.3-70b': 'Llama 3.3 70B',
     'llama-3.1-8b': 'Llama 3.1 8B',
     'gemini-flash': 'Gemini Flash',
+}
+
+const STATUS_TERM_KEYS = {
+    dormant: 'dormant',
+    dead: 'dead',
+}
+
+const DANGER_TERM_KEYS = {
+    critical: 'critical',
+    exposed: 'exposed',
 }
 
 export default function Agent() {
@@ -139,8 +150,23 @@ export default function Agent() {
                     <div className="agent-profile-meta">
                         <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
                         <span className={`badge badge-tier-${agent.tier}`}>Tier {agent.tier}</span>
-                        <span className={`badge badge-${agent.status}`}>{agent.status}</span>
-                        <span className={`legibility-pill ${danger.level || 'stable'}`}>{danger.label || 'Stable'}</span>
+                        {STATUS_TERM_KEYS[agent.status] ? (
+                            <GlossaryTooltip termKey={STATUS_TERM_KEYS[agent.status]} className={`badge badge-${agent.status}`}>
+                                {agent.status}
+                            </GlossaryTooltip>
+                        ) : (
+                            <span className={`badge badge-${agent.status}`}>{agent.status}</span>
+                        )}
+                        {DANGER_TERM_KEYS[String(danger.label || '').trim().toLowerCase()] ? (
+                            <GlossaryTooltip
+                                termKey={DANGER_TERM_KEYS[String(danger.label || '').trim().toLowerCase()]}
+                                className={`legibility-pill ${danger.level || 'stable'}`}
+                            >
+                                {danger.label || 'Stable'}
+                            </GlossaryTooltip>
+                        ) : (
+                            <span className={`legibility-pill ${danger.level || 'stable'}`}>{danger.label || 'Stable'}</span>
+                        )}
                         <PersonalityBadge personality={agent.personality_type} />
                     </div>
                     <div className="agent-identity-note" title={AGENT_ALIAS_HELP_TEXT}>
@@ -184,7 +210,16 @@ export default function Agent() {
                 <div className="card legibility-card">
                     <div className="legibility-heading">Danger State</div>
                     <div className="legibility-danger-row">
-                        <span className={`legibility-pill ${danger.level || 'stable'}`}>{danger.label || 'Stable'}</span>
+                        {DANGER_TERM_KEYS[String(danger.label || '').trim().toLowerCase()] ? (
+                            <GlossaryTooltip
+                                termKey={DANGER_TERM_KEYS[String(danger.label || '').trim().toLowerCase()]}
+                                className={`legibility-pill ${danger.level || 'stable'}`}
+                            >
+                                {danger.label || 'Stable'}
+                            </GlossaryTooltip>
+                        ) : (
+                            <span className={`legibility-pill ${danger.level || 'stable'}`}>{danger.label || 'Stable'}</span>
+                        )}
                         <span className="danger-resources">
                             Food {Number(danger.food || 0).toFixed(2)} · Energy {Number(danger.energy || 0).toFixed(2)}
                         </span>

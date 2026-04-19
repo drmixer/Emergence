@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Users, Search } from 'lucide-react'
 import { api } from '../services/api'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
+import GlossaryTooltip from '../components/GlossaryTooltip'
 import { formatDistanceToNow } from 'date-fns'
 import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { ALLY_BUCKET_CONFIG, RIVAL_BUCKET_CONFIG, getRelationshipBucketMaps } from '../utils/relationshipBuckets'
@@ -39,6 +40,16 @@ function getArchetype(agent) {
 function getRelationships(agent) {
     const legibility = getLegibility(agent)
     return legibility.relationships && typeof legibility.relationships === 'object' ? legibility.relationships : {}
+}
+
+const STATUS_TERM_KEYS = {
+    dormant: 'dormant',
+    dead: 'dead',
+}
+
+const DANGER_TERM_KEYS = {
+    critical: 'critical',
+    exposed: 'exposed',
 }
 
 export default function Agents() {
@@ -209,17 +220,32 @@ export default function Agents() {
                                     </div>
                                     <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
                                 </div>
-                                <span className={`badge badge-${agent.status}`}>
-                                    {agent.status}
-                                </span>
+                                {STATUS_TERM_KEYS[agent.status] ? (
+                                    <GlossaryTooltip termKey={STATUS_TERM_KEYS[agent.status]} className={`badge badge-${agent.status}`}>
+                                        {agent.status}
+                                    </GlossaryTooltip>
+                                ) : (
+                                    <span className={`badge badge-${agent.status}`}>
+                                        {agent.status}
+                                    </span>
+                                )}
                             </div>
 
                             <div className="agent-meta">
                                 <span className={`badge badge-tier-${agent.tier}`}>Tier {agent.tier}</span>
                                 <PersonalityBadge personality={agent.personality_type} showIcon={false} />
-                                <span className={`legibility-pill ${danger.level || 'stable'}`}>
-                                    {danger.label || 'Stable'}
-                                </span>
+                                {DANGER_TERM_KEYS[String(danger.label || '').trim().toLowerCase()] ? (
+                                    <GlossaryTooltip
+                                        termKey={DANGER_TERM_KEYS[String(danger.label || '').trim().toLowerCase()]}
+                                        className={`legibility-pill ${danger.level || 'stable'}`}
+                                    >
+                                        {danger.label || 'Stable'}
+                                    </GlossaryTooltip>
+                                ) : (
+                                    <span className={`legibility-pill ${danger.level || 'stable'}`}>
+                                        {danger.label || 'Stable'}
+                                    </span>
+                                )}
                             </div>
 
                             <div className="agent-legibility">
