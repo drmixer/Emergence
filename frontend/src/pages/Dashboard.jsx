@@ -79,7 +79,7 @@ export default function Dashboard() {
         }
 
         const applyOverviewAndResources = (overview, resources) => {
-            setIsLive(Boolean(overview?.events?.latest))
+            setIsLive(Boolean(overview?.scope?.simulation_active))
 
             const capacity = overview?.resources?.capacity_estimate || {}
             const foodMax = Number(capacity.food || 0) || 1
@@ -259,6 +259,9 @@ export default function Dashboard() {
 
     // Check for pre-launch state
     const isPreLaunch = stats && stats.dayNumber === 0 && stats.totalMessages === 0
+    const hasActiveRun = Boolean(scope?.simulation_active)
+    const idleDashboard = !loading && scope?.simulation_active === false
+    const lastCompletedRunId = String(scope?.last_completed_run_id || '').trim()
     const socialChartData = socialSeries.map((row) => ({
         day: row.day_label,
         conflict: Number(row.conflict_events || 0),
@@ -297,7 +300,7 @@ export default function Dashboard() {
             </div>
 
             {/* Activity Pulse */}
-            {!loading && stats && (
+            {!loading && stats && hasActiveRun && (
                 <ActivityPulse
                     isLive={isLive && !isPreLaunch}
                     lastActivity={stats.lastActivity}
@@ -306,12 +309,34 @@ export default function Dashboard() {
                 />
             )}
 
-            {!loading && stats && (
+            {!loading && stats && hasActiveRun && (
                 <div className="dashboard-scope-note">
                     <span>{scope?.summary || 'Agent status and resources reflect the live world state. Message, proposal, and law totals are cumulative within the currently loaded simulation database.'}</span>
                     {scope?.active_run_id && (
                         <strong>Run {scope.active_run_id}</strong>
                     )}
+                </div>
+            )}
+
+            {idleDashboard && (
+                <div className="card">
+                    <div className="card-body">
+                        <div className="empty-state" style={{ minHeight: 180 }}>
+                            <Activity size={28} />
+                            <div>
+                                <strong>No run in progress</strong>
+                            </div>
+                            <p>Live dashboard metrics will appear when the next simulation starts.</p>
+                            {lastCompletedRunId && (
+                                <div>
+                                    Last completed run:{' '}
+                                    <Link to={`/runs/${encodeURIComponent(lastCompletedRunId)}`}>
+                                        {lastCompletedRunId}
+                                    </Link>
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -322,12 +347,12 @@ export default function Dashboard() {
             )}
 
             {/* Critical Agents Banner */}
-            {!loading && stats && stats.criticalFoodAgents > 0 && (
+            {!idleDashboard && !loading && stats && stats.criticalFoodAgents > 0 && (
                 <CriticalAgentsBanner count={stats.criticalFoodAgents} type="food" />
             )}
 
             {/* Crisis Strip */}
-            {!loading && (
+            {!idleDashboard && !loading && (
                 <div className="card crisis-strip-card">
                     <div className="card-header">
                         <h3>
@@ -364,7 +389,7 @@ export default function Dashboard() {
             )}
 
             {/* Stats Grid */}
-            <div className="stats-grid">
+            {!idleDashboard && <div className="stats-grid">
                 {loading ? (
                     <>
                         <SkeletonStatCard />
@@ -427,10 +452,10 @@ export default function Dashboard() {
                         </div>
                     </>
                 )}
-            </div>
+            </div>}
 
             {/* Resource Summary with Anxiety Indicators */}
-            <div className="resource-grid">
+            {!idleDashboard && <div className="resource-grid">
                 {loading ? (
                     <>
                         <SkeletonStatCard />
@@ -462,10 +487,10 @@ export default function Dashboard() {
                         />
                     </>
                 )}
-            </div>
+            </div>}
 
             {/* Content Grid */}
-            <div className="content-grid">
+            {!idleDashboard && <div className="content-grid">
                 {/* Active Proposals */}
                 <div className="card">
                     <div className="card-header">
@@ -551,9 +576,9 @@ export default function Dashboard() {
                         )}
                     </div>
                 </div>
-            </div>
+            </div>}
 
-            <div className="content-grid">
+            {!idleDashboard && <div className="content-grid">
                 <div className="card">
                     <div className="card-header">
                         <h3>
@@ -617,9 +642,9 @@ export default function Dashboard() {
                         )}
                     </div>
                 </div>
-            </div>
+            </div>}
 
-            <div className="content-grid">
+            {!idleDashboard && <div className="content-grid">
                 <div className="card">
                     <div className="card-header">
                         <h3>Inequality</h3>
@@ -692,7 +717,7 @@ export default function Dashboard() {
                         )}
                     </div>
                 </div>
-            </div>
+            </div>}
 
             <style>{`
                 .resource-grid {

@@ -1797,7 +1797,20 @@ def overview():
     db = SessionLocal()
     try:
         run_window = get_live_run_window(db)
-        active_run_id = run_window.run_id
+        configured_run_id = run_window.run_id
+        simulation_active = bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
+        simulation_paused = bool(runtime_config_service.get_effective_value_cached("SIMULATION_PAUSED"))
+        active_run_id = configured_run_id if simulation_active else None
+
+        last_completed_run = (
+            db.query(SimulationRun)
+            .filter(SimulationRun.ended_at.isnot(None))
+            .order_by(SimulationRun.ended_at.desc())
+            .first()
+        )
+        last_completed_run_id = None
+        if last_completed_run is not None:
+            last_completed_run_id = str(last_completed_run.run_id or "").strip() or None
 
         total_agents = db.query(Agent).count()
         active_agents = db.query(Agent).filter(Agent.status == "active").count()
@@ -1902,13 +1915,22 @@ def overview():
         return {
             "day_number": day_number,
             "scope": {
-                "summary": "Agent status and resources reflect the live world state. Message, proposal, law, and day totals are scoped to the active run window.",
+                "summary": (
+                    "Agent status and resources reflect the live world state. Message, proposal, law, and day totals are scoped to the active run window."
+                    if simulation_active
+                    else "No run is currently active. Live dashboard metrics are paused until the next simulation starts."
+                ),
                 "agent_state_scope": "live_world_state",
                 "resource_scope": "live_world_state",
                 "message_scope": "active_run_window",
                 "proposal_scope": "active_run_window",
                 "law_scope": "active_run_window",
                 "active_run_id": active_run_id,
+                "configured_run_id": configured_run_id,
+                "simulation_active": simulation_active,
+                "simulation_paused": simulation_paused,
+                "last_completed_run_id": last_completed_run_id,
+                "last_completed_run_ended_at": last_completed_run.ended_at.isoformat() if last_completed_run and last_completed_run.ended_at else None,
             },
             "agents": {
                 "total": total_agents,
