@@ -30,12 +30,10 @@
 }
 
 .glossary-popover {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 8px);
-    transform: translateX(-50%);
-    z-index: 40;
+    position: fixed;
+    z-index: 120;
     width: min(320px, calc(100vw - 32px));
+    max-width: calc(100vw - 24px);
     display: none;
     flex-direction: column;
     gap: 6px;
@@ -47,14 +45,27 @@
 }
 
 .glossary-popover-left {
-    left: 0;
-    transform: none;
+    transform-origin: top left;
 }
 
 .glossary-popover-right {
-    left: auto;
-    right: 0;
-    transform: none;
+    transform-origin: top right;
+}
+
+.glossary-popover-center {
+    transform-origin: top center;
+}
+
+.glossary-popover-top.glossary-popover-left {
+    transform-origin: bottom left;
+}
+
+.glossary-popover-top.glossary-popover-right {
+    transform-origin: bottom right;
+}
+
+.glossary-popover-top.glossary-popover-center {
+    transform-origin: bottom center;
 }
 
 .glossary-popover.visible {
@@ -83,16 +94,4 @@
 
 .glossary-popover-link:hover {
     text-decoration: underline;
-}
-
-.card:has(.glossary-inline),
-.agent-card:has(.glossary-inline) {
-    overflow: visible;
-}
-
-@media (max-width: 720px) {
-    .glossary-popover {
-        left: 0;
-        transform: none;
-    }
 }

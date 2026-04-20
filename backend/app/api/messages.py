@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.models.models import Agent, Message
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
+from app.services.run_policy import is_deterministic_fallback_forum_post_content
 
 router = APIRouter()
 
@@ -38,6 +39,8 @@ class MessageResponse(BaseModel):
     recipient_agent_id: Optional[int]
     created_at: Optional[str]
     author: AgentInfo
+    recipient: Optional[AgentInfo] = None
+    is_degraded_fallback: bool = False
 
     class Config:
         from_attributes = True
@@ -66,6 +69,18 @@ def _message_response(message: Message) -> MessageResponse:
         recipient_agent_id=message.recipient_agent_id,
         created_at=message.created_at.isoformat() if message.created_at else None,
         author=_agent_info(message.author),
+        recipient=_agent_info(message.recipient) if message.recipient else None,
+        is_degraded_fallback=(
+            str(message.message_type or "").strip() == "forum_post"
+            and is_deterministic_fallback_forum_post_content(message.content)
+        ),
+    )
+
+
+def _base_message_query(db: Session):
+    return db.query(Message).options(
+        joinedload(Message.author),
+        joinedload(Message.recipient),
     )
 
 
@@ -85,8 +100,7 @@ def list_messages(
     Default behavior is forum posts only (top-level posts).
     """
     query = (
-        db.query(Message)
-        .options(joinedload(Message.author))
+        _base_message_query(db)
         .order_by(desc(Message.created_at))
     )
     if scope != "all":
@@ -113,8 +127,7 @@ def get_message(
     """Get a single message and its direct replies."""
     run_window = get_live_run_window(db)
     message_query = (
-        db.query(Message)
-        .options(joinedload(Message.author))
+        _base_message_query(db)
     )
     if scope != "all":
         message_query = apply_live_run_window(message_query, Message.created_at, run_window)
@@ -123,8 +136,7 @@ def get_message(
         raise HTTPException(status_code=404, detail="Message not found")
 
     replies_query = (
-        db.query(Message)
-        .options(joinedload(Message.author))
+        _base_message_query(db)
         .filter(Message.parent_message_id == message.id)
     )
     if scope != "all":
@@ -146,8 +158,7 @@ def get_thread(
     """Get the full thread containing the given message."""
     run_window = get_live_run_window(db)
     start_query = (
-        db.query(Message)
-        .options(joinedload(Message.author))
+        _base_message_query(db)
     )
     if scope != "all":
         start_query = apply_live_run_window(start_query, Message.created_at, run_window)
@@ -155,11 +166,41 @@ def get_thread(
     if not start:
         raise HTTPException(status_code=404, detail="Message not found")
 
+    if start.message_type == "direct_message":
+        participant_ids = sorted(
+            {
+                int(start.author_agent_id or 0),
+                int(start.recipient_agent_id or 0),
+            }
+        )
+        if len(participant_ids) != 2 or participant_ids[0] <= 0 or participant_ids[1] <= 0:
+            raise HTTPException(status_code=400, detail="Direct message is missing conversation participants")
+
+        conversation_query = _base_message_query(db).filter(
+            Message.message_type == "direct_message",
+            (
+                ((Message.author_agent_id == participant_ids[0]) & (Message.recipient_agent_id == participant_ids[1]))
+                |
+                ((Message.author_agent_id == participant_ids[1]) & (Message.recipient_agent_id == participant_ids[0]))
+            ),
+        )
+        if scope != "all":
+            conversation_query = apply_live_run_window(conversation_query, Message.created_at, run_window)
+        conversation_messages = conversation_query.order_by(Message.created_at.asc(), Message.id.asc()).all()
+        if not conversation_messages:
+            raise HTTPException(status_code=404, detail="Message thread not found")
+        root = conversation_messages[0]
+        return {
+            "root_id": root.id,
+            "thread_kind": "direct_conversation",
+            "root_message": _message_response(root).model_dump(),
+            "messages": [_message_response(m).model_dump() for m in conversation_messages],
+        }
+
     root = start
     while root.parent_message_id is not None:
         parent = (
-            db.query(Message)
-            .options(joinedload(Message.author))
+            _base_message_query(db)
             .filter(Message.id == root.parent_message_id)
             .first()
         )
@@ -182,8 +223,7 @@ def get_thread(
         frontier = []
 
         batch_query = (
-            db.query(Message)
-            .options(joinedload(Message.author))
+            _base_message_query(db)
             .filter((Message.id.in_(parents)) | (Message.parent_message_id.in_(parents)))
         )
         if scope != "all":
@@ -204,5 +244,7 @@ def get_thread(
 
     return {
         "root_id": root.id,
+        "thread_kind": "forum_thread",
+        "root_message": _message_response(root).model_dump(),
         "messages": [_message_response(m).model_dump() for m in all_messages],
     }

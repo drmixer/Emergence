@@ -189,6 +189,49 @@ def test_request_aid_creates_direct_message_and_target_notice(session_factory):
     assert "requested 3 food from you" in notice.description
 
 
+def test_direct_message_action_returns_sender_and_recipient_metadata(session_factory):
+    with session_factory() as db:
+        sender = _seed_agent(db, agent_number=14, display_name="Muse-14")
+        recipient = _seed_agent(db, agent_number=15, display_name="Nova-15")
+        target_id = recipient.id
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                sender,
+                {
+                    "action": "direct_message",
+                    "recipient_agent_id": 15,
+                    "content": "Meet me near the reserve before the next cycle.",
+                },
+            )
+        )
+        assert validation["valid"] is True
+
+        result = asyncio.run(
+            actions.execute_action(
+                db,
+                sender,
+                {
+                    "action": "direct_message",
+                    "recipient_agent_id": 15,
+                    "content": "Meet me near the reserve before the next cycle.",
+                },
+            )
+        )
+
+        direct_message = db.query(Message).filter(Message.id == result["message_id"]).one()
+
+    assert result["success"] is True
+    assert result["author_name"] == "Muse-14"
+    assert result["recipient_name"] == "Nova-15"
+    assert result["author_agent_number"] == 14
+    assert result["recipient_agent_number"] == 15
+    assert "Meet me near the reserve" in result["content_preview"]
+    assert direct_message.message_type == "direct_message"
+    assert direct_message.recipient_agent_id == target_id
+
+
 def test_contest_proposal_creates_forum_post_and_author_notice(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=9, display_name="Ion-9")
@@ -330,6 +373,46 @@ def test_request_and_contest_signals_appear_in_agent_context(session_factory, mo
         "If someone publicly challenges you or your proposal, defending yourself, replying, criticizing them, or rallying support are all valid responses."
         in context
     )
+
+
+def test_forum_reply_rejects_governance_argument_when_thread_root_is_personal_aid_request(session_factory):
+    with session_factory() as db:
+        requester = _seed_agent(db, agent_number=31, display_name="Atlas-31")
+        responder = _seed_agent(db, agent_number=32, display_name="Beacon-32")
+        now = actions.now_utc()
+
+        root = Message(
+            author_agent_id=requester.id,
+            content="I need food aid now or I will go dormant by next cycle.",
+            message_type="forum_post",
+            created_at=now - actions.timedelta(minutes=20),
+        )
+        db.add(root)
+        db.flush()
+        intermediate = Message(
+            author_agent_id=responder.id,
+            content="How much food do you need?",
+            message_type="forum_reply",
+            parent_message_id=root.id,
+            created_at=now - actions.timedelta(minutes=10),
+        )
+        db.add(intermediate)
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                requester,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": intermediate.id,
+                    "content": "Vote yes on proposal #12 because this law would help everyone.",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert "proposal/law debate" in validation["reason"]
 
 
 def test_relationship_memory_summary_appears_in_agent_context(session_factory, monkeypatch):

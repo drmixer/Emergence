@@ -20,8 +20,32 @@ function formatTimestamp(value) {
   }
 }
 
+function formatRecipient(recipient) {
+  if (!recipient || typeof recipient !== 'object') return 'Unknown'
+  if (recipient.agent_number || recipient.display_name) return formatAgentDisplayLabel(recipient)
+  return 'Unknown'
+}
+
+function buildThreadLabel(threadData) {
+  const kind = String(threadData?.thread_kind || '').trim()
+  if (kind === 'direct_conversation') {
+    const messages = Array.isArray(threadData?.messages) ? threadData.messages : []
+    const first = messages.find((message) => message?.author && message?.recipient)
+    if (first) {
+      return `${formatAuthor(first.author)} <-> ${formatRecipient(first.recipient)}`
+    }
+    return 'Direct Conversation'
+  }
+  const rootMessage = threadData?.root_message
+  if (rootMessage?.id) {
+    return `Forum Thread #${rootMessage.id}`
+  }
+  return 'Forum Thread'
+}
+
 function MessageRow({ message, onOpenThread }) {
   const agentNumber = Number(message?.author?.agent_number || 0)
+  const isDirectMessage = String(message?.message_type || '') === 'direct_message'
   return (
     <div className="message-row">
       <div className="message-row-header">
@@ -32,6 +56,14 @@ function MessageRow({ message, onOpenThread }) {
             <span>{formatAuthor(message.author)}</span>
           )}
           <span className="message-type-chip">{String(message.message_type || '').replace(/_/g, ' ')}</span>
+          {message?.is_degraded_fallback && (
+            <span className="message-type-chip degraded-fallback-chip">degraded fallback</span>
+          )}
+          {isDirectMessage && (
+            <span className="message-direction-chip">
+              to {formatRecipient(message.recipient)}
+            </span>
+          )}
         </div>
         <div className="message-row-meta">
           <Clock size={13} />
@@ -61,7 +93,7 @@ export default function Messages() {
   const [threadLoading, setThreadLoading] = useState(false)
   const [threadError, setThreadError] = useState('')
   const [threadData, setThreadData] = useState(null)
-  const [threadRootId, setThreadRootId] = useState(0)
+  const [threadRequestedId, setThreadRequestedId] = useState(0)
 
   useEffect(() => {
     async function loadMessages() {
@@ -110,15 +142,14 @@ export default function Messages() {
     if (!messageId) return
     setThreadLoading(true)
     setThreadError('')
-    setThreadRootId(messageId)
+    setThreadRequestedId(messageId)
     try {
       const thread = await api.getMessageThread(messageId)
       const resolvedThread = thread && typeof thread === 'object' ? thread : null
       setThreadData(resolvedThread)
-      setThreadRootId(Number(resolvedThread?.root_id || messageId || 0))
     } catch (_err) {
       setThreadData(null)
-      setThreadRootId(0)
+      setThreadRequestedId(0)
       setThreadError('Unable to load thread right now.')
     } finally {
       setThreadLoading(false)
@@ -196,7 +227,10 @@ export default function Messages() {
         <div className="card messages-thread">
           <div className="card-header">
             <h3>Thread View</h3>
-            {threadRootId > 0 && <span className="strip-meta">Root #{threadRootId}</span>}
+            {threadData && <span className="strip-meta">{buildThreadLabel(threadData)}</span>}
+            {!threadData && threadLoading && threadRequestedId > 0 && (
+              <span className="strip-meta">Opening #{threadRequestedId}</span>
+            )}
           </div>
           <div className="card-body">
             {!threadData && !threadLoading && !threadError && (
@@ -209,11 +243,25 @@ export default function Messages() {
                 {threadData.messages.map((message) => (
                   <div key={message.id} className="thread-row">
                     <div className="thread-row-head">
-                      {Number(message?.author?.agent_number || 0) > 0 ? (
-                        <Link to={`/agents/${message.author.agent_number}`}>{formatAuthor(message.author)}</Link>
-                      ) : (
-                        <span>{formatAuthor(message.author)}</span>
-                      )}
+                      <div className="thread-row-people">
+                        {Number(message?.author?.agent_number || 0) > 0 ? (
+                          <Link to={`/agents/${message.author.agent_number}`}>{formatAuthor(message.author)}</Link>
+                        ) : (
+                          <span>{formatAuthor(message.author)}</span>
+                        )}
+                        {String(message?.message_type || '') === 'direct_message' && (
+                          <span className="thread-direction">
+                            to {message?.recipient?.agent_number > 0 ? (
+                              <Link to={`/agents/${message.recipient.agent_number}`}>{formatRecipient(message.recipient)}</Link>
+                            ) : (
+                              formatRecipient(message.recipient)
+                            )}
+                          </span>
+                        )}
+                        {message?.is_degraded_fallback && (
+                          <span className="message-type-chip degraded-fallback-chip">degraded fallback</span>
+                        )}
+                      </div>
                       <span>{formatTimestamp(message.created_at)}</span>
                     </div>
                     <p>{sanitizeVisibleMessageContent(message.content)}</p>
@@ -282,6 +330,15 @@ export default function Messages() {
           border-radius: 999px;
           padding: 2px 8px;
         }
+        .message-direction-chip {
+          font-size: 0.74rem;
+          color: var(--text-secondary);
+        }
+        .degraded-fallback-chip {
+          color: #92400e;
+          border-color: rgba(245, 158, 11, 0.42);
+          background: rgba(245, 158, 11, 0.12);
+        }
         .message-row-content {
           margin: 0 0 var(--spacing-sm);
           white-space: pre-wrap;
@@ -310,6 +367,15 @@ export default function Messages() {
           color: var(--text-muted);
           font-size: 0.82rem;
           margin-bottom: 6px;
+        }
+        .thread-row-people {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+          align-items: center;
+        }
+        .thread-direction {
+          color: var(--text-secondary);
         }
         .thread-row p {
           margin: 0;

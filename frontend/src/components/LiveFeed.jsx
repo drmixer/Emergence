@@ -11,7 +11,7 @@ import {
     User,
     FileText
 } from 'lucide-react'
-import { subscribeToEvents } from '../services/api'
+import { api, subscribeToEvents } from '../services/api'
 import { showEventToast } from './ToastNotifications'
 
 const backgroundEventTypes = new Set(['work', 'idle'])
@@ -45,6 +45,36 @@ const eventColors = {
     default: 'blue',
 }
 
+function formatDirectMessageDescription(event) {
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+    const result = metadata?.result && typeof metadata.result === 'object' ? metadata.result : {}
+    const authorName = String(result.author_name || '').trim()
+    const recipientName = String(result.recipient_name || '').trim()
+    const preview = String(result.content_preview || '').trim()
+
+    if (!authorName || !recipientName) {
+        return String(event?.description || '').trim()
+    }
+
+    const headline = `${authorName} -> ${recipientName}`
+    if (!preview) {
+        return headline
+    }
+    return `${headline}: ${preview}`
+}
+
+function getEventDescription(event) {
+    const eventType = String(event?.event_type || '').trim()
+    if (eventType === 'direct_message') {
+        return formatDirectMessageDescription(event)
+    }
+    return String(event?.description || '').trim()
+}
+
+function isDegradedFallbackEvent(event) {
+    return Boolean(event?.is_degraded_fallback)
+}
+
 function getContinuityOrigin(payload) {
     const origin = String(payload?.lineage_origin || '').trim().toLowerCase()
     return origin === 'carryover' || origin === 'fresh' ? origin : ''
@@ -65,17 +95,25 @@ function getEventHref(event) {
     if (
         threadId > 0 &&
         new Set([
-            'forum_post',
-            'forum_reply',
             'direct_message',
             'request_aid',
             'aid_request_received',
-            'public_accusation',
             'refuse_aid',
             'aid_refusal_received',
         ]).has(eventType)
     ) {
-        return `/messages?tab=all&thread=${threadId}`
+        return `/messages?tab=direct&thread=${threadId}`
+    }
+
+    if (
+        threadId > 0 &&
+        new Set([
+            'forum_post',
+            'forum_reply',
+            'public_accusation',
+        ]).has(eventType)
+    ) {
+        return `/messages?tab=forum&thread=${threadId}`
     }
 
     if (eventType === 'create_proposal') {
@@ -97,6 +135,7 @@ function EventCard({ event }) {
     const timeAgo = event.created_at
         ? formatDistanceToNow(new Date(event.created_at), { addSuffix: true })
         : 'just now'
+    const description = getEventDescription(event)
 
     const body = (
         <div className={`event-card animate-fade-in`}>
@@ -104,9 +143,12 @@ function EventCard({ event }) {
                 <Icon size={16} />
             </div>
             <div className="event-content">
-                <div className="event-description">{event.description}</div>
+                <div className="event-description">{description}</div>
                 <div className="event-meta">
                     <span className="event-type">{event.event_type.replace(/_/g, ' ')}</span>
+                    {isDegradedFallbackEvent(event) && (
+                        <span className="event-continuity-chip degraded">Degraded fallback</span>
+                    )}
                     {getContinuityOrigin(event) === 'carryover' && (
                         <span className="event-continuity-chip carryover">Carryover</span>
                     )}
@@ -136,14 +178,29 @@ export default function LiveFeed() {
     const [showSystemNoise, setShowSystemNoise] = useState(true)
     const [connected, setConnected] = useState(false)
     const [error, setError] = useState(null)
-    const [isPreLaunch, setIsPreLaunch] = useState(true)
+    const [runState, setRunState] = useState('checking')
+    const [lastCompletedRunId, setLastCompletedRunId] = useState('')
 
     const addEvent = useCallback((newEvent) => {
         setEvents(prev => [newEvent, ...prev].slice(0, 100))
-        setIsPreLaunch(false) // Real events mean we're live
+        setRunState('live')
 
         // Show toast notification for notable events
         showEventToast(newEvent)
+    }, [])
+
+    const refreshRunState = useCallback(async () => {
+        try {
+            const overview = await api.getAnalyticsOverview()
+            const scope = overview?.scope && typeof overview.scope === 'object' ? overview.scope : {}
+            const completedRunId = String(scope.last_completed_run_id || '').trim()
+            const simulationActive = scope.simulation_active === true
+
+            setLastCompletedRunId(completedRunId)
+            setRunState(simulationActive ? 'live' : completedRunId ? 'idle' : 'prelaunch')
+        } catch {
+            setRunState((current) => (current === 'checking' ? 'prelaunch' : current))
+        }
     }, [])
 
     const visibleEvents = useMemo(() => {
@@ -157,6 +214,10 @@ export default function LiveFeed() {
     }, [events, showBackground, showSystemNoise])
 
     useEffect(() => {
+        const initialRefreshTimer = window.setTimeout(() => {
+            void refreshRunState()
+        }, 0)
+
         // Try to connect to SSE
         const unsubscribe = subscribeToEvents(
             (event) => {
@@ -165,7 +226,7 @@ export default function LiveFeed() {
                     setError(null)
                 } else if (event.type === 'snapshot_empty') {
                     setEvents([])
-                    setIsPreLaunch(true)
+                    void refreshRunState()
                 } else if (event.type === 'event') {
                     addEvent(event)
                 }
@@ -177,18 +238,20 @@ export default function LiveFeed() {
         )
 
         return () => {
+            window.clearTimeout(initialRefreshTimer)
             unsubscribe()
         }
-    }, [addEvent])
+    }, [addEvent, refreshRunState])
 
-    // Pre-launch waiting state
-    if (isPreLaunch && events.length === 0) {
+    if (events.length === 0 && runState !== 'live') {
+        const isIdle = runState === 'idle'
+        const isChecking = runState === 'checking'
         return (
             <div className="live-feed">
                 <div className="live-feed-header">
                     <h3>Live Feed</h3>
-                    <div className="live-indicator waiting">
-                        Waiting
+                    <div className={`live-indicator ${isIdle ? 'disconnected' : 'waiting'}`}>
+                        {isChecking ? 'Checking' : isIdle ? 'Idle' : 'Waiting'}
                     </div>
                 </div>
 
@@ -196,13 +259,34 @@ export default function LiveFeed() {
                     <div className="prelaunch-icon">
                         <Zap size={32} />
                     </div>
-                    <h4>Waiting for Experiment</h4>
-                    <p>The simulation hasn't started yet. Events will appear here once agents begin interacting.</p>
-                    <div className="prelaunch-dots">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                    </div>
+                    <h4>
+                        {isChecking
+                            ? 'Checking feed status'
+                            : isIdle
+                                ? 'No run in progress'
+                                : 'Waiting for Experiment'}
+                    </h4>
+                    <p>
+                        {isChecking
+                            ? 'Loading the current run state.'
+                            : isIdle
+                                ? 'Live events will appear here when the next run starts.'
+                                : "The simulation hasn't started yet. Events will appear here once agents begin interacting."}
+                    </p>
+                    {isIdle && lastCompletedRunId ? (
+                        <p>
+                            Last completed run:{' '}
+                            <Link to={`/runs/${encodeURIComponent(lastCompletedRunId)}`}>
+                                {lastCompletedRunId}
+                            </Link>
+                        </p>
+                    ) : (
+                        <div className="prelaunch-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    )}
                 </div>
             </div>
         )

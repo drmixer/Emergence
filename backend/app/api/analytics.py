@@ -47,6 +47,7 @@ from app.services.live_run_scope import (
     apply_run_window,
     get_live_run_window,
 )
+from app.services.run_policy import is_deterministic_fallback_forum_post_content
 from app.core.database import SessionLocal
 from app.models.models import (
     Event,
@@ -1823,11 +1824,12 @@ def overview():
         dead_agents = db.query(Agent).filter(Agent.status == "dead").count()
 
         total_messages = apply_live_run_window(db.query(Message), Message.created_at, run_window).count()
-        forum_posts = apply_live_run_window(
+        forum_posts_query = apply_live_run_window(
             db.query(Message).filter(Message.message_type == "forum_post"),
             Message.created_at,
             run_window,
-        ).count()
+        )
+        forum_posts = forum_posts_query.count()
         forum_replies = apply_live_run_window(
             db.query(Message).filter(Message.message_type == "forum_reply"),
             Message.created_at,
@@ -1838,6 +1840,12 @@ def overview():
             Message.created_at,
             run_window,
         ).count()
+        degraded_fallback_messages = sum(
+            1
+            for message in forum_posts_query.all()
+            if is_deterministic_fallback_forum_post_content(message.content)
+        )
+        meaningful_messages = max(0, int(total_messages) - int(degraded_fallback_messages))
 
         total_proposals = apply_live_run_window(db.query(Proposal), Proposal.created_at, run_window).count()
         active_proposals = apply_live_run_window(
@@ -1928,6 +1936,7 @@ def overview():
                 "agent_state_scope": "live_world_state",
                 "resource_scope": "live_world_state",
                 "message_scope": "active_run_window",
+                "message_count_basis": "meaningful_messages_exclude_degraded_fallback_posts",
                 "proposal_scope": "active_run_window",
                 "law_scope": "active_run_window",
                 "active_run_id": active_run_id,
@@ -1946,6 +1955,8 @@ def overview():
             "critical": {"food_agents": critical_food, "energy_agents": critical_energy},
             "messages": {
                 "total": total_messages,
+                "meaningful_total": meaningful_messages,
+                "degraded_fallback_total": degraded_fallback_messages,
                 "forum_posts": forum_posts,
                 "forum_replies": forum_replies,
                 "direct_messages": direct_messages,

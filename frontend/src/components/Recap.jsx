@@ -385,7 +385,7 @@ export default function Recap({ minimal = false, runId = '' }) {
                     ) : (
                         <div className="recap-play-prompt">
                             <Play size={32} />
-                            <p>Click Play to experience the recap</p>
+                            <p>Press Play to animate the recap summary.</p>
                         </div>
                     )}
                 </div>

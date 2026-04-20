@@ -26,6 +26,7 @@ from app.services.run_policy import (
     build_terminal_llm_failure_action,
     current_run_class,
     deterministic_failure_policy_for_run_class,
+    is_deterministic_fallback_forum_post_content,
 )
 from app.services.runtime_config import runtime_config_service
 from app.services.routine_executor import routine_executor
@@ -408,6 +409,13 @@ class AgentProcessor:
         }
         if runtime_metadata:
             metadata["runtime"] = runtime_metadata
+        if (
+            str(action.get("action") or "").strip() == "forum_post"
+            and bool((runtime_metadata or {}).get("continuity_protection"))
+            and is_deterministic_fallback_forum_post_content(action.get("content"))
+        ):
+            metadata["message_classification"] = "deterministic_fallback"
+            metadata["degraded_fallback"] = True
 
         if not self._runtime_accepts_agent_work() or not self._agent_exists(db, agent_id):
             db.rollback()

@@ -23,6 +23,11 @@ FAILURE_POLICY_ROUTINE_ON_LLM_FAILURE = "routine_on_llm_failure"
 RUNTIME_MODE_DETERMINISTIC_FORCED_IDLE = "deterministic_forced_idle"
 RUNTIME_MODE_DETERMINISTIC_ROUTINE_FALLBACK = "deterministic_routine_fallback"
 
+DETERMINISTIC_FALLBACK_FORUM_POST_CONTENT = (
+    "I'm having trouble communicating clearly right now, so I'll focus on work and "
+    "staying alive. If anyone has a concrete plan, summarize it and tag me."
+)
+
 
 def coerce_run_class(run_class: str | None) -> str:
     clean = str(run_class or "").strip().lower()
@@ -52,6 +57,12 @@ def current_run_class() -> str:
 
 def current_failure_policy() -> str:
     return deterministic_failure_policy_for_run_class(current_run_class())
+
+
+def is_deterministic_fallback_forum_post_content(content: str | None) -> bool:
+    return " ".join(str(content or "").split()) == " ".join(
+        DETERMINISTIC_FALLBACK_FORUM_POST_CONTENT.split()
+    )
 
 
 def build_terminal_llm_failure_action(
@@ -104,10 +115,7 @@ def build_terminal_llm_failure_action(
 
     return {
         "action": "forum_post",
-        "content": (
-            "I'm having trouble communicating clearly right now, so I'll focus on work and "
-            "staying alive. If anyone has a concrete plan, summarize it and tag me."
-        ),
+        "content": DETERMINISTIC_FALLBACK_FORUM_POST_CONTENT,
         "reasoning": reasoning,
         "_deterministic_meta": deterministic_meta,
     }

@@ -175,6 +175,12 @@
     border-color: rgba(59, 130, 246, 0.42);
 }
 
+.event-continuity-chip.degraded {
+    color: #92400e;
+    background: rgba(245, 158, 11, 0.14);
+    border-color: rgba(245, 158, 11, 0.42);
+}
+
 .empty-feed {
     display: flex;
     flex-direction: column;

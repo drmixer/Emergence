@@ -126,6 +126,18 @@ def _message_is_within_active_run(db: Session, message: Message) -> bool:
     return created_at is not None and created_at >= started_at
 
 
+def _message_thread_root(db: Session, message: Message) -> Message:
+    root = message
+    seen_ids: set[int] = set()
+    while root.parent_message_id is not None and root.id not in seen_ids:
+        seen_ids.add(int(root.id))
+        parent = db.query(Message).filter(Message.id == root.parent_message_id).first()
+        if parent is None:
+            break
+        root = parent
+    return root
+
+
 def _proposal_is_within_active_run(db: Session, proposal: Proposal) -> bool:
     started_at = _active_run_started_at(db)
     if started_at is None:
@@ -274,7 +286,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Forum reply requires content"}
         if len(content) > 2000:
             return {"valid": False, "reason": "Forum reply too long (max 2000 chars)"}
-        if _looks_like_personal_survival_request(parent.content) and _looks_like_governance_argument(content):
+        thread_root = _message_thread_root(db, parent)
+        if _looks_like_personal_survival_request(thread_root.content) and _looks_like_governance_argument(content):
             return {
                 "valid": False,
                 "reason": "Reply content appears to target proposal/law debate rather than the selected aid thread; choose the matching proposal discussion or use contest_proposal",
@@ -702,6 +715,11 @@ async def _execute_direct_message(db: Session, agent: Agent, action: dict) -> di
         "success": True,
         "description": f"{author_name} sent a message to {recipient_name}",
         "message_id": message.id,
+        "author_agent_number": int(agent.agent_number),
+        "author_name": author_name,
+        "recipient_agent_number": int(recipient.agent_number),
+        "recipient_name": recipient_name,
+        "content_preview": " ".join((str(action.get("content") or "").split()))[:180],
     }
 
 

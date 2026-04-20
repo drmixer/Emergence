@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.models import Event
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
+from app.services.run_policy import is_deterministic_fallback_forum_post_content
 from app.services.lineage import (
     agent_number_map,
     lineage_map_for_season,
@@ -31,6 +32,7 @@ class EventResponse(BaseModel):
     event_type: str
     description: str
     metadata: dict
+    is_degraded_fallback: bool = False
     lineage_origin: Optional[str] = None
     lineage_is_carryover: bool = False
     lineage_is_fresh: bool = False
@@ -55,6 +57,25 @@ def _build_lineage_context_by_agent_id(db: Session, events: list[Event]) -> dict
         by_agent_id[int(agent_id)] = payload
 
     return by_agent_id
+
+
+def _event_is_degraded_fallback(event: Event) -> bool:
+    metadata = event.event_metadata or {}
+    if bool(metadata.get("degraded_fallback")):
+        return True
+    if str(metadata.get("message_classification") or "").strip() == "deterministic_fallback":
+        return True
+    runtime = metadata.get("runtime") if isinstance(metadata, dict) else None
+    if (
+        str(event.event_type or "").strip() == "forum_post"
+        and isinstance(runtime, dict)
+        and bool(runtime.get("continuity_protection"))
+        and is_deterministic_fallback_forum_post_content(
+            ((metadata.get("action") or {}) if isinstance(metadata.get("action"), dict) else {}).get("content")
+        )
+    ):
+        return True
+    return False
 
 
 @router.get("", response_model=List[EventResponse])
@@ -85,6 +106,7 @@ def list_events(
                 event_type=event.event_type,
                 description=event.description,
                 metadata=event.event_metadata or {},
+                is_degraded_fallback=_event_is_degraded_fallback(event),
                 lineage_origin=lineage.get("lineage_origin"),
                 lineage_is_carryover=bool(lineage.get("lineage_is_carryover")),
                 lineage_is_fresh=bool(lineage.get("lineage_is_fresh")),
@@ -113,6 +135,7 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
         event_type=event.event_type,
         description=event.description,
         metadata=event.event_metadata or {},
+        is_degraded_fallback=_event_is_degraded_fallback(event),
         lineage_origin=lineage.get("lineage_origin"),
         lineage_is_carryover=bool(lineage.get("lineage_is_carryover")),
         lineage_is_fresh=bool(lineage.get("lineage_is_fresh")),

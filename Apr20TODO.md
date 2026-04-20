@@ -2,7 +2,10 @@
 
 Post-run cleanup and correctness work to finish before any new run launches.
 
-## Done Locally, Not Yet Deployed
+## Done And Deployed
+
+- [x] CI fix in [backend/tests/test_events_lineage_api.py](/Users/drmixer/code/Emergence/backend/tests/test_events_lineage_api.py)
+  - keep `scope=all` because `/api/events` now defaults to empty when no run is active
 
 - [x] Governance run-boundary fix
   - expire inherited active proposals at run start
@@ -11,42 +14,39 @@ Post-run cleanup and correctness work to finish before any new run launches.
   - count passed/failed proposals by `resolved_at` for run-scoped reporting
   - scope scheduler/routine proposal queries to the active run window
 
-## Ready To Commit / Push
+## Done Locally, Not Yet Committed / Deployed
 
-- [ ] CI fix in [backend/tests/test_events_lineage_api.py](/Users/drmixer/code/Emergence/backend/tests/test_events_lineage_api.py)
-  - keep `scope=all` because `/api/events` now defaults to empty when no run is active
-
-## Next Correctness / UX Queue
-
-- [ ] Fix `/messages` threading and semantics
+- [x] Fix `/messages` threading and semantics
   - fix thread root label bug
   - improve `forum_reply` targeting so proposal/law argument threads do not attach to personal aid-request threads
   - make direct-message views and feed clickthroughs coherent
 
-- [ ] Fix live feed direct-message presentation
+- [x] Fix live feed direct-message presentation
   - show both sender and recipient for DM items
 
-- [ ] Fix live-surface message interpretation
+- [x] Fix live-surface message interpretation
   - distinguish meaningful agent-authored communication from deterministic fallback posts
   - label or exclude fallback/degraded-mode content from meaningful message counts
   - current canned fallback string comes from [backend/app/services/run_policy.py](/Users/drmixer/code/Emergence/backend/app/services/run_policy.py)
 
-- [ ] Fix avatar number legibility
+- [x] Fix avatar number legibility
   - use a consistent badge/inset with tabular digits and no distortion
 
-- [ ] Fix tooltip edge clipping
-  - shared glossary tooltip still clips at viewport edges
+- [x] Fix tooltip edge clipping
+  - shared glossary tooltip now renders in a viewport-clamped portal instead of clipping in local containers
 
-- [ ] Fix typo
-  - `generateing` -> `generating`
+- [x] Fix typo
+  - `generating` spelling is clean; prior todo text corrected
 
-- [ ] Fix stale/live UI edge cases
-  - landing hero counter should align with active-run semantics
-  - when no run is active, live surfaces should show idle/no-run state instead of stale last-run activity
+- [x] Fix stale/live UI edge cases
+  - landing hero now keys off active-run semantics instead of stale historical counters
+  - no-run live feed now renders an idle state instead of pretending the experiment is merely waiting to start
 
-- [ ] Fix Highlights tab
-  - remove misleading nonfunctional copy like “Click Play to experience the recap” if no playable recap exists
-  - polish later after correctness work
+- [x] Fix Highlights tab
+  - recap prompt copy now describes the actual control behavior
+  - highlights header copy no longer claims there is a current run when none is active
+
+## Next Correctness / UX Queue
 
 - [ ] Investigate invalid actions again
   - latest completed run `real-20260420T020843Z` ended with `630` invalid actions
@@ -62,9 +62,8 @@ Post-run cleanup and correctness work to finish before any new run launches.
 
 ## Recommended Order Before Next Run
 
-1. Commit/push CI fix.
-2. Commit/push governance run-boundary fix.
-3. Deploy backend and worker.
-4. Work through the queued UI/message/threading fixes.
-5. Run one clean canary with no new scarcity tuning changes beyond correctness fixes.
-6. Reassess behavior richness and whether any reheating is still needed.
+1. Commit/push the current UI/message/threading batch.
+2. Deploy frontend and backend together if the backend message-classification changes stay bundled with the UI counts/labels.
+3. Run one clean canary with no new scarcity tuning changes beyond correctness fixes.
+4. Re-check invalid-action mix on that canary.
+5. Reassess behavior richness and whether any reheating is still needed.

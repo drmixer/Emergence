@@ -667,7 +667,9 @@ export default function Highlights() {
         <p className="page-description">
           {isArchiveView && selectedRunId
             ? `Archived replay surfaces for ${selectedRunId}`
-            : 'Notable events, recaps, and daily summaries for the current run'}
+            : activeRunId
+              ? 'Notable events, recaps, and daily summaries for the current run'
+              : 'Recaps, notable events, and daily summaries from the latest available run'}
         </p>
       </div>
 

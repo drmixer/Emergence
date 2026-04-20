@@ -15,6 +15,12 @@ const TEASER_QUOTES = [
     { agent: '?', text: "No rules. No guidance. Pure emergence.", role: "System" },
 ]
 
+const IDLE_QUOTES = [
+    { agent: '?', text: 'No run is active right now. The next launch will start a fresh live feed.', role: 'System' },
+    { agent: '?', text: 'The last run has ended. Review archived evidence instead of stale live counters.', role: 'System' },
+    { agent: '?', text: 'Live surfaces are paused until the next simulation begins.', role: 'System' },
+]
+
 // Manifesto lines for the animated section
 const MANIFESTO_LINES = [
     { text: "Emergence is an experiment in consequences.", type: "title" },
@@ -154,23 +160,28 @@ export default function Landing() {
     const [statsLoading, setStatsLoading] = useState(true)
     const [momentsLoading, setMomentsLoading] = useState(true)
     const [isVisible, setIsVisible] = useState(false)
-    const [isPreLaunch, setIsPreLaunch] = useState(true)
+    const [runPhase, setRunPhase] = useState('prelaunch')
+    const [lastCompletedRunId, setLastCompletedRunId] = useState('')
     const heroRef = useRef(null)
 
     // Fetch real stats from API
     useEffect(() => {
         async function fetchStats() {
+            let simulationActive = false
+            let completedRunId = ''
             try {
                 const data = await api.getLandingStats().catch(() => null)
                 if (data) {
+                    simulationActive = Boolean(data.simulationActive)
+                    completedRunId = String(data.lastCompletedRunId || '').trim()
                     setStats({
                         day: data.day || 0,
                         messages: data.messageCount || 0,
                         laws: data.lawCount || 0,
                         activeAgents: data.activeAgents || 100
                     })
-                    // Check if experiment has started (Day > 0 or has messages)
-                    setIsPreLaunch(data.day === 0 && (data.messageCount || 0) === 0)
+                    setLastCompletedRunId(completedRunId)
+                    setRunPhase(simulationActive ? 'live' : completedRunId ? 'idle' : 'prelaunch')
                 }
             } catch (error) {
                 console.error('Failed to fetch landing stats:', error)
@@ -184,7 +195,7 @@ export default function Landing() {
                     api.getMessages(5).catch(() => []),
                     api.getBestMoments(3, 72, 55).catch(() => ({ items: [] })),
                 ])
-                if (Array.isArray(recentMessages) && recentMessages.length > 0) {
+                if (simulationActive && Array.isArray(recentMessages) && recentMessages.length > 0) {
                     setQuotes(
                         recentMessages.map((m) => ({
                             agent: m?.author?.agent_number ?? '?',
@@ -208,12 +219,16 @@ export default function Landing() {
 
     // Auto-rotate quotes (use teaser quotes in pre-launch)
     useEffect(() => {
-        const activeQuotes = isPreLaunch ? TEASER_QUOTES : (quotes.length > 0 ? quotes : TEASER_QUOTES)
+        const activeQuotes = runPhase === 'live'
+            ? (quotes.length > 0 ? quotes : TEASER_QUOTES)
+            : runPhase === 'idle'
+                ? IDLE_QUOTES
+                : TEASER_QUOTES
         const interval = setInterval(() => {
             setCurrentQuoteIndex((prev) => (prev + 1) % activeQuotes.length)
         }, 5000)
         return () => clearInterval(interval)
-    }, [isPreLaunch, quotes])
+    }, [quotes, runPhase])
 
     // Fade in effect
     useEffect(() => {
@@ -254,8 +269,17 @@ export default function Landing() {
         }
     }
 
-    const activeQuotes = isPreLaunch ? TEASER_QUOTES : (quotes.length > 0 ? quotes : TEASER_QUOTES)
+    const isPreLaunch = runPhase === 'prelaunch'
+    const isIdle = runPhase === 'idle'
+    const activeQuotes = runPhase === 'live'
+        ? (quotes.length > 0 ? quotes : TEASER_QUOTES)
+        : isIdle
+            ? IDLE_QUOTES
+            : TEASER_QUOTES
     const currentQuote = activeQuotes[currentQuoteIndex % activeQuotes.length]
+    const ctaHref = isIdle && lastCompletedRunId
+        ? `/runs/${encodeURIComponent(lastCompletedRunId)}`
+        : '/dashboard'
 
     const shareMoment = async (turn) => {
         const eventId = Number(turn?.event_id || 0)
@@ -355,6 +379,20 @@ export default function Landing() {
                             <span className="stat-value">{stats.activeAgents} agents ready</span>
                         </div>
                     </div>
+                ) : isIdle ? (
+                    <div className="stats-bar prelaunch">
+                        <div className="stat-item prelaunch-item">
+                            <Clock className="stat-icon" size={18} />
+                            <span className="stat-value">No Run Active</span>
+                        </div>
+                        <div className="stat-divider" />
+                        <div className="stat-item">
+                            <Scale className="stat-icon" size={18} />
+                            <span className="stat-value">
+                                {lastCompletedRunId ? `Latest: ${lastCompletedRunId}` : 'Awaiting next launch'}
+                            </span>
+                        </div>
+                    </div>
                 ) : (
                     <div className="stats-bar">
                         <div className="stat-item">
@@ -385,24 +423,30 @@ export default function Landing() {
                     onClick={() => {
                         trackKpiEvent('landing_run_click', {
                             surface: 'vite_landing_cta',
-                            target: 'dashboard',
+                            target: isIdle && lastCompletedRunId ? 'latest_run' : 'dashboard',
                         })
-                        navigate('/dashboard')
+                        navigate(ctaHref)
                     }}
                 >
                     <div className="cta-pulse" />
                     <Play size={20} />
-                    <span>{isPreLaunch ? 'Preview Dashboard' : 'Watch Live'}</span>
+                    <span>
+                        {isPreLaunch
+                            ? 'Preview Dashboard'
+                            : isIdle
+                                ? 'Review Latest Run'
+                                : 'Watch Live'}
+                    </span>
                 </button>
 
                 {/* Rotating Quote */}
                 <div className="quote-container">
-                    <div className={`quote-content ${isPreLaunch ? 'prelaunch' : ''}`} key={currentQuoteIndex}>
+                    <div className={`quote-content ${runPhase !== 'live' ? 'prelaunch' : ''}`} key={currentQuoteIndex}>
                         <Sparkles className="quote-icon" size={16} />
                         <blockquote className="quote-text">"{currentQuote.text}"</blockquote>
                         <div className="quote-author">
-                            {isPreLaunch ? <Clock size={14} /> : <Brain size={14} />}
-                            <span>{isPreLaunch ? 'System' : currentQuote.role}</span>
+                            {runPhase === 'live' ? <Brain size={14} /> : <Clock size={14} />}
+                            <span>{runPhase === 'live' ? currentQuote.role : 'System'}</span>
                         </div>
                     </div>
                 </div>
@@ -410,17 +454,25 @@ export default function Landing() {
                 <div className="hero-best-moments">
                     <div className="hero-best-moments-header">
                         <div>
-                            <span className="hero-best-moments-eyebrow">Best Moments</span>
-                            <p>Evidence-backed turning points from the live run.</p>
+                            <span className="hero-best-moments-eyebrow">{isIdle ? 'Latest Run' : 'Best Moments'}</span>
+                            <p>
+                                {isPreLaunch
+                                    ? 'Highlights will appear after the next run produces evidence-backed moments.'
+                                    : isIdle
+                                        ? 'Evidence-backed turning points from the latest completed run.'
+                                        : 'Evidence-backed turning points from the live run.'}
+                            </p>
                         </div>
-                        <button
-                            type="button"
-                            className="hero-best-moments-link"
-                            onClick={() => navigate(getStoryReplayHref())}
-                        >
-                            Open 60s replay
-                            <ArrowUpRight size={15} />
-                        </button>
+                        {bestMoments.length > 0 && (
+                            <button
+                                type="button"
+                                className="hero-best-moments-link"
+                                onClick={() => navigate(getStoryReplayHref())}
+                            >
+                                {isIdle ? 'Open latest replay' : 'Open 60s replay'}
+                                <ArrowUpRight size={15} />
+                            </button>
+                        )}
                     </div>
 
                     <div className="hero-best-moments-grid">
@@ -431,7 +483,9 @@ export default function Landing() {
                             <div className="hero-moment-empty">
                                 {isPreLaunch
                                     ? 'Best moments will appear as soon as the run starts producing evidence-backed events.'
-                                    : 'No high-salience moments are available yet.'}
+                                    : isIdle
+                                        ? 'No archived best moments are available yet.'
+                                        : 'No high-salience moments are available yet.'}
                             </div>
                         )}
                         {!momentsLoading && bestMoments.map((turn) => {

@@ -582,11 +582,15 @@ class APIService {
             return {
                 activeAgents: overview?.agents?.active ?? health.active_agents ?? 0,
                 totalAgents: overview?.agents?.total ?? health.total_agents ?? 100,
-                messageCount: overview?.messages?.total ?? 0,
+                messageCount: overview?.messages?.meaningful_total ?? overview?.messages?.total ?? 0,
+                degradedFallbackMessageCount: overview?.messages?.degraded_fallback_total ?? 0,
                 lawCount: overview?.laws?.total ?? 0,
                 proposalCount: overview?.proposals?.total ?? 0,
                 day: overview?.day_number ?? 0,
                 lastActivity: overview?.events?.latest ?? null,
+                simulationActive: overview?.scope?.simulation_active === true,
+                activeRunId: overview?.scope?.active_run_id || '',
+                lastCompletedRunId: overview?.scope?.last_completed_run_id || '',
             }
         } catch (error) {
             console.error('Failed to get landing stats:', error)

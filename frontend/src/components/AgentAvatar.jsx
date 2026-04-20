@@ -71,27 +71,31 @@ export default function AgentAvatar({
 
     return (
         <div
-            className={`agent-avatar ${sizeClasses[size]} tier-${tier} ${avatarIdentity.pattern} ${appliedShapeClass} ${status} ${className}`}
+            className={`agent-avatar avatar-component ${sizeClasses[size]} tier-${tier} ${avatarIdentity.pattern} ${appliedShapeClass} ${status} ${className}`}
             style={avatarIdentity.style}
         >
-            {/* Pattern overlay based on personality */}
-            <div className="avatar-pattern" />
+            <div className="avatar-shell">
+                {/* Pattern overlay based on personality */}
+                <div className="avatar-pattern" />
 
-            {/* Tier indicator ring */}
-            <div className="avatar-tier-ring" />
+                {/* Tier indicator ring */}
+                <div className="avatar-tier-ring" />
+
+                {/* Status indicator */}
+                {status === 'dormant' && (
+                    <div className="avatar-dormant-overlay" />
+                )}
+            </div>
 
             {/* Agent number */}
             {showNumber && (
-                <span className="avatar-number-plate">
-                    <span className="avatar-number">
-                        #{avatarIdentity.safe}
+                <span className="avatar-number-badge" aria-label={`Agent #${avatarIdentity.safe}`}>
+                    <span className="avatar-number-plate">
+                        <span className="avatar-number">
+                            #{avatarIdentity.safe}
+                        </span>
                     </span>
                 </span>
-            )}
-
-            {/* Status indicator */}
-            {status === 'dormant' && (
-                <div className="avatar-dormant-overlay" />
             )}
         </div>
     )

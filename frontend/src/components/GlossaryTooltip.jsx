@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 import { CircleHelp } from 'lucide-react'
 import { GLOSSARY_TERMS_BY_KEY } from '../data/glossaryTerms'
 import './GlossaryTooltip.css'
@@ -12,7 +13,10 @@ export default function GlossaryTooltip({
     const entry = GLOSSARY_TERMS_BY_KEY[termKey]
     const [open, setOpen] = useState(false)
     const [placement, setPlacement] = useState('center')
+    const [verticalPlacement, setVerticalPlacement] = useState('bottom')
+    const [popoverStyle, setPopoverStyle] = useState(null)
     const wrapperRef = useRef(null)
+    const tooltipRef = useRef(null)
     const closeTimerRef = useRef(null)
     const tooltipId = useId()
 
@@ -39,25 +43,49 @@ export default function GlossaryTooltip({
             if (!wrapper) return
             const rect = wrapper.getBoundingClientRect()
             const margin = 12
-            const estimatedWidth = Math.min(320, window.innerWidth - 32)
+            const viewportWidth = window.innerWidth
+            const viewportHeight = window.innerHeight
+            const estimatedWidth = Math.min(320, Math.max(160, viewportWidth - margin * 2))
+            const estimatedHeight = tooltipRef.current?.offsetHeight || 156
             const centeredLeft = rect.left + rect.width / 2 - estimatedWidth / 2
-            const centeredRight = rect.left + rect.width / 2 + estimatedWidth / 2
+            const preferredLeft = Math.min(
+                Math.max(centeredLeft, margin),
+                viewportWidth - estimatedWidth - margin
+            )
+            const preferredTop = rect.bottom + 8
+            const aboveTop = rect.top - estimatedHeight - 8
+            const shouldPlaceAbove =
+                preferredTop + estimatedHeight > viewportHeight - margin &&
+                aboveTop >= margin
 
             if (centeredLeft < margin) {
                 setPlacement('left')
-                return
-            }
-            if (centeredRight > window.innerWidth - margin) {
+            } else if (centeredLeft + estimatedWidth > viewportWidth - margin) {
                 setPlacement('right')
-                return
+            } else {
+                setPlacement('center')
             }
-            setPlacement('center')
+
+            setVerticalPlacement(shouldPlaceAbove ? 'top' : 'bottom')
+            setPopoverStyle({
+                left: `${preferredLeft}px`,
+                top: `${Math.max(
+                    margin,
+                    shouldPlaceAbove
+                        ? aboveTop
+                        : Math.min(preferredTop, viewportHeight - estimatedHeight - margin)
+                )}px`,
+                width: `${estimatedWidth}px`,
+            })
         }
 
         updatePlacement()
+        const frame = window.requestAnimationFrame(updatePlacement)
 
         const handlePointerDown = (event) => {
-            if (!wrapperRef.current?.contains(event.target)) {
+            const clickedTrigger = wrapperRef.current?.contains(event.target)
+            const clickedTooltip = tooltipRef.current?.contains(event.target)
+            if (!clickedTrigger && !clickedTooltip) {
                 setOpen(false)
             }
         }
@@ -69,6 +97,7 @@ export default function GlossaryTooltip({
         document.addEventListener('pointerdown', handlePointerDown)
         document.addEventListener('keydown', handleEscape)
         return () => {
+            window.cancelAnimationFrame(frame)
             window.removeEventListener('resize', updatePlacement)
             window.removeEventListener('scroll', updatePlacement, true)
             document.removeEventListener('pointerdown', handlePointerDown)
@@ -112,23 +141,30 @@ export default function GlossaryTooltip({
                 <CircleHelp size={12} />
             </button>
 
-            <span
-                id={tooltipId}
-                role="dialog"
-                className={`glossary-popover glossary-popover-${placement} ${open ? 'visible' : ''}`}
-                onMouseEnter={cancelClose}
-                onMouseLeave={scheduleClose}
-            >
-                <span className="glossary-popover-title">{entry.label}</span>
-                <span className="glossary-popover-body">{entry.definition}</span>
-                <Link
-                    className="glossary-popover-link"
-                    to={`/glossary#${entry.key}`}
-                    onClick={() => setOpen(false)}
+            {open && typeof document !== 'undefined' && createPortal(
+                <span
+                    id={tooltipId}
+                    ref={tooltipRef}
+                    role="dialog"
+                    className={`glossary-popover glossary-popover-${placement} glossary-popover-${verticalPlacement} visible`}
+                    style={popoverStyle || undefined}
+                    onMouseEnter={cancelClose}
+                    onMouseLeave={scheduleClose}
+                    onFocus={cancelClose}
+                    onBlur={scheduleClose}
                 >
-                    Learn more
-                </Link>
-            </span>
+                    <span className="glossary-popover-title">{entry.label}</span>
+                    <span className="glossary-popover-body">{entry.definition}</span>
+                    <Link
+                        className="glossary-popover-link"
+                        to={`/glossary#${entry.key}`}
+                        onClick={() => setOpen(false)}
+                    >
+                        Learn more
+                    </Link>
+                </span>,
+                document.body
+            )}
         </span>
     )
 }
