@@ -125,6 +125,14 @@ This cadence is intentionally conservative for budget control and reliability wh
   - same number + carryover = same continuing identity
   - same number + fresh reset = new identity in a reused numeric slot
 
+## Fresh-Run Start Semantics
+- A new run must not silently inherit leftover world state from an earlier run unless an explicit transfer/carryover workflow is declared.
+- Starting a fresh run requires:
+  - a fresh `run_id`
+  - a freshly prepared world state rather than agents already carrying death/dormancy/starvation state from a prior run
+- Operational start controls should refuse dirty fresh starts rather than reopening or continuing a prior run accidentally.
+- If the live population reaches `0 active / 0 dormant`, the run should auto-close instead of remaining marked active until a manual or scheduled stop arrives.
+
 ## Governance Run-Boundary Semantics
 - Governance state is run-scoped by default unless an explicit transfer policy says otherwise.
 - Active proposals must not remain open across run boundaries; unresolved proposals expire when the run ends and must not resolve in a later run.
@@ -191,7 +199,7 @@ make sim-preset PRESET=internal_scarcity_tight_v2
 make sim-preset PRESET=internal_scarcity_tight_v3
 make sim-preset PRESET=internal_scarcity_tight_v4
 make sim-preset PRESET=internal_scarcity_tight_v5
-make sim-start RUN_MODE=real
+make sim-start RUN_MODE=real RUN_ID=<run_id>
 make sim-stop
 
 # Run artifact rebuild

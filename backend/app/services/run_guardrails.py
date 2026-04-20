@@ -36,6 +36,7 @@ class RunGuardrailService:
     Stop conditions:
     - hard budget breach
     - repeated provider failures in recent window
+    - full population extinction
     - sustained DB pool exhaustion pressure
     """
 
@@ -65,6 +66,10 @@ class RunGuardrailService:
         scheduled_stop_decision = self._check_scheduled_stop()
         if scheduled_stop_decision.should_stop:
             return scheduled_stop_decision
+
+        extinction_decision = self._check_population_extinct()
+        if extinction_decision.should_stop:
+            return extinction_decision
 
         provider_decision = self._check_provider_failures()
         if provider_decision.should_stop:
@@ -190,6 +195,46 @@ class RunGuardrailService:
             "checked_at": current_time.isoformat(),
         }
         return StopDecision(True, "scheduled_stop_reached", details)
+
+    @staticmethod
+    def _check_population_extinct() -> StopDecision:
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT
+                        COUNT(*) AS total_agents,
+                        COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) AS active_agents,
+                        COALESCE(SUM(CASE WHEN status = 'dormant' THEN 1 ELSE 0 END), 0) AS dormant_agents,
+                        COALESCE(SUM(CASE WHEN status = 'dead' OR died_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS dead_agents
+                    FROM agents
+                    """
+                )
+            ).first()
+        except Exception as exc:
+            logger.warning("Population-extinction stop check unavailable: %s", exc)
+            return StopDecision(False)
+        finally:
+            db.close()
+
+        total_agents = int((row.total_agents if row else 0) or 0)
+        active_agents = int((row.active_agents if row else 0) or 0)
+        dormant_agents = int((row.dormant_agents if row else 0) or 0)
+        dead_agents = int((row.dead_agents if row else 0) or 0)
+
+        if total_agents <= 0:
+            return StopDecision(False)
+        if active_agents > 0 or dormant_agents > 0:
+            return StopDecision(False)
+
+        details = {
+            "total_agents": total_agents,
+            "active_agents": active_agents,
+            "dormant_agents": dormant_agents,
+            "dead_agents": dead_agents,
+        }
+        return StopDecision(True, "population_extinct", details)
 
     @staticmethod
     def _check_provider_failures() -> StopDecision:
@@ -354,6 +399,9 @@ class RunGuardrailService:
         if reason == "scheduled_stop_reached":
             reason_text = "Scheduled stop reached"
             run_end_reason = "Scheduled stop via run_guardrails"
+        elif reason == "population_extinct":
+            reason_text = "All living agents are gone; stopping extinct run"
+            run_end_reason = "Population extinct via run_guardrails"
         else:
             reason_text = f"Stop condition tripped: {reason}"
             run_end_reason = reason_text

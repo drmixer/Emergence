@@ -1885,7 +1885,9 @@ def overview():
         first_at = ensure_utc(first_event.created_at) if first_event and first_event.created_at else None
         latest_at = ensure_utc(most_recent_event.created_at) if most_recent_event and most_recent_event.created_at else None
 
-        if run_window.started_at is not None:
+        if not simulation_active:
+            day_number = 0
+        elif run_window.started_at is not None:
             day_number = get_simulation_day_number_from_bounds(run_window.started_at, latest_at)
         else:
             day_number = get_simulation_day_number(db)

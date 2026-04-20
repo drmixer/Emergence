@@ -24,7 +24,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.core.database import SessionLocal
 from app.core.time import now_utc
 from app.models.models import SimulationRun
+from app.services.governance_run_boundary import retire_inherited_governance_state
 from app.services.run_policy import coerce_run_class, deterministic_failure_policy_for_run_class
+from app.services.run_start_safety import RunStartSafetyError, assert_new_run_startable
 from app.services.runtime_config import runtime_config_service
 
 _DEFAULT_PROTOCOL_VERSION = "protocol_v1"
@@ -180,32 +182,38 @@ def _clean_optional_text(value: Any) -> str | None:
     return text_value or None
 
 
-def _existing_run_class(run_id: str | None) -> str | None:
-    clean_run_id = str(run_id or "").strip()
-    if not clean_run_id:
-        return None
-    db = SessionLocal()
-    try:
-        row = db.query(SimulationRun).filter(SimulationRun.run_id == clean_run_id).first()
-        if row is None:
-            return None
-        return str(row.run_class or "").strip() or None
-    finally:
-        db.close()
+def _normalize_run_id(raw_value: str | None, mode: str) -> str:
+    clean = str(raw_value or "").strip()
+    if clean:
+        return clean
+    return f"{mode}-{now_utc().strftime('%Y%m%dT%H%M%SZ')}"
 
 
-def _existing_run_tuning_state(run_id: str | None) -> bool | None:
-    clean_run_id = str(run_id or "").strip()
-    if not clean_run_id:
-        return None
-    db = SessionLocal()
-    try:
-        row = db.query(SimulationRun).filter(SimulationRun.run_id == clean_run_id).first()
-        if row is None:
-            return None
-        return bool(row.protocol_deviation and str(row.deviation_reason or "").strip() == "tuning_run")
-    finally:
-        db.close()
+def _resolve_start_runtime_updates(
+    *,
+    requested_run_mode: str | None,
+    requested_run_id: str | None,
+    requested_run_class: str | None,
+    requested_condition: str | None,
+    requested_season_number: int | None,
+    current_run_mode: str | None = None,
+) -> tuple[dict[str, Any], str, str]:
+    resolved_run_mode = str(requested_run_mode or current_run_mode or "test").strip() or "test"
+    resolved_run_id = _normalize_run_id(requested_run_id, resolved_run_mode)
+    resolved_run_class = coerce_run_class(requested_run_class or _DEFAULT_RUN_CLASS)
+    resolved_condition = str(requested_condition or "").strip()
+    resolved_season_number = int(requested_season_number or 0)
+
+    updates: dict[str, Any] = {
+        "SIMULATION_ACTIVE": True,
+        "SIMULATION_PAUSED": False,
+        "SIMULATION_RUN_MODE": resolved_run_mode,
+        "SIMULATION_RUN_ID": resolved_run_id,
+        "SIMULATION_RUN_CLASS": resolved_run_class,
+        "SIMULATION_CONDITION_NAME": resolved_condition,
+        "SIMULATION_SEASON_NUMBER": resolved_season_number,
+    }
+    return updates, resolved_run_id, resolved_run_mode
 
 
 def _upsert_run_registry_start(
@@ -367,25 +375,26 @@ def main() -> None:
         return
 
     if args.command == "start":
-        updates: dict[str, Any] = {
-            "SIMULATION_ACTIVE": True,
-            "SIMULATION_PAUSED": False,
-        }
-        if args.run_mode:
-            updates["SIMULATION_RUN_MODE"] = args.run_mode
-        if args.run_id is not None:
-            updates["SIMULATION_RUN_ID"] = str(args.run_id)
-        resolved_cli_run_class = args.run_class or _existing_run_class(args.run_id)
-        if resolved_cli_run_class is not None:
-            updates["SIMULATION_RUN_CLASS"] = coerce_run_class(resolved_cli_run_class)
-        if args.condition is not None:
-            updates["SIMULATION_CONDITION_NAME"] = str(args.condition or "").strip()
-        if args.season_number is not None:
-            updates["SIMULATION_SEASON_NUMBER"] = int(args.season_number or 0)
+        status_before = _status_payload()
+        updates, resolved_run_id, resolved_run_mode = _resolve_start_runtime_updates(
+            requested_run_mode=args.run_mode,
+            requested_run_id=args.run_id,
+            requested_run_class=args.run_class,
+            requested_condition=args.condition,
+            requested_season_number=args.season_number,
+            current_run_mode=str(status_before.get("simulation_run_mode") or "").strip() or None,
+        )
+        db = SessionLocal()
+        try:
+            assert_new_run_startable(db, run_id=resolved_run_id)
+        except RunStartSafetyError as exc:
+            raise SystemExit(str(exc)) from exc
+        finally:
+            db.close()
+
         resolved_tuning_run = bool(args.tuning_run)
         if not resolved_tuning_run:
-            existing_tuning = _existing_run_tuning_state(args.run_id)
-            resolved_tuning_run = bool(existing_tuning)
+            resolved_tuning_run = False
 
         result = _update_runtime(
             updates,
@@ -393,8 +402,8 @@ def main() -> None:
         )
         effective = result.get("effective", {})
         result["run_registry"] = _upsert_run_registry_start(
-            run_id=str(effective.get("SIMULATION_RUN_ID") or "").strip(),
-            run_mode=str(effective.get("SIMULATION_RUN_MODE") or "").strip() or None,
+            run_id=resolved_run_id,
+            run_mode=resolved_run_mode,
             run_class=coerce_run_class(effective.get("SIMULATION_RUN_CLASS")),
             condition_name=(
                 str(effective.get("SIMULATION_CONDITION_NAME") or "").strip() or None
@@ -403,6 +412,11 @@ def main() -> None:
             tuning_run=resolved_tuning_run,
             reason="Operator start via simulation_control.py",
         )
+        db = SessionLocal()
+        try:
+            retire_inherited_governance_state(db, run_id=resolved_run_id)
+        finally:
+            db.close()
         print(json.dumps(result, indent=2))
         print(json.dumps(_status_payload(), indent=2))
         return

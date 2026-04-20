@@ -29,6 +29,7 @@ from app.services.governance_run_boundary import (
 )
 from app.services.kpi_rollups import get_recent_rollups
 from app.services.run_policy import coerce_run_class, deterministic_failure_policy_for_run_class
+from app.services.run_start_safety import RunStartSafetyError, assert_new_run_startable
 from app.services.run_reports import get_run_report_pipeline_status, maybe_generate_run_closeout_bundle
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
@@ -830,11 +831,16 @@ def start_simulation_run(
     mode = str(request.mode or "").strip()
     run_id = _normalize_run_id(request.run_id, mode)
     existing_run_row = _get_simulation_run_row(db, run_id=run_id)
+    if existing_run_row is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"run_id `{run_id}` already exists; start a new run with a fresh run_id.",
+        )
     metadata = _resolve_run_start_metadata(
         request,
         run_id=run_id,
         mode=mode,
-        existing_run_class=(existing_run_row.run_class if existing_run_row else None),
+        existing_run_class=None,
     )
     _validate_run_reference(
         db,
@@ -854,6 +860,14 @@ def start_simulation_run(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="reset_world is only supported for test runs",
         )
+    if not request.reset_world:
+        try:
+            assert_new_run_startable(db, run_id=run_id)
+        except RunStartSafetyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
     if not _has_research_metadata(request):
         logger.warning(
             "Starting run without research metadata; applying defaults (run_id=%s mode=%s actor=%s protocol_version=%s run_class=%s)",

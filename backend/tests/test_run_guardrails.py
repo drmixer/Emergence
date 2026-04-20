@@ -180,12 +180,56 @@ class _FakeDB:
         self.row = row
         self.calls = []
 
-    def execute(self, statement, params):
-        self.calls.append({"statement": str(statement), "params": dict(params)})
+    def execute(self, statement, params=None):
+        self.calls.append({"statement": str(statement), "params": dict(params or {})})
         return _FakeResult(self.row)
 
     def close(self):
         return None
+
+
+def test_population_extinct_stop_triggers_when_no_living_agents_remain(monkeypatch):
+    _install_runtime_values(monkeypatch, {})
+    fake_db = _FakeDB(
+        type(
+            "Row",
+            (),
+            {
+                "total_agents": 50,
+                "active_agents": 0,
+                "dormant_agents": 0,
+                "dead_agents": 50,
+            },
+        )()
+    )
+    monkeypatch.setattr("app.services.run_guardrails.SessionLocal", lambda: fake_db)
+
+    decision = RunGuardrailService._check_population_extinct()
+
+    assert decision.should_stop is True
+    assert decision.reason == "population_extinct"
+    assert decision.details["dead_agents"] == 50
+
+
+def test_population_extinct_stop_ignores_runs_with_living_agents(monkeypatch):
+    _install_runtime_values(monkeypatch, {})
+    fake_db = _FakeDB(
+        type(
+            "Row",
+            (),
+            {
+                "total_agents": 50,
+                "active_agents": 3,
+                "dormant_agents": 2,
+                "dead_agents": 45,
+            },
+        )()
+    )
+    monkeypatch.setattr("app.services.run_guardrails.SessionLocal", lambda: fake_db)
+
+    decision = RunGuardrailService._check_population_extinct()
+
+    assert decision.should_stop is False
 
 
 def test_provider_failure_stop_requires_failure_rate_threshold(monkeypatch):

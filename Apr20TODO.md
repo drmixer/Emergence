@@ -14,6 +14,12 @@ Post-run cleanup and correctness work to finish before any new run launches.
   - count passed/failed proposals by `resolved_at` for run-scoped reporting
   - scope scheduler/routine proposal queries to the active run window
 
+- [x] Start/stop correctness hardening
+  - fresh starts now require a fresh `run_id`
+  - CLI/admin start paths reject accidental dirty-world carryover from dead/dormant/starving state
+  - run guardrails auto-stop extinct runs at `0 active / 0 dormant`
+  - landing hero live stats now zero out when no run is active
+
 ## Done Locally, Not Yet Committed / Deployed
 
 - [x] Fix `/messages` threading and semantics
@@ -49,8 +55,10 @@ Post-run cleanup and correctness work to finish before any new run launches.
 ## Next Correctness / UX Queue
 
 - [ ] Investigate invalid actions again
-  - latest completed run `real-20260420T020843Z` ended with `630` invalid actions
-  - current top category was entirely: `Action rejected: Can only vote on a proposal from the current run`
+  - exclude the operationally invalid start-path runs from tuning interpretation:
+    - accidental reopened tail of `real-20260420T020843Z`
+    - dirty-start canary `real-20260420T124849Z`
+  - latest completed valid baseline to re-check should come after the corrected replacement canary
   - re-check invalid-action mix after governance fix is deployed
 
 ## Nice To Have Later

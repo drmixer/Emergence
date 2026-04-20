@@ -26,6 +26,12 @@ const FALLBACK_QUOTES = [
   "The archive updates as the world evolves.",
 ]
 
+const IDLE_QUOTES = [
+  "No run is active right now. Live hero stats stay at zero until the next launch.",
+  "The last run has ended. Review the archive instead of stale live counters.",
+  "Live surfaces are idle until the next simulation begins.",
+]
+
 export function HeroSection() {
   const sectionRef = useRef<HTMLElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -36,6 +42,7 @@ export function HeroSection() {
     laws: 0,
     coalitions: 0,
   })
+  const [simulationActive, setSimulationActive] = useState(false)
   const [quotes, setQuotes] = useState<string[]>([])
   const [quoteIndex, setQuoteIndex] = useState(0)
 
@@ -76,10 +83,21 @@ export function HeroSection() {
       }
 
       try {
-        const [overview, messages, emergence] = await Promise.all([
-          fetch(`${apiBase}/api/analytics/overview`)
-            .then((response) => (response.ok ? response.json() : null))
-            .catch(() => null),
+        const overview = await fetch(`${apiBase}/api/analytics/overview`)
+          .then((response) => (response.ok ? response.json() : null))
+          .catch(() => null)
+        if (cancelled) return
+
+        const isLive = overview?.scope?.simulation_active === true
+        setSimulationActive(isLive)
+
+        if (!isLive) {
+          setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
+          setQuotes([])
+          return
+        }
+
+        const [messages, emergence] = await Promise.all([
           fetch(`${apiBase}/api/messages?limit=5`)
             .then((response) => (response.ok ? response.json() : []))
             .catch(() => []),
@@ -104,6 +122,7 @@ export function HeroSection() {
         setQuotes(extractedQuotes)
       } catch {
         if (!cancelled) {
+          setSimulationActive(false)
           setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
           setQuotes([])
         }
@@ -126,11 +145,13 @@ export function HeroSection() {
   }, [])
 
   const quote = useMemo(() => {
-    const source = quotes.length > 0 ? quotes : FALLBACK_QUOTES
+    const source = simulationActive
+      ? (quotes.length > 0 ? quotes : FALLBACK_QUOTES)
+      : IDLE_QUOTES
     return source[quoteIndex % source.length]
-  }, [quoteIndex, quotes])
+  }, [quoteIndex, quotes, simulationActive])
 
-  const isPreLaunch = stats.day === 0 && stats.deaths === 0 && stats.laws === 0
+  const isIdle = !simulationActive
 
   return (
     <section ref={sectionRef} id="hero" className="relative min-h-screen flex items-center px-4 md:pl-28 md:pr-12">
@@ -160,7 +181,7 @@ export function HeroSection() {
             <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Live Stats Preview</span>
             <span className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               {statsLoading ? <Activity className="h-3.5 w-3.5 animate-pulse" /> : <Radio className="h-3.5 w-3.5" />}
-              {statsLoading ? "Loading" : "Live"}
+              {statsLoading ? "Loading" : isIdle ? "Idle" : "Live"}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -199,11 +220,11 @@ export function HeroSection() {
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Watch Live</p>
             <h3 className="mt-2 font-[var(--font-bebas)] text-5xl leading-none tracking-tight">
-              {isPreLaunch ? "Simulation Staging" : "Simulation Active"}
+              {isIdle ? "Simulation Idle" : "Simulation Active"}
             </h3>
             <p className="mt-3 max-w-xl font-mono text-xs leading-relaxed text-muted-foreground">
-              {isPreLaunch
-                ? "The agents are preparing. Some will cooperate. Some will compete. Some will die. What emerges under resource scarcity?"
+              {isIdle
+                ? "No run is active right now. The next launch will begin a fresh live window instead of continuing stale counters."
                 : "The agents are surviving, cooperating, and competing. No script. No predetermined outcomes. What society will they create?"}
             </p>
             <p className="mt-3 max-w-xl font-mono text-[11px] leading-relaxed text-muted-foreground/80">
@@ -221,7 +242,7 @@ export function HeroSection() {
             className="inline-flex items-center gap-3 border border-foreground bg-foreground px-6 py-3 font-mono text-xs uppercase tracking-widest text-background transition-all duration-200 hover:translate-x-0.5"
           >
             <Play className="h-4 w-4" />
-            {isPreLaunch ? "Preview Dashboard" : "Watch Live"}
+            {isIdle ? "View Dashboard" : "Watch Live"}
             <ArrowUpRight className="h-4 w-4" />
           </Link>
         </div>

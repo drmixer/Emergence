@@ -411,6 +411,80 @@ def test_run_start_rejects_missing_parent_run_reference(db_session, monkeypatch)
     assert response.json()["detail"] == "parent_run_id must reference an existing simulation run"
 
 
+def test_run_start_rejects_existing_run_id(db_session, monkeypatch):
+    db_session.add(
+        SimulationRun(
+            run_id="real-existing-run",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="standard_72h",
+            started_at=now_utc(),
+        )
+    )
+    db_session.commit()
+    client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
+
+    with client:
+        response = client.post(
+            "/api/admin/control/run/start",
+            json={"mode": "real", "run_id": "real-existing-run"},
+        )
+
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"]
+
+
+def test_run_start_rejects_dirty_world_state(db_session, monkeypatch):
+    author = _seed_author(db_session)
+    db_session.add(
+        Agent(
+            agent_number=2,
+            display_name="Agent #2",
+            model_type="or_gpt_oss_20b_free",
+            tier=1,
+            personality_type="neutral",
+            status="dead",
+            system_prompt="{}",
+            starvation_cycles=5,
+            died_at=now_utc(),
+            death_cause="starvation",
+        )
+    )
+    proposal = Proposal(
+        author_agent_id=author.id,
+        title="Dirty Proposal",
+        description="Should block new run starts.",
+        proposal_type="law",
+        status="active",
+        voting_closes_at=now_utc() + admin_api.timedelta(hours=1),
+    )
+    db_session.add(proposal)
+    db_session.flush()
+    db_session.add(
+        Law(
+            proposal_id=proposal.id,
+            title="Dirty Law",
+            description="Should block new run starts.",
+            author_agent_id=author.id,
+            active=True,
+            passed_at=now_utc(),
+        )
+    )
+    db_session.commit()
+
+    client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
+
+    with client:
+        response = client.post(
+            "/api/admin/control/run/start",
+            json={"mode": "real", "run_id": "real-new-run"},
+        )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "dead agents" in detail
+
+
 def test_run_start_rejects_missing_mirror_control_run_reference(db_session, monkeypatch):
     client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
 

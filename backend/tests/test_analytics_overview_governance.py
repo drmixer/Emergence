@@ -223,3 +223,52 @@ def test_overview_excludes_degraded_fallback_posts_from_meaningful_message_total
     assert body["messages"]["total"] == 3
     assert body["messages"]["degraded_fallback_total"] == 1
     assert body["messages"]["meaningful_total"] == 2
+
+
+def test_overview_zeroes_day_number_when_no_run_is_active(
+    testing_session_factory,
+    monkeypatch,
+):
+    session = testing_session_factory()
+    run_started_at = datetime(2026, 4, 19, 2, 8, 43, tzinfo=timezone.utc)
+
+    session.add(
+        SimulationRun(
+            run_id="real-20260419T020843Z",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="special_exploratory",
+            started_at=run_started_at,
+            ended_at=run_started_at + timedelta(hours=8),
+        )
+    )
+    session.add(
+        Event(
+            event_type="daily_summary",
+            description="Historical summary",
+            created_at=run_started_at + timedelta(days=3),
+            event_metadata={"day_number": 4},
+        )
+    )
+    session.commit()
+    session.close()
+
+    runtime_values = {
+        "SIMULATION_ACTIVE": False,
+        "SIMULATION_PAUSED": True,
+        "SIMULATION_RUN_ID": "",
+    }
+    monkeypatch.setattr(analytics_api, "SessionLocal", testing_session_factory)
+    monkeypatch.setattr(
+        analytics_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: runtime_values.get(key),
+    )
+
+    with _make_client() as client:
+        response = client.get("/api/analytics/overview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scope"]["simulation_active"] is False
+    assert body["day_number"] == 0
