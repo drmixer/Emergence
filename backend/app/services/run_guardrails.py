@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.core.database import SessionLocal, engine
 from app.core.time import now_utc
 from app.models.models import Event, SimulationRun
+from app.services.governance_run_boundary import close_run_governance_state
 from app.services.run_reports import maybe_generate_run_closeout_bundle
 from app.services.runtime_config import runtime_config_service
 from app.services.usage_budget import usage_budget
@@ -395,6 +396,7 @@ class RunGuardrailService:
                         run_id=run_id,
                         reason=run_end_reason,
                     )
+                    close_run_governance_state(db, run_id=run_id)
                 except Exception as exc:
                     db.rollback()
                     logger.error("Failed to mark run registry stop for guardrail: %s", exc)

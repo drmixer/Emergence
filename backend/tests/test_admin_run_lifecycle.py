@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.time import now_utc
-from app.models.models import SimulationRun
+from app.models.models import Agent, Law, Proposal, SimulationRun
 
 admin_api = importlib.import_module("app.api.admin")
 
@@ -60,6 +60,9 @@ def db_session():
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
+    Agent.__table__.create(bind=engine)
+    Proposal.__table__.create(bind=engine)
+    Law.__table__.create(bind=engine)
     SimulationRun.__table__.create(bind=engine)
     session = sessionmaker(bind=engine, future=True)()
     try:
@@ -115,6 +118,21 @@ def _stub_budget(monkeypatch):
             estimated_cost_usd=0.0,
         ),
     )
+
+
+def _seed_author(db_session, *, agent_number: int = 1) -> Agent:
+    author = Agent(
+        agent_number=agent_number,
+        display_name=f"Agent #{agent_number}",
+        model_type="or_gpt_oss_20b_free",
+        tier=1,
+        personality_type="neutral",
+        status="active",
+        system_prompt="{}",
+    )
+    db_session.add(author)
+    db_session.commit()
+    return author
 
 
 def test_run_start_creates_simulation_row_with_defaults_and_warns(caplog, db_session, monkeypatch):
@@ -213,6 +231,108 @@ def test_run_start_and_stop_persist_research_metadata_and_end_reason(db_session,
     stopped = db_session.query(SimulationRun).filter_by(run_id="real-child-run").one()
     assert stopped.ended_at is not None
     assert stopped.end_reason == "phase2_stop"
+
+
+def test_run_start_retires_inherited_governance_state(db_session, monkeypatch):
+    author = _seed_author(db_session)
+    old_started_at = now_utc() - admin_api.timedelta(days=1)
+    db_session.add(
+        SimulationRun(
+            run_id="real-old-run",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="standard_72h",
+            started_at=old_started_at,
+            ended_at=old_started_at + admin_api.timedelta(hours=12),
+        )
+    )
+    proposal = Proposal(
+        author_agent_id=author.id,
+        title="Carryover Proposal",
+        description="Should not survive into the next run.",
+        proposal_type="law",
+        status="active",
+        created_at=old_started_at + admin_api.timedelta(hours=1),
+        voting_closes_at=old_started_at + admin_api.timedelta(hours=2),
+    )
+    db_session.add(proposal)
+    db_session.flush()
+    db_session.add(
+        Law(
+            proposal_id=proposal.id,
+            title="Carryover Law",
+            description="Should not stay active in a new run.",
+            author_agent_id=author.id,
+            active=True,
+            passed_at=old_started_at + admin_api.timedelta(hours=3),
+        )
+    )
+    db_session.commit()
+
+    client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
+    with client:
+        response = client.post(
+            "/api/admin/control/run/start",
+            json={"mode": "real", "run_id": "real-new-run"},
+        )
+
+    assert response.status_code == 200
+    refreshed_proposal = db_session.query(Proposal).filter_by(id=proposal.id).one()
+    refreshed_law = db_session.query(Law).one()
+    assert refreshed_proposal.status == "expired"
+    assert refreshed_proposal.resolved_at is not None
+    assert refreshed_law.active is False
+    assert refreshed_law.repealed_at is not None
+
+
+def test_run_stop_closes_current_run_governance_state(db_session, monkeypatch):
+    author = _seed_author(db_session)
+    client, _runtime_stub = _make_admin_client(db_session, monkeypatch)
+
+    with client:
+        start_response = client.post(
+            "/api/admin/control/run/start",
+            json={"mode": "real", "run_id": "real-governance-run"},
+        )
+
+    assert start_response.status_code == 200
+    run_row = db_session.query(SimulationRun).filter_by(run_id="real-governance-run").one()
+    proposal = Proposal(
+        author_agent_id=author.id,
+        title="Live Proposal",
+        description="Should expire when the run stops.",
+        proposal_type="law",
+        status="active",
+        created_at=run_row.started_at,
+        voting_closes_at=run_row.started_at + admin_api.timedelta(hours=1),
+    )
+    db_session.add(proposal)
+    db_session.flush()
+    db_session.add(
+        Law(
+            proposal_id=proposal.id,
+            title="Live Law",
+            description="Should deactivate when the run stops.",
+            author_agent_id=author.id,
+            active=True,
+            passed_at=run_row.started_at,
+        )
+    )
+    db_session.commit()
+
+    with client:
+        stop_response = client.post(
+            "/api/admin/control/run/stop",
+            json={"reason": "phase2_stop"},
+        )
+
+    assert stop_response.status_code == 200
+    refreshed_proposal = db_session.query(Proposal).filter_by(id=proposal.id).one()
+    refreshed_law = db_session.query(Law).one()
+    assert refreshed_proposal.status == "expired"
+    assert refreshed_proposal.resolved_at is not None
+    assert refreshed_law.active is False
+    assert refreshed_law.repealed_at is not None
 
 
 def test_run_start_can_mark_tuning_run(db_session, monkeypatch):

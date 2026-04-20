@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Agent, AgentInventory, Proposal, Vote
 from app.services.actions import action_energy_cost
+from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 
 
 class RoutineExecutor:
@@ -158,16 +159,15 @@ class RoutineExecutor:
 
         now = now_utc()
         deadline = now + timedelta(minutes=self.URGENT_PROPOSAL_WINDOW_MINUTES)
-        proposals = (
-            db.query(Proposal)
-            .filter(
+        proposals = apply_live_run_window(
+            db.query(Proposal).filter(
                 Proposal.status == "active",
                 Proposal.voting_closes_at > now,
                 Proposal.voting_closes_at <= deadline,
-            )
-            .order_by(Proposal.voting_closes_at.asc())
-            .all()
-        )
+            ),
+            Proposal.created_at,
+            get_live_run_window(db),
+        ).order_by(Proposal.voting_closes_at.asc()).all()
         for proposal in proposals:
             has_voted = (
                 db.query(Vote)

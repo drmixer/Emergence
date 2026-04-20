@@ -125,6 +125,12 @@ This cadence is intentionally conservative for budget control and reliability wh
   - same number + carryover = same continuing identity
   - same number + fresh reset = new identity in a reused numeric slot
 
+## Governance Run-Boundary Semantics
+- Governance state is run-scoped by default unless an explicit transfer policy says otherwise.
+- Active proposals must not remain open across run boundaries; unresolved proposals expire when the run ends and must not resolve in a later run.
+- Laws passed during a run are part of that run's historical record, but they are not implicitly active in later runs unless a declared carryover/reset policy reintroduces them.
+- Run-scoped governance reporting should count proposal outcomes by resolution timing (`resolved_at`) when summarizing what happened inside a run, not only by proposal creation timing.
+
 ## Names, Avatars, and Profiles (Product Direction)
 - Names:
   - immutable, system-assigned codename per canonical agent number

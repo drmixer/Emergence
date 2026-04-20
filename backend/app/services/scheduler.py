@@ -27,6 +27,7 @@ from app.services.archive_drafts import maybe_generate_scheduled_weekly_draft
 from app.services.emergence_metrics import persist_completed_day_snapshot
 from app.services.events_generator import event_generator
 from app.services.law_effects import active_survival_reserve_laws
+from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 from app.services.run_reports import maybe_generate_scheduled_run_report_backfill
 from app.services.runtime_config import runtime_config_service
 from app.services.social_drafts import list_draft_texts_for_dedupe
@@ -1027,9 +1028,14 @@ async def resolve_expired_proposals():
         
         now = datetime.utcnow()
         
-        expired_proposals = db.query(Proposal).filter(
+        expired_proposals_query = db.query(Proposal).filter(
             Proposal.status == "active",
             Proposal.voting_closes_at <= now
+        )
+        expired_proposals = apply_live_run_window(
+            expired_proposals_query,
+            Proposal.created_at,
+            get_live_run_window(db),
         ).all()
         
         results = []

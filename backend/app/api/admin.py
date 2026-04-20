@@ -23,6 +23,10 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.time import now_utc
 from app.models.models import AdminConfigChange, SimulationRun
+from app.services.governance_run_boundary import (
+    close_run_governance_state,
+    retire_inherited_governance_state,
+)
 from app.services.kpi_rollups import get_recent_rollups
 from app.services.run_policy import coerce_run_class, deterministic_failure_policy_for_run_class
 from app.services.run_reports import get_run_report_pipeline_status, maybe_generate_run_closeout_bundle
@@ -885,6 +889,7 @@ def start_simulation_run(
         metadata=metadata,
         start_reason=request.reason or f"run_start_{mode}",
     )
+    retire_inherited_governance_state(db, run_id=run_id)
 
     runtime_config_service.update_settings(
         db,
@@ -953,6 +958,7 @@ def stop_simulation_run(
         run_id=run_id_before,
         end_reason=request.reason or "run_stop",
     )
+    close_run_governance_state(db, run_id=run_id_before)
     effective = result.get("effective") or {}
     report_bundle = maybe_generate_run_closeout_bundle(
         run_id=run_id_before,

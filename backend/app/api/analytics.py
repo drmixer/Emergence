@@ -41,7 +41,12 @@ from app.services.kpi_rollups import record_kpi_event
 from app.services.report_artifacts import load_json_artifact
 from app.services.simulation_time import get_simulation_day_number, get_simulation_day_number_from_bounds
 from app.services.runtime_config import runtime_config_service
-from app.services.live_run_scope import LiveRunWindow, apply_live_run_window, get_live_run_window
+from app.services.live_run_scope import (
+    LiveRunWindow,
+    apply_live_run_window,
+    apply_run_window,
+    get_live_run_window,
+)
 from app.core.database import SessionLocal
 from app.models.models import (
     Event,
@@ -1840,14 +1845,14 @@ def overview():
             Proposal.created_at,
             run_window,
         ).count()
-        passed_proposals = apply_live_run_window(
+        passed_proposals = apply_run_window(
             db.query(Proposal).filter(Proposal.status == "passed"),
-            Proposal.created_at,
+            Proposal.resolved_at,
             run_window,
         ).count()
-        failed_proposals = apply_live_run_window(
+        failed_proposals = apply_run_window(
             db.query(Proposal).filter(Proposal.status == "failed"),
-            Proposal.created_at,
+            Proposal.resolved_at,
             run_window,
         ).count()
 

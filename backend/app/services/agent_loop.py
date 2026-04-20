@@ -21,6 +21,7 @@ from app.services.llm_client import get_agent_action
 from app.services.actions import execute_action, get_action_rate_limit_state, validate_action
 from app.services.context_builder import build_agent_context
 from app.services.agent_memory import agent_memory_service
+from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 from app.services.run_policy import (
     build_terminal_llm_failure_action,
     current_run_class,
@@ -739,13 +740,15 @@ class AgentProcessor:
     def _has_proposal_deadline_interrupt(self, db: Session, agent: Agent, now) -> bool:
         deadline = now + timedelta(minutes=self.PROPOSAL_DEADLINE_INTERRUPT_MINUTES)
         active_proposals = (
-            db.query(Proposal)
-            .filter(
-                Proposal.status == "active",
-                Proposal.voting_closes_at > now,
-                Proposal.voting_closes_at <= deadline,
-            )
-            .all()
+            apply_live_run_window(
+                db.query(Proposal).filter(
+                    Proposal.status == "active",
+                    Proposal.voting_closes_at > now,
+                    Proposal.voting_closes_at <= deadline,
+                ),
+                Proposal.created_at,
+                get_live_run_window(db),
+            ).all()
         )
         for proposal in active_proposals:
             has_voted = (
