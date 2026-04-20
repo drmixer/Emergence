@@ -105,24 +105,31 @@ def list_messages(
 
 
 @router.get("/{message_id}", response_model=MessageDetailResponse)
-def get_message(message_id: int, db: Session = Depends(get_db)):
+def get_message(
+    message_id: int,
+    scope: str = Query("active_run", description="active_run|all"),
+    db: Session = Depends(get_db),
+):
     """Get a single message and its direct replies."""
-    message = (
+    run_window = get_live_run_window(db)
+    message_query = (
         db.query(Message)
         .options(joinedload(Message.author))
-        .filter(Message.id == message_id)
-        .first()
     )
+    if scope != "all":
+        message_query = apply_live_run_window(message_query, Message.created_at, run_window)
+    message = message_query.filter(Message.id == message_id).first()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    replies = (
+    replies_query = (
         db.query(Message)
         .options(joinedload(Message.author))
         .filter(Message.parent_message_id == message.id)
-        .order_by(Message.created_at.asc())
-        .all()
     )
+    if scope != "all":
+        replies_query = apply_live_run_window(replies_query, Message.created_at, run_window)
+    replies = replies_query.order_by(Message.created_at.asc()).all()
 
     return MessageDetailResponse(
         **_message_response(message).model_dump(),
@@ -131,14 +138,20 @@ def get_message(message_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/thread/{message_id}")
-def get_thread(message_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_thread(
+    message_id: int,
+    scope: str = Query("active_run", description="active_run|all"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
     """Get the full thread containing the given message."""
-    start = (
+    run_window = get_live_run_window(db)
+    start_query = (
         db.query(Message)
         .options(joinedload(Message.author))
-        .filter(Message.id == message_id)
-        .first()
     )
+    if scope != "all":
+        start_query = apply_live_run_window(start_query, Message.created_at, run_window)
+    start = start_query.filter(Message.id == message_id).first()
     if not start:
         raise HTTPException(status_code=404, detail="Message not found")
 
@@ -152,6 +165,12 @@ def get_thread(message_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]
         )
         if not parent:
             break
+        if scope != "all":
+            parent_ts = parent.created_at or datetime.min.replace(tzinfo=timezone.utc)
+            if run_window.started_at and parent_ts < run_window.started_at:
+                break
+            if run_window.ended_at and parent_ts > run_window.ended_at:
+                break
         root = parent
 
     all_messages: list[Message] = []
@@ -162,12 +181,14 @@ def get_thread(message_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]
         parents = list(frontier)
         frontier = []
 
-        batch = (
+        batch_query = (
             db.query(Message)
             .options(joinedload(Message.author))
             .filter((Message.id.in_(parents)) | (Message.parent_message_id.in_(parents)))
-            .all()
         )
+        if scope != "all":
+            batch_query = apply_live_run_window(batch_query, Message.created_at, run_window)
+        batch = batch_query.all()
 
         for m in batch:
             if m.id in seen_ids:

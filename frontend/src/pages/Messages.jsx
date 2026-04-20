@@ -113,9 +113,12 @@ export default function Messages() {
     setThreadRootId(messageId)
     try {
       const thread = await api.getMessageThread(messageId)
-      setThreadData(thread && typeof thread === 'object' ? thread : null)
+      const resolvedThread = thread && typeof thread === 'object' ? thread : null
+      setThreadData(resolvedThread)
+      setThreadRootId(Number(resolvedThread?.root_id || messageId || 0))
     } catch (_err) {
       setThreadData(null)
+      setThreadRootId(0)
       setThreadError('Unable to load thread right now.')
     } finally {
       setThreadLoading(false)

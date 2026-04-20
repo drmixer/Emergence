@@ -19,6 +19,7 @@ from app.services.law_effects import (
     survival_reserve_contribution_rate,
     survival_reserve_law_active,
 )
+from app.services.live_run_scope import get_live_run_window
 from app.services.events_generator import event_generator
 from app.services.relationship_memory import relationship_memory_service
 from app.services.runtime_config import runtime_config_service
@@ -110,6 +111,61 @@ def work_base_yield(work_type: str) -> Decimal:
 
 RATE_LIMIT_REASON = "Rate limit exceeded (max actions per hour)"
 SANCTIONED_RATE_LIMIT_REASON = "You are SANCTIONED - limited to 1 action per hour"
+
+
+def _active_run_started_at(db: Session):
+    run_window = get_live_run_window(db)
+    return ensure_utc(run_window.started_at)
+
+
+def _message_is_within_active_run(db: Session, message: Message) -> bool:
+    started_at = _active_run_started_at(db)
+    if started_at is None:
+        return True
+    created_at = ensure_utc(message.created_at)
+    return created_at is not None and created_at >= started_at
+
+
+def _proposal_is_within_active_run(db: Session, proposal: Proposal) -> bool:
+    started_at = _active_run_started_at(db)
+    if started_at is None:
+        return True
+    created_at = ensure_utc(proposal.created_at)
+    return created_at is not None and created_at >= started_at
+
+
+def _looks_like_personal_survival_request(text: str | None) -> bool:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    if not normalized:
+        return False
+    request_markers = (
+        "requesting food aid",
+        "requesting energy aid",
+        "risk dormancy",
+        "go dormant",
+        "keep me alive",
+        "immediate aid",
+        "avoid dormancy",
+        "need food",
+        "need energy",
+    )
+    return any(marker in normalized for marker in request_markers)
+
+
+def _looks_like_governance_argument(text: str | None) -> bool:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    if not normalized:
+        return False
+    governance_markers = (
+        "proposal #",
+        "law #",
+        "vote no",
+        "vote yes",
+        "proposal ",
+        "this law",
+        "these laws",
+    )
+    return any(marker in normalized for marker in governance_markers)
 def get_action_rate_limit_state(db: Session, agent: Agent, *, now: Optional[datetime] = None) -> dict:
     """Return rolling-hour action budget state for an agent."""
     current_time = now or now_utc()
@@ -211,6 +267,18 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         parent = db.query(Message).filter(Message.id == parent_id).first()
         if not parent:
             return {"valid": False, "reason": "Parent message not found"}
+        if not _message_is_within_active_run(db, parent):
+            return {"valid": False, "reason": "Can only reply to a message from the current run"}
+        content = action.get("content", "")
+        if not content or len(content) < 1:
+            return {"valid": False, "reason": "Forum reply requires content"}
+        if len(content) > 2000:
+            return {"valid": False, "reason": "Forum reply too long (max 2000 chars)"}
+        if _looks_like_personal_survival_request(parent.content) and _looks_like_governance_argument(content):
+            return {
+                "valid": False,
+                "reason": "Reply content appears to target proposal/law debate rather than the selected aid thread; choose the matching proposal discussion or use contest_proposal",
+            }
     
     elif action_type == "direct_message":
         recipient_id = action.get("recipient_agent_id")
@@ -289,6 +357,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         proposal = db.query(Proposal).filter(Proposal.id == proposal_id).first()
         if not proposal:
             return {"valid": False, "reason": "Proposal not found"}
+        if not _proposal_is_within_active_run(db, proposal):
+            return {"valid": False, "reason": "Can only contest a proposal from the current run"}
         if proposal.author_agent_id == agent.id:
             return {"valid": False, "reason": "Cannot contest your own proposal"}
         if proposal.status != "active":
@@ -306,9 +376,11 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         
         # Check daily proposal limit
         day_ago = now - timedelta(days=1)
+        started_at = _active_run_started_at(db)
+        proposals_since = max(day_ago, started_at) if started_at else day_ago
         recent_proposals = db.query(Proposal).filter(
             Proposal.author_agent_id == agent.id,
-            Proposal.created_at > day_ago
+            Proposal.created_at > proposals_since
         ).count()
         if recent_proposals >= settings.MAX_PROPOSALS_PER_DAY:
             return {"valid": False, "reason": "Daily proposal limit reached"}
@@ -328,6 +400,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         proposal = db.query(Proposal).filter(Proposal.id == proposal_id).first()
         if not proposal:
             return {"valid": False, "reason": "Proposal not found"}
+        if not _proposal_is_within_active_run(db, proposal):
+            return {"valid": False, "reason": "Can only vote on a proposal from the current run"}
         if proposal.status != "active":
             return {"valid": False, "reason": "Proposal is not active"}
         voting_closes_at = ensure_utc(proposal.voting_closes_at)

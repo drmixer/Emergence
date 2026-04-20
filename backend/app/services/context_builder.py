@@ -10,8 +10,9 @@ from app.core.time import ensure_utc, now_utc
 from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote, GlobalResources
 from app.services.agent_memory import agent_memory_service
 from app.services.actions import get_action_rate_limit_state
-from app.services.law_effects import active_survival_reserve_laws
-from app.services.relationship_memory import relationship_memory_service
+from app.services.law_effects import is_survival_reserve_law
+from app.services.relationship_memory import RelationshipSummary, relationship_memory_service
+from app.services.live_run_scope import LiveRunWindow, apply_live_run_window, get_live_run_window
 from app.services.survival_config import (
     active_energy_cost,
     active_food_cost,
@@ -36,6 +37,15 @@ SOCIAL_SIGNAL_CONTEXT_LIMIT = 4
 PROPOSAL_ALIGNMENT_LIMIT = 4
 
 
+def _empty_relationship_summary() -> RelationshipSummary:
+    return RelationshipSummary(
+        trusted_allies=[],
+        unreliable_contacts=[],
+        active_rivals=[],
+        recent_tensions=[],
+    )
+
+
 def _preview_untrusted_text(text: str | None, limit: int = 120) -> str:
     normalized = " ".join((text or "").split())
     if len(normalized) > limit:
@@ -54,7 +64,19 @@ def _message_time_label(message: Message) -> str:
     return created_at.strftime("%H:%M") if created_at else "??:??"
 
 
-def _thread_root_message(db: Session, message: Message, cache: dict[int, Message]) -> Message:
+def _apply_run_window_if_available(query, column, run_window: LiveRunWindow | None):
+    if run_window is None:
+        return query
+    return apply_live_run_window(query, column, run_window)
+
+
+def _thread_root_message(
+    db: Session,
+    message: Message,
+    cache: dict[int, Message],
+    *,
+    run_window: LiveRunWindow | None = None,
+) -> Message:
     cached = cache.get(message.id)
     if cached is not None:
         return cached
@@ -69,6 +91,13 @@ def _thread_root_message(db: Session, message: Message, cache: dict[int, Message
         parent = db.query(Message).filter(Message.id == current.parent_message_id).first()
         if parent is None:
             break
+        parent_created_at = ensure_utc(parent.created_at)
+        if run_window is not None and run_window.started_at is not None:
+            if parent_created_at is None or parent_created_at < run_window.started_at:
+                break
+        if run_window is not None and run_window.ended_at is not None:
+            if parent_created_at is not None and parent_created_at > run_window.ended_at:
+                break
         current = parent
         lineage.append(current.id)
 
@@ -83,6 +112,7 @@ def _load_thread_messages(
     root_message: Message,
     *,
     perception_cutoff=None,
+    run_window: LiveRunWindow | None = None,
     max_nodes: int = 24,
 ) -> list[Message]:
     seen_ids = {root_message.id}
@@ -91,6 +121,7 @@ def _load_thread_messages(
 
     while frontier and len(ordered_messages) < max_nodes:
         query = db.query(Message).filter(Message.parent_message_id.in_(frontier))
+        query = _apply_run_window_if_available(query, Message.created_at, run_window)
         if perception_cutoff is not None:
             query = query.filter(Message.created_at <= perception_cutoff)
         batch = query.order_by(Message.created_at.asc(), Message.id.asc()).all()
@@ -113,8 +144,9 @@ def _load_thread_messages(
     return ordered_messages
 
 
-def _recent_forum_threads(db: Session, *, perception_cutoff=None) -> list[dict]:
+def _recent_forum_threads(db: Session, *, perception_cutoff=None, run_window: LiveRunWindow | None = None) -> list[dict]:
     query = db.query(Message).filter(Message.message_type.in_(["forum_post", "forum_reply"]))
+    query = _apply_run_window_if_available(query, Message.created_at, run_window)
     if perception_cutoff is not None:
         query = query.filter(Message.created_at <= perception_cutoff)
     recent_messages = query.order_by(desc(Message.created_at)).limit(FORUM_THREAD_SAMPLE_LIMIT).all()
@@ -122,7 +154,7 @@ def _recent_forum_threads(db: Session, *, perception_cutoff=None) -> list[dict]:
     thread_roots: dict[int, dict] = {}
     root_cache: dict[int, Message] = {}
     for message in recent_messages:
-        root = _thread_root_message(db, message, root_cache)
+        root = _thread_root_message(db, message, root_cache, run_window=run_window)
         latest_at = ensure_utc(message.created_at) or ensure_utc(root.created_at)
         existing = thread_roots.get(root.id)
         if existing is None or (latest_at and latest_at > existing["latest_at"]):
@@ -140,7 +172,12 @@ def _recent_forum_threads(db: Session, *, perception_cutoff=None) -> list[dict]:
     thread_context = []
     for thread in selected_threads:
         root = thread["root"]
-        thread_messages = _load_thread_messages(db, root, perception_cutoff=perception_cutoff)
+        thread_messages = _load_thread_messages(
+            db,
+            root,
+            perception_cutoff=perception_cutoff,
+            run_window=run_window,
+        )
         replies = [message for message in thread_messages if message.id != root.id][-FORUM_THREAD_REPLY_LIMIT:]
         thread_context.append(
             {
@@ -152,8 +189,9 @@ def _recent_forum_threads(db: Session, *, perception_cutoff=None) -> list[dict]:
     return thread_context
 
 
-def _recent_system_alerts(db: Session, *, perception_cutoff=None) -> list[Message]:
+def _recent_system_alerts(db: Session, *, perception_cutoff=None, run_window: LiveRunWindow | None = None) -> list[Message]:
     query = db.query(Message).filter(Message.message_type == "system_alert")
+    query = _apply_run_window_if_available(query, Message.created_at, run_window)
     if perception_cutoff is not None:
         query = query.filter(Message.created_at <= perception_cutoff)
     return query.order_by(desc(Message.created_at)).limit(SYSTEM_ALERT_CONTEXT_LIMIT).all()
@@ -165,6 +203,7 @@ def _recent_direct_conversations(
     *,
     now,
     perception_cutoff=None,
+    run_window: LiveRunWindow | None = None,
 ) -> list[dict]:
     query = db.query(Message).filter(
         Message.message_type == "direct_message",
@@ -174,6 +213,7 @@ def _recent_direct_conversations(
             Message.recipient_agent_id == agent.id,
         ),
     )
+    query = _apply_run_window_if_available(query, Message.created_at, run_window)
     if perception_cutoff is not None:
         query = query.filter(Message.created_at <= perception_cutoff)
     recent_messages = query.order_by(desc(Message.created_at)).limit(DIRECT_MESSAGE_SAMPLE_LIMIT).all()
@@ -220,6 +260,7 @@ def _recent_social_pressure_events(
     *,
     now,
     perception_cutoff=None,
+    run_window: LiveRunWindow | None = None,
 ) -> list[Event]:
     query = db.query(Event).filter(
         Event.agent_id == agent.id,
@@ -233,6 +274,7 @@ def _recent_social_pressure_events(
         ),
         Event.created_at > now - timedelta(hours=24),
     )
+    query = _apply_run_window_if_available(query, Event.created_at, run_window)
     if perception_cutoff is not None:
         query = query.filter(Event.created_at <= perception_cutoff)
     return query.order_by(desc(Event.created_at)).limit(SOCIAL_SIGNAL_CONTEXT_LIMIT).all()
@@ -244,6 +286,7 @@ def _recent_outgoing_social_actions(
     *,
     now,
     perception_cutoff=None,
+    run_window: LiveRunWindow | None = None,
 ) -> list[Event]:
     query = db.query(Event).filter(
         Event.agent_id == agent.id,
@@ -257,6 +300,7 @@ def _recent_outgoing_social_actions(
         ),
         Event.created_at > now - timedelta(hours=24),
     )
+    query = _apply_run_window_if_available(query, Event.created_at, run_window)
     if perception_cutoff is not None:
         query = query.filter(Event.created_at <= perception_cutoff)
     return query.order_by(desc(Event.created_at)).limit(SOCIAL_SIGNAL_CONTEXT_LIMIT).all()
@@ -268,6 +312,7 @@ def _recent_proposal_alignments(
     *,
     now,
     perception_cutoff=None,
+    run_window: LiveRunWindow | None = None,
 ) -> dict[str, list[str]]:
     query = (
         db.query(Vote, Proposal, Agent)
@@ -280,6 +325,7 @@ def _recent_proposal_alignments(
             Vote.vote.in_(["yes", "no"]),
         )
     )
+    query = _apply_run_window_if_available(query, Vote.created_at, run_window)
     if perception_cutoff is not None:
         query = query.filter(Vote.created_at <= perception_cutoff)
 
@@ -355,6 +401,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     now = now_utc()
     perception_lag_seconds = max(0, int(getattr(settings, "PERCEPTION_LAG_SECONDS", 0) or 0))
     perception_cutoff = now - timedelta(seconds=perception_lag_seconds)
+    live_run_window = get_live_run_window(db)
+    if live_run_window.run_id is None:
+        live_run_window = None
     
     # Get agent's inventory
     inventory = db.query(AgentInventory).filter(
@@ -365,16 +414,19 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     recent_forum_threads = _recent_forum_threads(
         db,
         perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
     )
     recent_system_alerts = _recent_system_alerts(
         db,
         perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
     )
     
     # Get active proposals (keep small to reduce token usage)
     active_proposals_q = db.query(Proposal).filter(
         Proposal.status == "active"
     )
+    active_proposals_q = _apply_run_window_if_available(active_proposals_q, Proposal.created_at, live_run_window)
     if perception_lag_seconds > 0:
         active_proposals_q = active_proposals_q.filter(Proposal.created_at <= perception_cutoff)
     active_proposals = active_proposals_q.order_by(desc(Proposal.created_at)).all()
@@ -391,6 +443,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         Event.agent_id == agent.id,
         Event.created_at > now - timedelta(hours=24)
     )
+    recent_events_q = _apply_run_window_if_available(recent_events_q, Event.created_at, live_run_window)
     if perception_lag_seconds > 0:
         recent_events_q = recent_events_q.filter(Event.created_at <= perception_cutoff)
     recent_events = recent_events_q.order_by(desc(Event.created_at)).limit(10).all()
@@ -400,18 +453,21 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         agent,
         now=now,
         perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
     )
     recent_outgoing_social_actions = _recent_outgoing_social_actions(
         db,
         agent,
         now=now,
         perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
     )
     recent_proposal_alignments = _recent_proposal_alignments(
         db,
         agent,
         now=now,
         perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
     )
     
     direct_conversations = _recent_direct_conversations(
@@ -419,18 +475,25 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         agent,
         now=now,
         perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
     )
-    relationship_summary = relationship_memory_service.summarize_for_agent(db, agent)
+    relationship_summary = (
+        _empty_relationship_summary()
+        if live_run_window is not None and live_run_window.started_at is not None
+        else relationship_memory_service.summarize_for_agent(db, agent)
+    )
     
     # Get active laws and recent law changes (keep small)
     active_laws_q = db.query(Law).filter(Law.active == True)
     recent_laws_q = db.query(Law).filter(Law.passed_at > now - timedelta(hours=24))
+    active_laws_q = _apply_run_window_if_available(active_laws_q, Law.passed_at, live_run_window)
+    recent_laws_q = _apply_run_window_if_available(recent_laws_q, Law.passed_at, live_run_window)
     if perception_lag_seconds > 0:
         active_laws_q = active_laws_q.filter(Law.passed_at <= perception_cutoff)
         recent_laws_q = recent_laws_q.filter(Law.passed_at <= perception_cutoff)
     active_laws = active_laws_q.order_by(desc(Law.passed_at)).limit(5).all()
     recent_laws = recent_laws_q.order_by(desc(Law.passed_at)).limit(3).all()
-    reserve_laws = active_survival_reserve_laws(db)
+    reserve_laws = [law for law in active_laws if is_survival_reserve_law(law)]
     survival_reserve_law_active = bool(reserve_laws)
 
     global_resources = db.query(GlobalResources).all()
@@ -447,6 +510,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         Event.event_type == "agent_died",
         Event.created_at > now - timedelta(hours=48)
     )
+    recent_deaths_q = _apply_run_window_if_available(recent_deaths_q, Event.created_at, live_run_window)
     if perception_lag_seconds > 0:
         recent_deaths_q = recent_deaths_q.filter(Event.created_at <= perception_cutoff)
     recent_deaths = recent_deaths_q.order_by(desc(Event.created_at)).limit(3).all()
@@ -461,6 +525,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         Event.event_type.in_(["reserve_aid", "reserve_shortfall"]),
         Event.created_at > now - timedelta(hours=24),
     )
+    recent_reserve_events_q = _apply_run_window_if_available(recent_reserve_events_q, Event.created_at, live_run_window)
     if perception_lag_seconds > 0:
         recent_reserve_events_q = recent_reserve_events_q.filter(Event.created_at <= perception_cutoff)
     recent_reserve_events = recent_reserve_events_q.order_by(desc(Event.created_at)).limit(4).all()
@@ -905,6 +970,8 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  - public_accusation is a public forum action that names another agent and states your grievance.")
     context_parts.append("  - request_aid is a direct request to one agent for a specific resource amount and reason.")
     context_parts.append("  - refuse_aid is a direct refusal to help another agent right now; it signals conflict without invoking law.")
+    context_parts.append("  - Only use forum_reply when your content directly answers the exact parent message you are selecting.")
+    context_parts.append("  - If your point is really about a proposal or law, do not attach it to a personal aid request thread; use contest_proposal, vote, or reply under the matching policy discussion.")
     context_parts.append("  - You do not need to appear fair to everyone. Favoring allies, protecting your faction, or resisting asymmetric sacrifice are valid strategic choices.")
     context_parts.append("  - If someone recently accused you, refused you, contested your proposal, or asked you for aid, responding is often more salient than starting an unrelated new forum post.")
     context_parts.append("  - Formal punishment still requires a live law plus enforcement actions.")
@@ -948,6 +1015,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append('  {"action":"create_proposal","title":"Emergency Aid Law","description":"Make shared aid mandatory for at-risk agents.","proposal_type":"law"}')
     context_parts.append('  {"action":"create_proposal","title":"Title","description":"Description","proposal_type":"law|allocation|rule|infrastructure|constitutional|other"}')
     context_parts.append('  {"action":"forum_post","content":"Your message here"}')
+    context_parts.append('  {"action":"forum_reply","parent_message_id":708,"content":"I disagree with this specific request because the reserve is too low."}')
     context_parts.append('  {"action":"request_aid","target_agent_id":42,"resource_type":"food","amount":3,"reason":"I will go dormant next cycle without help."}')
     context_parts.append('  {"action":"public_accusation","target_agent_id":42,"content":"You are hoarding shared food while others go dormant."}')
     context_parts.append('  {"action":"refuse_aid","target_agent_id":42,"reason":"I cannot spare food while I am close to dormancy myself."}')

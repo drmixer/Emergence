@@ -657,7 +657,11 @@ export function subscribeToEvents(onEvent, onError) {
                 connected = true
                 onEvent({ type: 'connected', transport: 'poll' })
             }
-            emitEvents(items)
+            if (items.length === 0) {
+                onEvent({ type: 'snapshot_empty' })
+            } else {
+                emitEvents(items)
+            }
         } catch (error) {
             connected = false
             console.error('Event polling error:', error)

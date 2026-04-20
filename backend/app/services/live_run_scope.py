@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import false
 from sqlalchemy.orm import Session
 
 from app.core.time import ensure_utc
@@ -22,6 +23,10 @@ class LiveRunWindow:
 
 def get_live_run_window(db: Session) -> LiveRunWindow:
     """Return the runtime-selected run window for live viewer surfaces."""
+    simulation_active = bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
+    if not simulation_active:
+        return LiveRunWindow(run_id=None, started_at=None, ended_at=None)
+
     run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip() or None
     if not run_id:
         return LiveRunWindow(run_id=None, started_at=None, ended_at=None)
@@ -39,6 +44,8 @@ def get_live_run_window(db: Session) -> LiveRunWindow:
 
 def apply_live_run_window(query: Any, column: Any, run_window: LiveRunWindow) -> Any:
     """Filter a SQLAlchemy query to the live run window when available."""
+    if run_window.run_id is None:
+        return query.filter(false())
     if run_window.started_at is not None:
         query = query.filter(column >= run_window.started_at)
     if run_window.ended_at is not None:

@@ -12,6 +12,7 @@ from app.core.database import Base
 from app.core.time import now_utc
 from app.models.models import Agent, AgentInventory, Event, Message, Proposal
 from app.services import agent_loop, context_builder
+from app.services.live_run_scope import LiveRunWindow
 
 
 @pytest.fixture
@@ -127,6 +128,96 @@ def test_context_includes_thread_root_and_bilateral_dm_history(session_factory, 
     assert "Yes, but I need numbers on reserve levels first." in context
     assert "You ->" in context
     assert "To you <-" in context
+
+
+def test_context_scopes_social_inputs_to_active_run_window(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        counterpart = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        now = now_utc()
+        run_start = now - timedelta(hours=2)
+        monkeypatch.setattr(
+            context_builder,
+            "get_live_run_window",
+            lambda _db: LiveRunWindow(run_id="run-current", started_at=run_start, ended_at=None),
+        )
+
+        db.add_all(
+            [
+                Message(
+                    author_agent_id=counterpart.id,
+                    content="OLD THREAD: deaths from the last run should not leak forward.",
+                    message_type="forum_post",
+                    created_at=now - timedelta(hours=6),
+                ),
+                Message(
+                    author_agent_id=counterpart.id,
+                    content="CURRENT THREAD: reserve levels are falling now.",
+                    message_type="forum_post",
+                    created_at=now - timedelta(minutes=30),
+                ),
+                Message(
+                    author_agent_id=counterpart.id,
+                    recipient_agent_id=agent.id,
+                    content="OLD DM: remember the last run collapse.",
+                    message_type="direct_message",
+                    created_at=now - timedelta(hours=5),
+                ),
+                Message(
+                    author_agent_id=counterpart.id,
+                    recipient_agent_id=agent.id,
+                    content="CURRENT DM: can you help with energy tonight?",
+                    message_type="direct_message",
+                    created_at=now - timedelta(minutes=20),
+                ),
+                Event(
+                    agent_id=agent.id,
+                    event_type="agent_died",
+                    description="OLD DEATH: Matrix-03 died in the previous run.",
+                    created_at=now - timedelta(hours=7),
+                ),
+                Event(
+                    agent_id=agent.id,
+                    event_type="aid_request_received",
+                    description="CURRENT SIGNAL: Beacon-2 requested food support.",
+                    created_at=now - timedelta(minutes=10),
+                ),
+                Proposal(
+                    author_agent_id=counterpart.id,
+                    title="Old Proposal",
+                    description="This should be hidden because it predates the active run.",
+                    proposal_type="law",
+                    status="active",
+                    voting_closes_at=now + timedelta(hours=1),
+                    created_at=now - timedelta(hours=8),
+                ),
+                Proposal(
+                    author_agent_id=counterpart.id,
+                    title="Current Proposal",
+                    description="This should be visible inside the active run window.",
+                    proposal_type="law",
+                    status="active",
+                    voting_closes_at=now + timedelta(hours=1),
+                    created_at=now - timedelta(minutes=15),
+                ),
+            ]
+        )
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "CURRENT THREAD: reserve levels are falling now." in context
+    assert "CURRENT DM: can you help with energy tonight?" in context
+    assert "Current Proposal" in context
+    assert "CURRENT SIGNAL: Beacon-2 requested food support." in context
+    assert "OLD THREAD: deaths from the last run should not leak forward." not in context
+    assert "OLD DM: remember the last run collapse." not in context
+    assert "OLD DEATH: Matrix-03 died in the previous run." not in context
+    assert "Old Proposal" not in context
+    assert "RELATIONSHIP MEMORY:" not in context
 
 
 def test_recent_direct_message_accelerates_next_checkpoint_without_immediate_interrupt(session_factory):

@@ -61,6 +61,7 @@ export default function AgentAvatar({
     className = ''
 }) {
     const avatarIdentity = generateAvatarIdentity(agentNumber, personality, tier)
+    const appliedShapeClass = size === 'large' ? avatarIdentity.shapeClass : 'shape-round'
 
     const sizeClasses = {
         small: 'avatar-sm',
@@ -70,7 +71,7 @@ export default function AgentAvatar({
 
     return (
         <div
-            className={`agent-avatar ${sizeClasses[size]} tier-${tier} ${avatarIdentity.pattern} ${avatarIdentity.shapeClass} ${status} ${className}`}
+            className={`agent-avatar ${sizeClasses[size]} tier-${tier} ${avatarIdentity.pattern} ${appliedShapeClass} ${status} ${className}`}
             style={avatarIdentity.style}
         >
             {/* Pattern overlay based on personality */}
@@ -81,8 +82,10 @@ export default function AgentAvatar({
 
             {/* Agent number */}
             {showNumber && (
-                <span className="avatar-number">
-                    #{avatarIdentity.safe}
+                <span className="avatar-number-plate">
+                    <span className="avatar-number">
+                        #{avatarIdentity.safe}
+                    </span>
                 </span>
             )}
 

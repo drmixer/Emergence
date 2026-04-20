@@ -108,14 +108,46 @@
 
 /* Agent number */
 .avatar-number {
-    position: relative;
-    z-index: 1;
     font-weight: 700;
     font-family: var(--font-ibm-plex-mono, var(--font-mono, monospace));
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     color: var(--text-primary);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    line-height: 1;
+}
+
+.avatar-number-plate {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.1em;
+    height: 1.7em;
+    padding: 0 0.38em;
+    border-radius: 999px;
+    background: rgba(7, 10, 18, 0.76);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.agent-avatar.avatar-sm .avatar-number-plate {
+    min-width: 1.7em;
+    height: 1.45em;
+    padding: 0 0.26em;
+}
+
+.agent-avatar.avatar-md .avatar-number-plate {
+    min-width: 1.9em;
+    height: 1.55em;
+    padding: 0 0.32em;
+}
+
+.agent-avatar.avatar-lg .avatar-number-plate {
+    min-width: 2.5em;
+    height: 1.95em;
+    padding: 0 0.46em;
 }
 
 /* Dormant overlay */

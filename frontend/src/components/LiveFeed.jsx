@@ -163,6 +163,9 @@ export default function LiveFeed() {
                 if (event.type === 'connected') {
                     setConnected(true)
                     setError(null)
+                } else if (event.type === 'snapshot_empty') {
+                    setEvents([])
+                    setIsPreLaunch(true)
                 } else if (event.type === 'event') {
                     addEvent(event)
                 }
