@@ -90,7 +90,7 @@ def test_list_events_includes_lineage_for_agent_events():
     db.commit()
 
     with _make_client(db) as client:
-        response = client.get("/api/events?limit=5")
+        response = client.get("/api/events?limit=5&scope=all")
 
     assert response.status_code == 200
     rows = response.json()
