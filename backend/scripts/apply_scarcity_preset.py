@@ -53,10 +53,29 @@ def _apply_resource_targets(*, agent_targets: dict[str, float], pool_targets: di
                     died_at = NULL,
                     death_cause = NULL,
                     sanctioned_until = NULL,
-                    exiled = FALSE
+                    exiled = FALSE,
+                    current_intent = '{}',
+                    intent_expires_at = NULL,
+                    last_checkpoint_at = NULL,
+                    next_checkpoint_at = NULL
                 """
             )
         )
+
+        db.execute(
+            text(
+                """
+                UPDATE agent_memory
+                SET summary_text = '',
+                    last_checkpoint_number = 0,
+                    last_updated_at = CURRENT_TIMESTAMP
+                """
+            )
+        )
+
+        relationship_memory_cleared = db.execute(
+            text("DELETE FROM agent_relationship_memory")
+        ).rowcount or 0
 
         db.commit()
         return {
@@ -64,6 +83,8 @@ def _apply_resource_targets(*, agent_targets: dict[str, float], pool_targets: di
             "agent_resource_targets": {k: float(v) for k, v in agent_targets.items()},
             "common_pool_targets": {k: float(v) for k, v in pool_targets.items()},
             "agent_state_reset": True,
+            "agent_memory_reset": True,
+            "relationship_memory_rows_cleared": int(relationship_memory_cleared),
         }
     except Exception:
         db.rollback()

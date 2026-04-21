@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.models.models import Agent, AgentInventory, GlobalResources
+from app.models.models import Agent, AgentInventory, AgentMemory, AgentRelationshipMemory, GlobalResources
 from scripts import apply_scarcity_preset
 
 
@@ -45,11 +45,21 @@ def test_apply_resource_targets_resets_agent_survival_state(session_factory):
             personality_type="neutral",
             status="dormant",
             system_prompt="Test prompt",
+            current_intent={"strategy": "social_coordination", "checkpoint_number": 11},
             starvation_cycles=3,
             death_cause="starvation",
             exiled=True,
         )
+        counterpart = Agent(
+            agent_number=2,
+            model_type="llama-3.1-8b",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="Test prompt",
+        )
         db.add(agent)
+        db.add(counterpart)
         db.flush()
         db.add_all(
             [
@@ -57,6 +67,20 @@ def test_apply_resource_targets_resets_agent_survival_state(session_factory):
                 AgentInventory(agent_id=agent.id, resource_type="energy", quantity=Decimal("0")),
                 AgentInventory(agent_id=agent.id, resource_type="materials", quantity=Decimal("9")),
             ]
+        )
+        db.add(
+            AgentMemory(
+                agent_id=agent.id,
+                summary_text="Old collapse memory",
+                last_checkpoint_number=22,
+            )
+        )
+        db.add(
+            AgentRelationshipMemory(
+                agent_id=agent.id,
+                other_agent_id=counterpart.id,
+                aid_requests_made_to_other_count=2,
+            )
         )
         db.add_all(
             [
@@ -74,9 +98,13 @@ def test_apply_resource_targets_resets_agent_survival_state(session_factory):
     )
 
     assert result["agent_state_reset"] is True
+    assert result["agent_memory_reset"] is True
+    assert result["relationship_memory_rows_cleared"] == 1
 
     with session_factory() as db:
         refreshed = db.query(Agent).filter(Agent.id == agent_id).one()
+        refreshed_memory = db.query(AgentMemory).filter(AgentMemory.agent_id == agent_id).one()
+        relationship_rows = db.query(AgentRelationshipMemory).all()
         inventories = {
             row.resource_type: float(row.quantity)
             for row in db.query(AgentInventory).filter(AgentInventory.agent_id == agent_id).all()
@@ -90,5 +118,12 @@ def test_apply_resource_targets_resets_agent_survival_state(session_factory):
     assert refreshed.starvation_cycles == 0
     assert refreshed.death_cause is None
     assert refreshed.exiled is False
+    assert refreshed.current_intent == {}
+    assert refreshed.intent_expires_at is None
+    assert refreshed.last_checkpoint_at is None
+    assert refreshed.next_checkpoint_at is None
+    assert refreshed_memory.summary_text == ""
+    assert refreshed_memory.last_checkpoint_number == 0
+    assert relationship_rows == []
     assert inventories == {"food": 24.0, "energy": 18.0, "materials": 20.0}
     assert globals_rows == {"food": 550.0, "energy": 200.0, "materials": 500.0}
