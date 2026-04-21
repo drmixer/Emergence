@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.models.models import Agent, Proposal
 from app.services.routine_executor import RoutineExecutor
 
@@ -81,3 +83,22 @@ def test_unaffordable_routine_action_falls_back_to_idle():
 
     assert result["action"] == "idle"
     assert "conserving energy" in result["reasoning"].lower()
+
+
+@pytest.mark.parametrize("strategy", ["social_coordination", "governance"])
+def test_civic_strategies_hold_position_with_idle_between_checkpoints(monkeypatch, strategy: str):
+    agent = _agent(12, "neutral")
+    agent.current_intent = {"strategy": strategy}
+    executor = RoutineExecutor()
+
+    monkeypatch.setattr(
+        RoutineExecutor,
+        "_resource_levels",
+        staticmethod(lambda _db, _agent_id: {"food": 10.0, "energy": 10.0, "materials": 10.0}),
+    )
+    monkeypatch.setattr(executor, "_urgent_unvoted_proposal", lambda _db, _agent: None)
+
+    result = executor.build_action(None, agent)
+
+    assert result["action"] == "idle"
+    assert "follow-up" in result["reasoning"].lower()

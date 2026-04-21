@@ -118,13 +118,12 @@ class RoutineExecutor:
         if strategy == "conserve_energy":
             return {"action": "idle", "reasoning": "Routine execution: conserving energy between checkpoints."}
         if strategy in {"governance", "social_coordination"}:
-            # Keep civic agents productive between strategic replans.
-            return affordable(
-                self._work_action(
-                    self._lowest_resource_work_type(food, energy, materials),
-                    "Routine execution: maintain baseline production while monitoring governance.",
+            return {
+                "action": "idle",
+                "reasoning": (
+                    "Routine execution: hold position for social/governance follow-up between checkpoints."
                 ),
-            )
+            }
         if strategy == "resource_exchange":
             if materials < 12.0:
                 return affordable(
