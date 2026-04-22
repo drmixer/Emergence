@@ -115,6 +115,10 @@ class LLMClient:
         self._openrouter_window_s = 60.0
         self._openrouter_calls: deque[float] = deque()
         self._openrouter_rpm_lock = asyncio.Lock()
+        self._gemini_rpm = max(1, int(getattr(settings, "GEMINI_RPM_LIMIT", 8) or 8))
+        self._gemini_window_s = 60.0
+        self._gemini_calls: deque[float] = deque()
+        self._gemini_rpm_lock = asyncio.Lock()
 
         configured_run_id = str(getattr(settings, "SIMULATION_RUN_ID", "") or "").strip()
         self._default_run_id = configured_run_id or now_utc().strftime("run-%Y%m%dT%H%M%SZ")
@@ -145,6 +149,27 @@ class LLMClient:
 
         await asyncio.sleep(wait_s)
         return await self._throttle_openrouter()
+
+    async def _throttle_gemini(self) -> None:
+        now = time.monotonic()
+        raw_rpm_limit = runtime_config_service.get_effective_value_cached("GEMINI_RPM_LIMIT")
+        rpm_limit = max(
+            1,
+            int(self._gemini_rpm if raw_rpm_limit is None else raw_rpm_limit),
+        )
+        async with self._gemini_rpm_lock:
+            while self._gemini_calls and (now - self._gemini_calls[0]) > self._gemini_window_s:
+                self._gemini_calls.popleft()
+
+            if len(self._gemini_calls) < rpm_limit:
+                self._gemini_calls.append(now)
+                return
+
+            oldest = self._gemini_calls[0]
+            wait_s = max(0.0, self._gemini_window_s - (now - oldest)) + random.random() * 0.2
+
+        await asyncio.sleep(wait_s)
+        return await self._throttle_gemini()
 
     @staticmethod
     def _extract_text_from_message(message: Any) -> Optional[str]:
@@ -314,6 +339,8 @@ class LLMClient:
             async with sem:
                 if client is self.openrouter_client:
                     await self._throttle_openrouter()
+                elif client is self.gemini_client:
+                    await self._throttle_gemini()
                 response = await client.chat.completions.create(
                     model=used_model_name,
                     messages=[

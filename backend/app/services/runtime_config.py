@@ -172,6 +172,12 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         max_value=120,
         description="OpenRouter requests-per-minute cap.",
     ),
+    "GEMINI_RPM_LIMIT": MutableSettingSpec(
+        python_type=int,
+        min_value=1,
+        max_value=120,
+        description="Gemini requests-per-minute cap.",
+    ),
     "LLM_ACTION_MAX_TOKENS": MutableSettingSpec(
         python_type=int,
         min_value=64,

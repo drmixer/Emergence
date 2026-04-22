@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 from app.services import llm_client
 
@@ -57,3 +58,95 @@ def test_parse_action_response_rejects_truncated_json_like_payload():
     assert meta["ok"] is False
     assert meta["parse_status"] == "json_not_found_rejected"
     assert meta["error_type"] == "json_not_found"
+
+
+def test_throttle_gemini_honors_runtime_rpm_limit(monkeypatch):
+    client = llm_client.LLMClient()
+    client._gemini_window_s = 0.001
+    client._gemini_calls.append(llm_client.time.monotonic())
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(
+        llm_client.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: 1 if key == "GEMINI_RPM_LIMIT" else None,
+    )
+    monkeypatch.setattr(llm_client.random, "random", lambda: 0.0)
+
+    real_sleep = asyncio.sleep
+
+    async def _fake_sleep(delay: float):
+        sleeps.append(delay)
+        await real_sleep(delay + 0.001)
+
+    monkeypatch.setattr(llm_client.asyncio, "sleep", _fake_sleep)
+
+    asyncio.run(client._throttle_gemini())
+
+    assert len(sleeps) == 1
+    assert 0.0 < sleeps[0] <= 0.001
+    assert len(client._gemini_calls) == 1
+
+
+def test_create_completion_with_budget_throttles_gemini(monkeypatch):
+    client = llm_client.LLMClient()
+    calls = {"gemini_throttle": 0, "openrouter_throttle": 0}
+
+    async def _fake_gemini_throttle():
+        calls["gemini_throttle"] += 1
+
+    async def _fake_openrouter_throttle():
+        calls["openrouter_throttle"] += 1
+
+    async def _fake_create(**_kwargs):
+        return SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=11, completion_tokens=7, total_tokens=18),
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"action":"idle"}'))],
+        )
+
+    monkeypatch.setattr(client, "_throttle_gemini", _fake_gemini_throttle)
+    monkeypatch.setattr(client, "_throttle_openrouter", _fake_openrouter_throttle)
+    monkeypatch.setattr(
+        client.gemini_client.chat.completions,
+        "create",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        llm_client.usage_budget,
+        "preflight",
+        lambda **_kwargs: SimpleNamespace(
+            allowed=True,
+            reason=None,
+            soft_cap_reached=False,
+            snapshot=SimpleNamespace(calls_total=0, estimated_cost_usd=0.0),
+        ),
+    )
+    recorded: list[dict] = []
+    monkeypatch.setattr(
+        llm_client.usage_budget,
+        "record_call",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+
+    response, used_model_name, provider_name, blocked_reason = asyncio.run(
+        client._create_completion_with_budget(
+            client=client.gemini_client,
+            agent_id=23,
+            checkpoint_number=2,
+            model_type="gm_gemini_2_0_flash_lite",
+            model_name="gemini-2.0-flash-lite",
+            system_prompt="system",
+            user_prompt="user",
+            max_tokens=128,
+            temperature=0.7,
+            fallback_used=False,
+        )
+    )
+
+    assert blocked_reason is None
+    assert provider_name == "gemini"
+    assert used_model_name == "gemini-2.0-flash-lite"
+    assert calls == {"gemini_throttle": 1, "openrouter_throttle": 0}
+    assert response.usage.total_tokens == 18
+    assert recorded and recorded[0]["provider"] == "gemini"
+    assert recorded[0]["success"] is True

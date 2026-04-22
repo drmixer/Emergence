@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     MISTRAL_MAX_CONCURRENCY: int = 4
     GEMINI_MAX_CONCURRENCY: int = 4
     OPENROUTER_RPM_LIMIT: int = 6
+    GEMINI_RPM_LIMIT: int = 8
     # Action-generation output controls (checkpoint decisions).
     LLM_ACTION_MAX_TOKENS: int = 350
     LLM_ACTION_PARSE_RETRY_ATTEMPTS: int = 2
