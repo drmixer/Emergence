@@ -24,6 +24,7 @@ from app.services.lineage import (
     lineage_payload_for_agent_number,
     resolve_active_or_latest_season_id,
 )
+from app.services.live_run_scope import LiveRunWindow, apply_live_run_window, get_live_run_window
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 
@@ -377,6 +378,7 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
     if not agents:
         return {}
 
+    run_window = get_live_run_window(db)
     window_start = now_utc() - timedelta(hours=LEGIBILITY_WINDOW_HOURS)
     tracked_agent_ids = {int(agent.id) for agent in agents}
     tracked_agents_by_id = {int(agent.id): agent for agent in agents}
@@ -394,17 +396,14 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
     for row in inventories:
         inventory_by_agent_id[int(row.agent_id)][str(row.resource_type)] = float(row.quantity or 0)
 
-    messages = (
-        db.query(Message)
-        .filter(
-            Message.created_at >= window_start,
-            or_(
-                Message.author_agent_id.in_(tracked_agent_ids),
-                Message.recipient_agent_id.in_(tracked_agent_ids),
-            ),
-        )
-        .all()
+    messages_query = db.query(Message).filter(
+        Message.created_at >= window_start,
+        or_(
+            Message.author_agent_id.in_(tracked_agent_ids),
+            Message.recipient_agent_id.in_(tracked_agent_ids),
+        ),
     )
+    messages = _apply_run_window_if_available(messages_query, Message.created_at, run_window).all()
     parent_message_ids = {
         int(message.parent_message_id)
         for message in messages
@@ -424,24 +423,18 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
     }
 
     event_types = LEGIBILITY_CONFLICT_EVENT_TYPES | LEGIBILITY_POSITIVE_EVENT_TYPES
-    events = (
-        db.query(Event)
-        .filter(
-            Event.created_at >= window_start,
-            Event.agent_id.in_(tracked_agent_ids),
-            Event.event_type.in_(event_types),
-        )
-        .all()
+    events_query = db.query(Event).filter(
+        Event.created_at >= window_start,
+        Event.agent_id.in_(tracked_agent_ids),
+        Event.event_type.in_(event_types),
     )
+    events = _apply_run_window_if_available(events_query, Event.created_at, run_window).all()
 
-    votes = (
-        db.query(Vote)
-        .filter(
-            Vote.created_at >= window_start,
-            Vote.agent_id.in_(tracked_agent_ids),
-        )
-        .all()
+    votes_query = db.query(Vote).filter(
+        Vote.created_at >= window_start,
+        Vote.agent_id.in_(tracked_agent_ids),
     )
+    votes = _apply_run_window_if_available(votes_query, Vote.created_at, run_window).all()
     proposal_ids = {int(vote.proposal_id) for vote in votes if vote.proposal_id is not None}
     proposal_lookup = (
         {
@@ -451,14 +444,15 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
         if proposal_ids
         else {}
     )
-    recent_authored_proposals = (
-        db.query(Proposal)
-        .filter(
-            Proposal.created_at >= window_start,
-            Proposal.author_agent_id.in_(tracked_agent_ids),
-        )
-        .all()
+    recent_authored_proposals_query = db.query(Proposal).filter(
+        Proposal.created_at >= window_start,
+        Proposal.author_agent_id.in_(tracked_agent_ids),
     )
+    recent_authored_proposals = _apply_run_window_if_available(
+        recent_authored_proposals_query,
+        Proposal.created_at,
+        run_window,
+    ).all()
 
     positive_scores: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
     negative_scores: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
@@ -678,6 +672,14 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
         }
 
     return legibility_by_agent_id
+
+
+def _apply_run_window_if_available(query, column, run_window: LiveRunWindow | None):
+    if run_window is None:
+        return query
+    if run_window.run_id is None:
+        return query
+    return apply_live_run_window(query, column, run_window)
 
 
 def _resolve_lineage_context(db: Session, *, agent_number: int) -> dict:

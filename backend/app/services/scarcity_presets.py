@@ -237,6 +237,8 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
         ),
         runtime_overrides={
             "AGENT_LOOP_DELAY_SECONDS": 180,
+            "PROPOSAL_VOTING_HOURS": 2.0,
+            "PROPOSAL_RESOLUTION_INTERVAL_SECONDS": 60,
             "SURVIVAL_ACTIVE_FOOD_COST": 4.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
             "SURVIVAL_DORMANT_FOOD_COST": 0.75,

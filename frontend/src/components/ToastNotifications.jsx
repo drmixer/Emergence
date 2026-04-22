@@ -78,16 +78,22 @@ const eventConfig = {
     }
 }
 
+function isProposalToast(event) {
+    const eventType = event?.event_type || event?.type
+    return eventType === 'proposal_created' || eventType === 'create_proposal'
+}
+
 // Custom toast component for events
 function EventToast({ event, config }) {
     const Icon = config?.icon || MessageSquare
     const color = config?.color || '#6B7280'
     const bgColor = config?.bgColor || 'rgba(107, 114, 128, 0.15)'
     const prefix = config?.prefix || ''
+    const proposalToast = isProposalToast(event)
 
     return (
         <div
-            className="event-toast"
+            className={`event-toast ${proposalToast ? 'proposal-toast' : ''}`}
             style={{
                 '--toast-color': color,
                 '--toast-bg': bgColor
@@ -107,6 +113,7 @@ function EventToast({ event, config }) {
 // Show a toast for an event
 export function showEventToast(event) {
     const config = eventConfig[event.event_type] || eventConfig[event.type]
+    const proposalToast = isProposalToast(event)
 
     // Only show toasts for notable events
     const notableTypes = [
@@ -142,7 +149,8 @@ export function showEventToast(event) {
             </div>
         ),
         {
-            duration: 5000,
+            id: proposalToast ? 'proposal-feed-toast' : undefined,
+            duration: proposalToast ? 3500 : 5000,
             position: 'bottom-right',
         }
     )
@@ -179,6 +187,11 @@ export function ToastProvider() {
         <>
             <Toaster
                 position="bottom-right"
+                gutter={10}
+                containerStyle={{
+                    right: 24,
+                    bottom: 24,
+                }}
                 toastOptions={{
                     duration: 5000,
                 }}
@@ -188,19 +201,26 @@ export function ToastProvider() {
                     display: flex;
                     align-items: flex-start;
                     gap: 12px;
-                    padding: 12px 16px;
-                    background: var(--bg-card, #0a0a0a);
-                    border: 1px solid var(--toast-color);
+                    padding: 12px 14px;
+                    background: rgba(10, 10, 10, 0.92);
+                    border: 1px solid color-mix(in srgb, var(--toast-color) 55%, transparent);
                     border-radius: 12px;
-                    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
-                    max-width: 360px;
+                    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.34);
+                    backdrop-filter: blur(12px);
+                    max-width: 320px;
                     cursor: pointer;
                     transition: all 0.2s ease;
                 }
 
+                .proposal-toast {
+                    gap: 10px;
+                    max-width: 280px;
+                    padding: 10px 12px;
+                }
+
                 .event-toast:hover {
                     transform: translateY(-2px);
-                    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+                    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
                 }
 
                 .toast-icon {
@@ -213,6 +233,12 @@ export function ToastProvider() {
                     align-items: center;
                     justify-content: center;
                     flex-shrink: 0;
+                }
+
+                .proposal-toast .toast-icon {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 7px;
                 }
 
                 .toast-content {
@@ -234,6 +260,16 @@ export function ToastProvider() {
                     color: rgba(255, 255, 255, 0.9);
                     line-height: 1.4;
                     display: block;
+                    overflow: hidden;
+                    display: -webkit-box;
+                    -webkit-box-orient: vertical;
+                    -webkit-line-clamp: 3;
+                }
+
+                .proposal-toast .toast-message {
+                    font-size: 0.8125rem;
+                    line-height: 1.35;
+                    -webkit-line-clamp: 2;
                 }
 
                 .toast-wrapper {
@@ -263,6 +299,13 @@ export function ToastProvider() {
                     to {
                         opacity: 0;
                         transform: translateX(100px);
+                    }
+                }
+
+                @media (max-width: 900px) {
+                    .event-toast,
+                    .proposal-toast {
+                        max-width: min(300px, calc(100vw - 32px));
                     }
                 }
             `}</style>

@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.time import now_utc
 from app.models.models import Agent, AgentInventory, AgentLineage, Event, Message, Proposal, SimulationRun, Vote
+from app.services.live_run_scope import LiveRunWindow
 
 agents_api = importlib.import_module("app.api.agents")
 agents_router = agents_api.router
@@ -559,5 +560,121 @@ def test_agent_detail_lineage_defaults_when_missing():
     assert body["profile_stats"]["total_actions"] == 0
     assert body["profile_stats"]["invalid_action_rate"] == 0.0
     assert body["legibility"]["archetype"]["title"] == "Survivor"
+
+    db.close()
+
+
+def test_agent_detail_relationships_are_scoped_to_active_run_window(monkeypatch):
+    db = _build_db_session()
+    now = now_utc()
+    run_start = now - timedelta(hours=2)
+
+    focal = Agent(
+        agent_number=10,
+        display_name="Syntax-10",
+        model_type="claude-sonnet-4",
+        tier=1,
+        personality_type="efficiency",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=3),
+        last_active_at=now,
+    )
+    old_counterpart = Agent(
+        agent_number=35,
+        display_name="Tempo-35",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=3),
+        last_active_at=now,
+    )
+    current_counterpart = Agent(
+        agent_number=7,
+        display_name="Beacon-07",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="stability",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=3),
+        last_active_at=now,
+    )
+    db.add_all([focal, old_counterpart, current_counterpart])
+    db.flush()
+
+    db.add_all(
+        [
+            AgentInventory(agent_id=focal.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=focal.id, resource_type="energy", quantity=20),
+            AgentInventory(agent_id=old_counterpart.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=old_counterpart.id, resource_type="energy", quantity=20),
+            AgentInventory(agent_id=current_counterpart.id, resource_type="food", quantity=20),
+            AgentInventory(agent_id=current_counterpart.id, resource_type="energy", quantity=20),
+        ]
+    )
+
+    for idx in range(4):
+        db.add(
+            Message(
+                author_agent_id=focal.id,
+                recipient_agent_id=old_counterpart.id,
+                content=f"old coordination ping {idx}",
+                message_type="direct_message",
+                created_at=run_start - timedelta(minutes=30 + idx),
+            )
+        )
+
+    db.add(
+        Message(
+            author_agent_id=focal.id,
+            recipient_agent_id=current_counterpart.id,
+            content="current coordination ping",
+            message_type="direct_message",
+            created_at=run_start + timedelta(minutes=10),
+        )
+    )
+    db.add(
+        Event(
+            agent_id=focal.id,
+            event_type="trade",
+            description="shared supplies this run",
+            event_metadata={"action": {"recipient_agent_id": 7}},
+            created_at=run_start + timedelta(minutes=20),
+        )
+    )
+    db.add(
+        SimulationRun(
+            run_id="real-run-current",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="special_exploratory",
+            season_id="season_01",
+            season_number=1,
+            started_at=run_start,
+            ended_at=None,
+        )
+    )
+    db.commit()
+
+    monkeypatch.setattr(
+        agents_api,
+        "get_live_run_window",
+        lambda _db: LiveRunWindow(run_id="real-run-current", started_at=run_start, ended_at=None),
+    )
+
+    with _make_client(db) as client:
+        response = client.get("/api/agents/10")
+
+    assert response.status_code == 200
+    body = response.json()
+    relationships = body["legibility"]["relationships"]
+    assert relationships["allies"][0]["agent_number"] == 7
+    assert "1 trade" in relationships["allies"][0]["evidence"]
+    assert "1 direct message" in relationships["allies"][0]["evidence"]
+    assert relationships["ally_buckets"]["trade_support"]["agent_number"] == 7
+    assert all(item["agent_number"] != 35 for item in relationships["allies"])
 
     db.close()

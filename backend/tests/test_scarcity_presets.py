@@ -102,6 +102,8 @@ def test_internal_canary_b_legibility_preset_relaxes_food_side_for_observation_w
     preset = get_scarcity_preset("internal_canary_b_legibility_v1")
 
     assert preset.runtime_overrides["AGENT_LOOP_DELAY_SECONDS"] == 180
+    assert preset.runtime_overrides["PROPOSAL_VOTING_HOURS"] == 2.0
+    assert preset.runtime_overrides["PROPOSAL_RESOLUTION_INTERVAL_SECONDS"] == 60
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_FOOD_COST"] == 4.0
     assert preset.runtime_overrides["SURVIVAL_ACTIVE_ENERGY_COST"] == 4.0
     assert preset.runtime_overrides["SURVIVAL_DORMANT_FOOD_COST"] == 0.75
