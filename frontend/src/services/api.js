@@ -15,7 +15,12 @@ class APIService {
 
     async fetch(endpoint, options = {}) {
         const url = `${this.baseUrl}${endpoint}`
-        const { headers: optionHeaders = {}, ...restOptions } = options
+        const {
+            headers: optionHeaders = {},
+            quietErrors = false,
+            quietStatusCodes = [],
+            ...restOptions
+        } = options
 
         try {
             const response = await fetch(url, {
@@ -45,7 +50,11 @@ class APIService {
 
             return response.json()
         } catch (error) {
-            console.error(`API Error (${endpoint}):`, error)
+            const status = Number(error?.status || 0)
+            const suppressLog = quietErrors || quietStatusCodes.includes(status)
+            if (!suppressLog) {
+                console.error(`API Error (${endpoint}):`, error)
+            }
             throw error
         }
     }
@@ -220,6 +229,47 @@ class APIService {
         params.append('limit', String(limit))
         if (runId) params.append('run_id', String(runId))
         return this.fetch(`/api/analytics/plot-turns/replay-story?${params.toString()}`)
+    }
+
+    async getRunPlayback(runId, pageLimit = 500) {
+        const cleanRunId = String(runId || '').trim()
+        if (!cleanRunId) {
+            throw new Error('runId is required')
+        }
+
+        let offset = 0
+        let totalCount = null
+        let items = []
+        let basePayload = null
+
+        while (totalCount === null || offset < totalCount) {
+            const params = new URLSearchParams()
+            params.append('limit', String(pageLimit))
+            params.append('offset', String(offset))
+
+            const payload = await this.fetch(`/api/analytics/runs/${encodeURIComponent(cleanRunId)}/playback?${params.toString()}`, {
+                quietStatusCodes: [404],
+            })
+            if (!basePayload) {
+                basePayload = payload && typeof payload === 'object' ? payload : {}
+                totalCount = Number(basePayload?.total_count || 0)
+            }
+
+            const pageItems = Array.isArray(payload?.items) ? payload.items : []
+            if (pageItems.length === 0) break
+
+            items = items.concat(pageItems)
+            offset += pageItems.length
+
+            if (pageItems.length < pageLimit) break
+        }
+
+        return {
+            ...(basePayload || {}),
+            items,
+            count: items.length,
+            total_count: totalCount ?? items.length,
+        }
     }
 
     async getLatestSummary(runId = '') {

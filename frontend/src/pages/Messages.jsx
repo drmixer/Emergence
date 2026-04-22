@@ -84,7 +84,7 @@ function MessageRow({ message, onOpenThread }) {
 
 export default function Messages() {
   const [searchParams] = useSearchParams()
-  const [activeTab, setActiveTab] = useState('forum')
+  const [activeTab, setActiveTab] = useState('all')
   const [forumPosts, setForumPosts] = useState([])
   const [replies, setReplies] = useState([])
   const [directMessages, setDirectMessages] = useState([])
@@ -175,10 +175,14 @@ export default function Messages() {
           <MessageSquare size={30} />
           Agent Messages
         </h1>
-        <p className="page-description">Public and direct agent messages from the simulation.</p>
+        <p className="page-description">All agent message types by default, with filters for forum posts, replies, and direct messages.</p>
       </div>
 
       <div className="message-tabs">
+        <button type="button" className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
+          <MessageCircle size={16} />
+          All Messages
+        </button>
         <button type="button" className={`tab-btn ${activeTab === 'forum' ? 'active' : ''}`} onClick={() => setActiveTab('forum')}>
           <MessageSquare size={16} />
           Forum Posts
@@ -190,10 +194,6 @@ export default function Messages() {
         <button type="button" className={`tab-btn ${activeTab === 'direct' ? 'active' : ''}`} onClick={() => setActiveTab('direct')}>
           <MessageCircle size={16} />
           Direct Messages
-        </button>
-        <button type="button" className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
-          <MessageCircle size={16} />
-          All Messages
         </button>
       </div>
 

@@ -9,7 +9,6 @@ import {
   Sparkles,
   MessageCircle,
   Flame,
-  TrendingUp,
   TrendingDown,
   Minus,
   Share2,
@@ -23,8 +22,6 @@ import { getMomentEvidenceHref, getMomentReplayHref } from '../utils/bestMoments
 
 const Recap = lazy(() => import('../components/Recap'))
 const QuoteCardGenerator = lazy(() => import('../components/QuoteCard'))
-
-const QUICK_BET_AMOUNT = 5
 
 const getImportanceColor = (importance) => {
   if (importance >= 100) return 'gold'
@@ -43,12 +40,12 @@ const eventTypeIcons = {
   default: Star,
 }
 
-const pct = (value) => `${Math.round(Number(value || 0) * 100)}%`
-const getTurnRunId = (turn) => String(turn?.metadata?.runtime?.run_id || '').trim()
-const VALID_TABS = new Set(['recap', 'highlights', 'summary', 'plotTurns', 'predictions', 'replay', 'quotes'])
+const getTurnRunId = (turn) => String(turn?.run_id || turn?.metadata?.runtime?.run_id || '').trim()
+const VALID_TABS = new Set(['recap', 'highlights', 'summary', 'plotTurns', 'replay', 'quotes'])
 const VALID_REPLAY_MODES = new Set(['timeline', 'story60'])
 const MAJOR_CATEGORIES = new Set(['crisis', 'conflict', 'governance'])
 const STORY_CHAPTERS = ['Trigger', 'Escalation', 'Turning Point', 'Outcome']
+const REPLAY_BUCKET_MINUTES = 30
 
 function resolveReplayMode(requestedMode, requestedEventId = 0) {
   if (VALID_REPLAY_MODES.has(requestedMode)) return requestedMode
@@ -66,6 +63,81 @@ function getMomentTier(turn) {
 function getTurnTimestamp(turn) {
   const timestamp = turn?.created_at ? new Date(turn.created_at).getTime() : 0
   return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function formatReplayBucketLabel(timestampMs, totalSpanMs = 0) {
+  const date = new Date(timestampMs)
+  if (!Number.isFinite(date.getTime())) return ''
+
+  if (totalSpanMs > 24 * 60 * 60 * 1000) {
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date)
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function buildReplayBuckets(events, timeWindow, bucketMinutes = REPLAY_BUCKET_MINUTES) {
+  const bucketMs = Math.max(10, Number(bucketMinutes || REPLAY_BUCKET_MINUTES)) * 60 * 1000
+  const eventTimestamps = Array.isArray(events)
+    ? events.map((turn) => getTurnTimestamp(turn)).filter((value) => value > 0)
+    : []
+
+  const requestedStart = timeWindow?.start_utc ? new Date(timeWindow.start_utc).getTime() : 0
+  const requestedEnd = timeWindow?.end_utc ? new Date(timeWindow.end_utc).getTime() : 0
+
+  let startMs = Number.isFinite(requestedStart) && requestedStart > 0 ? requestedStart : (eventTimestamps[0] || 0)
+  let endMs = Number.isFinite(requestedEnd) && requestedEnd > 0 ? requestedEnd : (eventTimestamps[eventTimestamps.length - 1] || startMs)
+
+  if (eventTimestamps.length > 0) {
+    startMs = Math.min(startMs || eventTimestamps[0], eventTimestamps[0])
+    endMs = Math.max(endMs || eventTimestamps[eventTimestamps.length - 1], eventTimestamps[eventTimestamps.length - 1])
+  }
+
+  if (!Number.isFinite(startMs) || startMs <= 0) return []
+  if (!Number.isFinite(endMs) || endMs < startMs) endMs = startMs
+
+  const totalSpanMs = Math.max(bucketMs, endMs - startMs)
+  const bucketCount = Math.max(1, Math.ceil(totalSpanMs / bucketMs))
+  const buckets = Array.from({ length: bucketCount }, (_, idx) => {
+    const bucketStart = startMs + (idx * bucketMs)
+    const bucketEnd = idx === bucketCount - 1 ? endMs : Math.min(endMs, bucketStart + bucketMs)
+    return {
+      index: idx,
+      bucket_start: new Date(bucketStart).toISOString(),
+      bucket_end: new Date(bucketEnd).toISOString(),
+      label: formatReplayBucketLabel(bucketStart, totalSpanMs),
+      event_count: 0,
+      max_salience: 0,
+      dominant_category: null,
+      category_counts: {},
+    }
+  })
+
+  for (const turn of events || []) {
+    const timestamp = getTurnTimestamp(turn)
+    if (timestamp <= 0 || timestamp < startMs || timestamp > endMs) continue
+    const idx = Math.max(0, Math.min(bucketCount - 1, Math.floor((timestamp - startMs) / bucketMs)))
+    const bucket = buckets[idx]
+    bucket.event_count += 1
+    bucket.max_salience = Math.max(Number(bucket.max_salience || 0), Number(turn?.salience || 0))
+    const category = String(turn?.category || 'notable')
+    bucket.category_counts[category] = Number(bucket.category_counts[category] || 0) + 1
+    bucket.dominant_category = Object.keys(bucket.category_counts).sort((left, right) => {
+      const countDelta = Number(bucket.category_counts[right] || 0) - Number(bucket.category_counts[left] || 0)
+      if (countDelta !== 0) return countDelta
+      return left.localeCompare(right)
+    })[0] || 'notable'
+  }
+
+  return buckets
 }
 
 function pickReplayStoryMoments(turns, targetCount = 8) {
@@ -238,17 +310,14 @@ export default function Highlights() {
   const [replayStory, setReplayStory] = useState({ items: [], chapters: [] })
   const [replayBuckets, setReplayBuckets] = useState([])
   const [replayIndex, setReplayIndex] = useState(-1)
+  const [replayPlayback, setReplayPlayback] = useState(null)
   const [replayMode, setReplayMode] = useState(resolveReplayMode(requestedReplayMode, requestedEventId))
   const [storyMomentIndex, setStoryMomentIndex] = useState(0)
   const [selectedReplayEventId, setSelectedReplayEventId] = useState(0)
   const [showSourceDetail, setShowSourceDetail] = useState(false)
-  const [predictionMarkets, setPredictionMarkets] = useState([])
-  const [predictionStats, setPredictionStats] = useState(null)
-  const [predictionNotice, setPredictionNotice] = useState(null)
-  const [predictionError, setPredictionError] = useState(null)
-  const [placingMarketKey, setPlacingMarketKey] = useState(null)
   const [activeRunId, setActiveRunId] = useState('')
   const [selectedRunId, setSelectedRunId] = useState('')
+  const [invalidArchivedRunId, setInvalidArchivedRunId] = useState('')
   const [overview, setOverview] = useState(null)
   const [emergenceMetrics, setEmergenceMetrics] = useState(null)
   const [shareNotice, setShareNotice] = useState('')
@@ -286,21 +355,44 @@ export default function Highlights() {
       setReplayStory({ items: [], chapters: [] })
       setReplayBuckets([])
       setReplayIndex(-1)
-      setPredictionMarkets([])
-      setPredictionStats(null)
-      setPredictionNotice(null)
-      setPredictionError(null)
+      setReplayPlayback(null)
+      setInvalidArchivedRunId('')
       setOverview(null)
       setEmergenceMetrics(null)
 
       try {
         const archiveView = Boolean(runFilter)
-        const overviewPayload = archiveView ? null : await api.getAnalyticsOverview().catch(() => null)
-        if (cancelled) return
-        const liveRunId = String(overviewPayload?.scope?.active_run_id || '').trim()
-        setActiveRunId(liveRunId)
-        setSelectedRunId(runFilter || liveRunId)
-        setOverview(overviewPayload && typeof overviewPayload === 'object' ? overviewPayload : null)
+        if (archiveView) {
+          try {
+            await api.fetch(`/api/analytics/runs/${encodeURIComponent(runFilter)}?trace_limit=1&min_salience=0`, {
+              quietStatusCodes: [404],
+            })
+            if (cancelled) return
+            setActiveRunId('')
+            setSelectedRunId(runFilter)
+            setOverview(null)
+          } catch (error) {
+            if (cancelled) return
+            if (Number(error?.status || 0) === 404) {
+              setActiveRunId('')
+              setSelectedRunId('')
+              setInvalidArchivedRunId(runFilter)
+              setOverview(null)
+            } else {
+              setActiveRunId('')
+              setSelectedRunId(runFilter)
+              setOverview(null)
+            }
+          }
+        } else {
+          const overviewPayload = await api.getAnalyticsOverview().catch(() => null)
+          if (cancelled) return
+          const liveRunId = String(overviewPayload?.scope?.active_run_id || '').trim()
+          const lastCompletedRunId = String(overviewPayload?.scope?.last_completed_run_id || '').trim()
+          setActiveRunId(liveRunId)
+          setSelectedRunId(liveRunId || lastCompletedRunId)
+          setOverview(overviewPayload && typeof overviewPayload === 'object' ? overviewPayload : null)
+        }
       } catch {
         if (cancelled) return
         setActiveRunId('')
@@ -321,6 +413,7 @@ export default function Highlights() {
 
   useEffect(() => {
     if (loading) return
+    if (Boolean(runFilter) && invalidArchivedRunId) return
     if (activeTab === 'recap' || activeTab === 'quotes') return
     if (loadedTabs[activeTab]) return
 
@@ -351,38 +444,35 @@ export default function Highlights() {
           if (!archiveView && !emergenceMetrics) {
             setEmergenceMetrics(metricsPayload && typeof metricsPayload === 'object' ? metricsPayload : null)
           }
-        } else if (activeTab === 'predictions') {
-          if (archiveView) {
-            setPredictionMarkets([])
-            setPredictionStats(null)
+        } else if (activeTab === 'replay') {
+          if (!scopedRunId) {
+            setReplayTurns([])
+            setReplayStory({ items: [], chapters: [] })
+            setReplayBuckets([])
+            setReplayIndex(-1)
+            setReplayPlayback(null)
           } else {
-            const [openMarkets, me] = await Promise.all([
-              api.getPredictionMarkets('open', 8).catch(() => []),
-              api.getPredictionMe().catch(() => null),
+            const [replay, replayStoryPayload, metricsPayload] = await Promise.all([
+              api.getRunPlayback(scopedRunId).catch(() => ({ items: [], time_window: null, contract: null })),
+              api.getReplayStory(24, 55, 8, scopedRunId).catch(() => ({ items: [], chapters: [] })),
+              archiveView || emergenceMetrics
+                ? Promise.resolve(emergenceMetrics)
+                : api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
             ])
             if (cancelled) return
-            setPredictionMarkets(Array.isArray(openMarkets) ? openMarkets : [])
-            setPredictionStats(me && typeof me === 'object' ? me : null)
-          }
-        } else if (activeTab === 'replay') {
-          const [replay, replayStoryPayload, metricsPayload] = await Promise.all([
-            api.getPlotTurnReplay(24, 55, 30, 240, scopedRunId).catch(() => ({ items: [], buckets: [] })),
-            api.getReplayStory(24, 55, 8, scopedRunId).catch(() => ({ items: [], chapters: [] })),
-            archiveView || emergenceMetrics
-              ? Promise.resolve(emergenceMetrics)
-              : api.fetch('/api/analytics/emergence/metrics?hours=24').catch(() => null),
-          ])
-          if (cancelled) return
-          setReplayTurns(Array.isArray(replay?.items) ? replay.items : [])
-          setReplayStory({
-            items: Array.isArray(replayStoryPayload?.items) ? replayStoryPayload.items : [],
-            chapters: Array.isArray(replayStoryPayload?.chapters) ? replayStoryPayload.chapters : [],
-          })
-          const buckets = Array.isArray(replay?.buckets) ? replay.buckets : []
-          setReplayBuckets(buckets)
-          setReplayIndex(buckets.length > 0 ? buckets.length - 1 : -1)
-          if (!archiveView && !emergenceMetrics) {
-            setEmergenceMetrics(metricsPayload && typeof metricsPayload === 'object' ? metricsPayload : null)
+            const playbackItems = Array.isArray(replay?.items) ? replay.items : []
+            setReplayTurns(playbackItems)
+            setReplayPlayback(replay && typeof replay === 'object' ? replay : null)
+            setReplayStory({
+              items: Array.isArray(replayStoryPayload?.items) ? replayStoryPayload.items : [],
+              chapters: Array.isArray(replayStoryPayload?.chapters) ? replayStoryPayload.chapters : [],
+            })
+            const buckets = buildReplayBuckets(playbackItems, replay?.time_window, REPLAY_BUCKET_MINUTES)
+            setReplayBuckets(buckets)
+            setReplayIndex(buckets.length > 0 ? buckets.length - 1 : -1)
+            if (!archiveView && !emergenceMetrics) {
+              setEmergenceMetrics(metricsPayload && typeof metricsPayload === 'object' ? metricsPayload : null)
+            }
           }
         }
 
@@ -398,29 +488,7 @@ export default function Highlights() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, emergenceMetrics, loadedTabs, loading, runFilter, selectedRunId])
-
-  const handleQuickPrediction = async (marketId, prediction) => {
-    const key = `${marketId}-${prediction}`
-    setPredictionError(null)
-    setPredictionNotice(null)
-    setPlacingMarketKey(key)
-
-    try {
-      await api.placePredictionBet(marketId, prediction, QUICK_BET_AMOUNT)
-      const [openMarkets, me] = await Promise.all([
-        api.getPredictionMarkets('open', 8).catch(() => []),
-        api.getPredictionMe().catch(() => null),
-      ])
-      setPredictionMarkets(Array.isArray(openMarkets) ? openMarkets : [])
-      setPredictionStats(me && typeof me === 'object' ? me : null)
-      setPredictionNotice(`Placed ${QUICK_BET_AMOUNT} EP on ${prediction.toUpperCase()}.`)
-    } catch {
-      setPredictionError('Unable to place prediction right now.')
-    } finally {
-      setPlacingMarketKey(null)
-    }
-  }
+  }, [activeTab, emergenceMetrics, invalidArchivedRunId, loadedTabs, loading, runFilter, selectedRunId])
 
   const activeReplayBucket =
     replayIndex >= 0 && replayIndex < replayBuckets.length ? replayBuckets[replayIndex] : null
@@ -493,6 +561,12 @@ export default function Highlights() {
   }, [selectedReplayEventId, replayTurns, replayBucketEvents, replayRecent])
 
   const activeReplayMoment = replayMode === 'story60' ? activeStoryMoment : activeTimelineMoment
+  const replayContract = replayPlayback?.contract && typeof replayPlayback.contract === 'object'
+    ? replayPlayback.contract
+    : null
+  const replayTimeWindow = replayPlayback?.time_window && typeof replayPlayback.time_window === 'object'
+    ? replayPlayback.time_window
+    : null
 
   const activeReplayMomentDeltas = useMemo(() => buildMomentDeltas(activeReplayMoment), [activeReplayMoment])
   const activeReplayEvidence = useMemo(() => {
@@ -508,12 +582,19 @@ export default function Highlights() {
   }, [activeReplayMoment])
 
   const isArchiveView = Boolean(runFilter)
+  const invalidArchiveState = isArchiveView && Boolean(invalidArchivedRunId)
   const showLiveStateStrip = !isArchiveView && !!selectedRunId && selectedRunId === activeRunId
   const highlightsLoading = loading || Boolean(tabLoading.highlights)
   const summaryLoading = loading || Boolean(tabLoading.summary)
   const plotTurnsLoading = loading || Boolean(tabLoading.plotTurns)
-  const predictionsLoading = loading || Boolean(tabLoading.predictions)
   const replayLoading = loading || Boolean(tabLoading.replay)
+  const runScopeLabel = invalidArchiveState
+    ? `Requested archived run ${invalidArchivedRunId} not found`
+    : isArchiveView && selectedRunId
+    ? `Selected run ${selectedRunId}`
+    : (showLiveStateStrip ? 'Active run' : 'Latest available run')
+  const recapTabLabel = isArchiveView ? 'Run Recap' : 'Run Summary So Far'
+  const plotTurnsLabel = isArchiveView ? 'Key Moments' : 'What Changed'
 
   const stateStrip = useMemo(() => {
     const day = Number(overview?.day_number || 0)
@@ -665,11 +746,13 @@ export default function Highlights() {
           Highlights
         </h1>
         <p className="page-description">
-          {isArchiveView && selectedRunId
-            ? `Archived replay surfaces for ${selectedRunId}`
+          {invalidArchiveState
+            ? `Requested archived run ${invalidArchivedRunId} could not be found`
+            : isArchiveView && selectedRunId
+            ? `Run recap, replay, and evidence surfaces for archived run ${selectedRunId}`
             : activeRunId
-              ? 'Notable events, recaps, and daily summaries for the current run'
-              : 'Recaps, notable events, and daily summaries from the latest available run'}
+              ? 'Live story desk for the current run: recap, what changed, replay, and summary'
+              : 'Recap, key moments, replay, and summary from the latest available run'}
         </p>
       </div>
 
@@ -677,7 +760,17 @@ export default function Highlights() {
         Highlights are observational summaries from simulation data. For claim-level evidence, review run detail traces and the <Link to="/method">method notes</Link>.
       </div>
 
-      {isArchiveView && selectedRunId && (
+      {requestedTab === 'predictions' && (
+        <div className="feed-notice">
+          Predictions now live on their own page. <Link to="/predictions">Open the prediction market</Link>.
+        </div>
+      )}
+
+      {invalidArchiveState ? (
+        <div className="feed-notice">
+          Requested archived run <strong>{invalidArchivedRunId}</strong> was not found. <Link to="/archive">Choose a completed run from the archive</Link>.
+        </div>
+      ) : isArchiveView && selectedRunId && (
         <div className="feed-notice">
           Viewing archived run <strong>{selectedRunId}</strong>. <Link to="/archive">Back to archive</Link>
         </div>
@@ -689,7 +782,7 @@ export default function Highlights() {
           onClick={() => setActiveTab('recap')}
         >
           <Sparkles size={16} />
-          Previously On...
+          {recapTabLabel}
         </button>
         <button
           className={`tab-btn ${activeTab === 'highlights' ? 'active' : ''}`}
@@ -710,14 +803,7 @@ export default function Highlights() {
           onClick={() => setActiveTab('plotTurns')}
         >
           <Flame size={16} />
-          Plot Turns
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'predictions' ? 'active' : ''}`}
-          onClick={() => setActiveTab('predictions')}
-        >
-          <TrendingUp size={16} />
-          Predictions
+          {plotTurnsLabel}
         </button>
         <button
           className={`tab-btn ${activeTab === 'replay' ? 'active' : ''}`}
@@ -735,50 +821,60 @@ export default function Highlights() {
         </button>
       </div>
 
-      {showLiveStateStrip && (activeTab === 'plotTurns' || activeTab === 'replay') && (
-        <div className="state-strip">
-          <div className="state-item">
-            <span>Day</span>
-            <strong>{stateStrip.day}</strong>
+      {!invalidArchiveState && showLiveStateStrip && (activeTab === 'plotTurns' || activeTab === 'replay') && (
+        <>
+          <div className="feed-notice">Scope: Active run</div>
+          <div className="state-strip">
+            <div className="state-item">
+              <span>Day</span>
+              <strong>{stateStrip.day}</strong>
+            </div>
+            <div className="state-item">
+              <span>Deaths</span>
+              <strong>{stateStrip.deaths}</strong>
+            </div>
+            <div className="state-item">
+              <span>Laws</span>
+              <strong>{stateStrip.laws}</strong>
+            </div>
+            <div className="state-item">
+              <span>Coalition Index</span>
+              <strong>{stateStrip.coalitionIndex}</strong>
+            </div>
+            <div className={`state-item trend ${stateStrip.trend}`}>
+              <span>Trend</span>
+              <strong><TrendIcon size={14} /> {stateStrip.trendLabel}</strong>
+            </div>
           </div>
-          <div className="state-item">
-            <span>Deaths</span>
-            <strong>{stateStrip.deaths}</strong>
-          </div>
-          <div className="state-item">
-            <span>Laws</span>
-            <strong>{stateStrip.laws}</strong>
-          </div>
-          <div className="state-item">
-            <span>Coalition Index</span>
-            <strong>{stateStrip.coalitionIndex}</strong>
-          </div>
-          <div className={`state-item trend ${stateStrip.trend}`}>
-            <span>Trend</span>
-            <strong><TrendIcon size={14} /> {stateStrip.trendLabel}</strong>
-          </div>
-        </div>
+        </>
       )}
 
       {shareNotice && <div className="feed-notice success">{shareNotice}</div>}
 
-      {activeTab === 'recap' && (
+      {invalidArchiveState && (
+        <div className="empty-state">
+          Archived run <strong>{invalidArchivedRunId}</strong> was not found. Return to <Link to="/archive">the runs archive</Link> and choose a completed run.
+        </div>
+      )}
+
+      {!invalidArchiveState && activeTab === 'recap' && (
         <Suspense fallback={<div className="empty-state">Loading recap…</div>}>
-          <Recap runId={selectedRunId} />
+          <Recap runId={selectedRunId} title={recapTabLabel.toUpperCase()} scopeLabel={runScopeLabel} />
         </Suspense>
       )}
 
-      {activeTab === 'quotes' && (
+      {!invalidArchiveState && activeTab === 'quotes' && (
         <Suspense fallback={<div className="empty-state">Loading quote cards…</div>}>
           <QuoteCardGenerator />
         </Suspense>
       )}
 
-      {activeTab === 'highlights' && (
+      {!invalidArchiveState && activeTab === 'highlights' && (
         <div className="featured-events">
           <div className="featured-intro">
             <h3>Best Moments</h3>
             <p>The fastest way to understand why this run matters, with replay and evidence links on every card.</p>
+            <span>Scope: {runScopeLabel}</span>
           </div>
           {highlightsLoading && (
             <div className="empty-state">Loading best moments…</div>
@@ -830,7 +926,7 @@ export default function Highlights() {
         </div>
       )}
 
-      {activeTab === 'summary' && (
+      {!invalidArchiveState && activeTab === 'summary' && (
         <div className="daily-summary">
           {summaryLoading ? (
             <div className="empty-state">Loading daily summary…</div>
@@ -856,50 +952,53 @@ export default function Highlights() {
               )}
 
               {summary.stats && (
-                <div className="summary-stats">
-                  {summary.stats.active_agents !== undefined && (
-                    <div className="summary-stat">
-                      <div className="stat-value">{summary.stats.active_agents}</div>
-                      <div className="stat-label">Active</div>
-                    </div>
-                  )}
-                  {summary.stats.dormant_agents !== undefined && (
-                    <div className="summary-stat">
-                      <div className="stat-value">{summary.stats.dormant_agents}</div>
-                      <div className="stat-label">Dormant</div>
-                    </div>
-                  )}
-                  {summary.stats.messages !== undefined && (
-                    <div className="summary-stat">
-                      <div className="stat-value">{summary.stats.messages}</div>
-                      <div className="stat-label">Messages</div>
-                    </div>
-                  )}
-                  {summary.stats.votes !== undefined && (
-                    <div className="summary-stat">
-                      <div className="stat-value">{summary.stats.votes}</div>
-                      <div className="stat-label">Votes</div>
-                    </div>
-                  )}
-                  {summary.stats.laws_passed !== undefined && (
-                    <div className="summary-stat">
-                      <div className="stat-value">{summary.stats.laws_passed}</div>
-                      <div className="stat-label">Laws</div>
-                    </div>
-                  )}
-                  {summary.stats.total_events !== undefined && (
-                    <div className="summary-stat">
-                      <div className="stat-value">{summary.stats.total_events}</div>
-                      <div className="stat-label">Events</div>
-                    </div>
-                  )}
-                  {summary.stats.llm_calls !== undefined && (
-                    <div className="summary-stat">
-                      <div className="stat-value">{summary.stats.llm_calls}</div>
-                      <div className="stat-label">LLM Calls</div>
-                    </div>
-                  )}
-                </div>
+                <>
+                  <div className="feed-notice">Scope: {runScopeLabel}</div>
+                  <div className="summary-stats">
+                    {summary.stats.active_agents !== undefined && (
+                      <div className="summary-stat">
+                        <div className="stat-value">{summary.stats.active_agents}</div>
+                        <div className="stat-label">Active</div>
+                      </div>
+                    )}
+                    {summary.stats.dormant_agents !== undefined && (
+                      <div className="summary-stat">
+                        <div className="stat-value">{summary.stats.dormant_agents}</div>
+                        <div className="stat-label">Dormant</div>
+                      </div>
+                    )}
+                    {summary.stats.messages !== undefined && (
+                      <div className="summary-stat">
+                        <div className="stat-value">{summary.stats.messages}</div>
+                        <div className="stat-label">Messages</div>
+                      </div>
+                    )}
+                    {summary.stats.votes !== undefined && (
+                      <div className="summary-stat">
+                        <div className="stat-value">{summary.stats.votes}</div>
+                        <div className="stat-label">Votes</div>
+                      </div>
+                    )}
+                    {summary.stats.laws_passed !== undefined && (
+                      <div className="summary-stat">
+                        <div className="stat-value">{summary.stats.laws_passed}</div>
+                        <div className="stat-label">Laws</div>
+                      </div>
+                    )}
+                    {summary.stats.total_events !== undefined && (
+                      <div className="summary-stat">
+                        <div className="stat-value">{summary.stats.total_events}</div>
+                        <div className="stat-label">Events</div>
+                      </div>
+                    )}
+                    {summary.stats.llm_calls !== undefined && (
+                      <div className="summary-stat">
+                        <div className="stat-value">{summary.stats.llm_calls}</div>
+                        <div className="stat-label">LLM Calls</div>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
 
               <div className="summary-content">
@@ -912,13 +1011,22 @@ export default function Highlights() {
         </div>
       )}
 
-      {activeTab === 'plotTurns' && (
+      {!invalidArchiveState && activeTab === 'plotTurns' && (
         <div className="plot-turns-panel">
+          <div className="featured-intro">
+            <h3>{plotTurnsLabel}</h3>
+            <p>
+              {isArchiveView
+                ? 'Curated high-salience moments for the selected archived run.'
+                : 'The most visible changes shaping the active run right now.'}
+            </p>
+            <span>Scope: {runScopeLabel}</span>
+          </div>
           {plotTurnsLoading && (
-            <div className="empty-state">Loading plot turns…</div>
+            <div className="empty-state">Loading {plotTurnsLabel.toLowerCase()}…</div>
           )}
           {!plotTurnsLoading && plotTurns.length === 0 && (
-            <div className="empty-state">No major plot turns yet.</div>
+            <div className="empty-state">No {plotTurnsLabel.toLowerCase()} yet.</div>
           )}
           {plotTurns.map((turn) => {
             const turnRunId = getTurnRunId(turn)
@@ -958,117 +1066,11 @@ export default function Highlights() {
         </div>
       )}
 
-      {activeTab === 'predictions' && (
-        <div className="prediction-panel">
-          {isArchiveView ? (
-            <div className="empty-state">
-              Predictions are live-only. Return to <Link to="/highlights?tab=predictions">the current run market</Link>.
-            </div>
-          ) : (
-            <>
-          <div className="prediction-intro-card">
-            <strong>Audience-side calls only.</strong>
-            <p>These hooks resolve from live run data after the window closes. They do not affect the simulation or agent incentives.</p>
-          </div>
-
-          {predictionStats && (
-            <div className="prediction-stats">
-              <div>
-                <span>Balance</span>
-                <strong>{Math.round(Number(predictionStats.balance || 0))} EP</strong>
-              </div>
-              <div>
-                <span>Bets</span>
-                <strong>{Number(predictionStats.bets_made || 0)}</strong>
-              </div>
-              <div>
-                <span>Win Rate</span>
-                <strong>{Number(predictionStats.win_rate || 0)}%</strong>
-              </div>
-            </div>
-          )}
-
-          {predictionNotice && <div className="feed-notice success">{predictionNotice}</div>}
-          {predictionError && <div className="feed-notice error">{predictionError}</div>}
-
-          {predictionsLoading && <div className="empty-state">Loading prediction markets…</div>}
-          {!predictionsLoading && predictionMarkets.length === 0 && (
-            <div className="empty-state">
-              No open markets right now. <Link to="/predictions">Open full market</Link>.
-            </div>
-          )}
-
-          {predictionMarkets.map((market) => {
-            const yesProb = Number(market.yes_probability || 0)
-            const noProb = Math.max(0, 1 - yesProb)
-            const placingForMarket = placingMarketKey?.startsWith(`${market.id}-`)
-
-            return (
-              <div key={market.id} className="prediction-card">
-                <div className="prediction-row">
-                  <div className="prediction-title-wrap">
-                    <h3>{market.title}</h3>
-                    {market.auto_generated && <span className="prediction-live-chip">Live Hook</span>}
-                  </div>
-                  <span className="prediction-close">
-                    Closes {market.closes_at ? formatDistanceToNow(new Date(market.closes_at), { addSuffix: true }) : 'soon'}
-                  </span>
-                </div>
-                {market.description && <p>{market.description}</p>}
-                {market.stake && (
-                  <div className="prediction-copy-block">
-                    <span>Stake</span>
-                    <strong>{market.stake}</strong>
-                  </div>
-                )}
-                {market.resolution_basis && (
-                  <div className="prediction-copy-block">
-                    <span>Settles</span>
-                    <strong>{market.resolution_basis}</strong>
-                  </div>
-                )}
-                {Array.isArray(market.evidence_links) && market.evidence_links.length > 0 && (
-                  <div className="prediction-links">
-                    {market.evidence_links.map((link) => (
-                      <a key={`${market.id}-${link.href}`} href={link.href}>{link.label}</a>
-                    ))}
-                  </div>
-                )}
-
-                <div className="prediction-probability">
-                  <div className="prediction-yes" style={{ width: pct(yesProb) }}>YES {pct(yesProb)}</div>
-                  <div className="prediction-no" style={{ width: pct(noProb) }}>NO {pct(noProb)}</div>
-                </div>
-
-                <div className="prediction-actions">
-                  <button
-                    className="btn btn-primary"
-                    disabled={Boolean(placingForMarket)}
-                    onClick={() => handleQuickPrediction(market.id, 'yes')}
-                  >
-                    Pick YES ({QUICK_BET_AMOUNT} EP)
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    disabled={Boolean(placingForMarket)}
-                    onClick={() => handleQuickPrediction(market.id, 'no')}
-                  >
-                    Pick NO ({QUICK_BET_AMOUNT} EP)
-                  </button>
-                </div>
-              </div>
-            )
-          })}
-            </>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'replay' && (
+      {!invalidArchiveState && activeTab === 'replay' && (
         <div className="replay-panel">
           {replayLoading && <div className="empty-state">Loading replay…</div>}
           {!replayLoading && replayBuckets.length === 0 && (
-            <div className="empty-state">No replay data for the last 24 hours yet.</div>
+            <div className="empty-state">No replay data for this run yet.</div>
           )}
 
           {replayBuckets.length > 0 && activeReplayBucket && (
@@ -1076,12 +1078,12 @@ export default function Highlights() {
               <div className="replay-intro-card">
                 <div>
                   <strong>Replay in 60 Seconds</strong>
-                  <p>Compressed, chaptered playback from verified plot turns. Use timeline mode when you want the full 24-hour scrub.</p>
+                  <p>Story mode is a curated chaptered recap. Timeline mode is canonical event playback for the selected run.</p>
                 </div>
                 <span>
-                  {replayStoryMoments.length > 0
+                  {replayMode === 'story60'
                     ? `${replayStoryMoments.length} curated moments`
-                    : `${replayBuckets.length} timeline slices`}
+                    : `${replayTurns.length} replay events`}
                 </span>
               </div>
 
@@ -1105,11 +1107,25 @@ export default function Highlights() {
               {replayMode === 'timeline' ? (
                 <>
                   <div className="replay-header">
-                    <h3>Time Scrub</h3>
+                    <h3>Replay Timeline</h3>
                     <span>
                       Slice {replayIndex + 1}/{replayBuckets.length} · {activeReplayBucket.label} · {activeReplayBucket.event_count} event
                       {activeReplayBucket.event_count === 1 ? '' : 's'}
                     </span>
+                  </div>
+                  <div className="replay-source-note">
+                    <strong>Canonical playback</strong>
+                    <span>
+                      {replayContract?.ordering === 'created_at_asc_id_asc'
+                        ? 'Ordered by created_at then id.'
+                        : 'Run-scoped event playback.'}
+                    </span>
+                    {replayTimeWindow?.start_utc && replayTimeWindow?.end_utc && (
+                      <em>
+                        {formatDistanceToNow(new Date(replayTimeWindow.start_utc), { addSuffix: true })} to{' '}
+                        {formatDistanceToNow(new Date(replayTimeWindow.end_utc), { addSuffix: true })}
+                      </em>
+                    )}
                   </div>
 
                   <input
@@ -1143,7 +1159,7 @@ export default function Highlights() {
                         <div>
                           <h4>Events In This Slice</h4>
                           {replayBucketEvents.length === 0 ? (
-                            <div className="empty-state compact">No high-salience turns in this slice.</div>
+                            <div className="empty-state compact">No replay-visible events in this slice.</div>
                           ) : (
                             <div className="plot-turns-panel">
                               {replayBucketEvents.map((turn) => {
@@ -1281,6 +1297,10 @@ export default function Highlights() {
                       <span>
                         {replayStoryMoments.length} curated moments · chaptered narrative · about one minute to scan
                       </span>
+                    </div>
+                    <div className="replay-source-note">
+                      <strong>Curated story</strong>
+                      <span>Selected from high-salience plot turns, not full event playback.</span>
                     </div>
 
                     {replayStoryMoments.length === 0 || !activeStoryMoment ? (
@@ -2083,6 +2103,26 @@ export default function Highlights() {
           margin: 0;
           font-size: 1rem;
           color: var(--text-primary);
+        }
+
+        .replay-source-note {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.75rem;
+          align-items: center;
+          margin: 0 0 1rem;
+          color: var(--text-secondary);
+          font-size: 0.82rem;
+        }
+
+        .replay-source-note strong {
+          color: var(--text-primary);
+          font-weight: 700;
+        }
+
+        .replay-source-note em {
+          font-style: normal;
+          color: #cbd5e1;
         }
 
         .replay-buckets {

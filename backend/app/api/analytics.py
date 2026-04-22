@@ -46,6 +46,7 @@ from app.services.live_run_scope import (
     apply_live_run_window,
     apply_run_window,
     get_live_run_window,
+    get_run_window,
 )
 from app.services.run_policy import is_deterministic_fallback_forum_post_content
 from app.core.database import SessionLocal
@@ -513,6 +514,28 @@ def _serialize_plot_turn(event: Event, score: int, actor_label: str | None = Non
         "actor": actor_label,
         "created_at": ensure_utc(event.created_at).isoformat() if event.created_at else None,
         "metadata": event.event_metadata or {},
+    }
+
+
+def _event_runtime_run_id(event: Event) -> str:
+    metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
+    runtime = metadata.get("runtime") if isinstance(metadata.get("runtime"), dict) else {}
+    return str(runtime.get("run_id") or "").strip()
+
+
+def _serialize_playback_event(event: Event) -> dict[str, Any]:
+    score = _score_plot_turn(event)
+    return {
+        "event_id": int(event.id or 0),
+        "agent_id": (int(event.agent_id) if event.agent_id is not None else None),
+        "event_type": str(event.event_type or ""),
+        "title": _plot_turn_title(event),
+        "description": str(event.description or ""),
+        "salience": int(score),
+        "category": _plot_turn_category(event),
+        "created_at": ensure_utc(event.created_at).isoformat() if event.created_at else None,
+        "metadata": event.event_metadata or {},
+        "run_id": _event_runtime_run_id(event) or None,
     }
 
 
@@ -1356,6 +1379,7 @@ def plot_turns(
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
         payload = [item[2] for item in scored[:limit]]
         return {
+            "source_type": "curated_plot_turns",
             "window_hours": hours,
             "min_salience": min_salience,
             "run_id": effective_run_id,
@@ -1436,6 +1460,7 @@ def plot_turns_replay(
             )
 
         return {
+            "source_type": "curated_plot_turn_replay",
             "window_hours": hours,
             "min_salience": min_salience,
             "bucket_minutes": bucket_minutes,
@@ -1478,6 +1503,7 @@ def plot_turns_replay_story(
         )
         story = _build_replay_story_payload([item[2] for item in scored], target_count=limit)
         return {
+            "source_type": "curated_plot_turn_story",
             "window_hours": hours,
             "min_salience": min_salience,
             "run_id": effective_run_id,
@@ -1519,11 +1545,78 @@ def best_moments(
         )
         moments = _select_best_moments_payloads([item[2] for item in scored], limit)
         return {
+            "source_type": "curated_best_moments",
             "window_hours": hours,
             "min_salience": min_salience,
             "run_id": effective_run_id,
             "count": len(moments),
             "items": moments,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/runs/{run_id}/playback")
+def run_playback(
+    run_id: str = Path(..., max_length=64, pattern=r"^[A-Za-z0-9:_-]+$"),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Canonical run-scoped playback stream from the raw event log.
+    """
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        raise HTTPException(status_code=400, detail="run_id is required")
+
+    now = now_utc()
+    db = SessionLocal()
+    try:
+        run_row = (
+            db.query(SimulationRun)
+            .filter(SimulationRun.run_id == clean_run_id)
+            .first()
+        )
+        if run_row is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        run_window = get_run_window(db, clean_run_id)
+        run_started_at = ensure_utc(run_window.started_at)
+        if run_started_at is None:
+            raise HTTPException(status_code=409, detail="Run window is incomplete for canonical playback")
+
+        run_ended_at = ensure_utc(run_window.ended_at)
+        if run_ended_at is None or run_ended_at > now:
+            run_ended_at = now
+
+        ordered_rows = (
+            db.query(Event)
+            .filter(Event.created_at >= run_started_at, Event.created_at <= run_ended_at)
+            .order_by(Event.created_at.asc(), Event.id.asc())
+            .all()
+        )
+        scoped_rows = [row for row in ordered_rows if _event_runtime_run_id(row) == clean_run_id]
+        paged_rows = scoped_rows[offset: offset + limit]
+
+        return {
+            "run_id": clean_run_id,
+            "run_metadata": _serialize_run_registry_metadata(run_row),
+            "contract": {
+                "source_type": "full_event_playback",
+                "ordering": "created_at_asc_id_asc",
+                "run_scope": "event_metadata.runtime.run_id",
+                "completeness": "logged_events_only",
+            },
+            "time_window": {
+                "start_utc": run_started_at.isoformat(),
+                "end_utc": run_ended_at.isoformat(),
+                "source": "simulation_runs_registry",
+            },
+            "offset": offset,
+            "limit": limit,
+            "count": len(paged_rows),
+            "total_count": len(scoped_rows),
+            "items": [_serialize_playback_event(row) for row in paged_rows],
         }
     finally:
         db.close()

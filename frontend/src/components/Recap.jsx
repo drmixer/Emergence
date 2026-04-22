@@ -1,8 +1,7 @@
-// Recap Component - "Previously on Emergence" TV-show style summaries
+// Recap component for run-scoped narrative summaries.
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
-    Play,
     ChevronLeft,
     ChevronRight,
     Sparkles,
@@ -12,8 +11,8 @@ import {
 import { api } from '../services/api'
 import { getMomentEvidenceHref, getMomentReplayHref } from '../utils/bestMoments'
 
-// Typewriter effect hook
-function useTypewriter(text, speed = 30, enabled = true) {
+// Optional text animation for recap copy.
+function useTypewriter(text, speed = 30, enabled = true, restartKey = 0) {
     const [displayedText, setDisplayedText] = useState('')
     const [isComplete, setIsComplete] = useState(false)
 
@@ -39,7 +38,7 @@ function useTypewriter(text, speed = 30, enabled = true) {
         }, speed)
 
         return () => clearInterval(timer)
-    }, [text, speed, enabled])
+    }, [text, speed, enabled, restartKey])
 
     return { displayedText, isComplete }
 }
@@ -159,11 +158,16 @@ function buildRecap({ id, period, title, fallbackHeadline, intro, moments, stats
 }
 
 // Main Recap Component
-export default function Recap({ minimal = false, runId = '' }) {
+export default function Recap({
+    minimal = false,
+    runId = '',
+    title = 'PREVIOUSLY ON EMERGENCE...',
+    scopeLabel = '',
+}) {
     const [recaps, setRecaps] = useState([])
     const [activeRecap, setActiveRecap] = useState(null)
-    const [isPlaying, setIsPlaying] = useState(false)
-    const [showTypewriter, setShowTypewriter] = useState(true)
+    const [animateNarrative, setAnimateNarrative] = useState(false)
+    const [animationKey, setAnimationKey] = useState(0)
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
@@ -212,7 +216,7 @@ export default function Recap({ minimal = false, runId = '' }) {
                     recapsBuilt.push(buildRecap({
                         id: 2,
                         period: 'last_week',
-                        title: scopedRunId ? 'Episode Recap' : 'Latest Summary',
+                        title: scopedRunId ? 'Run Summary' : 'Latest Summary',
                         fallbackHeadline: latestSummary?.day_number
                             ? `Day ${latestSummary.day_number} Summary`
                             : (scopedRunId ? `Run ${scopedRunId} Summary` : 'This Week'),
@@ -244,26 +248,27 @@ export default function Recap({ minimal = false, runId = '' }) {
         loadRecaps()
     }, [runId])
 
+    const resolvedScopeLabel = String(scopeLabel || (runId ? 'Selected run' : 'Latest available run')).trim()
+
     const { displayedText, isComplete } = useTypewriter(
         activeRecap?.summary?.narrative || '',
         20,
-        showTypewriter && isPlaying
+        animateNarrative,
+        animationKey
     )
 
     const handleRecapSelect = (recap) => {
         setActiveRecap(recap)
-        setIsPlaying(false)
-        setShowTypewriter(true)
+        setAnimateNarrative(false)
     }
 
-    const handlePlay = () => {
-        setIsPlaying(true)
-        setShowTypewriter(true)
+    const handleAnimateNarrative = () => {
+        setAnimationKey((prev) => prev + 1)
+        setAnimateNarrative(true)
     }
 
-    const handleSkip = () => {
-        setShowTypewriter(false)
-        setIsPlaying(false)
+    const handleShowFullText = () => {
+        setAnimateNarrative(false)
     }
 
     const goToNext = () => {
@@ -299,7 +304,7 @@ export default function Recap({ minimal = false, runId = '' }) {
             <div className="recap-container minimal">
                 <div className="recap-minimal-header">
                     <Sparkles size={16} />
-                    <span>Previously on Emergence...</span>
+                    <span>{title}</span>
                 </div>
                 <p className="recap-minimal-text">
                     {activeRecap.summary.stake || activeRecap.summary.headline}
@@ -317,7 +322,7 @@ export default function Recap({ minimal = false, runId = '' }) {
             <div className="recap-header">
                 <div className="recap-header-text">
                     <span className="recap-eyebrow">━━━━━━━━━━━━━━━━━━━━━</span>
-                    <h2>PREVIOUSLY ON EMERGENCE...</h2>
+                    <h2>{title}</h2>
                     <span className="recap-eyebrow">━━━━━━━━━━━━━━━━━━━━━</span>
                 </div>
             </div>
@@ -337,7 +342,10 @@ export default function Recap({ minimal = false, runId = '' }) {
             {/* Main Content */}
             <div className="recap-content">
                 <div className="recap-narrative-header">
-                    <h3>{activeRecap.summary.headline}</h3>
+                    <div>
+                        <h3>{activeRecap.summary.headline}</h3>
+                        <p>Scope: {resolvedScopeLabel}</p>
+                    </div>
                     <div className="recap-controls">
                         <button
                             className="recap-nav-btn"
@@ -347,24 +355,24 @@ export default function Recap({ minimal = false, runId = '' }) {
                             <ChevronLeft size={18} />
                         </button>
 
-                        {!isPlaying && !isComplete ? (
+                        {animateNarrative && !isComplete ? (
                             <button
                                 className="recap-play-btn"
-                                onClick={handlePlay}
-                                title="Play"
+                                onClick={handleShowFullText}
+                                title="Show Full Text"
                             >
-                                <Play size={18} />
-                                <span>Play</span>
+                                <span>Show Full Text</span>
                             </button>
-                        ) : isPlaying && !isComplete ? (
+                        ) : (
                             <button
-                                className="recap-skip-btn"
-                                onClick={handleSkip}
-                                title="Skip"
+                                className="recap-play-btn"
+                                onClick={handleAnimateNarrative}
+                                title="Animate Text"
                             >
-                                <span>Skip</span>
+                                <Sparkles size={18} />
+                                <span>Animate Text</span>
                             </button>
-                        ) : null}
+                        )}
 
                         <button
                             className="recap-nav-btn"
@@ -377,20 +385,13 @@ export default function Recap({ minimal = false, runId = '' }) {
                 </div>
 
                 <div className="recap-narrative">
-                    {isPlaying || showTypewriter === false ? (
-                        <p className={isComplete ? 'complete' : 'typing'}>
-                            {showTypewriter ? displayedText : activeRecap.summary.narrative}
-                            {!isComplete && showTypewriter && <span className="cursor">|</span>}
-                        </p>
-                    ) : (
-                        <div className="recap-play-prompt">
-                            <Play size={32} />
-                            <p>Press Play to animate the recap summary.</p>
-                        </div>
-                    )}
+                    <p className={animateNarrative && !isComplete ? 'typing' : 'complete'}>
+                        {animateNarrative ? displayedText : activeRecap.summary.narrative}
+                        {animateNarrative && !isComplete && <span className="cursor">|</span>}
+                    </p>
                 </div>
 
-                {(isComplete || !showTypewriter) && (
+                {(isComplete || !animateNarrative) && (
                     <div className="recap-hooks">
                         <div className="recap-hook">
                             <span className="recap-hook-label">Stake</span>
@@ -408,7 +409,7 @@ export default function Recap({ minimal = false, runId = '' }) {
                 )}
 
                 {/* Highlights */}
-                {(isComplete || !showTypewriter) && (
+                {(isComplete || !animateNarrative) && (
                     <div className="recap-highlights">
                         <h4>Key Moments</h4>
                         <div className="highlights-list">
@@ -434,8 +435,9 @@ export default function Recap({ minimal = false, runId = '' }) {
                 )}
 
                 {/* Stats */}
-                {(isComplete || !showTypewriter) && (
+                {(isComplete || !animateNarrative) && (
                     <div className="recap-stats">
+                        <p>Scope: {resolvedScopeLabel}</p>
                         {Object.entries(activeRecap.summary.stats).map(([key, value]) => (
                             <div key={key} className="stat-item">
                                 <span className="stat-value">

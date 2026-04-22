@@ -27,3 +27,11 @@ export function getStoryReplayHref(runId = '') {
   if (runId) params.set('run', String(runId))
   return `/highlights?${params.toString()}`
 }
+
+export function getTimelineReplayHref(runId = '') {
+  const params = new URLSearchParams()
+  params.set('tab', 'replay')
+  params.set('mode', 'timeline')
+  if (runId) params.set('run', String(runId))
+  return `/highlights?${params.toString()}`
+}

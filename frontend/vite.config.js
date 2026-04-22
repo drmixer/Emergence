@@ -25,4 +25,8 @@ export default defineConfig({
   preview: {
     allowedHosts: true,
   },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+  },
 })

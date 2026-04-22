@@ -106,7 +106,7 @@ export default function Reports() {
           Runs Archive
         </h1>
         <p className="page-description">
-          Completed runs, top-line closeout stats, and direct links into replay and report artifacts.
+          Completed runs, top-line closeout stats, and direct links into recap, replay story, and report artifacts.
         </p>
       </div>
 
@@ -257,14 +257,14 @@ export default function Reports() {
                         className="btn btn-primary"
                       >
                         <TimerReset size={14} />
-                        Replay in 60 Seconds
+                        Replay Story
                       </Link>
                       <Link
                         to={`/highlights?tab=recap&run=${encodeURIComponent(runId)}`}
                         className="btn btn-secondary"
                       >
                         <FileText size={14} />
-                        Episode Recap
+                        Run Recap
                       </Link>
                       <button
                         type="button"
