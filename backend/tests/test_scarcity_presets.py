@@ -133,6 +133,14 @@ def test_standard_reset_preset_restores_named_baseline():
     assert preset.common_pool_targets["energy"] == 1000.0
 
 
+def test_all_internal_tuning_presets_use_shorter_proposal_timing():
+    for preset in list_scarcity_presets():
+        if not preset.name.startswith("internal_"):
+            continue
+        assert preset.runtime_overrides["PROPOSAL_VOTING_HOURS"] == 2.0
+        assert preset.runtime_overrides["PROPOSAL_RESOLUTION_INTERVAL_SECONDS"] == 60
+
+
 def test_list_scarcity_presets_is_sorted_and_complete():
     names = [preset.name for preset in list_scarcity_presets()]
 

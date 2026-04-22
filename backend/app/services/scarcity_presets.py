@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+CANARY_TUNING_RUNTIME_OVERRIDES = {
+    "PROPOSAL_VOTING_HOURS": 2.0,
+    "PROPOSAL_RESOLUTION_INTERVAL_SECONDS": 60,
+}
+
 
 @dataclass(frozen=True)
 class ScarcityPreset:
@@ -52,6 +57,7 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "no automatic reserve revival."
         ),
         runtime_overrides={
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
             "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 3.0,
             "SURVIVAL_DORMANT_FOOD_COST": 0.5,
@@ -80,6 +86,7 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "energy buffering, lower starting inventories, and no automatic reserve revival."
         ),
         runtime_overrides={
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
             "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
             "SURVIVAL_DORMANT_FOOD_COST": 0.5,
@@ -108,6 +115,7 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "v2 while tightening food availability and keeping reserve auto-support disabled."
         ),
         runtime_overrides={
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
             "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
             "SURVIVAL_DORMANT_FOOD_COST": 0.5,
@@ -139,6 +147,7 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "while making food meaningfully tighter instead of relying on an energy-only bottleneck."
         ),
         runtime_overrides={
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
             "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
             "SURVIVAL_DORMANT_FOOD_COST": 0.5,
@@ -170,6 +179,7 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "cuts food throughput, and lowers both agent and common-pool food buffers."
         ),
         runtime_overrides={
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
             "SURVIVAL_ACTIVE_FOOD_COST": 4.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
             "SURVIVAL_DORMANT_FOOD_COST": 0.75,
@@ -203,6 +213,7 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
         ),
         runtime_overrides={
             "AGENT_LOOP_DELAY_SECONDS": 180,
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
             "SURVIVAL_ACTIVE_FOOD_COST": 5.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
             "SURVIVAL_DORMANT_FOOD_COST": 1.0,
@@ -237,8 +248,7 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
         ),
         runtime_overrides={
             "AGENT_LOOP_DELAY_SECONDS": 180,
-            "PROPOSAL_VOTING_HOURS": 2.0,
-            "PROPOSAL_RESOLUTION_INTERVAL_SECONDS": 60,
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
             "SURVIVAL_ACTIVE_FOOD_COST": 4.0,
             "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
             "SURVIVAL_DORMANT_FOOD_COST": 0.75,
