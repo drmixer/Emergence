@@ -209,8 +209,28 @@
 
 ## Current Recommendation
 - Treat Canary A as a clean failure.
-- Move next to Canary B or an equivalent redesign centered on:
-  - legible interdependence
-  - named shared problems
-  - actor-specific public state
-- Do not continue iterating scarcity pressure in this same configuration.
+- Treat the Canary B rerun as a confounded failure on the survival-floor criterion.
+- Before rerunning legibility, calibrate a survival window that can hold `>= 40 active`
+  agents through hour 4 and ideally `>= 30 active` through hour 8.
+- Keep the Canary B legibility/context changes intact during that calibration.
+- Tune only scarcity/headroom until the observation window is stable enough to make the
+  social read interpretable.
+
+## Canary C: Survival Window Calibration
+
+### Goal
+- Find the minimum scarcity band that preserves an interpretable active population for hour-scale runs.
+- Do not add new social or governance changes in this phase; this is an economics/headroom calibration only.
+
+### Minimum Success
+- `>= 40 active` agents at `4 hours`
+- `>= 30 active` agents at `8 hours`
+
+### Constraints
+- Keep the Canary B legibility patch in place.
+- Keep reserve semantics, death threshold, and other non-scarcity mechanics unchanged.
+- Keep the tuning-only shorter proposal window for canaries so governance outcomes can resolve inside the run.
+
+### Decision Rule
+- If Canary C still misses the active-population floor, scarcity remains the blocking variable.
+- If Canary C clears the floor, rerun Canary B legibility inside that band before drawing conclusions about the social engine.

@@ -274,6 +274,41 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "materials": 500.0,
         },
     ),
+    "internal_canary_c_survival_window_v1": ScarcityPreset(
+        name="internal_canary_c_survival_window_v1",
+        description=(
+            "Survival-window calibration canary for hour-scale runs. Preserves the Canary B "
+            "legibility surfaces and reserve semantics, but adds enough additional food/energy "
+            "headroom to keep agents active long enough for social behavior to be observable."
+        ),
+        runtime_overrides={
+            "AGENT_LOOP_DELAY_SECONDS": 180,
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
+            "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
+            "SURVIVAL_ACTIVE_ENERGY_COST": 3.5,
+            "SURVIVAL_DORMANT_FOOD_COST": 0.5,
+            "SURVIVAL_DORMANT_ENERGY_COST": 0.75,
+            "SURVIVAL_DEATH_THRESHOLD": 5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": False,
+            "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED": False,
+            "WORK_YIELD_FARM_BASE": 1.4,
+            "WORK_YIELD_GENERATE_BASE": 1.75,
+            "WORK_YIELD_GATHER_BASE": 0.5,
+            "WORLD_EVENT_GENERATION_ENABLED": False,
+        },
+        agent_resource_targets={
+            "food": 22.0,
+            "energy": 24.0,
+            "materials": 20.0,
+        },
+        common_pool_targets={
+            "food": 450.0,
+            "energy": 300.0,
+            "materials": 500.0,
+        },
+    ),
 }
 
 
