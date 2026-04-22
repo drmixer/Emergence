@@ -124,8 +124,9 @@ async function main() {
     fail(`Unable to resolve API base from ${runResult.ogImage}`);
   }
 
-  const events = await fetchJson(`${apiBase}/api/events?limit=1`);
-  ensure(Array.isArray(events) && events.length > 0, `No events returned from ${apiBase}/api/events?limit=1`);
+  const eventsUrl = `${apiBase}/api/events?limit=1&scope=all`;
+  const events = await fetchJson(eventsUrl);
+  ensure(Array.isArray(events) && events.length > 0, `No events returned from ${eventsUrl}`);
   const eventId = Number(events[0]?.id || 0);
   ensure(Number.isInteger(eventId) && eventId > 0, "Could not resolve a valid event id for smoke check");
 
