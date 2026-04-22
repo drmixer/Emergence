@@ -35,6 +35,7 @@ DIRECT_CONVERSATION_LIMIT = 3
 DIRECT_CONVERSATION_MESSAGE_LIMIT = 4
 SOCIAL_SIGNAL_CONTEXT_LIMIT = 4
 PROPOSAL_ALIGNMENT_LIMIT = 4
+MESSAGE_PREVIEW_LIMIT = 220
 
 
 def _empty_relationship_summary() -> RelationshipSummary:
@@ -46,11 +47,199 @@ def _empty_relationship_summary() -> RelationshipSummary:
     )
 
 
-def _preview_untrusted_text(text: str | None, limit: int = 120) -> str:
+def _preview_untrusted_text(text: str | None, limit: int = MESSAGE_PREVIEW_LIMIT) -> str:
     normalized = " ".join((text or "").split())
     if len(normalized) > limit:
         return normalized[:limit] + "..."
     return normalized
+
+
+def _agent_public_label(agent: Agent | None) -> str:
+    if agent is None:
+        return "Unknown agent"
+    if agent.display_name:
+        return f"{agent.display_name} (#{agent.agent_number})"
+    return f"Agent #{agent.agent_number}"
+
+
+def _format_time_remaining(target_at, *, now) -> str:
+    deadline = ensure_utc(target_at) or now
+    minutes_left = max(0, int((deadline - now).total_seconds() / 60))
+    hours_left = minutes_left // 60
+    remaining_minutes = minutes_left % 60
+    if hours_left > 0:
+        return f"{hours_left}h {remaining_minutes}m"
+    return f"{minutes_left}m"
+
+
+def _shared_problem_line(
+    *,
+    total_active: int,
+    total_dormant: int,
+    common_pool: dict[str, float],
+) -> str:
+    collective_food_upkeep = (total_active * float(active_food_cost())) + (
+        total_dormant * float(dormant_food_cost())
+    )
+    collective_energy_upkeep = (total_active * float(active_energy_cost())) + (
+        total_dormant * float(dormant_energy_cost())
+    )
+    food_gap = max(0.0, collective_food_upkeep - float(common_pool.get("food", 0.0)))
+    energy_gap = max(0.0, collective_energy_upkeep - float(common_pool.get("energy", 0.0)))
+
+    if food_gap > 0 or energy_gap > 0:
+        return (
+            "- Shared problem - Visible upkeep gap: if the common pool alone had to cover one cycle right "
+            f"now, it would be short {food_gap:.1f} food and {energy_gap:.1f} energy for "
+            f"{total_active} active + {total_dormant} dormant agents."
+        )
+    if total_dormant > 0:
+        return (
+            "- Shared problem - Recovery coordination gap: the visible common pool could cover one upkeep "
+            f"cycle, but {total_dormant} dormant agents still need explicit aid, trade, or policy help."
+        )
+    return (
+        "- Shared problem - Survival coordination question: the visible common pool could cover one upkeep "
+        "cycle, so the live question is who contributes, who draws, and under what rule."
+    )
+
+
+def _public_actor_snapshot(
+    db: Session,
+    *,
+    now,
+    perception_cutoff=None,
+    run_window: LiveRunWindow | None = None,
+) -> list[str]:
+    living_agents = (
+        db.query(Agent)
+        .filter(Agent.status.in_(["active", "dormant"]))
+        .order_by(Agent.agent_number.asc())
+        .all()
+    )
+    if not living_agents:
+        return [
+            "- Strongest private stockpiles: none visible.",
+            "- Most exposed agents: none visible.",
+            "- Governance focal point: no living agents remain.",
+        ]
+
+    inventories = (
+        db.query(AgentInventory)
+        .filter(AgentInventory.agent_id.in_([agent.id for agent in living_agents]))
+        .all()
+    )
+    inventory_by_agent_id: dict[int, dict[str, float]] = {
+        int(agent.id): {"food": 0.0, "energy": 0.0, "materials": 0.0}
+        for agent in living_agents
+    }
+    for row in inventories:
+        inventory_by_agent_id[int(row.agent_id)][str(row.resource_type)] = float(row.quantity or 0.0)
+
+    living_snapshots = []
+    critical_food = float(active_food_cost())
+    critical_energy = float(active_energy_cost())
+    low_food = float(low_resource_warning_threshold(active_food_cost()))
+    low_energy = float(low_resource_warning_threshold(active_energy_cost()))
+
+    for living_agent in living_agents:
+        resources = inventory_by_agent_id.get(int(living_agent.id), {"food": 0.0, "energy": 0.0, "materials": 0.0})
+        food = float(resources.get("food", 0.0))
+        energy = float(resources.get("energy", 0.0))
+        materials = float(resources.get("materials", 0.0))
+        total_resources = food + energy + materials
+
+        if living_agent.status == "dormant" and int(living_agent.starvation_cycles or 0) > 0:
+            risk_band = 0
+        elif living_agent.status == "active" and (food < critical_food or energy < critical_energy):
+            risk_band = 1
+        elif living_agent.status == "dormant":
+            risk_band = 2
+        elif food < low_food or energy < low_energy:
+            risk_band = 3
+        else:
+            risk_band = 4
+
+        living_snapshots.append(
+            {
+                "agent": living_agent,
+                "food": food,
+                "energy": energy,
+                "materials": materials,
+                "total_resources": total_resources,
+                "risk_band": risk_band,
+            }
+        )
+
+    strongest = sorted(
+        living_snapshots,
+        key=lambda item: (-item["total_resources"], item["agent"].agent_number),
+    )[:3]
+    strongest_line = "; ".join(
+        f"{_agent_public_label(item['agent'])} F{item['food']:.1f}/E{item['energy']:.1f}/M{item['materials']:.1f}"
+        for item in strongest
+    )
+
+    exposed_candidates = [item for item in living_snapshots if item["risk_band"] < 4] or living_snapshots
+    most_exposed = sorted(
+        exposed_candidates,
+        key=lambda item: (
+            item["risk_band"],
+            item["food"] + item["energy"],
+            item["materials"],
+            item["agent"].agent_number,
+        ),
+    )[:3]
+    exposed_line = "; ".join(
+        (
+            f"{_agent_public_label(item['agent'])} {item['agent'].status}, "
+            f"starvation={int(item['agent'].starvation_cycles or 0)}, "
+            f"F{item['food']:.1f}/E{item['energy']:.1f}"
+        )
+        for item in most_exposed
+    )
+
+    recent_proposals_q = db.query(Proposal).filter(Proposal.created_at > now - timedelta(hours=24))
+    recent_proposals_q = _apply_run_window_if_available(recent_proposals_q, Proposal.created_at, run_window)
+    if perception_cutoff is not None:
+        recent_proposals_q = recent_proposals_q.filter(Proposal.created_at <= perception_cutoff)
+    recent_proposals = recent_proposals_q.order_by(desc(Proposal.created_at)).limit(8).all()
+
+    contested_proposal = next(
+        iter(
+            sorted(
+                [proposal for proposal in recent_proposals if int(proposal.votes_against or 0) > 0],
+                key=lambda proposal: (
+                    -int(proposal.votes_against or 0),
+                    -(ensure_utc(proposal.created_at).timestamp() if ensure_utc(proposal.created_at) else 0.0),
+                ),
+            )
+        ),
+        None,
+    )
+    latest_proposal = recent_proposals[0] if recent_proposals else None
+
+    if contested_proposal is not None:
+        governance_line = (
+            f"- Governance focal point: proposal #{contested_proposal.id} "
+            f"\"{contested_proposal.title}\" by {_agent_public_label(contested_proposal.author)} "
+            f"has {int(contested_proposal.votes_against or 0)} no votes and closes in "
+            f"{_format_time_remaining(contested_proposal.voting_closes_at, now=now)}."
+        )
+    elif latest_proposal is not None:
+        governance_line = (
+            f"- Governance focal point: latest proposal #{latest_proposal.id} "
+            f"\"{latest_proposal.title}\" by {_agent_public_label(latest_proposal.author)} closes in "
+            f"{_format_time_remaining(latest_proposal.voting_closes_at, now=now)}."
+        )
+    else:
+        governance_line = "- Governance focal point: no proposal has been introduced in the last 24 hours."
+
+    return [
+        f"- Strongest private stockpiles: {strongest_line}",
+        f"- Most exposed agents: {exposed_line}",
+        governance_line,
+    ]
 
 
 def _message_author_label(message: Message) -> str:
@@ -529,6 +718,17 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     if perception_lag_seconds > 0:
         recent_reserve_events_q = recent_reserve_events_q.filter(Event.created_at <= perception_cutoff)
     recent_reserve_events = recent_reserve_events_q.order_by(desc(Event.created_at)).limit(4).all()
+    shared_problem_line = _shared_problem_line(
+        total_active=total_active,
+        total_dormant=total_dormant,
+        common_pool=common_pool,
+    )
+    public_actor_snapshot_lines = _public_actor_snapshot(
+        db,
+        now=now,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
+    )
 
     proposal_hooks: list[str] = []
     recent_forum_activity_count = sum(
@@ -745,15 +945,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         for prop in prioritized_active_proposals[:5]:  # Limit to keep prompt small
             author_name = f"Agent #{prop.author_agent_id}"
             votes_summary = f"Yes: {prop.votes_for}, No: {prop.votes_against}, Abstain: {prop.votes_abstain}"
-            closes_at = ensure_utc(prop.voting_closes_at) or now
-            time_left = closes_at - now
-            minutes_left = max(0, int(time_left.total_seconds() / 60))
-            hours_left = minutes_left // 60
-            remaining_minutes = minutes_left % 60
-            if hours_left > 0:
-                closes_in = f"{hours_left}h {remaining_minutes}m"
-            else:
-                closes_in = f"{minutes_left}m"
+            closes_in = _format_time_remaining(prop.voting_closes_at, now=now)
             
             # Check if this agent has voted
             has_voted = db.query(Vote).filter(
@@ -898,6 +1090,12 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append(f"- Active Agents: {total_active}/{total_population}")
     context_parts.append(f"- Dormant Agents: {total_dormant}")
     context_parts.append(f"- Dead Agents: {total_dead} (permanent)")
+    context_parts.append(shared_problem_line)
+    context_parts.append("")
+
+    context_parts.append("PUBLIC ACTOR SNAPSHOT:")
+    for line in public_actor_snapshot_lines:
+        context_parts.append(line)
     context_parts.append("")
 
     context_parts.append("COMMON POOL:")

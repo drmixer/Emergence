@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.time import now_utc
-from app.models.models import Agent, AgentInventory, Event, Message, Proposal
+from app.models.models import Agent, AgentInventory, Event, GlobalResources, Message, Proposal
 from app.services import agent_loop, context_builder
 from app.services.live_run_scope import LiveRunWindow
 
@@ -282,6 +282,125 @@ def test_recent_forum_reply_accelerates_next_checkpoint_without_immediate_interr
     assert agent.next_checkpoint_at <= now_utc() + timedelta(
         minutes=processor.LOW_PRIORITY_SOCIAL_ADVANCE_MINUTES + 1
     )
+
+
+def test_context_includes_canary_b_shared_problem_and_public_actor_snapshot(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        focal = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        richest = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        fragile = _seed_agent(db, agent_number=3, display_name="Cipher-3")
+        starving = _seed_agent(db, agent_number=4, display_name="Drift-4")
+        now = now_utc()
+
+        richest.status = "active"
+        fragile.status = "active"
+        starving.status = "dormant"
+        starving.starvation_cycles = 2
+
+        for inventory in db.query(AgentInventory).filter(AgentInventory.agent_id == richest.id):
+            if inventory.resource_type == "food":
+                inventory.quantity = 20
+            elif inventory.resource_type == "energy":
+                inventory.quantity = 15
+            elif inventory.resource_type == "materials":
+                inventory.quantity = 12
+
+        for inventory in db.query(AgentInventory).filter(AgentInventory.agent_id == fragile.id):
+            if inventory.resource_type == "food":
+                inventory.quantity = 0.2
+            elif inventory.resource_type == "energy":
+                inventory.quantity = 0.1
+            elif inventory.resource_type == "materials":
+                inventory.quantity = 0
+
+        for inventory in db.query(AgentInventory).filter(AgentInventory.agent_id == starving.id):
+            if inventory.resource_type == "food":
+                inventory.quantity = 0
+            elif inventory.resource_type == "energy":
+                inventory.quantity = 0
+            elif inventory.resource_type == "materials":
+                inventory.quantity = 0
+
+        db.add_all(
+            [
+                GlobalResources(resource_type="food", total_amount=2, in_common_pool=2, produced_today=0, consumed_today=0),
+                GlobalResources(resource_type="energy", total_amount=1, in_common_pool=1, produced_today=0, consumed_today=0),
+                GlobalResources(resource_type="materials", total_amount=0, in_common_pool=0, produced_today=0, consumed_today=0),
+                Proposal(
+                    author_agent_id=richest.id,
+                    title="Emergency Reserve Vote",
+                    description="Push the reserve into public use before more agents collapse.",
+                    proposal_type="law",
+                    status="active",
+                    votes_for=1,
+                    votes_against=2,
+                    votes_abstain=0,
+                    voting_closes_at=now + timedelta(minutes=45),
+                    created_at=now - timedelta(minutes=10),
+                ),
+            ]
+        )
+        db.commit()
+        db.refresh(focal)
+
+        context = asyncio.run(context_builder.build_agent_context(db, focal))
+
+    assert "Shared problem - Visible upkeep gap:" in context
+    assert "PUBLIC ACTOR SNAPSHOT:" in context
+    assert "Strongest private stockpiles:" in context
+    assert "Beacon-2 (#2) F20.0/E15.0/M12.0" in context
+    assert "Most exposed agents:" in context
+    assert "Drift-4 (#4) dormant, starvation=2, F0.0/E0.0" in context
+    assert "Governance focal point: proposal #" in context
+    assert "\"Emergency Reserve Vote\"" in context
+    assert "has 2 no votes" in context
+
+
+def test_context_uses_longer_message_previews_for_actionable_substance(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        counterpart = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        now = now_utc()
+
+        forum_content = (
+            "We need a real reserve plan before dawn. "
+            + ("detail " * 8)
+            + "Key tradeoff: mandatory energy contributions are acceptable only if dormant agents get first claim."
+        )
+        dm_content = (
+            "I can support your proposal if you make the burden explicit. "
+            + ("numbers " * 6)
+            + "Action point: name Beacon-2 and Cipher-3 as initial contributors so the thread becomes concrete."
+        )
+
+        root = Message(
+            author_agent_id=counterpart.id,
+            content=forum_content,
+            message_type="forum_post",
+            created_at=now - timedelta(minutes=30),
+        )
+        db.add(root)
+        db.flush()
+        db.add(
+            Message(
+                author_agent_id=counterpart.id,
+                recipient_agent_id=agent.id,
+                content=dm_content,
+                message_type="direct_message",
+                created_at=now - timedelta(minutes=10),
+            )
+        )
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "Key tradeoff: mandatory energy contributions are acceptable only if dormant agents get first claim." in context
+    assert "Action point: name Beacon-2 and Cipher-3 as initial contributors so the thread becomes concrete." in context
 
 
 def test_recent_aid_request_accelerates_next_checkpoint_without_immediate_interrupt(session_factory):

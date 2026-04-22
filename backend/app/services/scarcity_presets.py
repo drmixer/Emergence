@@ -228,6 +228,40 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
             "materials": 500.0,
         },
     ),
+    "internal_canary_b_legibility_v1": ScarcityPreset(
+        name="internal_canary_b_legibility_v1",
+        description=(
+            "Canary B preset for the legibility diagnosis. Keeps the Canary A baseline intact "
+            "except for a modest food-side relaxation intended to preserve an interpretable "
+            "population through the first 4 hours."
+        ),
+        runtime_overrides={
+            "AGENT_LOOP_DELAY_SECONDS": 180,
+            "SURVIVAL_ACTIVE_FOOD_COST": 4.0,
+            "SURVIVAL_ACTIVE_ENERGY_COST": 4.0,
+            "SURVIVAL_DORMANT_FOOD_COST": 0.75,
+            "SURVIVAL_DORMANT_ENERGY_COST": 1.0,
+            "SURVIVAL_DEATH_THRESHOLD": 5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": False,
+            "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED": False,
+            "WORK_YIELD_FARM_BASE": 1.0,
+            "WORK_YIELD_GENERATE_BASE": 1.5,
+            "WORK_YIELD_GATHER_BASE": 0.5,
+            "WORLD_EVENT_GENERATION_ENABLED": False,
+        },
+        agent_resource_targets={
+            "food": 16.0,
+            "energy": 18.0,
+            "materials": 20.0,
+        },
+        common_pool_targets={
+            "food": 250.0,
+            "energy": 200.0,
+            "materials": 500.0,
+        },
+    ),
 }
 
 

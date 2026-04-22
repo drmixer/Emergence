@@ -98,6 +98,26 @@ def test_internal_scarcity_tight_v6_preset_tightens_food_without_changing_death_
     assert preset.common_pool_targets == {"food": 100.0, "energy": 200.0, "materials": 500.0}
 
 
+def test_internal_canary_b_legibility_preset_relaxes_food_side_for_observation_window():
+    preset = get_scarcity_preset("internal_canary_b_legibility_v1")
+
+    assert preset.runtime_overrides["AGENT_LOOP_DELAY_SECONDS"] == 180
+    assert preset.runtime_overrides["SURVIVAL_ACTIVE_FOOD_COST"] == 4.0
+    assert preset.runtime_overrides["SURVIVAL_ACTIVE_ENERGY_COST"] == 4.0
+    assert preset.runtime_overrides["SURVIVAL_DORMANT_FOOD_COST"] == 0.75
+    assert preset.runtime_overrides["SURVIVAL_DORMANT_ENERGY_COST"] == 1.0
+    assert preset.runtime_overrides["SURVIVAL_DEATH_THRESHOLD"] == 5
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is False
+    assert preset.runtime_overrides["WORK_YIELD_FARM_BASE"] == 1.0
+    assert preset.runtime_overrides["WORK_YIELD_GENERATE_BASE"] == 1.5
+    assert preset.runtime_overrides["WORLD_EVENT_GENERATION_ENABLED"] is False
+    assert preset.agent_resource_targets == {"food": 16.0, "energy": 18.0, "materials": 20.0}
+    assert preset.common_pool_targets == {"food": 250.0, "energy": 200.0, "materials": 500.0}
+
+
 def test_standard_reset_preset_restores_named_baseline():
     preset = get_scarcity_preset("standard_reset_v2")
 
@@ -115,6 +135,7 @@ def test_list_scarcity_presets_is_sorted_and_complete():
     names = [preset.name for preset in list_scarcity_presets()]
 
     assert names == [
+        "internal_canary_b_legibility_v1",
         "internal_scarcity_tight_v1",
         "internal_scarcity_tight_v2",
         "internal_scarcity_tight_v3",
