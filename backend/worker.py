@@ -246,11 +246,12 @@ async def main():
                 stop_decision = run_guardrail_service.evaluate_and_enforce()
                 if stop_decision.should_stop:
                     logger.error(
-                        "Stopping worker after run guardrail trigger (%s): %s",
+                        "Run guardrail triggered (%s); transitioning worker to idle: %s",
                         stop_decision.reason,
                         stop_decision.details or {},
                     )
-                    break
+                    await asyncio.sleep(CONTROL_LOOP_SLEEP_SECONDS)
+                    continue
 
                 # Log periodic status
                 now = datetime.now(UTC)
