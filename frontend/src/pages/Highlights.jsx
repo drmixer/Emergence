@@ -9,6 +9,7 @@ import {
   Sparkles,
   MessageCircle,
   Flame,
+  TrendingUp,
   TrendingDown,
   Minus,
   Share2,
