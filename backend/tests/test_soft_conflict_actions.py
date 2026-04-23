@@ -189,6 +189,31 @@ def test_request_aid_creates_direct_message_and_target_notice(session_factory):
     assert "requested 3 food from you" in notice.description
 
 
+def test_request_aid_rejects_dormant_target(session_factory):
+    with session_factory() as db:
+        requester = _seed_agent(db, agent_number=9, display_name="Ion-9")
+        target = _seed_agent(db, agent_number=10, display_name="Joule-10")
+        target.status = "dormant"
+        db.commit()
+        db.refresh(target)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                requester,
+                {
+                    "action": "request_aid",
+                    "target_agent_id": 10,
+                    "resource_type": "energy",
+                    "amount": 3,
+                    "reason": "I will go dormant next cycle without help.",
+                },
+            )
+        )
+
+    assert validation == {"valid": False, "reason": "Cannot request aid from a dormant agent"}
+
+
 def test_direct_message_action_returns_sender_and_recipient_metadata(session_factory):
     with session_factory() as db:
         sender = _seed_agent(db, agent_number=14, display_name="Muse-14")

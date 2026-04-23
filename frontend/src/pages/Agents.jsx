@@ -305,13 +305,18 @@ export default function Agents() {
 
         .agent-name-row {
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           gap: var(--spacing-sm);
           flex-wrap: wrap;
+          flex: 1;
+          min-width: 0;
         }
 
         .agent-name-row h4 {
           margin: 0;
+          line-height: 1.2;
+          min-width: 0;
+          overflow-wrap: anywhere;
         }
 
         .continuity-chip {

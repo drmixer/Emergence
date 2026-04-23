@@ -141,6 +141,27 @@ def test_internal_canary_c_survival_window_preset_adds_active_headroom_without_r
     assert preset.common_pool_targets == {"food": 450.0, "energy": 300.0, "materials": 500.0}
 
 
+def test_internal_canary_d_revival_window_preset_only_reopens_reserve_reentry_path():
+    preset = get_scarcity_preset("internal_canary_d_revival_window_v1")
+
+    assert preset.runtime_overrides["AGENT_LOOP_DELAY_SECONDS"] == 180
+    assert preset.runtime_overrides["PROPOSAL_VOTING_HOURS"] == 2.0
+    assert preset.runtime_overrides["PROPOSAL_RESOLUTION_INTERVAL_SECONDS"] == 60
+    assert preset.runtime_overrides["SURVIVAL_ACTIVE_FOOD_COST"] == 3.0
+    assert preset.runtime_overrides["SURVIVAL_ACTIVE_ENERGY_COST"] == 3.5
+    assert preset.runtime_overrides["SURVIVAL_DORMANT_FOOD_COST"] == 0.5
+    assert preset.runtime_overrides["SURVIVAL_DORMANT_ENERGY_COST"] == 0.75
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is True
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is True
+    assert preset.runtime_overrides["WORK_YIELD_FARM_BASE"] == 1.4
+    assert preset.runtime_overrides["WORK_YIELD_GENERATE_BASE"] == 1.75
+    assert preset.runtime_overrides["WORLD_EVENT_GENERATION_ENABLED"] is False
+    assert preset.agent_resource_targets == {"food": 22.0, "energy": 24.0, "materials": 20.0}
+    assert preset.common_pool_targets == {"food": 450.0, "energy": 300.0, "materials": 500.0}
+
+
 def test_standard_reset_preset_restores_named_baseline():
     preset = get_scarcity_preset("standard_reset_v2")
 
@@ -168,6 +189,7 @@ def test_list_scarcity_presets_is_sorted_and_complete():
     assert names == [
         "internal_canary_b_legibility_v1",
         "internal_canary_c_survival_window_v1",
+        "internal_canary_d_revival_window_v1",
         "internal_scarcity_tight_v1",
         "internal_scarcity_tight_v2",
         "internal_scarcity_tight_v3",

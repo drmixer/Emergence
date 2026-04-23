@@ -171,12 +171,14 @@ def _public_actor_snapshot(
             }
         )
 
+    strongest_candidates = [item for item in living_snapshots if item["agent"].status == "active"] or living_snapshots
     strongest = sorted(
-        living_snapshots,
+        strongest_candidates,
         key=lambda item: (-item["total_resources"], item["agent"].agent_number),
     )[:3]
     strongest_line = "; ".join(
-        f"{_agent_public_label(item['agent'])} F{item['food']:.1f}/E{item['energy']:.1f}/M{item['materials']:.1f}"
+        f"{_agent_public_label(item['agent'])} {item['agent'].status}, "
+        f"F{item['food']:.1f}/E{item['energy']:.1f}/M{item['materials']:.1f}"
         for item in strongest
     )
 

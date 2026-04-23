@@ -234,3 +234,30 @@
 ### Decision Rule
 - If Canary C still misses the active-population floor, scarcity remains the blocking variable.
 - If Canary C clears the floor, rerun Canary B legibility inside that band before drawing conclusions about the social engine.
+
+## Canary D: Recovery Width Calibration
+
+### Goal
+- Test whether dormancy can become a recoverable state instead of a one-way door.
+- Keep the Canary C active-survival economics unchanged.
+- Change only the recovery pathway width.
+
+### Diff From Canary C
+- Re-enable `SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED`.
+- Re-enable `SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED`.
+- Keep `SURVIVAL_RESERVE_ACTIVE_AID_ENABLED = False`.
+- Keep `SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED = False`.
+
+### Why
+- Canary C showed `44` dormancy transitions and `0` revivals.
+- Under that setup, recovery depended almost entirely on timely `trade`, while dormant agents could not act for themselves.
+- Canary D tests the smallest reserve change that widens the re-entry path without broadly subsidizing all active shortfalls or merely preserving a large dormant pool.
+
+### Success Read
+- Dormancy should stop behaving like soft death.
+- The run should produce non-zero revivals.
+- The active population should decline more slowly than in Canary C, even if scarcity still needs further tuning afterward.
+
+### Decision Rule
+- If Canary D still produces near-zero revivals, dormancy recovery remains structurally too narrow.
+- If Canary D restores meaningful revivals but active retention is still weak, keep the recovery pathway and retune active survival economics next.

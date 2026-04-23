@@ -309,9 +309,15 @@
 
 .agent-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-lg);
+}
+
+.agent-header > .badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: flex-start;
 }
 
 .agent-avatar {
@@ -351,6 +357,11 @@
   font-weight: 600;
   margin-bottom: var(--spacing-xs);
   color: var(--text-primary);
+}
+
+.agent-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .agent-model {

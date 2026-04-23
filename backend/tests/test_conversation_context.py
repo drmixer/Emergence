@@ -350,12 +350,41 @@ def test_context_includes_canary_b_shared_problem_and_public_actor_snapshot(sess
     assert "Shared problem - Visible upkeep gap:" in context
     assert "PUBLIC ACTOR SNAPSHOT:" in context
     assert "Strongest private stockpiles:" in context
-    assert "Beacon-2 (#2) F20.0/E15.0/M12.0" in context
+    assert "Beacon-2 (#2) active, F20.0/E15.0/M12.0" in context
     assert "Most exposed agents:" in context
     assert "Drift-4 (#4) dormant, starvation=2, F0.0/E0.0" in context
     assert "Governance focal point: proposal #" in context
     assert "\"Emergency Reserve Vote\"" in context
     assert "has 2 no votes" in context
+
+
+def test_public_actor_snapshot_prefers_active_stockpiles_over_dormant_ones(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        focal = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        active_holder = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        dormant_holder = _seed_agent(db, agent_number=3, display_name="Cipher-3")
+        dormant_holder.status = "dormant"
+        db.commit()
+
+        for resource_type, quantity in (("food", 14), ("energy", 13), ("materials", 12)):
+            db.query(AgentInventory).filter(
+                AgentInventory.agent_id == active_holder.id,
+                AgentInventory.resource_type == resource_type,
+            ).one().quantity = quantity
+        for resource_type, quantity in (("food", 50), ("energy", 45), ("materials", 40)):
+            db.query(AgentInventory).filter(
+                AgentInventory.agent_id == dormant_holder.id,
+                AgentInventory.resource_type == resource_type,
+            ).one().quantity = quantity
+        db.commit()
+        db.refresh(focal)
+
+        context = asyncio.run(context_builder.build_agent_context(db, focal))
+
+    assert "Strongest private stockpiles: Beacon-2 (#2) active, F14.0/E13.0/M12.0" in context
+    assert "Cipher-3 (#3) dormant, F50.0/E45.0/M40.0" not in context
 
 
 def test_context_uses_longer_message_previews_for_actionable_substance(session_factory, monkeypatch):

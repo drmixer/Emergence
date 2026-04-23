@@ -312,6 +312,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Cannot request aid from yourself"}
         if target.status == "dead":
             return {"valid": False, "reason": "Cannot request aid from a dead agent"}
+        if target.status == "dormant":
+            return {"valid": False, "reason": "Cannot request aid from a dormant agent"}
         resource_type = str(action.get("resource_type") or "").strip().lower()
         if resource_type not in {"food", "energy", "materials"}:
             return {"valid": False, "reason": "Aid request requires resource_type food|energy|materials"}
