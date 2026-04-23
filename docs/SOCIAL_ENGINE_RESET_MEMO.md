@@ -258,6 +258,43 @@
 - The run should produce non-zero revivals.
 - The active population should decline more slowly than in Canary C, even if scarcity still needs further tuning afterward.
 
+## Canary E: Response Loop Calibration
+
+### Goal
+- Test whether agents begin answering each other more consistently now that the world is survivable.
+- Keep the Canary D survival and recovery baseline fixed.
+- Change only response visibility and response timing.
+
+### Baseline
+- Keep the Canary D survival economics unchanged.
+- Keep reserve auto-contribution and reserve auto-revive enabled.
+- Keep reserve active-aid and dormant-maintenance disabled.
+- Keep canary proposal timing unchanged.
+
+### Diff
+1. In [backend/app/services/agent_loop.py](/Users/drmixer/code/Emergence/backend/app/services/agent_loop.py):
+   - Pull low-priority social follow-up checkpoints forward more aggressively when agents receive a recent DM, aid request, or forum reply.
+   - This is a timing change, not a behavior override.
+2. In [backend/app/services/context_builder.py](/Users/drmixer/code/Emergence/backend/app/services/context_builder.py):
+   - Add a compact incoming-request inbox that shows:
+     - who asked
+     - exact amount and resource
+     - whether helping would visibly keep the requester active this cycle
+     - any visible relationship or governance tie
+   - Make pending inbound requests legible enough to answer directly with `trade`, `refuse_aid`, or conditional `direct_message`.
+
+### Success Read
+- Survival floor still holds:
+  - `>= 40 active` at `4h`
+  - `>= 30 active` at `8h`
+- Non-zero bilateral follow-through appears:
+  - `trade` and/or `refuse_aid`
+  - more multi-turn DM or forum exchange
+- Response breadth improves:
+  - not just whether responses occur
+  - but how many distinct agents are responding
+- If responses rise but only a few agents handle them, treat donor congestion as the next diagnosis rather than claiming the response loop is solved.
+
 ### Decision Rule
 - If Canary D still produces near-zero revivals, dormancy recovery remains structurally too narrow.
 - If Canary D restores meaningful revivals but active retention is still weak, keep the recovery pathway and retune active survival economics next.

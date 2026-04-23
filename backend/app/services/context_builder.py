@@ -7,7 +7,7 @@ from sqlalchemy import desc, or_
 
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
-from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote, GlobalResources
+from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote, GlobalResources, AgentRelationshipMemory
 from app.services.agent_memory import agent_memory_service
 from app.services.actions import get_action_rate_limit_state
 from app.services.law_effects import is_survival_reserve_law
@@ -34,6 +34,7 @@ DIRECT_MESSAGE_SAMPLE_LIMIT = 16
 DIRECT_CONVERSATION_LIMIT = 3
 DIRECT_CONVERSATION_MESSAGE_LIMIT = 4
 SOCIAL_SIGNAL_CONTEXT_LIMIT = 4
+INCOMING_AID_REQUEST_CONTEXT_LIMIT = 4
 PROPOSAL_ALIGNMENT_LIMIT = 4
 MESSAGE_PREVIEW_LIMIT = 220
 
@@ -471,6 +472,105 @@ def _recent_social_pressure_events(
     return query.order_by(desc(Event.created_at)).limit(SOCIAL_SIGNAL_CONTEXT_LIMIT).all()
 
 
+def _incoming_aid_request_inbox(
+    db: Session,
+    agent: Agent,
+    *,
+    now,
+    perception_cutoff=None,
+    run_window: LiveRunWindow | None = None,
+) -> list[dict]:
+    query = db.query(Event).filter(
+        Event.agent_id == agent.id,
+        Event.event_type == "aid_request_received",
+        Event.created_at > now - timedelta(hours=24),
+    )
+    query = _apply_run_window_if_available(query, Event.created_at, run_window)
+    if perception_cutoff is not None:
+        query = query.filter(Event.created_at <= perception_cutoff)
+    events = query.order_by(desc(Event.created_at), desc(Event.id)).limit(INCOMING_AID_REQUEST_CONTEXT_LIMIT).all()
+
+    inbox_entries: list[dict] = []
+    for event in events:
+        metadata = dict(event.event_metadata or {})
+        requester_id = int(metadata.get("requesting_agent_id") or 0)
+        if requester_id <= 0:
+            continue
+        requester = db.query(Agent).filter(Agent.id == requester_id).first()
+        if requester is None:
+            continue
+
+        resource_type = str(metadata.get("resource_type") or "").strip().lower()
+        try:
+            requested_amount = float(metadata.get("amount") or 0.0)
+        except (TypeError, ValueError):
+            requested_amount = 0.0
+
+        requester_inventory_rows = (
+            db.query(AgentInventory)
+            .filter(AgentInventory.agent_id == requester.id)
+            .all()
+        )
+        requester_inventory = {"food": 0.0, "energy": 0.0, "materials": 0.0}
+        for row in requester_inventory_rows:
+            requester_inventory[str(row.resource_type)] = float(row.quantity or 0.0)
+
+        requester_food = float(requester_inventory.get("food", 0.0))
+        requester_energy = float(requester_inventory.get("energy", 0.0))
+        would_keep_active = False
+        if requester.status == "active":
+            if resource_type == "food":
+                would_keep_active = (
+                    requester_energy >= float(active_energy_cost())
+                    and requester_food + requested_amount >= float(active_food_cost())
+                )
+            elif resource_type == "energy":
+                would_keep_active = (
+                    requester_food >= float(active_food_cost())
+                    and requester_energy + requested_amount >= float(active_energy_cost())
+                )
+
+        relationship_row = (
+            db.query(AgentRelationshipMemory)
+            .filter(
+                AgentRelationshipMemory.agent_id == agent.id,
+                AgentRelationshipMemory.other_agent_id == requester.id,
+            )
+            .first()
+        )
+        tie_labels: list[str] = []
+        if relationship_row is not None:
+            if (
+                int(relationship_row.aid_received_from_other_count or 0) > 0
+                or int(relationship_row.trade_received_from_other_count or 0) > 0
+            ):
+                tie_labels.append("prior helper")
+            if int(relationship_row.proposal_supports_from_other_count or 0) > 0:
+                tie_labels.append("supported your proposals")
+            if int(relationship_row.proposal_supports_for_other_count or 0) > 0:
+                tie_labels.append("you supported their proposals")
+            if int(relationship_row.proposal_oppositions_from_other_count or 0) > 0:
+                tie_labels.append("opposed your proposals")
+            if int(relationship_row.aid_refusals_received_from_other_count or 0) > 0:
+                tie_labels.append("refused you before")
+
+        inbox_entries.append(
+            {
+                "requester": requester,
+                "resource_type": resource_type,
+                "requested_amount": requested_amount,
+                "requester_food": requester_food,
+                "requester_energy": requester_energy,
+                "would_keep_active": would_keep_active,
+                "tie_labels": tie_labels,
+                "message_id": metadata.get("message_id"),
+                "event": event,
+            }
+        )
+
+    return inbox_entries
+
+
 def _recent_outgoing_social_actions(
     db: Session,
     agent: Agent,
@@ -640,6 +740,13 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     recent_events = recent_events_q.order_by(desc(Event.created_at)).limit(10).all()
 
     recent_social_pressure = _recent_social_pressure_events(
+        db,
+        agent,
+        now=now,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
+    )
+    incoming_aid_request_inbox = _incoming_aid_request_inbox(
         db,
         agent,
         now=now,
@@ -939,6 +1046,32 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                     f"{_preview_untrusted_text(message.content)}"
                 )
         context_parts.append("")
+
+    if incoming_aid_request_inbox:
+        context_parts.append(f"INCOMING REQUESTS NEED RESPONSE ({len(incoming_aid_request_inbox)} shown):")
+        for request in incoming_aid_request_inbox:
+            requester = request["requester"]
+            requester_name = requester.display_name or f"Agent #{requester.agent_number}"
+            requested_amount = request["requested_amount"]
+            resource_type = request["resource_type"]
+            requester_food = request["requester_food"]
+            requester_energy = request["requester_energy"]
+            requested_amount_label = f"{requested_amount:.1f}".rstrip("0").rstrip(".")
+            help_effect = (
+                "would keep them active this cycle"
+                if request["would_keep_active"]
+                else "would not visibly clear their full active-cycle deficit"
+            )
+            tie_fragment = ""
+            if request["tie_labels"]:
+                tie_fragment = f" Tie: {', '.join(request['tie_labels'][:2])}."
+            context_parts.append(
+                f"  - {requester_name} (#{requester.agent_number}) asks for {requested_amount_label} {resource_type}. "
+                f"Visible state: {requester.status}, F{requester_food:.1f}/E{requester_energy:.1f}. "
+                f"Helping {help_effect}.{tie_fragment}"
+            )
+        context_parts.append("  Reply with trade if you can help, refuse_aid if you cannot, or direct_message if you want conditional coordination.")
+        context_parts.append("")
     
     # Active proposals
     context_parts.append(f"ACTIVE PROPOSALS ({len(active_proposals)} total):")
@@ -1067,8 +1200,19 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             context_parts.append(f"  - {event.description}")
         context_parts.append("")
 
-    if recent_social_pressure or recent_outgoing_social_actions or recent_proposal_alignments["allies"] or recent_proposal_alignments["opponents"]:
+    if incoming_aid_request_inbox or recent_social_pressure or recent_outgoing_social_actions or recent_proposal_alignments["allies"] or recent_proposal_alignments["opponents"]:
         context_parts.append("SOCIAL PRESSURE AND ALIGNMENT:")
+        if incoming_aid_request_inbox:
+            context_parts.append("  Requests currently waiting on you:")
+            for request in incoming_aid_request_inbox[:SOCIAL_SIGNAL_CONTEXT_LIMIT]:
+                requester = request["requester"]
+                requested_amount = request["requested_amount"]
+                resource_type = request["resource_type"]
+                requested_amount_label = f"{requested_amount:.1f}".rstrip("0").rstrip(".")
+                context_parts.append(
+                    f"    - {requester.display_name or f'Agent #{requester.agent_number}'} wants {requested_amount_label} {resource_type}; "
+                    f"{'that amount would keep them active this cycle' if request['would_keep_active'] else 'that amount alone would not fully solve their visible deficit'}"
+                )
         if recent_social_pressure:
             context_parts.append("  Incoming pressure or requests:")
             for event in recent_social_pressure[:SOCIAL_SIGNAL_CONTEXT_LIMIT]:
@@ -1181,6 +1325,10 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     if food >= critical_food and energy >= critical_energy:
         checkpoint_priority_lines.append(
             "If you are at a checkpoint and not in immediate survival crisis, do not spend this turn on routine work or idle if there is a meaningful social, governance, or trade action available."
+        )
+    if incoming_aid_request_inbox:
+        checkpoint_priority_lines.append(
+            "You have incoming aid requests waiting on you. Trade, refuse_aid, or a direct response is usually more valuable than starting an unrelated new action."
         )
     if recent_social_pressure or direct_conversations:
         checkpoint_priority_lines.append(

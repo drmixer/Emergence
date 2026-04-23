@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.time import now_utc
-from app.models.models import Agent, AgentInventory, Event, GlobalResources, Message, Proposal
+from app.models.models import Agent, AgentInventory, AgentRelationshipMemory, Event, GlobalResources, Message, Proposal
 from app.services import agent_loop, context_builder
 from app.services.live_run_scope import LiveRunWindow
 
@@ -456,6 +456,59 @@ def test_recent_aid_request_accelerates_next_checkpoint_without_immediate_interr
     assert agent.next_checkpoint_at <= now_utc() + timedelta(
         minutes=processor.LOW_PRIORITY_SOCIAL_ADVANCE_MINUTES + 1
     )
+
+
+def test_context_surfaces_incoming_request_inbox_with_actionable_tie_and_survival_read(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        requester = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+
+        db.query(AgentInventory).filter(
+            AgentInventory.agent_id == requester.id,
+            AgentInventory.resource_type == "food",
+        ).one().quantity = 2.5
+        db.query(AgentInventory).filter(
+            AgentInventory.agent_id == requester.id,
+            AgentInventory.resource_type == "energy",
+        ).one().quantity = 4.0
+
+        db.add(
+            AgentRelationshipMemory(
+                agent_id=agent.id,
+                other_agent_id=requester.id,
+                proposal_supports_from_other_count=1,
+            )
+        )
+        db.add(
+            Event(
+                agent_id=agent.id,
+                event_type="aid_request_received",
+                description="🆘 Beacon-2 requested 1 food from you: I am at risk of dormancy.",
+                event_metadata={
+                    "requesting_agent_id": requester.id,
+                    "requesting_agent_number": requester.agent_number,
+                    "target_agent_id": agent.id,
+                    "target_agent_number": agent.agent_number,
+                    "resource_type": "food",
+                    "amount": "1",
+                    "message_id": 999,
+                },
+                created_at=now_utc() - timedelta(minutes=5),
+            )
+        )
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "INCOMING REQUESTS NEED RESPONSE (1 shown):" in context
+    assert "Beacon-2 (#2) asks for 1 food." in context
+    assert "Visible state: active, F2.5/E4.0." in context
+    assert "Helping would keep them active this cycle." in context
+    assert "Tie: supported your proposals." in context
+    assert "Reply with trade if you can help, refuse_aid if you cannot, or direct_message if you want conditional coordination." in context
 
 
 def test_checkpoint_interrupts_on_recent_targeted_social_pressure(session_factory):

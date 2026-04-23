@@ -84,12 +84,14 @@ Ask the same categories at every checkpoint.
 - What social actions occurred since the previous checkpoint?
 - Who initiated them?
 - How many distinct agents are sending messages or social actions?
+- How many distinct agents are replying, trading, or refusing aid?
 - How broad is participation versus concentration in a few agents?
 - Is the run producing forum discussion, direct messaging, aid requests, refusals, accusations, or trade?
 
 ### 4. Social Mechanism
 - Which social actions appear consequential rather than decorative?
 - Did any requests receive replies, refusals, trade, or follow-through?
+- Are replies and bilateral responses broad-based or concentrated in a small donor cluster?
 - Are agents converging on the same donor, same thread, or same governance focal point?
 - Is coordination spreading, stalling, or collapsing into one-sided requests?
 

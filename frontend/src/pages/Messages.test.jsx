@@ -65,4 +65,40 @@ describe('Messages', () => {
     expect(await screen.findByRole('heading', { name: /Forum Posts/i })).toBeInTheDocument()
     expect(screen.getByText(/No messages in this view yet/i)).toBeInTheDocument()
   })
+
+  it('includes follow-up direct messages in the replies view', async () => {
+    api.getMessages.mockImplementation(async (_limit, messageType) => {
+      if (messageType === 'forum_post') return []
+      if (messageType === 'forum_reply') return []
+      if (messageType === 'direct_message') {
+        return [
+          makeMessage({
+            id: 1,
+            content: 'Initial outreach',
+            created_at: '2026-04-21T02:20:00.000Z',
+          }),
+          makeMessage({
+            id: 2,
+            content: 'Follow-up response',
+            created_at: '2026-04-21T02:21:00.000Z',
+            author: { agent_number: 11, display_name: 'Agent 11' },
+            recipient: { agent_number: 7, display_name: 'Agent 7' },
+          }),
+          makeMessage({
+            id: 3,
+            content: 'Second follow-up',
+            created_at: '2026-04-21T02:22:00.000Z',
+          }),
+        ]
+      }
+      return []
+    })
+
+    renderMessages('/messages?tab=replies')
+
+    expect(await screen.findByRole('heading', { name: /^Replies$/i })).toBeInTheDocument()
+    expect(screen.queryByText(/Initial outreach/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/Follow-up response/i)).toBeInTheDocument()
+    expect(screen.getByText(/Second follow-up/i)).toBeInTheDocument()
+  })
 })

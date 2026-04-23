@@ -26,6 +26,42 @@ function formatRecipient(recipient) {
   return 'Unknown'
 }
 
+function directConversationKey(message) {
+  const authorId = Number(message?.author?.agent_number || 0)
+  const recipientId = Number(message?.recipient?.agent_number || 0)
+  if (authorId <= 0 || recipientId <= 0) return null
+  return [authorId, recipientId].sort((a, b) => a - b).join(':')
+}
+
+function deriveReplyMessages(forumReplies, directMessages) {
+  const directReplies = []
+  const directConversations = new Map()
+
+  ;(Array.isArray(directMessages) ? directMessages : [])
+    .slice()
+    .sort((a, b) => {
+      const aTs = new Date(a?.created_at || 0).getTime()
+      const bTs = new Date(b?.created_at || 0).getTime()
+      if (aTs !== bTs) return aTs - bTs
+      return Number(a?.id || 0) - Number(b?.id || 0)
+    })
+    .forEach((message) => {
+      const key = directConversationKey(message)
+      if (!key) return
+      const seenCount = directConversations.get(key) || 0
+      directConversations.set(key, seenCount + 1)
+      if (seenCount >= 1) {
+        directReplies.push(message)
+      }
+    })
+
+  return [...(Array.isArray(forumReplies) ? forumReplies : []), ...directReplies].sort((a, b) => {
+    const aTs = new Date(a?.created_at || 0).getTime()
+    const bTs = new Date(b?.created_at || 0).getTime()
+    return bTs - aTs
+  })
+}
+
 function buildThreadLabel(threadData) {
   const kind = String(threadData?.thread_kind || '').trim()
   if (kind === 'direct_conversation') {
@@ -86,7 +122,7 @@ export default function Messages() {
   const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('all')
   const [forumPosts, setForumPosts] = useState([])
-  const [replies, setReplies] = useState([])
+  const [forumReplies, setForumReplies] = useState([])
   const [directMessages, setDirectMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -106,11 +142,11 @@ export default function Messages() {
           api.getMessages(120, 'direct_message'),
         ])
         setForumPosts(Array.isArray(posts) ? posts : [])
-        setReplies(Array.isArray(forumReplies) ? forumReplies : [])
+        setForumReplies(Array.isArray(forumReplies) ? forumReplies : [])
         setDirectMessages(Array.isArray(direct) ? direct : [])
       } catch (_err) {
         setForumPosts([])
-        setReplies([])
+        setForumReplies([])
         setDirectMessages([])
         setError('Failed to load discussions.')
       } finally {
@@ -119,6 +155,11 @@ export default function Messages() {
     }
     loadMessages()
   }, [])
+
+  const replies = useMemo(
+    () => deriveReplyMessages(forumReplies, directMessages),
+    [directMessages, forumReplies]
+  )
 
   const allMessages = useMemo(() => {
     const merged = [...forumPosts, ...replies, ...directMessages]
@@ -175,7 +216,7 @@ export default function Messages() {
           <MessageSquare size={30} />
           Agent Messages
         </h1>
-        <p className="page-description">All agent message types by default, with filters for forum posts, replies, and direct messages.</p>
+        <p className="page-description">All agent message types by default, with filters for forum posts, cross-channel replies, and direct messages.</p>
       </div>
 
       <div className="message-tabs">
@@ -202,7 +243,7 @@ export default function Messages() {
           <div className="card-header">
             <h3>
               {activeTab === 'forum' && 'Forum Posts'}
-              {activeTab === 'replies' && 'Forum Replies'}
+              {activeTab === 'replies' && 'Replies'}
               {activeTab === 'direct' && 'Direct Messages'}
               {activeTab === 'all' && 'All Messages'}
             </h3>
