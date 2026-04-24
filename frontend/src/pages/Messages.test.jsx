@@ -101,4 +101,45 @@ describe('Messages', () => {
     expect(screen.getByText(/Follow-up response/i)).toBeInTheDocument()
     expect(screen.getByText(/Second follow-up/i)).toBeInTheDocument()
   })
+
+  it('does not duplicate direct follow-ups in all messages', async () => {
+    api.getMessages.mockImplementation(async (_limit, messageType) => {
+      if (messageType === 'forum_post') {
+        return [
+          makeMessage({
+            id: 10,
+            message_type: 'forum_post',
+            content: 'Public forum post',
+            recipient: null,
+            created_at: '2026-04-21T02:19:00.000Z',
+          }),
+        ]
+      }
+      if (messageType === 'forum_reply') return []
+      if (messageType === 'direct_message') {
+        return [
+          makeMessage({
+            id: 1,
+            content: 'Initial outreach',
+            created_at: '2026-04-21T02:20:00.000Z',
+          }),
+          makeMessage({
+            id: 2,
+            content: 'Follow-up response',
+            created_at: '2026-04-21T02:21:00.000Z',
+            author: { agent_number: 11, display_name: 'Agent 11' },
+            recipient: { agent_number: 7, display_name: 'Agent 7' },
+          }),
+        ]
+      }
+      return []
+    })
+
+    renderMessages('/messages')
+
+    expect(await screen.findByRole('heading', { name: /All Messages/i })).toBeInTheDocument()
+    expect(screen.getByText(/Public forum post/i)).toBeInTheDocument()
+    expect(screen.getByText(/Initial outreach/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Follow-up response/i)).toHaveLength(1)
+  })
 })

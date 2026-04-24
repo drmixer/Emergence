@@ -62,6 +62,28 @@ function deriveReplyMessages(forumReplies, directMessages) {
   })
 }
 
+function sortMessagesNewestFirst(messages) {
+  return [...(Array.isArray(messages) ? messages : [])].sort((a, b) => {
+    const aTs = new Date(a?.created_at || 0).getTime()
+    const bTs = new Date(b?.created_at || 0).getTime()
+    if (aTs !== bTs) return bTs - aTs
+    return Number(b?.id || 0) - Number(a?.id || 0)
+  })
+}
+
+function dedupeMessagesById(messages) {
+  const seen = new Set()
+  const deduped = []
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const id = Number(message?.id || 0)
+    const key = id > 0 ? `id:${id}` : `${message?.message_type || ''}:${message?.created_at || ''}:${message?.content || ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(message)
+  }
+  return deduped
+}
+
 function buildThreadLabel(threadData) {
   const kind = String(threadData?.thread_kind || '').trim()
   if (kind === 'direct_conversation') {
@@ -162,13 +184,9 @@ export default function Messages() {
   )
 
   const allMessages = useMemo(() => {
-    const merged = [...forumPosts, ...replies, ...directMessages]
-    return merged.sort((a, b) => {
-      const aTs = new Date(a?.created_at || 0).getTime()
-      const bTs = new Date(b?.created_at || 0).getTime()
-      return bTs - aTs
-    })
-  }, [directMessages, forumPosts, replies])
+    const merged = [...forumPosts, ...forumReplies, ...directMessages]
+    return sortMessagesNewestFirst(dedupeMessagesById(merged))
+  }, [directMessages, forumPosts, forumReplies])
 
   const visibleMessages =
     activeTab === 'forum'
