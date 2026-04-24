@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -9,7 +10,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.models.models import Agent, AgentInventory, Event, Message
+from app.core.time import now_utc
+from app.models.models import Agent, AgentInventory, Event, Message, Proposal
 from app.services import actions, context_builder
 
 
@@ -212,6 +214,73 @@ def test_request_aid_rejects_dormant_target(session_factory):
         )
 
     assert validation == {"valid": False, "reason": "Cannot request aid from a dormant agent"}
+
+
+def test_create_proposal_rejects_near_duplicate_active_current_run_title(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        db.add(
+            Proposal(
+                author_agent_id=author.id,
+                title="Emergency Aid Allocation for Dormant Agents",
+                description="Allocate aid to dormant agents at critical risk.",
+                proposal_type="allocation",
+                status="active",
+                voting_closes_at=now_utc() + timedelta(hours=2),
+                created_at=now_utc(),
+            )
+        )
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Emergency Aid for Dormant Agents",
+                    "description": "Send emergency support to dormant agents at risk.",
+                    "proposal_type": "allocation",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert "Near-duplicate active proposal exists" in validation["reason"]
+
+
+def test_create_proposal_allows_distinct_active_proposal(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=13, display_name="Mosaic-13")
+        proposer = _seed_agent(db, agent_number=16, display_name="Orbit-16")
+        db.add(
+            Proposal(
+                author_agent_id=author.id,
+                title="Shared Survival Reserve Law",
+                description="Create a shared reserve for survival support.",
+                proposal_type="law",
+                status="active",
+                voting_closes_at=now_utc() + timedelta(hours=2),
+                created_at=now_utc(),
+            )
+        )
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Reduced Contribution Reserve Law",
+                    "description": "Lower reserve contributions when energy is scarce.",
+                    "proposal_type": "law",
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
 
 
 def test_direct_message_action_returns_sender_and_recipient_metadata(session_factory):

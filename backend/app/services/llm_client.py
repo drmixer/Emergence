@@ -60,7 +60,10 @@ GEMINI_CONFIG = {
     "models": {
         # Stable Gemini cohort keys (seeded explicitly in scripts/seed_agents.py)
         "gm_gemini_2_5_flash": "gemini-2.5-flash",
-        "gm_gemini_2_0_flash": "gemini-2.0-flash",
+        # Canary E showed gemini-2.0-flash was functionally unavailable under
+        # run pressure. Keep the cohort key stable for tier attribution, but
+        # route it to the stable Gemini 2.5 Flash model before Canary F.
+        "gm_gemini_2_0_flash": "gemini-2.5-flash",
         "gm_gemini_2_0_flash_lite": "gemini-2.0-flash-lite",
     },
 }

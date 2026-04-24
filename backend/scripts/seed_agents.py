@@ -30,8 +30,10 @@ MODEL_COHORT_PLAN = [
     {"count": 1, "tier": 1, "model_type": "or_gpt_oss_120b", "resolved_model": "openai/gpt-oss-120b"},
     {"count": 1, "tier": 1, "model_type": "or_qwen3_235b_a22b_2507", "resolved_model": "qwen/qwen3-235b-a22b-2507"},
     {"count": 3, "tier": 1, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
-    # Tier 2 (12): Gemini Flash + Mistral with a small OpenRouter free share.
-    {"count": 5, "tier": 2, "model_type": "gm_gemini_2_0_flash", "resolved_model": "gemini-2.0-flash (direct gemini)"},
+    # Tier 2 (12): Gemini Flash cohort + Mistral with a small OpenRouter free share.
+    # The cohort label is kept stable for attribution; it resolves to Gemini 2.5 Flash
+    # after Canary E exposed Gemini 2.0 Flash reliability failures under run pressure.
+    {"count": 5, "tier": 2, "model_type": "gm_gemini_2_0_flash", "resolved_model": "gemini-2.5-flash (direct gemini; tier 2 stable route)"},
     {"count": 4, "tier": 2, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
     {"count": 2, "tier": 2, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
     {"count": 1, "tier": 2, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-20b:free"},

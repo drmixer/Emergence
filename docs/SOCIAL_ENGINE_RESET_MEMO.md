@@ -298,3 +298,38 @@
 ### Decision Rule
 - If Canary D still produces near-zero revivals, dormancy recovery remains structurally too narrow.
 - If Canary D restores meaningful revivals but active retention is still weak, keep the recovery pathway and retune active survival economics next.
+
+### Outcome
+- Passed on the response-loop question after stripping out provider and action-affordance confounds.
+- Run: `real-20260423T120719Z`
+- Condition: `real_scarcity_tuning_20260423_canary_e_response_loop_v1`
+- Duration: `8h`
+- Closeout survival:
+  - `37 active / 13 dormant / 0 dead`
+  - `64` dormancy events
+  - `51` revivals
+- Raw bilateral follow-through was `5/10` aid requests, but the clean read was stronger:
+  - `4` unanswered requests targeted Orbit-12, whose next checkpoints failed on `gemini-2.0-flash` rate limits and whose run record was `6` successes / `61` failures.
+  - `1` unanswered request targeted Vector-02, which had `0.00` energy and could not afford even a low-cost communicative action before going dormant.
+  - Excluding those confounds, answerable requests had `5/5` bilateral follow-through via `trade` or `refuse_aid`.
+- Decision:
+  - the response loop works when agents can actually think and afford a response
+  - the next blocker is provider reliability/observability, not another response-loop behavior change
+
+## Canary F: Provider-Clean Response/Governance Read
+
+### Pre-F Routing Intervention
+- Keep tier composition unchanged.
+- Keep the `gm_gemini_2_0_flash` cohort label for attribution continuity.
+- Route that cohort to `gemini-2.5-flash` before Canary F because Canary E showed `gemini-2.0-flash` was functionally unavailable under run pressure.
+- Treat this as an explicit inter-run provider reliability intervention, not fallback.
+
+### Pre-F Fixes
+- Suppress near-duplicate active proposals so governance novelty is not inflated by repeated reserve laws.
+- Add or verify reporting that separates aid-request outcomes into:
+  - answered
+  - provider-confounded
+  - mechanically unaffordable
+  - clean unanswered
+- Verify `Replies` includes forum replies plus follow-up DMs.
+- Verify dormant agents are not eligible aid-request targets.

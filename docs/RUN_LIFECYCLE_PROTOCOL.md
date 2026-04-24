@@ -50,6 +50,10 @@ This cadence is intentionally conservative for budget control and reliability wh
 - No provider or model fallback should silently swap an agent onto a different provider/model during a run.
 - Unknown or deprecated model assignments should fail fast as configuration errors; they must not be remapped onto a different provider/model.
 - Agent/provider assignment should remain stable within a run except for pre-declared cohort mappings.
+- Cohort labels may be remapped between runs only as an explicit routing intervention,
+  with the run condition documenting the effective provider/model mapping. Keep the
+  social/economic `tier` field stable when the intent is to repair provider reliability
+  rather than change the tier composition.
 - Deterministic fallback is distinct from provider/model fallback:
   - provider/model fallback changes the effective brain and dilutes attribution
   - deterministic fallback preserves attribution but can still change observed behavior

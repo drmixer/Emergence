@@ -418,3 +418,136 @@ def test_collect_run_snapshot_includes_provider_failures_and_worst_window():
         assert snapshot["llm"]["worst_failure_window"]["failure_calls"] >= 1
     finally:
         db_session.close()
+
+
+def test_aid_request_followthrough_classifies_provider_and_mechanical_confounds():
+    db_session = _build_snapshot_session()
+    try:
+        started_at = datetime(2026, 4, 23, 15, 0, tzinfo=timezone.utc)
+        requester = Agent(
+            agent_number=1,
+            display_name="Requester",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        provider_failed = Agent(
+            agent_number=2,
+            display_name="Provider Failed",
+            model_type="gm_gemini_2_0_flash",
+            tier=2,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        responder = Agent(
+            agent_number=3,
+            display_name="Responder",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        unaffordable = Agent(
+            agent_number=4,
+            display_name="No Energy",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add_all([requester, provider_failed, responder, unaffordable])
+        db_session.flush()
+        db_session.add_all(
+            [
+                Event(
+                    agent_id=requester.id,
+                    event_type="request_aid",
+                    description="Requester asked Provider Failed for energy",
+                    event_metadata={
+                        "action": {"target_agent_id": provider_failed.id},
+                        "runtime": {"run_id": "run-followthrough"},
+                    },
+                    created_at=started_at + run_reports.timedelta(minutes=1),
+                ),
+                Event(
+                    agent_id=requester.id,
+                    event_type="request_aid",
+                    description="Requester asked Responder for food",
+                    event_metadata={
+                        "action": {"target_agent_id": responder.id},
+                        "runtime": {"run_id": "run-followthrough"},
+                    },
+                    created_at=started_at + run_reports.timedelta(minutes=2),
+                ),
+                Event(
+                    agent_id=responder.id,
+                    event_type="trade",
+                    description="Responder traded food to Requester",
+                    event_metadata={
+                        "action": {"recipient_agent_id": requester.id},
+                        "runtime": {"run_id": "run-followthrough"},
+                    },
+                    created_at=started_at + run_reports.timedelta(minutes=3),
+                ),
+                Event(
+                    agent_id=requester.id,
+                    event_type="request_aid",
+                    description="Requester asked No Energy for energy",
+                    event_metadata={
+                        "action": {"target_agent_id": unaffordable.id},
+                        "runtime": {"run_id": "run-followthrough"},
+                    },
+                    created_at=started_at + run_reports.timedelta(minutes=4),
+                ),
+                Event(
+                    agent_id=unaffordable.id,
+                    event_type="idle",
+                    description="Agent chose to rest after an unaffordable action: Insufficient energy",
+                    event_metadata={"runtime": {"run_id": "run-followthrough"}},
+                    created_at=started_at + run_reports.timedelta(minutes=5),
+                ),
+            ]
+        )
+        db_session.execute(
+            text(
+                """
+                INSERT INTO llm_usage (
+                    run_id, agent_id, success, fallback_used, prompt_tokens, completion_tokens,
+                    total_tokens, estimated_cost_usd, provider, model_name, resolved_model_name, error_type, created_at
+                ) VALUES
+                    ('run-followthrough', :provider_failed_id, 0, 0, 0, 0, 0, 0, 'gemini', 'gemini-2.0-flash', NULL, 'RateLimitError', :t1),
+                    ('run-followthrough', :responder_id, 1, 0, 1, 1, 2, 0, 'gemini', 'gemini-2.5-flash', NULL, NULL, :t2),
+                    ('run-followthrough', :unaffordable_id, 1, 0, 1, 1, 2, 0, 'gemini', 'gemini-2.5-flash', NULL, NULL, :t3)
+                """
+            ),
+            {
+                "provider_failed_id": provider_failed.id,
+                "responder_id": responder.id,
+                "unaffordable_id": unaffordable.id,
+                "t1": started_at + run_reports.timedelta(minutes=1, seconds=30),
+                "t2": started_at + run_reports.timedelta(minutes=2, seconds=30),
+                "t3": started_at + run_reports.timedelta(minutes=4, seconds=30),
+            },
+        )
+        db_session.commit()
+
+        payload = run_reports._collect_aid_request_followthrough(
+            db_session,
+            run_id="run-followthrough",
+            run_started_at=started_at,
+            run_ended_at=started_at + run_reports.timedelta(minutes=10),
+        )
+
+        assert payload["aid_requests"] == 3
+        assert payload["answered"] == 1
+        assert payload["provider_confounded"] == 1
+        assert payload["mechanically_unaffordable"] == 1
+        assert payload["clean_unanswered"] == 0
+        assert payload["clean_followthrough_rate"] == 1.0
+    finally:
+        db_session.close()

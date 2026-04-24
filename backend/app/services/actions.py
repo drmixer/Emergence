@@ -4,6 +4,7 @@ Action Execution and Validation - Handles all agent actions.
 from datetime import datetime, timedelta
 from decimal import Decimal
 from math import ceil
+import re
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -178,6 +179,65 @@ def _looks_like_governance_argument(text: str | None) -> bool:
         "these laws",
     )
     return any(marker in normalized for marker in governance_markers)
+
+
+_PROPOSAL_TITLE_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "for",
+    "law",
+    "of",
+    "proposal",
+    "rule",
+    "the",
+    "to",
+}
+
+
+def _normalized_proposal_title_key(title: str | None) -> str:
+    words = re.findall(r"[a-z0-9]+", str(title or "").lower())
+    meaningful = [word for word in words if word not in _PROPOSAL_TITLE_STOPWORDS]
+    return " ".join(meaningful)
+
+
+def _active_run_proposal_query(db: Session):
+    query = db.query(Proposal).filter(Proposal.status == "active")
+    started_at = _active_run_started_at(db)
+    if started_at is not None:
+        query = query.filter(Proposal.created_at >= started_at)
+    return query
+
+
+def _find_near_duplicate_active_proposal(db: Session, action: dict) -> Proposal | None:
+    candidate_key = _normalized_proposal_title_key(action.get("title"))
+    if not candidate_key:
+        return None
+    candidate_tokens = set(candidate_key.split())
+    proposal_type = str(action.get("proposal_type") or "other")
+    if len(candidate_tokens) < 2:
+        return None
+
+    for proposal in _active_run_proposal_query(db).filter(Proposal.proposal_type == proposal_type).all():
+        existing_key = _normalized_proposal_title_key(proposal.title)
+        if not existing_key:
+            continue
+        if existing_key == candidate_key:
+            return proposal
+        existing_tokens = set(existing_key.split())
+        if len(existing_tokens) < 2:
+            continue
+        overlap = len(candidate_tokens & existing_tokens)
+        smaller = min(len(candidate_tokens), len(existing_tokens))
+        larger = max(len(candidate_tokens), len(existing_tokens))
+        # Catch near-identical short title variants such as:
+        # "Emergency Aid Allocation for Dormant Agents" vs
+        # "Emergency Aid for Dormant Agents".
+        if smaller >= 3 and overlap == smaller and (larger - smaller) <= 1:
+            return proposal
+    return None
+
+
 def get_action_rate_limit_state(db: Session, agent: Agent, *, now: Optional[datetime] = None) -> dict:
     """Return rolling-hour action budget state for an agent."""
     current_time = now or now_utc()
@@ -402,6 +462,15 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         
         if not action.get("title") or not action.get("description"):
             return {"valid": False, "reason": "Proposal requires title and description"}
+        duplicate = _find_near_duplicate_active_proposal(db, action)
+        if duplicate is not None:
+            return {
+                "valid": False,
+                "reason": (
+                    "Near-duplicate active proposal exists; vote, contest, or discuss "
+                    f"proposal #{duplicate.id} instead"
+                ),
+            }
     
     elif action_type == "vote":
         # Exiled agents cannot vote

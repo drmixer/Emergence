@@ -757,6 +757,12 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "conflict_events": int(sum(event_counts.get(event_type, 0) for event_type in CONFLICT_EVENT_TYPES)),
         "cooperation_events": int(sum(event_counts.get(event_type, 0) for event_type in COOPERATION_EVENT_TYPES)),
     }
+    social_followthrough = _collect_aid_request_followthrough(
+        db,
+        run_id=run_id,
+        run_started_at=run_started_at,
+        run_ended_at=run_ended_at,
+    )
 
     return {
         "run_id": run_id,
@@ -770,9 +776,212 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "verification_source": source,
         "llm": llm_payload,
         "activity": activity_payload,
+        "social_followthrough": social_followthrough,
         "inequality_gini_current": _gini(wealth_values),
         "key_moments": key_moments,
         "evidence_links": _base_evidence_links(run_id),
+    }
+
+
+def _collect_aid_request_followthrough(
+    db: Session,
+    *,
+    run_id: str,
+    run_started_at: datetime,
+    run_ended_at: datetime,
+) -> dict[str, Any]:
+    rows = db.execute(
+        text(
+            """
+            WITH req AS (
+              SELECT
+                e.id AS request_event_id,
+                e.created_at AS request_at,
+                e.agent_id AS requester_id,
+                CAST(e.event_metadata -> 'action' ->> 'target_agent_id' AS INTEGER) AS target_number,
+                e.description AS request_description
+              FROM events e
+              WHERE e.created_at >= :run_started_at
+                AND e.created_at <= :run_ended_at
+                AND (e.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                AND e.event_type = 'request_aid'
+            )
+            SELECT
+              req.request_event_id,
+              req.request_at,
+              req.requester_id,
+              requester.agent_number AS requester_number,
+              target.id AS target_id,
+              target.agent_number AS target_number,
+              target.display_name AS target_name,
+              target.model_type AS target_model_type,
+              (
+                SELECT COUNT(*)
+                FROM events t
+                WHERE t.created_at >= req.request_at
+                  AND t.created_at <= :run_ended_at
+                  AND (t.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                  AND t.event_type = 'trade'
+                  AND t.agent_id = target.id
+                  AND CAST(t.event_metadata -> 'action' ->> 'recipient_agent_id' AS INTEGER) = requester.agent_number
+              ) AS trade_count,
+              (
+                SELECT COUNT(*)
+                FROM events t
+                WHERE t.created_at >= req.request_at
+                  AND t.created_at <= :run_ended_at
+                  AND (t.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                  AND t.event_type = 'refuse_aid'
+                  AND t.agent_id = target.id
+                  AND CAST(t.event_metadata -> 'action' ->> 'target_agent_id' AS INTEGER) = requester.agent_number
+              ) AS refuse_count,
+              (
+                SELECT MIN(t.created_at)
+                FROM events t
+                WHERE t.created_at >= req.request_at
+                  AND t.created_at <= :run_ended_at
+                  AND (t.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                  AND (
+                    (
+                      t.event_type = 'trade'
+                      AND t.agent_id = target.id
+                      AND CAST(t.event_metadata -> 'action' ->> 'recipient_agent_id' AS INTEGER) = requester.agent_number
+                    )
+                    OR (
+                      t.event_type = 'refuse_aid'
+                      AND t.agent_id = target.id
+                      AND CAST(t.event_metadata -> 'action' ->> 'target_agent_id' AS INTEGER) = requester.agent_number
+                    )
+                  )
+              ) AS first_response_at,
+              (
+                SELECT lu.success
+                FROM llm_usage lu
+                WHERE lu.run_id = :run_id
+                  AND lu.agent_id = target.id
+                  AND lu.created_at >= req.request_at
+                ORDER BY lu.created_at ASC, lu.id ASC
+                LIMIT 1
+              ) AS next_llm_success,
+              (
+                SELECT lu.error_type
+                FROM llm_usage lu
+                WHERE lu.run_id = :run_id
+                  AND lu.agent_id = target.id
+                  AND lu.created_at >= req.request_at
+                ORDER BY lu.created_at ASC, lu.id ASC
+                LIMIT 1
+              ) AS next_llm_error_type,
+              (
+                SELECT COUNT(*)
+                FROM events x
+                WHERE x.created_at >= req.request_at
+                  AND x.created_at <= :run_ended_at
+                  AND (x.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                  AND x.agent_id = target.id
+                  AND (
+                    x.event_type = 'became_dormant'
+                    OR lower(x.description) LIKE '%insufficient energy%'
+                    OR lower(CAST(x.event_metadata AS TEXT)) LIKE '%not affordable%'
+                    OR lower(CAST(x.event_metadata AS TEXT)) LIKE '%insufficient energy%'
+                  )
+              ) AS unaffordable_signal_count
+            FROM req
+            LEFT JOIN agents requester ON requester.id = req.requester_id
+            LEFT JOIN agents target ON target.agent_number = req.target_number
+            ORDER BY req.request_at ASC, req.request_event_id ASC
+            """
+        ),
+        {
+            "run_id": run_id,
+            "run_started_at": run_started_at,
+            "run_ended_at": run_ended_at,
+        },
+    ).fetchall()
+
+    outcomes = {
+        "answered": 0,
+        "provider_confounded": 0,
+        "mechanically_unaffordable": 0,
+        "clean_unanswered": 0,
+    }
+    responder_ids: set[int] = set()
+    target_counts: dict[int, dict[str, Any]] = {}
+    examples: list[dict[str, Any]] = []
+
+    for row in rows:
+        trade_count = int(row.trade_count or 0)
+        refuse_count = int(row.refuse_count or 0)
+        answered = (trade_count + refuse_count) > 0
+        next_llm_success = row.next_llm_success
+        provider_confounded = bool(next_llm_success is False or next_llm_success == 0)
+        mechanically_unaffordable = int(row.unaffordable_signal_count or 0) > 0
+
+        if answered:
+            outcome = "answered"
+            if int(row.target_id or 0) > 0:
+                responder_ids.add(int(row.target_id))
+        elif provider_confounded:
+            outcome = "provider_confounded"
+        elif mechanically_unaffordable:
+            outcome = "mechanically_unaffordable"
+        else:
+            outcome = "clean_unanswered"
+        outcomes[outcome] += 1
+
+        target_id = int(row.target_id or 0)
+        if target_id > 0:
+            target = target_counts.setdefault(
+                target_id,
+                {
+                    "agent_number": int(row.target_number or 0),
+                    "display_name": str(row.target_name or "") or None,
+                    "model_type": str(row.target_model_type or "") or None,
+                    "requests": 0,
+                    "answered": 0,
+                },
+            )
+            target["requests"] += 1
+            if outcome == "answered":
+                target["answered"] += 1
+
+        if len(examples) < 16:
+            examples.append(
+                {
+                    "request_event_id": int(row.request_event_id or 0),
+                    "request_at": (
+                        _coerce_utc_datetime(row.request_at).isoformat()
+                        if _coerce_utc_datetime(row.request_at)
+                        else None
+                    ),
+                    "requester_number": int(row.requester_number or 0),
+                    "target_number": int(row.target_number or 0),
+                    "target_model_type": str(row.target_model_type or "") or None,
+                    "outcome": outcome,
+                    "trade_count": trade_count,
+                    "refuse_count": refuse_count,
+                    "next_llm_error_type": str(row.next_llm_error_type or "") or None,
+                }
+            )
+
+    request_count = len(rows)
+    return {
+        "aid_requests": request_count,
+        "answered": outcomes["answered"],
+        "provider_confounded": outcomes["provider_confounded"],
+        "mechanically_unaffordable": outcomes["mechanically_unaffordable"],
+        "clean_unanswered": outcomes["clean_unanswered"],
+        "clean_answerable_requests": outcomes["answered"] + outcomes["clean_unanswered"],
+        "clean_followthrough_rate": _safe_ratio(
+            outcomes["answered"],
+            outcomes["answered"] + outcomes["clean_unanswered"],
+        ),
+        "distinct_responders": len(responder_ids),
+        "targets": sorted(
+            target_counts.values(),
+            key=lambda item: (-int(item.get("requests") or 0), int(item.get("agent_number") or 0)),
+        ),
+        "examples": examples,
     }
 
 
@@ -838,6 +1047,7 @@ def _resolve_report_context(
 def _technical_markdown(payload: dict[str, Any]) -> str:
     llm = payload.get("llm") if isinstance(payload, dict) else {}
     activity = payload.get("activity") if isinstance(payload, dict) else {}
+    social_followthrough = payload.get("social_followthrough") if isinstance(payload, dict) else {}
     rows = [
         f"# Run {payload.get('run_id')} Technical Report",
         "",
@@ -904,6 +1114,20 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
             + f"success={int(row.get('success_calls') or 0)}, "
             + f"provider_model_fallback={int(row.get('provider_model_fallback_calls') or 0)}, "
             + f"cost_usd={float(row.get('estimated_cost_usd') or 0.0):.6f}"
+        )
+    if social_followthrough:
+        rows.extend(
+            [
+                "",
+                "## Social Follow-through",
+                f"- Aid requests: {int(social_followthrough.get('aid_requests') or 0):,}",
+                f"- Answered: {int(social_followthrough.get('answered') or 0):,}",
+                f"- Provider-confounded unanswered: {int(social_followthrough.get('provider_confounded') or 0):,}",
+                f"- Mechanically unaffordable unanswered: {int(social_followthrough.get('mechanically_unaffordable') or 0):,}",
+                f"- Clean unanswered: {int(social_followthrough.get('clean_unanswered') or 0):,}",
+                f"- Clean follow-through rate: {float(social_followthrough.get('clean_followthrough_rate') or 0.0):.4f}",
+                f"- Distinct responders: {int(social_followthrough.get('distinct_responders') or 0):,}",
+            ]
         )
     rows.extend(["", "## Caveats"])
     for caveat in payload.get("caveats") or []:
