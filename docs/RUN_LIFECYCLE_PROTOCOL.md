@@ -47,6 +47,12 @@ This cadence is intentionally conservative for budget control and reliability wh
 
 ## Runtime Failure and Routing Policy
 - Provider/model attribution is part of the protocol, not just an implementation detail.
+- Do not push commits, trigger deploys, or run deployment commands while a run is
+  active unless the user explicitly approves that specific live-run intervention.
+  Even frontend-only commits may redeploy backend/worker services and restart
+  simulation loops, creating an operational confound.
+- Before any push/deploy, check runtime status; if `simulation_active=true`,
+  pause and ask for approval.
 - No provider or model fallback should silently swap an agent onto a different provider/model during a run.
 - Unknown or deprecated model assignments should fail fast as configuration errors; they must not be remapped onto a different provider/model.
 - Agent/provider assignment should remain stable within a run except for pre-declared cohort mappings.

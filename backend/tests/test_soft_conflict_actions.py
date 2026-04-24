@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.core.time import now_utc
 from app.models.models import Agent, AgentInventory, Event, Message, Proposal
+from app.services.agent_loop import AgentProcessor
 from app.services import actions, context_builder
 
 
@@ -247,7 +248,126 @@ def test_create_proposal_rejects_near_duplicate_active_current_run_title(session
         )
 
     assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_active_proposal"
+    assert validation["proposal_id"] is not None
     assert "Near-duplicate active proposal exists" in validation["reason"]
+
+
+def test_duplicate_proposal_checkpoint_recovery_votes_on_existing_proposal(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        proposal = Proposal(
+            author_agent_id=author.id,
+            title="Emergency Aid Allocation for Dormant Agents",
+            description="Allocate aid to dormant agents at critical risk.",
+            proposal_type="allocation",
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+
+        attempted_action = {
+            "action": "create_proposal",
+            "title": "Emergency Aid for Dormant Agents",
+            "description": "Send emergency support to dormant agents at risk.",
+            "proposal_type": "allocation",
+        }
+        validation = asyncio.run(actions.validate_action(db, proposer, attempted_action))
+
+        followup = asyncio.run(
+            AgentProcessor()._build_duplicate_proposal_followup(
+                db,
+                proposer,
+                attempted_action=attempted_action,
+                validation=validation,
+            )
+        )
+
+    assert followup is not None
+    action, followup_validation = followup
+    assert followup_validation == {"valid": True}
+    assert action["action"] == "vote"
+    assert action["proposal_id"] == proposal.id
+    assert action["vote"] == "yes"
+
+
+def test_duplicate_proposal_checkpoint_recovery_discusses_when_already_voted(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        proposal = Proposal(
+            author_agent_id=author.id,
+            title="Emergency Aid Allocation for Dormant Agents",
+            description="Allocate aid to dormant agents at critical risk.",
+            proposal_type="allocation",
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+        asyncio.run(
+            actions.execute_action(
+                db,
+                proposer,
+                {"action": "vote", "proposal_id": proposal.id, "vote": "yes"},
+            )
+        )
+        discussion = Message(
+            author_agent_id=author.id,
+            content="Emergency Aid Allocation for Dormant Agents needs support.",
+            message_type="forum_post",
+            created_at=now_utc(),
+        )
+        db.add(discussion)
+        db.commit()
+        db.refresh(discussion)
+
+        attempted_action = {
+            "action": "create_proposal",
+            "title": "Emergency Aid for Dormant Agents",
+            "description": "Send emergency support to dormant agents at risk.",
+            "proposal_type": "allocation",
+        }
+        validation = asyncio.run(actions.validate_action(db, proposer, attempted_action))
+
+        followup = asyncio.run(
+            AgentProcessor()._build_duplicate_proposal_followup(
+                db,
+                proposer,
+                attempted_action=attempted_action,
+                validation=validation,
+            )
+        )
+
+    assert followup is not None
+    action, followup_validation = followup
+    assert followup_validation == {"valid": True}
+    assert action["action"] == "forum_reply"
+    assert action["parent_message_id"] == discussion.id
+
+
+def test_idle_action_descriptions_distinguish_routine_hold(session_factory):
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=17, display_name="Pulse-17")
+
+        result = asyncio.run(
+            actions.execute_action(
+                db,
+                agent,
+                {
+                    "action": "idle",
+                    "reasoning": "Routine execution: hold position for social/governance follow-up between checkpoints.",
+                },
+            )
+        )
+
+    assert result["description"] == "Agent held position for social/governance follow-up"
 
 
 def test_create_proposal_allows_distinct_active_proposal(session_factory):

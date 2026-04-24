@@ -238,6 +238,21 @@ def _find_near_duplicate_active_proposal(db: Session, action: dict) -> Proposal 
     return None
 
 
+def _idle_description(action: dict) -> str:
+    reasoning = str((action or {}).get("reasoning") or "").lower()
+    if "continuity protection" in reasoning or "checkpoint action rejected" in reasoning:
+        return "Agent held position after checkpoint recovery"
+    if "social/governance follow-up" in reasoning:
+        return "Agent held position for social/governance follow-up"
+    if "governance follow-up" in reasoning:
+        return "Agent held position for governance follow-up"
+    if "social" in reasoning and "follow-up" in reasoning:
+        return "Agent held position for social follow-up"
+    if "conserving energy" in reasoning or "conserve" in reasoning:
+        return "Agent conserved energy between checkpoints"
+    return "Agent chose to rest"
+
+
 def get_action_rate_limit_state(db: Session, agent: Agent, *, now: Optional[datetime] = None) -> dict:
     """Return rolling-hour action budget state for an agent."""
     current_time = now or now_utc()
@@ -466,6 +481,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         if duplicate is not None:
             return {
                 "valid": False,
+                "reason_code": "duplicate_active_proposal",
+                "proposal_id": duplicate.id,
                 "reason": (
                     "Near-duplicate active proposal exists; vote, contest, or discuss "
                     f"proposal #{duplicate.id} instead"
@@ -699,7 +716,7 @@ async def execute_action(db: Session, agent: Agent, action: dict) -> dict:
         result = await _execute_trade(db, agent, action)
     
     elif action_type == "idle":
-        result = {"success": True, "description": "Agent chose to rest (conserving energy)"}
+        result = {"success": True, "description": _idle_description(action)}
     
     # Phase 3: Enforcement actions
     elif action_type == "initiate_sanction":

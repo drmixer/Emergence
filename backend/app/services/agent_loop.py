@@ -5,6 +5,7 @@ Each agent runs this loop continuously to perceive, decide, and act.
 import asyncio
 import logging
 import random
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -293,6 +294,22 @@ class AgentProcessor:
                         if idle_validation["valid"]:
                             action_data = idle_fallback
                             validation = idle_validation
+                    if (
+                        not validation["valid"]
+                        and checkpoint_reason
+                        and validation.get("reason_code") == "duplicate_active_proposal"
+                    ):
+                        duplicate_followup = await self._build_duplicate_proposal_followup(
+                            db,
+                            agent,
+                            attempted_action=action_data,
+                            validation=validation,
+                        )
+                        if duplicate_followup is not None:
+                            redirect_target_proposal_id = validation.get("proposal_id")
+                            action_data, validation = duplicate_followup
+                            runtime_metadata["redirected_from_invalid_action"] = "duplicate_active_proposal"
+                            runtime_metadata["redirect_target_proposal_id"] = redirect_target_proposal_id
                     if not validation["valid"]:
                         self._apply_rate_limit_backoff(agent_id, validation, runtime_metadata=runtime_metadata)
                         # If checkpoint output is invalid, use the run-class-aware deterministic policy.
@@ -573,6 +590,86 @@ class AgentProcessor:
             "action": "idle",
             "reasoning": f"Conserving energy because the planned action was not affordable: {reason}",
         }
+
+    async def _build_duplicate_proposal_followup(
+        self,
+        db: Session,
+        agent: Agent,
+        *,
+        attempted_action: dict,
+        validation: dict,
+    ) -> Optional[tuple[dict, dict]]:
+        proposal_id = validation.get("proposal_id")
+        if not proposal_id:
+            return None
+        proposal = db.query(Proposal).filter(Proposal.id == proposal_id).first()
+        if proposal is None:
+            return None
+
+        vote_action = {
+            "action": "vote",
+            "proposal_id": proposal.id,
+            "vote": "yes",
+            "reasoning": (
+                "Checkpoint recovery: similar proposal already exists, so support the existing proposal."
+            ),
+        }
+        vote_validation = await validate_action(db, agent, vote_action)
+        if vote_validation["valid"]:
+            return vote_action, vote_validation
+
+        attempted_title = str((attempted_action or {}).get("title") or "a similar policy").strip()
+        discussion_content = (
+            f"I was going to propose \"{attempted_title}\", so I am consolidating around "
+            f"\"{proposal.title}\" (#{proposal.id}) instead of opening a duplicate."
+        )
+        parent_message = self._find_proposal_discussion_message(db, proposal)
+        if parent_message is not None:
+            reply_action = {
+                "action": "forum_reply",
+                "parent_message_id": parent_message.id,
+                "content": discussion_content,
+                "reasoning": (
+                    "Checkpoint recovery: discuss the existing proposal rather than creating a duplicate."
+                ),
+            }
+            reply_validation = await validate_action(db, agent, reply_action)
+            if reply_validation["valid"]:
+                return reply_action, reply_validation
+
+        post_action = {
+            "action": "forum_post",
+            "content": discussion_content,
+            "reasoning": (
+                "Checkpoint recovery: discuss the existing proposal rather than creating a duplicate."
+            ),
+        }
+        post_validation = await validate_action(db, agent, post_action)
+        if post_validation["valid"]:
+            return post_action, post_validation
+
+        return None
+
+    @staticmethod
+    def _find_proposal_discussion_message(db: Session, proposal: Proposal) -> Optional[Message]:
+        title_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9]+", str(proposal.title or "").lower())
+            if len(token) > 2
+        }
+        query = db.query(Message).filter(Message.message_type.in_(["forum_post", "forum_reply"]))
+        run_window = get_live_run_window(db)
+        if run_window.run_id is not None:
+            query = apply_live_run_window(query, Message.created_at, run_window)
+        for message in query.order_by(Message.created_at.desc()).limit(30).all():
+            content = str(message.content or "").lower()
+            if f"#{proposal.id}" in content:
+                return message
+            if title_tokens:
+                content_tokens = set(re.findall(r"[a-z0-9]+", content))
+                if len(title_tokens & content_tokens) >= min(3, len(title_tokens)):
+                    return message
+        return None
     
     async def _log_error(self, agent_id: int, error: str):
         """Log an error during processing."""
