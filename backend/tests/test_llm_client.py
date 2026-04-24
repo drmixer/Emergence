@@ -91,6 +91,7 @@ def test_throttle_gemini_honors_runtime_rpm_limit(monkeypatch):
 def test_create_completion_with_budget_throttles_gemini(monkeypatch):
     client = llm_client.LLMClient()
     calls = {"gemini_throttle": 0, "openrouter_throttle": 0}
+    create_kwargs: list[dict] = []
 
     async def _fake_gemini_throttle():
         calls["gemini_throttle"] += 1
@@ -98,7 +99,8 @@ def test_create_completion_with_budget_throttles_gemini(monkeypatch):
     async def _fake_openrouter_throttle():
         calls["openrouter_throttle"] += 1
 
-    async def _fake_create(**_kwargs):
+    async def _fake_create(**kwargs):
+        create_kwargs.append(kwargs)
         return SimpleNamespace(
             usage=SimpleNamespace(prompt_tokens=11, completion_tokens=7, total_tokens=18),
             choices=[SimpleNamespace(message=SimpleNamespace(content='{"action":"idle"}'))],
@@ -150,3 +152,57 @@ def test_create_completion_with_budget_throttles_gemini(monkeypatch):
     assert response.usage.total_tokens == 18
     assert recorded and recorded[0]["provider"] == "gemini"
     assert recorded[0]["success"] is True
+    assert "extra_body" not in create_kwargs[0]
+
+
+def test_create_completion_disables_gemini_25_flash_thinking(monkeypatch):
+    client = llm_client.LLMClient()
+    create_kwargs: list[dict] = []
+
+    async def _fake_create(**kwargs):
+        create_kwargs.append(kwargs)
+        return SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=11, completion_tokens=7, total_tokens=18),
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"action":"idle"}'))],
+        )
+
+    monkeypatch.setattr(client, "_throttle_gemini", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(
+        client.gemini_client.chat.completions,
+        "create",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        llm_client.usage_budget,
+        "preflight",
+        lambda **_kwargs: SimpleNamespace(
+            allowed=True,
+            reason=None,
+            soft_cap_reached=False,
+            snapshot=SimpleNamespace(calls_total=0, estimated_cost_usd=0.0),
+        ),
+    )
+    monkeypatch.setattr(llm_client.usage_budget, "record_call", lambda **_kwargs: None)
+
+    response, used_model_name, provider_name, blocked_reason = asyncio.run(
+        client._create_completion_with_budget(
+            client=client.gemini_client,
+            agent_id=23,
+            checkpoint_number=2,
+            model_type="gm_gemini_2_0_flash",
+            model_name="gemini-2.5-flash",
+            system_prompt="system",
+            user_prompt="user",
+            max_tokens=128,
+            temperature=0.7,
+            fallback_used=False,
+        )
+    )
+
+    assert blocked_reason is None
+    assert provider_name == "gemini"
+    assert used_model_name == "gemini-2.5-flash"
+    assert response.usage.total_tokens == 18
+    assert create_kwargs[0]["extra_body"] == {
+        "extra_body": {"google": {"thinking_config": {"thinking_budget": 0}}}
+    }

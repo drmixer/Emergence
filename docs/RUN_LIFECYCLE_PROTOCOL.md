@@ -54,6 +54,11 @@ This cadence is intentionally conservative for budget control and reliability wh
   with the run condition documenting the effective provider/model mapping. Keep the
   social/economic `tier` field stable when the intent is to repair provider reliability
   rather than change the tier composition.
+- Provider-specific request controls, such as Gemini thinking-budget settings for
+  action JSON reliability, count as routing/runtime configuration. They should be
+  documented with the run setup when they materially affect provider behavior, but
+  they are not provider/model fallback when the assigned provider and resolved model
+  remain unchanged.
 - Deterministic fallback is distinct from provider/model fallback:
   - provider/model fallback changes the effective brain and dilutes attribution
   - deterministic fallback preserves attribution but can still change observed behavior

@@ -283,6 +283,19 @@ class LLMClient:
             return "gemini"
         return "mistral"
 
+    @staticmethod
+    def _gemini_completion_extra_body(model_name: str) -> dict[str, Any] | None:
+        """
+        Gemini 2.5 Flash uses dynamic thinking by default. For short action JSON
+        completions, hidden thinking can consume the output budget and leave
+        truncated JSON. Disable thinking on the action route to preserve the
+        provider cohort while keeping checkpoint responses parseable.
+        """
+        normalized = (model_name or "").strip().lower()
+        if normalized.startswith("gemini-2.5-flash"):
+            return {"extra_body": {"google": {"thinking_config": {"thinking_budget": 0}}}}
+        return None
+
     async def _create_completion_with_budget(
         self,
         *,
@@ -344,14 +357,24 @@ class LLMClient:
                     await self._throttle_openrouter()
                 elif client is self.gemini_client:
                     await self._throttle_gemini()
-                response = await client.chat.completions.create(
-                    model=used_model_name,
-                    messages=[
+                extra_body = (
+                    self._gemini_completion_extra_body(used_model_name)
+                    if client is self.gemini_client
+                    else None
+                )
+                request_kwargs = {
+                    "model": used_model_name,
+                    "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    max_tokens=used_max_tokens,
-                    temperature=used_temperature,
+                    "max_tokens": used_max_tokens,
+                    "temperature": used_temperature,
+                }
+                if extra_body:
+                    request_kwargs["extra_body"] = extra_body
+                response = await client.chat.completions.create(
+                    **request_kwargs,
                 )
         except Exception as e:
             latency_ms = int((time.monotonic() - started) * 1000)

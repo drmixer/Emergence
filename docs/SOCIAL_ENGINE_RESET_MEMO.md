@@ -322,6 +322,7 @@
 - Keep tier composition unchanged.
 - Keep the `gm_gemini_2_0_flash` cohort label for attribution continuity.
 - Route that cohort to `gemini-2.5-flash` before Canary F because Canary E showed `gemini-2.0-flash` was functionally unavailable under run pressure.
+- Disable Gemini 2.5 Flash thinking on the action-JSON route (`thinking_budget=0`) because smoke testing showed the full checkpoint prompt could otherwise spend output budget on hidden reasoning and return truncated JSON.
 - Treat this as an explicit inter-run provider reliability intervention, not fallback.
 
 ### Pre-F Fixes
