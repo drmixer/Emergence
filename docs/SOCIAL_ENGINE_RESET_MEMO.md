@@ -336,3 +336,95 @@
   - clean unanswered
 - Verify `Replies` includes forum replies plus follow-up DMs.
 - Verify dormant agents are not eligible aid-request targets.
+
+### Outcome
+- Passed on the provider-stabilized response-loop question.
+- Run: `real-20260424T020150Z`
+- Condition: `real_scarcity_tuning_20260424_canary_f_provider_stabilized_response_governance_v1`
+- Duration: `8h`
+- Closeout survival:
+  - `41 active / 9 dormant / 0 dead`
+  - `24` dormancy events
+  - `15` revivals
+- Provider read:
+  - `647 / 647` LLM calls succeeded
+  - `0` provider failures
+  - `0` rate limits
+  - `0` provider fallback
+- Response-loop read:
+  - `15` aid requests
+  - `11` trades
+  - `4` aid refusals
+  - `7` distinct trade/refusal responders
+  - direct aid requests received concrete bilateral follow-through rather than only reserve rescue
+- Governance read:
+  - `5` proposals created
+  - `5` proposals resolved
+  - `5` laws passed
+  - duplicate-proposal suppression prevented mechanical stacking but exposed recovery/label noise when agents attempted near-duplicate governance actions
+- Operational caveat:
+  - a post-frontend-fix push redeployed backend/worker/frontend during the live run; the run stayed active and provider health remained clean, but this counts as an operational caveat
+- Decision:
+  - provider stabilization worked
+  - the response loop works under clean provider conditions
+  - the next blocker is governance recovery polish and feed interpretability, not another provider or scarcity change
+
+## Canary G: Governance Recovery And Feed-Clarity Check
+
+### Goal
+- Test whether post-F governance recovery polish reduces degraded fallback/governance idle noise while preserving Canary F's provider-clean response-loop gains.
+- Keep Canary F's provider-stabilized routing and Canary D/E/F survival/recovery economics fixed.
+- Change only the governance-recovery and feed-label polish already implemented after Canary F.
+
+### Baseline
+- Keep provider-stabilized cohort routing:
+  - `gm_gemini_2_0_flash` -> direct `gemini-2.5-flash`
+  - `gm_gemini_2_0_flash_lite` -> direct `gemini-2.5-flash`
+  - `or_gpt_oss_20b_free` -> direct `gemini-2.5-flash`
+  - `or_qwen3_4b_free` -> direct `gemini-2.5-flash`
+  - direct Mistral unchanged
+  - paid OpenRouter anchors unchanged
+- Keep the same tier labels and cohort labels for attribution continuity.
+- Keep the same survival economics and reserve settings as Canary F.
+- Keep the tuning proposal window and resolver cadence unchanged.
+
+### Diff
+1. Duplicate proposal validation now exposes structured `duplicate_active_proposal` metadata with the existing proposal id.
+2. Checkpoint attempts to create a near-duplicate proposal recover into:
+   - `vote` on the existing proposal when valid
+   - `forum_reply` on a matching proposal discussion when already voted
+   - otherwise a consolidation `forum_post`
+3. Idle event descriptions now distinguish:
+   - social/governance follow-up holds
+   - governance follow-up holds
+   - social follow-up holds
+   - checkpoint recovery holds
+   - generic energy conservation
+
+### Success Read
+- Provider health remains clean enough for interpretation:
+  - no provider-failure burst
+  - no provider/model fallback
+  - no repeated degraded provider messages
+- Survival floor still holds:
+  - `>= 40 active` at `4h`
+  - `>= 30 active` at `8h`
+- Response loop does not regress:
+  - aid requests still receive `trade`, `refuse_aid`, DM, or forum follow-through
+  - responder breadth remains visible and not fully collapsed into one donor
+- Governance recovery improves:
+  - near-duplicate proposal attempts no longer become degraded fallback posts
+  - governance intent converts into vote/discussion/consolidation more often than generic routine fallback
+- Feed clarity improves:
+  - repeated deterministic holds no longer dominate the feed as `Agent chose to rest`
+  - runtime idle volume remains technically visible without making the public feed look falsely inert
+
+### Invalidating Confounds
+- Any provider-failure burst resembling the aborted Canary F smoke.
+- Any push/deploy during the active run unless explicitly approved as a live-run intervention.
+- Population collapse below the survival floor before the question can be tested.
+
+### Decision Rule
+- If G preserves F's response-loop gains and reduces degraded governance fallback/feed noise, move on from response-loop/governance-recovery tuning.
+- If response-loop behavior regresses under clean providers, inspect the new governance recovery path for accidental suppression.
+- If provider health fails, classify the run as provider-confounded rather than behavioral.
