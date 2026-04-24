@@ -30,21 +30,21 @@ MODEL_COHORT_PLAN = [
     {"count": 1, "tier": 1, "model_type": "or_gpt_oss_120b", "resolved_model": "openai/gpt-oss-120b"},
     {"count": 1, "tier": 1, "model_type": "or_qwen3_235b_a22b_2507", "resolved_model": "qwen/qwen3-235b-a22b-2507"},
     {"count": 3, "tier": 1, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
-    # Tier 2 (12): Gemini Flash cohort + Mistral with a small OpenRouter free share.
+    # Tier 2 (12): Gemini Flash cohort + Mistral with legacy free-cohort labels.
     # The cohort label is kept stable for attribution; it resolves to Gemini 2.5 Flash
     # after Canary E exposed Gemini 2.0 Flash reliability failures under run pressure.
     {"count": 5, "tier": 2, "model_type": "gm_gemini_2_0_flash", "resolved_model": "gemini-2.5-flash (direct gemini; tier 2 stable route)"},
     {"count": 4, "tier": 2, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
-    {"count": 2, "tier": 2, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    {"count": 1, "tier": 2, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    # Tier 3 (13): Gemini Flash Lite + Mistral + a small OpenRouter free share.
-    {"count": 8, "tier": 3, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.0-flash-lite (direct gemini)"},
+    {"count": 2, "tier": 2, "model_type": "or_gpt_oss_20b_free", "resolved_model": "gemini-2.5-flash (direct gemini; provider-stabilized route)"},
+    {"count": 1, "tier": 2, "model_type": "or_qwen3_4b_free", "resolved_model": "gemini-2.5-flash (direct gemini; provider-stabilized route)"},
+    # Tier 3 (13): Gemini-stabilized Lite cohort + Mistral + a small legacy free-cohort share.
+    {"count": 8, "tier": 3, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.5-flash (direct gemini; provider-stabilized route)"},
     {"count": 4, "tier": 3, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
-    {"count": 1, "tier": 3, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    # Tier 4 (15): mostly OpenRouter free with additional direct Gemini/Mistral coverage.
-    {"count": 6, "tier": 4, "model_type": "or_gpt_oss_20b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    {"count": 4, "tier": 4, "model_type": "or_qwen3_4b_free", "resolved_model": "openai/gpt-oss-20b:free"},
-    {"count": 3, "tier": 4, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.0-flash-lite (direct gemini)"},
+    {"count": 1, "tier": 3, "model_type": "or_gpt_oss_20b_free", "resolved_model": "gemini-2.5-flash (direct gemini; provider-stabilized route)"},
+    # Tier 4 (15): legacy free/Lite labels stabilized through direct Gemini plus Mistral coverage.
+    {"count": 6, "tier": 4, "model_type": "or_gpt_oss_20b_free", "resolved_model": "gemini-2.5-flash (direct gemini; provider-stabilized route)"},
+    {"count": 4, "tier": 4, "model_type": "or_qwen3_4b_free", "resolved_model": "gemini-2.5-flash (direct gemini; provider-stabilized route)"},
+    {"count": 3, "tier": 4, "model_type": "gm_gemini_2_0_flash_lite", "resolved_model": "gemini-2.5-flash (direct gemini; provider-stabilized route)"},
     {"count": 2, "tier": 4, "model_type": "or_mistral_small_3_1_24b", "resolved_model": "mistral-small-latest (direct mistral)"},
 ]
 

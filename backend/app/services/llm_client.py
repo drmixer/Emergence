@@ -32,9 +32,6 @@ OPENROUTER_CONFIG = {
         "or_deepseek_chat_v3_1": "deepseek/deepseek-chat-v3.1",
         "or_gpt_oss_20b": "openai/gpt-oss-20b",
         "or_qwen3_32b": "qwen/qwen3-32b",
-        "or_gpt_oss_20b_free": "openai/gpt-oss-20b:free",
-        # Keep legacy key for DB compatibility; route to the default stable free model.
-        "or_qwen3_4b_free": "openai/gpt-oss-20b:free",
         "or_mistral_small_3_1_24b_free": "mistralai/mistral-small-3.1-24b-instruct:free",
         # Legacy model_type values kept for backward compatibility.
         "claude-sonnet-4": "deepseek/deepseek-r1-0528:free",
@@ -64,7 +61,13 @@ GEMINI_CONFIG = {
         # run pressure. Keep the cohort key stable for tier attribution, but
         # route it to the stable Gemini 2.5 Flash model before Canary F.
         "gm_gemini_2_0_flash": "gemini-2.5-flash",
-        "gm_gemini_2_0_flash_lite": "gemini-2.0-flash-lite",
+        # Aborted Canary F smoke showed the remaining Gemini Lite and OpenRouter
+        # free cohorts were still provider-confounded under burst pressure. Keep
+        # cohort labels stable, but route these fragile labels to the stable
+        # direct Gemini path for the provider-stabilized Canary F rerun.
+        "gm_gemini_2_0_flash_lite": "gemini-2.5-flash",
+        "or_gpt_oss_20b_free": "gemini-2.5-flash",
+        "or_qwen3_4b_free": "gemini-2.5-flash",
     },
 }
 

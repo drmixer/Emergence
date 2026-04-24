@@ -323,6 +323,8 @@
 - Keep the `gm_gemini_2_0_flash` cohort label for attribution continuity.
 - Route that cohort to `gemini-2.5-flash` before Canary F because Canary E showed `gemini-2.0-flash` was functionally unavailable under run pressure.
 - Disable Gemini 2.5 Flash thinking on the action-JSON route (`thinking_budget=0`) because smoke testing showed the full checkpoint prompt could otherwise spend output budget on hidden reasoning and return truncated JSON.
+- After an aborted `1m41s` Canary F smoke (`real-20260424T013348Z`), also route `gm_gemini_2_0_flash_lite`, `or_gpt_oss_20b_free`, and `or_qwen3_4b_free` to direct `gemini-2.5-flash`; the Lite cohort rate-limited under burst pressure and the OpenRouter free cohorts returned `503 no healthy upstream`.
+- Keep direct Mistral unchanged because it remained stable under Canary E and the aborted F smoke.
 - Treat this as an explicit inter-run provider reliability intervention, not fallback.
 
 ### Pre-F Fixes

@@ -206,3 +206,17 @@ def test_create_completion_disables_gemini_25_flash_thinking(monkeypatch):
     assert create_kwargs[0]["extra_body"] == {
         "extra_body": {"google": {"thinking_config": {"thinking_budget": 0}}}
     }
+
+
+def test_provider_stabilized_cohort_labels_route_to_gemini_25_flash():
+    client = llm_client.LLMClient()
+
+    for model_type in (
+        "gm_gemini_2_0_flash",
+        "gm_gemini_2_0_flash_lite",
+        "or_gpt_oss_20b_free",
+        "or_qwen3_4b_free",
+    ):
+        routed_client, model_name = client._get_client_and_model(model_type)
+        assert routed_client is client.gemini_client
+        assert model_name == "gemini-2.5-flash"
