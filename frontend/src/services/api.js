@@ -160,6 +160,7 @@ class APIService {
         if (options?.limit) params.append('limit', String(options.limit))
         if (options?.offset) params.append('offset', String(options.offset))
         if (options?.type) params.append('type', String(options.type))
+        if (options?.includeRoutineHoldIdles) params.append('include_routine_hold_idles', 'true')
 
         const query = params.toString() ? `?${params}` : ''
         return this.fetch(`/api/events${query}`)

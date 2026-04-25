@@ -174,7 +174,7 @@ function EventCard({ event }) {
 
 export default function LiveFeed() {
     const [events, setEvents] = useState([])
-    const [showBackground, setShowBackground] = useState(true)
+    const [showBackground, setShowBackground] = useState(false)
     const [showSystemNoise, setShowSystemNoise] = useState(true)
     const [connected, setConnected] = useState(false)
     const [error, setError] = useState(null)

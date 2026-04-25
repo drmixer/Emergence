@@ -8,7 +8,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import desc
+from sqlalchemy import and_, desc, not_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -23,6 +23,12 @@ from app.services.lineage import (
 )
 
 router = APIRouter()
+
+ROUTINE_HOLD_IDLE_DESCRIPTIONS = (
+    "Agent held position for social/governance follow-up",
+    "Agent held position for governance follow-up",
+    "Agent held position for social follow-up",
+)
 
 
 class EventResponse(BaseModel):
@@ -78,12 +84,28 @@ def _event_is_degraded_fallback(event: Event) -> bool:
     return False
 
 
+def _suppress_routine_hold_idles(query):
+    """Hide deterministic no-op hold idles from public event streams by default."""
+    return query.filter(
+        not_(
+            and_(
+                Event.event_type == "idle",
+                Event.description.in_(ROUTINE_HOLD_IDLE_DESCRIPTIONS),
+            )
+        )
+    )
+
+
 @router.get("", response_model=List[EventResponse])
 def list_events(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     type: Optional[str] = Query(None, description="Filter by event_type"),
     scope: str = Query("active_run", description="active_run|all"),
+    include_routine_hold_idles: bool = Query(
+        False,
+        description="Include deterministic routine hold-position idle events",
+    ),
     db: Session = Depends(get_db),
 ):
     """Paginated event log."""
@@ -92,6 +114,8 @@ def list_events(
         query = apply_live_run_window(query, Event.created_at, get_live_run_window(db))
     if type:
         query = query.filter(Event.event_type == type)
+    if not include_routine_hold_idles:
+        query = _suppress_routine_hold_idles(query)
 
     events = query.offset(offset).limit(limit).all()
     lineage_by_agent_id = _build_lineage_context_by_agent_id(db, events)

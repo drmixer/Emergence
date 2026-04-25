@@ -126,3 +126,67 @@ def test_get_event_with_no_agent_returns_default_lineage_fields():
     assert body["lineage_season_id"] is None
 
     db.close()
+
+
+def test_list_events_suppresses_routine_hold_idles_by_default():
+    db = _build_db_session()
+    now = now_utc()
+    db.add_all(
+        [
+            Event(
+                agent_id=None,
+                event_type="idle",
+                description="Agent held position for social/governance follow-up",
+                created_at=now - timedelta(minutes=1),
+            ),
+            Event(
+                agent_id=None,
+                event_type="vote",
+                description="Agent voted on proposal #7",
+                created_at=now,
+            ),
+        ]
+    )
+    db.commit()
+
+    with _make_client(db) as client:
+        response = client.get("/api/events?limit=5&scope=all")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert [row["event_type"] for row in rows] == ["vote"]
+
+    db.close()
+
+
+def test_list_events_can_include_routine_hold_idles_for_audits():
+    db = _build_db_session()
+    now = now_utc()
+    db.add_all(
+        [
+            Event(
+                agent_id=None,
+                event_type="idle",
+                description="Agent held position for governance follow-up",
+                created_at=now - timedelta(minutes=1),
+            ),
+            Event(
+                agent_id=None,
+                event_type="vote",
+                description="Agent voted on proposal #7",
+                created_at=now,
+            ),
+        ]
+    )
+    db.commit()
+
+    with _make_client(db) as client:
+        response = client.get(
+            "/api/events?limit=5&scope=all&include_routine_hold_idles=true"
+        )
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert [row["event_type"] for row in rows] == ["vote", "idle"]
+
+    db.close()

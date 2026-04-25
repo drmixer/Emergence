@@ -428,3 +428,51 @@
 - If G preserves F's response-loop gains and reduces degraded governance fallback/feed noise, move on from response-loop/governance-recovery tuning.
 - If response-loop behavior regresses under clean providers, inspect the new governance recovery path for accidental suppression.
 - If provider health fails, classify the run as provider-confounded rather than behavioral.
+
+## Canary H: Longer-Horizon Death Reachability And Response-Loop Check
+
+### Goal
+- Test whether death is naturally reachable under the current scarcity/dormancy settings when the run has enough time for dormant upkeep failures to compound.
+- Re-check Canary G's donor concentration and clean unanswered aid requests under a longer horizon before adding any donor-routing or routine-layer behavior changes.
+- Verify that feed-only suppression of repeated deterministic hold-position idles improves public readability without changing raw run telemetry.
+
+### Baseline
+- Keep Canary G's provider-stabilized routing, tier labels, scarcity economics, governance recovery path, and deterministic fallback semantics unchanged.
+- Run class remains `special_exploratory`.
+- Planned horizon: `16h`.
+- Expected ledger cost from Canary G burn rate: about `$1.02`, with OpenRouter projected around `$0.25` if G-like.
+
+### Interpretability Floor
+- Mid-run checkpoint: `8h`.
+- Continue the full 16h read only if active population is still `>= 30`.
+- If active population is below `30` at `8h`, pause for review and treat the second-half evidence as collapse-dominated rather than cleanly interpretable.
+
+### Success Read
+- Provider health remains clean:
+  - no provider-failure burst
+  - no provider/model fallback
+  - OpenRouter spend remains within available credit headroom
+- Survival/death mechanics become interpretable:
+  - dormant duration distribution is visible
+  - any death can be traced through resource state, reserve support, aid requests, and follow-through
+- Response-loop behavior remains readable:
+  - aid requests split into answered, mechanically unaffordable unanswered, provider-confounded unanswered, and clean unanswered
+  - requester/target/status patterns are reviewed for the clean unanswered set
+- Donor concentration is measured, not tuned:
+  - top donor share
+  - unique donor count
+  - repeated donor burden
+- Feed readability holds:
+  - default public feed is viewer-visible/salient
+  - raw DB/report event totals remain available for audit comparison
+
+### Reporting Note
+- Closeout reports and direct DB queries count raw events, including deterministic routine hold-position idles.
+- The default public live feed and `/api/events` suppress repeated deterministic hold-idles for readability.
+- Use `/api/events?include_routine_hold_idles=true` when comparing the feed endpoint against raw closeout totals.
+
+### Decision Rule
+- If H produces death, trace whether it came from intended scarcity pressure, response-loop failure, reserve exhaustion, or an operational/provider confound.
+- If H still produces no deaths with meaningful dormant duration, treat current settings as death-resistant and consider a scarcity/upkeep tuning pass.
+- If donor concentration or clean unanswered requests repeat at meaningful scale, plan a narrow donor/aid-routing intervention for the next canary.
+- If they do not repeat, leave donor mechanics unchanged.
