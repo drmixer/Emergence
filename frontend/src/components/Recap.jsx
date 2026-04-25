@@ -127,8 +127,8 @@ function deriveWatchNext(moments = [], stats = {}) {
 function buildNarrative({ intro, stake, consequence, watchNext }) {
     return [
         intro,
-        `Stake: ${stake}`,
-        `Consequence: ${consequence}`,
+        `Current tension: ${stake}`,
+        `Evidence: ${consequence}`,
         `Watch next: ${watchNext}`,
     ].join('\n\n')
 }
@@ -394,11 +394,11 @@ export default function Recap({
                 {(isComplete || !animateNarrative) && (
                     <div className="recap-hooks">
                         <div className="recap-hook">
-                            <span className="recap-hook-label">Stake</span>
+                            <span className="recap-hook-label">Current Tension</span>
                             <p>{activeRecap.summary.stake}</p>
                         </div>
                         <div className="recap-hook">
-                            <span className="recap-hook-label">Consequence</span>
+                            <span className="recap-hook-label">Evidence</span>
                             <p>{activeRecap.summary.consequence}</p>
                         </div>
                         <div className="recap-hook">

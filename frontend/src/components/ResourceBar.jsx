@@ -1,5 +1,6 @@
 // Resource Bar with anxiety indicators
 import { AlertTriangle, TrendingDown } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import GlossaryTooltip from './GlossaryTooltip'
 
 // Get color based on resource level (percentage)
@@ -67,17 +68,22 @@ export function ResourceBar({
 }
 
 // Warning banner for critical agents
-export function CriticalAgentsBanner({ count, type = 'food' }) {
+export function CriticalAgentsBanner({ count, type = 'food', href = '' }) {
     if (count === 0) return null
-
-    return (
+    const body = (
         <div className="critical-banner">
             <AlertTriangle size={16} />
             <span>
-                <strong>⚠️ {count} agent{count > 1 ? 's' : ''}</strong> at <GlossaryTooltip termKey="critical">critical</GlossaryTooltip> {type} levels
+                <strong>{count} agent{count > 1 ? 's' : ''}</strong> at <GlossaryTooltip termKey="critical">critical</GlossaryTooltip> {type} levels
             </span>
             <TrendingDown size={14} className="trend-icon" />
         </div>
+    )
+    if (!href) return body
+    return (
+        <Link to={href} className="critical-banner-link">
+            {body}
+        </Link>
     )
 }
 

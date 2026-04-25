@@ -73,6 +73,15 @@ def test_best_moments_endpoint_returns_curated_payload(monkeypatch):
 
     monkeypatch.setattr(analytics_api, "SessionLocal", lambda: fake_session)
     monkeypatch.setattr(analytics_api, "_collect_scored_plot_turns", lambda *args, **kwargs: scored)
+    monkeypatch.setattr(
+        analytics_api,
+        "_resolve_viewer_run_window",
+        lambda *args, **kwargs: analytics_api.LiveRunWindow(
+            run_id="run-20260409B",
+            started_at=now.replace(hour=0),
+            ended_at=None,
+        ),
+    )
 
     with _make_client() as client:
         response = client.get("/api/analytics/best-moments?limit=2&hours=48&min_salience=60&run_id=run-20260409B")
@@ -126,6 +135,15 @@ def test_replay_story_endpoint_returns_chaptered_payload(monkeypatch):
 
     monkeypatch.setattr(analytics_api, "SessionLocal", lambda: fake_session)
     monkeypatch.setattr(analytics_api, "_collect_scored_plot_turns", lambda *args, **kwargs: scored)
+    monkeypatch.setattr(
+        analytics_api,
+        "_resolve_viewer_run_window",
+        lambda *args, **kwargs: analytics_api.LiveRunWindow(
+            run_id="run-20260409C",
+            started_at=now.replace(hour=0),
+            ended_at=None,
+        ),
+    )
 
     with _make_client() as client:
         response = client.get("/api/analytics/plot-turns/replay-story?limit=4&hours=24&min_salience=55&run_id=run-20260409C")

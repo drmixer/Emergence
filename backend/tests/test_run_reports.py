@@ -183,7 +183,7 @@ def test_story_payload_and_markdown_include_exploratory_claim_boundary():
 
     assert payload["run_class"] == "special_exploratory"
     assert payload["exploratory_label"] == "exploratory"
-    assert "Tournament claim boundary" in markdown
+    assert "Exploratory claim boundary" in markdown
 
 
 def _build_snapshot_session():

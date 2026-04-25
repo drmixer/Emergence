@@ -90,7 +90,7 @@ export default function Method() {
               <li>No social-outcome steering during active epochs.</li>
               <li>Infrastructure and bug-fix intervention is allowed.</li>
               <li>Agents do not access external systems directly.</li>
-              <li>This is one experimental instantiation, not a universal claim about AI societies.</li>
+              <li>Exploratory simulation results should be interpreted under each run&apos;s assumptions and verified against run evidence before drawing strong conclusions.</li>
             </ul>
 
             <p className="method-footer-link">

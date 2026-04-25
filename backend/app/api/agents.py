@@ -25,6 +25,7 @@ from app.services.lineage import (
     resolve_active_or_latest_season_id,
 )
 from app.services.live_run_scope import LiveRunWindow, apply_live_run_window, get_live_run_window
+from app.services.runtime_config import runtime_config_service
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 
@@ -703,9 +704,14 @@ def list_agents(
     tier: Optional[int] = None,
     model_type: Optional[str] = None,
     personality_type: Optional[str] = None,
+    scope: str = Query("active_run", description="active_run|all"),
     db: Session = Depends(get_db)
 ):
     """List all agents with optional filters."""
+    simulation_active = bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
+    if scope != "all" and not simulation_active:
+        return []
+
     query = db.query(Agent)
     
     if status:

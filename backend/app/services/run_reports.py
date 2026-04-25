@@ -742,8 +742,12 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
     deterministic_routine_fallback_actions = int(
         (runtime_mode_counts.deterministic_routine_fallback_actions if runtime_mode_counts else 0) or 0
     )
+    viewer_suppressed_event_types = {"idle", "work"}
+    viewer_visible_events = total_events - int(sum(event_counts.get(event_type, 0) for event_type in viewer_suppressed_event_types))
     activity_payload = {
         "total_events": total_events,
+        "viewer_visible_events_default": max(0, viewer_visible_events),
+        "viewer_suppressed_routine_events_default": max(0, total_events - viewer_visible_events),
         "checkpoint_actions": int((runtime_mode_counts.checkpoint_actions if runtime_mode_counts else 0) or 0),
         "deterministic_forced_idle_actions": deterministic_forced_idle_actions,
         "deterministic_routine_fallback_actions": deterministic_routine_fallback_actions,
@@ -753,6 +757,11 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "forum_actions": int(event_counts.get("forum_post", 0) + event_counts.get("forum_reply", 0)),
         "laws_passed": int(event_counts.get("law_passed", 0)),
         "deaths": int(event_counts.get("agent_died", 0)),
+        "became_dormant": int(event_counts.get("became_dormant", 0)),
+        "agent_revived": int(event_counts.get("agent_revived", 0)),
+        "reserve_aid": int(event_counts.get("reserve_aid", 0)),
+        "reserve_shortfall": int(event_counts.get("reserve_shortfall", 0)),
+        "starvation_warnings": int(event_counts.get("starvation_warning", 0)),
         "trade_actions": int(event_counts.get("trade", 0)),
         "conflict_events": int(sum(event_counts.get(event_type, 0) for event_type in CONFLICT_EVENT_TYPES)),
         "cooperation_events": int(sum(event_counts.get(event_type, 0) for event_type in COOPERATION_EVENT_TYPES)),
@@ -762,6 +771,11 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         run_id=run_id,
         run_started_at=run_started_at,
         run_ended_at=run_ended_at,
+    )
+    behavior_hygiene = _collect_behavior_hygiene_diagnostics(
+        db,
+        run_id=run_id,
+        run_started_at=run_started_at,
     )
 
     return {
@@ -777,6 +791,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "llm": llm_payload,
         "activity": activity_payload,
         "social_followthrough": social_followthrough,
+        "behavior_hygiene": behavior_hygiene,
         "inequality_gini_current": _gini(wealth_values),
         "key_moments": key_moments,
         "evidence_links": _base_evidence_links(run_id),
@@ -905,6 +920,7 @@ def _collect_aid_request_followthrough(
         "mechanically_unaffordable": 0,
         "clean_unanswered": 0,
     }
+
     responder_ids: set[int] = set()
     target_counts: dict[int, dict[str, Any]] = {}
     examples: list[dict[str, Any]] = []
@@ -985,6 +1001,101 @@ def _collect_aid_request_followthrough(
     }
 
 
+def _message_fingerprint(text_value: str) -> str:
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", str(text_value or "").lower())
+        if len(token) >= 3
+        and token not in {"the", "and", "for", "that", "with", "this", "from", "have", "will", "agent", "agents"}
+    ]
+    return " ".join(tokens[:18])
+
+
+def _collect_behavior_hygiene_diagnostics(
+    db: Session,
+    *,
+    run_id: str,
+    run_started_at: datetime,
+) -> dict[str, Any]:
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              e.event_type,
+              e.description,
+              a.personality_type
+            FROM events e
+            LEFT JOIN agents a ON a.id = e.agent_id
+            WHERE e.created_at >= :since_ts
+              AND (
+                (e.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                OR e.agent_id IN (
+                  SELECT DISTINCT u.agent_id
+                  FROM llm_usage u
+                  WHERE u.agent_id IS NOT NULL
+                    AND u.run_id = :run_id
+                    AND u.created_at >= :since_ts
+                )
+              )
+            """
+        ),
+        {"run_id": run_id, "since_ts": run_started_at},
+    ).fetchall()
+
+    by_personality: dict[str, dict[str, int]] = {}
+    fingerprints: dict[str, dict[str, Any]] = {}
+    message_types = {"forum_post", "forum_reply", "direct_message", "request_aid", "refuse_aid"}
+    tracked_events = {
+        "create_proposal",
+        "vote",
+        "forum_post",
+        "forum_reply",
+        "direct_message",
+        "request_aid",
+        "refuse_aid",
+        "trade",
+        "became_dormant",
+        "agent_revived",
+    }
+
+    for row in rows:
+        event_type = str(row.event_type or "")
+        personality = str(row.personality_type or "unknown").strip() or "unknown"
+        bucket = by_personality.setdefault(personality, {"total": 0})
+        bucket["total"] += 1
+        if event_type in tracked_events:
+            bucket[event_type] = int(bucket.get(event_type, 0)) + 1
+
+        if event_type in message_types:
+            fingerprint = _message_fingerprint(str(row.description or ""))
+            if not fingerprint:
+                continue
+            entry = fingerprints.setdefault(
+                fingerprint,
+                {"count": 0, "event_types": {}, "example": str(row.description or "").strip()[:240]},
+            )
+            entry["count"] += 1
+            entry["event_types"][event_type] = int(entry["event_types"].get(event_type, 0)) + 1
+
+    repeated = sorted(
+        (
+            {"fingerprint": key, **value}
+            for key, value in fingerprints.items()
+            if int(value.get("count") or 0) >= 3
+        ),
+        key=lambda item: (-int(item.get("count") or 0), str(item.get("fingerprint") or "")),
+    )[:12]
+
+    return {
+        "personality_action_counts": [
+            {"personality_type": key, **value}
+            for key, value in sorted(by_personality.items(), key=lambda item: item[0])
+        ],
+        "repeated_message_fingerprints": repeated,
+        "repeated_message_fingerprint_count": len(repeated),
+    }
+
+
 def _worst_failure_window(rows: list[Any], *, window_minutes: int = 15) -> dict[str, Any] | None:
     buckets: dict[datetime, dict[str, int]] = {}
     for row in rows:
@@ -1048,6 +1159,7 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
     llm = payload.get("llm") if isinstance(payload, dict) else {}
     activity = payload.get("activity") if isinstance(payload, dict) else {}
     social_followthrough = payload.get("social_followthrough") if isinstance(payload, dict) else {}
+    behavior_hygiene = payload.get("behavior_hygiene") if isinstance(payload, dict) else {}
     rows = [
         f"# Run {payload.get('run_id')} Technical Report",
         "",
@@ -1069,12 +1181,18 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Activity Metrics",
         f"- Total events: {int((activity or {}).get('total_events') or 0):,}",
+        f"- Viewer-visible events by default: {int((activity or {}).get('viewer_visible_events_default') or 0):,}",
+        f"- Routine idle/work events hidden by default: {int((activity or {}).get('viewer_suppressed_routine_events_default') or 0):,}",
         f"- Deterministic forced idle actions: {int((activity or {}).get('deterministic_forced_idle_actions') or 0):,}",
         f"- Deterministic routine fallback actions: {int((activity or {}).get('deterministic_routine_fallback_actions') or 0):,}",
         f"- Proposals created: {int((activity or {}).get('proposal_actions') or 0):,}",
         f"- Votes cast: {int((activity or {}).get('vote_actions') or 0):,}",
         f"- Laws passed: {int((activity or {}).get('laws_passed') or 0):,}",
         f"- Forum actions: {int((activity or {}).get('forum_actions') or 0):,}",
+        f"- Became-dormant events: {int((activity or {}).get('became_dormant') or 0):,}",
+        f"- Reserve-aid events: {int((activity or {}).get('reserve_aid') or 0):,}",
+        f"- Agent-revived events: {int((activity or {}).get('agent_revived') or 0):,}",
+        f"- Starvation warnings: {int((activity or {}).get('starvation_warnings') or 0):,}",
         f"- Death events: {int((activity or {}).get('deaths') or 0):,}",
         f"- Cooperation events: {int((activity or {}).get('cooperation_events') or 0):,}",
         f"- Conflict events: {int((activity or {}).get('conflict_events') or 0):,}",
@@ -1129,6 +1247,28 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
                 f"- Distinct responders: {int(social_followthrough.get('distinct_responders') or 0):,}",
             ]
         )
+    if behavior_hygiene:
+        rows.extend(["", "## Behavior Hygiene Diagnostics"])
+        personality_rows = behavior_hygiene.get("personality_action_counts") or []
+        if personality_rows:
+            rows.append("- Personality/action counts:")
+            for row in personality_rows:
+                rows.append(
+                    "  - "
+                    + f"{row.get('personality_type')}: total={int(row.get('total') or 0)}, "
+                    + f"proposals={int(row.get('create_proposal') or 0)}, "
+                    + f"votes={int(row.get('vote') or 0)}, "
+                    + f"trades={int(row.get('trade') or 0)}, "
+                    + f"aid_requests={int(row.get('request_aid') or 0)}"
+                )
+        repeated = behavior_hygiene.get("repeated_message_fingerprints") or []
+        rows.append(
+            f"- Repeated message fingerprint clusters (count >= 3): {int(behavior_hygiene.get('repeated_message_fingerprint_count') or 0):,}"
+        )
+        for row in repeated[:5]:
+            rows.append(
+                f"  - count={int(row.get('count') or 0)}; example={str(row.get('example') or '').strip()}"
+            )
     rows.extend(["", "## Caveats"])
     for caveat in payload.get("caveats") or []:
         rows.append(f"- {str(caveat)}")
@@ -1154,7 +1294,7 @@ def _story_markdown(payload: dict[str, Any]) -> str:
     if run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
         rows.extend(
             [
-                "> Tournament claim boundary: special_exploratory outputs are exploratory and excluded from baseline condition synthesis by default.",
+                "> Exploratory claim boundary: special_exploratory outputs are exploratory and excluded from baseline condition synthesis by default.",
                 "",
             ]
         )
@@ -1316,8 +1456,8 @@ def _build_story_sections(
                     _build_claim_block(claim=claim_text, evidence_links=evidence_links),
                     _build_claim_block(
                         claim=(
-                            "This report is an observational simulation artifact under explicit assumptions, "
-                            "not direct evidence of real-world social behavior."
+                            "Exploratory simulation results should be interpreted under this run's assumptions "
+                            "and verified against run evidence before drawing strong conclusions."
                         ),
                         evidence_links=evidence_links,
                     ),
@@ -1364,6 +1504,16 @@ def _build_technical_payload(
     if str(snapshot.get("run_class") or "").strip().lower() == RUN_CLASS_SPECIAL_EXPLORATORY:
         caveats.append(
             "Run class is special_exploratory; outputs are exploratory and excluded from baseline condition synthesis by default."
+        )
+    activity = snapshot.get("activity") if isinstance(snapshot, dict) else {}
+    if (
+        int((activity or {}).get("became_dormant") or 0) > 0
+        and int((activity or {}).get("reserve_aid") or 0) > 0
+        and int((activity or {}).get("agent_revived") or 0) > 0
+        and int((activity or {}).get("deaths") or 0) == 0
+    ):
+        caveats.append(
+            "Death reachability is confounded when reserve-backed revival is active: dormancy pressure was reached, but zero deaths do not prove death is unreachable under intended non-auto-revival semantics."
         )
 
     return {

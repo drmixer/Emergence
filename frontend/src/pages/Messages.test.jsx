@@ -66,7 +66,7 @@ describe('Messages', () => {
     expect(screen.getByText(/No messages in this view yet/i)).toBeInTheDocument()
   })
 
-  it('includes follow-up direct messages in the replies view', async () => {
+  it('does not classify direct follow-ups as replies', async () => {
     api.getMessages.mockImplementation(async (_limit, messageType) => {
       if (messageType === 'forum_post') return []
       if (messageType === 'forum_reply') return []
@@ -94,10 +94,10 @@ describe('Messages', () => {
       return []
     })
 
-    renderMessages('/messages?tab=replies')
+    renderMessages('/messages?tab=direct')
 
-    expect(await screen.findByRole('heading', { name: /^Replies$/i })).toBeInTheDocument()
-    expect(screen.queryByText(/Initial outreach/i)).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Direct Messages/i })).toBeInTheDocument()
+    expect(screen.getByText(/Initial outreach/i)).toBeInTheDocument()
     expect(screen.getByText(/Follow-up response/i)).toBeInTheDocument()
     expect(screen.getByText(/Second follow-up/i)).toBeInTheDocument()
   })

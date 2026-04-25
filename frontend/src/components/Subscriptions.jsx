@@ -209,7 +209,7 @@ export function NotificationBell() {
                     <div className="notification-overlay" onClick={() => setIsOpen(false)} />
                     <div className="notification-dropdown">
                         <div className="notification-header">
-                            <h4>Notifications</h4>
+                            <h4>Followed Agent Alerts</h4>
                             {notifications.length > 0 && (
                                 <button onClick={markAllAsRead} className="mark-all-read">
                                     Mark all read
@@ -222,7 +222,7 @@ export function NotificationBell() {
                                 <div className="notification-empty">
                                     <Bell size={24} />
                                     <p>No notifications yet</p>
-                                    <span>Follow agents to get updates</span>
+                                    <span>Alerts appear here for followed-agent messages, proposals, votes, dormancy, and revivals.</span>
                                 </div>
                             ) : (
                                 notifications.slice(0, 10).map(notification => (

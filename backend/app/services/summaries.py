@@ -402,21 +402,13 @@ async def get_story_so_far() -> str:
             total_messages = db.query(Message).count()
             total_proposals = db.query(Proposal).count()
             total_laws = db.query(Law).count()
-            latest_event = db.query(Event).order_by(desc(Event.created_at)).first()
-            latest_at = (
-                latest_event.created_at.isoformat()
-                if latest_event and latest_event.created_at
-                else None
-            )
-
             return (
                 "Emergence is a live AI civilization experiment.\n\n"
                 f"- Agents: {active_agents} active / {dormant_agents} dormant / {dead_agents} dead (of {total_agents} total)\n"
                 f"- Messages: {total_messages}\n"
                 f"- Proposals: {total_proposals}\n"
                 f"- Laws passed: {total_laws}\n"
-                f"- Latest activity: {latest_at or 'unknown'}\n\n"
-                "Enable SUMMARIES_ENABLED to generate narrative summaries via an LLM."
+                "Daily narrative summaries are unavailable for this run window; use the linked run evidence for the current story."
             )
 
         # Get all daily summaries

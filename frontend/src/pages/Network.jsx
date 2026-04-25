@@ -15,6 +15,20 @@ function incrementEdge(map, sourceId, targetId, type, delta = 1) {
     map.set(key, prev)
 }
 
+function agentInternalIdFromMessageParticipant(participant) {
+    return Number(participant?.id || 0)
+}
+
+function agentNumberFromEventTarget(event, keys) {
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+    const action = metadata?.action && typeof metadata.action === 'object' ? metadata.action : {}
+    for (const key of keys) {
+        const value = Number(action[key] || metadata[key] || 0)
+        if (Number.isFinite(value) && value > 0) return value
+    }
+    return 0
+}
+
 export default function Network() {
     const [agents, setAgents] = useState([])
     const [relationships, setRelationships] = useState([])
@@ -26,13 +40,17 @@ export default function Network() {
         async function loadData() {
             try {
                 setError(null)
-                const [agentList, tradeEvents, dmEvents, voteEvents, replyEvents, proposals] = await Promise.all([
+                const [agentList, tradeEvents, voteEvents, proposals, directMessages, forumPosts, forumReplies, aidEvents, refusalEvents, accusationEvents] = await Promise.all([
                     api.getAgents(),
                     api.getEvents({ type: 'trade', limit: 500 }),
-                    api.getEvents({ type: 'direct_message', limit: 500 }),
                     api.getEvents({ type: 'vote', limit: 500 }),
-                    api.getEvents({ type: 'forum_reply', limit: 500 }),
                     api.fetch('/api/proposals?limit=200'),
+                    api.getMessages(200, 'direct_message'),
+                    api.getMessages(200, 'forum_post'),
+                    api.getMessages(200, 'forum_reply'),
+                    api.getEvents({ type: 'request_aid', limit: 500 }),
+                    api.getEvents({ type: 'refuse_aid', limit: 500 }),
+                    api.getEvents({ type: 'public_accusation', limit: 500 }),
                 ])
                 const agentsArr = Array.isArray(agentList) ? agentList : []
 
@@ -51,47 +69,45 @@ export default function Network() {
                     }
                 }
 
-                const parentMessageIds = new Set()
-                if (Array.isArray(replyEvents)) {
-                    for (const e of replyEvents) {
-                        const parentId = e?.metadata?.action?.parent_message_id
-                        if (parentId) parentMessageIds.add(Number(parentId))
-                    }
-                }
-
-                const parentIds = Array.from(parentMessageIds).slice(0, 50)
-                const parentMessages = await Promise.all(
-                    parentIds.map(async (mid) => {
-                        try {
-                            const msg = await api.getMessage(mid)
-                            return msg
-                        } catch {
-                            return null
-                        }
-                    })
-                )
-                const parentAuthorByMessageId = new Map()
-                for (const msg of parentMessages) {
-                    if (!msg?.id || !msg?.author?.agent_number) continue
-                    parentAuthorByMessageId.set(Number(msg.id), Number(msg.author.agent_number))
-                }
-
                 const edgeMap = new Map()
 
-                const processTradeOrDM = (events, type) => {
+                const processTrade = (events) => {
                     if (!Array.isArray(events)) return
                     for (const e of events) {
                         const srcInternalId = Number(e.agent_id)
                         const srcAgentNumber = byIdToNumber.get(srcInternalId)
-                        const recipientNumber = Number(e?.metadata?.action?.recipient_agent_id)
+                        const recipientNumber = agentNumberFromEventTarget(e, ['recipient_agent_id', 'recipient_agent_number'])
                         const tgtInternalId = byNumberToId.get(recipientNumber)
                         if (!srcAgentNumber || !tgtInternalId) continue
-                        incrementEdge(edgeMap, srcInternalId, tgtInternalId, type, 1)
+                        incrementEdge(edgeMap, srcInternalId, tgtInternalId, 'trade', 1)
                     }
                 }
 
-                processTradeOrDM(dmEvents, 'communication')
-                processTradeOrDM(tradeEvents, 'trade')
+                processTrade(tradeEvents)
+
+                const processMessages = (messages, delta = 1) => {
+                    if (!Array.isArray(messages)) return
+                    for (const message of messages) {
+                        const srcInternalId = agentInternalIdFromMessageParticipant(message?.author)
+                        const recipientInternalId = agentInternalIdFromMessageParticipant(message?.recipient)
+                        if (recipientInternalId > 0) {
+                            incrementEdge(edgeMap, srcInternalId, recipientInternalId, 'communication', delta)
+                            continue
+                        }
+                        if (message?.parent_message_id) {
+                            const parent = [...(forumPosts || []), ...(forumReplies || [])].find(
+                                (candidate) => Number(candidate?.id || 0) === Number(message.parent_message_id)
+                            )
+                            const parentAuthorId = agentInternalIdFromMessageParticipant(parent?.author)
+                            if (parentAuthorId > 0) {
+                                incrementEdge(edgeMap, srcInternalId, parentAuthorId, 'communication', delta)
+                            }
+                        }
+                    }
+                }
+
+                processMessages(directMessages, 1)
+                processMessages(forumReplies, 1)
 
                 if (Array.isArray(voteEvents)) {
                     for (const e of voteEvents) {
@@ -104,16 +120,20 @@ export default function Network() {
                     }
                 }
 
-                if (Array.isArray(replyEvents)) {
-                    for (const e of replyEvents) {
+                const processTargetedEvents = (events, delta = 1) => {
+                    if (!Array.isArray(events)) return
+                    for (const e of events) {
                         const srcInternalId = Number(e.agent_id)
-                        const parentMessageId = Number(e?.metadata?.action?.parent_message_id)
-                        const parentAuthorNumber = parentAuthorByMessageId.get(parentMessageId)
-                        const tgtInternalId = byNumberToId.get(parentAuthorNumber)
+                        const targetNumber = agentNumberFromEventTarget(e, ['target_agent_id', 'target_agent_number'])
+                        const tgtInternalId = byNumberToId.get(targetNumber)
                         if (!tgtInternalId) continue
-                        incrementEdge(edgeMap, srcInternalId, tgtInternalId, 'communication', 1)
+                        incrementEdge(edgeMap, srcInternalId, tgtInternalId, 'communication', delta)
                     }
                 }
+
+                processTargetedEvents(aidEvents, 1)
+                processTargetedEvents(refusalEvents, 1)
+                processTargetedEvents(accusationEvents, 1)
 
                 const edges = Array.from(edgeMap.values())
                     .sort((a, b) => b.strength - a.strength)

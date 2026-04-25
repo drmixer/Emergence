@@ -1150,11 +1150,11 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
     
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
     work_type_label = {
-        "farm": "farming",
-        "generate": "generating",
-        "gather": "gathering",
-    }.get(work_type, f"{work_type}ing")
-    description = f"{author_name} worked {hours}h {work_type_label}, produced {float(amount_kept):.2f} {resource_type}"
+        "farm": "farmed",
+        "generate": "generated",
+        "gather": "gathered",
+    }.get(work_type, "produced")
+    description = f"{author_name} {work_type_label} {float(amount_kept):.2f} {resource_type} in {hours}h"
     if production_modifier != Decimal("1.0"):
         description += f" (environment modifier {float(production_modifier):.2f}x)"
     if reserve_active and contribution_amount > 0:

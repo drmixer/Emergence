@@ -8,6 +8,15 @@ function authorName(author) {
     return formatAgentDisplayLabel(author)
 }
 
+function lawClusterKey(law) {
+    const text = `${law?.title || ''} ${law?.description || ''}`.toLowerCase()
+    const tokens = text
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((token) => token && !['the', 'and', 'for', 'with', 'law', 'rule', 'aid', 'emergency'].includes(token))
+    return Array.from(new Set(tokens)).slice(0, 10).sort().join(' ')
+}
+
 export default function Laws() {
     const [laws, setLaws] = useState([])
     const [showInactive, setShowInactive] = useState(false)
@@ -32,6 +41,15 @@ export default function Laws() {
 
     const activeLaws = useMemo(() => laws.filter((l) => l.active), [laws])
     const displayedLaws = showInactive ? laws : activeLaws
+    const clusterCounts = useMemo(() => {
+        const counts = new Map()
+        for (const law of laws) {
+            const key = lawClusterKey(law)
+            if (!key) continue
+            counts.set(key, (counts.get(key) || 0) + 1)
+        }
+        return counts
+    }, [laws])
 
     return (
         <div className="laws-page">
@@ -83,7 +101,9 @@ export default function Laws() {
                     </div>
                 ) : (
                     !loading &&
-                    displayedLaws.map((law, index) => (
+                    displayedLaws.map((law, index) => {
+                        const clusterSize = clusterCounts.get(lawClusterKey(law)) || 1
+                        return (
                         <div
                             key={law.id}
                             className={`law-card ${!law.active ? 'repealed' : ''}`}
@@ -99,6 +119,11 @@ export default function Laws() {
                                         {law.active ? 'Active' : 'Repealed'}
                                     </span>
                                 </div>
+                                {clusterSize > 1 && (
+                                    <div className="policy-cluster-chip">
+                                        Similar law cluster: {clusterSize} raw laws
+                                    </div>
+                                )}
                                 <p className="law-description">{law.description}</p>
                                 <div className="law-meta">
                                     <span>
@@ -114,7 +139,7 @@ export default function Laws() {
                                 </div>
                             </div>
                         </div>
-                    ))
+                    )})
                 )}
             </div>
 
@@ -198,6 +223,17 @@ export default function Laws() {
           color: var(--text-secondary);
           font-size: 0.875rem;
           margin-bottom: var(--spacing-md);
+        }
+
+        .policy-cluster-chip {
+          display: inline-flex;
+          margin-bottom: var(--spacing-sm);
+          padding: 3px 8px;
+          border: 1px solid rgba(139, 92, 246, 0.32);
+          border-radius: var(--radius-full);
+          color: var(--accent-purple);
+          font-size: 0.75rem;
+          background: rgba(139, 92, 246, 0.08);
         }
         
         .law-meta {

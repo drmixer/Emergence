@@ -1,6 +1,8 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Package, TrendingUp, TrendingDown } from 'lucide-react'
 import { api } from '../services/api'
+import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 const ResourcesCharts = lazy(() => import('../components/ResourcesCharts'))
 
@@ -17,6 +19,7 @@ function formatNumber(n) {
 }
 
 export default function Resources() {
+    const [searchParams] = useSearchParams()
     const [loading, setLoading] = useState(true)
     const [secondaryLoading, setSecondaryLoading] = useState(true)
     const [error, setError] = useState(null)
@@ -24,6 +27,7 @@ export default function Resources() {
     const [history, setHistory] = useState(null)
     const [distribution, setDistribution] = useState(null)
     const [agents, setAgents] = useState([])
+    const [aidLifecycle, setAidLifecycle] = useState(null)
 
     useEffect(() => {
         let cancelled = false
@@ -46,20 +50,23 @@ export default function Resources() {
             }
 
             try {
-                const [hist, dist, agentList] = await Promise.all([
+                const [hist, dist, agentList, aid] = await Promise.all([
                     api.getResourceHistory(),
                     api.getResourceDistribution(),
                     api.getAgents(),
+                    api.getAidLifecycle(80),
                 ])
                 if (cancelled) return
                 setHistory(hist)
                 setDistribution(dist)
                 setAgents(Array.isArray(agentList) ? agentList : [])
+                setAidLifecycle(aid && typeof aid === 'object' ? aid : null)
             } catch {
                 if (cancelled) return
                 setHistory(null)
                 setDistribution(null)
                 setAgents([])
+                setAidLifecycle(null)
             } finally {
                 if (!cancelled) {
                     setSecondaryLoading(false)
@@ -73,6 +80,7 @@ export default function Resources() {
     }, [])
 
     const totals = resources?.totals || {}
+    const focus = String(searchParams.get('focus') || '').trim()
 
     const dailyNet = useMemo(() => {
         const series = history?.series
@@ -143,6 +151,34 @@ export default function Resources() {
         value: t.total,
         color: t.tier === 1 ? COLORS.tier1 : t.tier === 2 ? COLORS.tier2 : t.tier === 3 ? COLORS.tier3 : COLORS.tier4,
     })), [distributionByTier])
+
+    const criticalAgents = useMemo(() => {
+        const dist = distribution?.distribution
+        if (!Array.isArray(dist)) return []
+        return dist
+            .map((row) => {
+                const resources = row?.resources || {}
+                return {
+                    ...row,
+                    food: Number(resources.food || 0),
+                    energy: Number(resources.energy || 0),
+                }
+            })
+            .filter((row) => row.status !== 'dead' && (row.food < 2 || row.energy < 2))
+            .sort((a, b) => {
+                const focusFood = focus === 'critical-food'
+                const left = focusFood ? Number(a.food) : Number(a.energy)
+                const right = focusFood ? Number(b.food) : Number(b.energy)
+                return left - right
+            })
+            .slice(0, 24)
+    }, [distribution, focus])
+
+    const aidItems = Array.isArray(aidLifecycle?.items) ? aidLifecycle.items : []
+
+    function statusLabel(status) {
+        return String(status || '').replace(/_/g, ' ')
+    }
 
     if (loading) {
         return <div className="loading"><div className="loading-spinner"></div>Loading...</div>
@@ -235,6 +271,84 @@ export default function Resources() {
                 </Suspense>
             )}
 
+            <div className="content-grid" style={{ marginTop: 'var(--spacing-lg)' }}>
+                <div className="card">
+                    <div className="card-header">
+                        <h3>Critical Agent Evidence</h3>
+                        <span className="strip-meta">{criticalAgents.length} shown</span>
+                    </div>
+                    <div className="card-body">
+                        {secondaryLoading ? (
+                            <div className="empty-state">Loading affected agents…</div>
+                        ) : criticalAgents.length === 0 ? (
+                            <div className="empty-state compact">No living agents are below critical food or energy thresholds.</div>
+                        ) : (
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Agent</th>
+                                        <th>Status</th>
+                                        <th>Food</th>
+                                        <th>Energy</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {criticalAgents.map((agent) => (
+                                        <tr key={agent.agent_number}>
+                                            <td>
+                                                <Link to={`/agents/${agent.agent_number}`}>
+                                                    {formatAgentDisplayLabel(agent)}
+                                                </Link>
+                                            </td>
+                                            <td>{agent.status}</td>
+                                            <td style={{ color: agent.food < 2 ? 'var(--accent-red)' : 'var(--text-secondary)' }}>{formatNumber(agent.food)}</td>
+                                            <td style={{ color: agent.energy < 2 ? 'var(--accent-red)' : 'var(--text-secondary)' }}>{formatNumber(agent.energy)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </div>
+
+                <div className="card">
+                    <div className="card-header">
+                        <h3>Aid Request Lifecycle</h3>
+                        <span className="strip-meta">{aidLifecycle?.total || 0} requests</span>
+                    </div>
+                    <div className="card-body">
+                        {secondaryLoading ? (
+                            <div className="empty-state">Loading aid requests…</div>
+                        ) : aidItems.length === 0 ? (
+                            <div className="empty-state compact">No direct aid requests in the current run window.</div>
+                        ) : (
+                            <div className="aid-lifecycle-list">
+                                {aidItems.slice(0, 12).map((item) => (
+                                    <div key={item.request_event_id} className={`aid-lifecycle-row status-${item.status}`}>
+                                        <div>
+                                            <strong>
+                                                {item.requester ? formatAgentDisplayLabel(item.requester) : 'Unknown'}
+                                            </strong>
+                                            {' -> '}
+                                            <strong>
+                                                {item.target ? formatAgentDisplayLabel(item.target) : 'Unknown'}
+                                            </strong>
+                                        </div>
+                                        <div className="aid-lifecycle-meta">
+                                            <span>{formatNumber(item.amount)} {item.resource_type}</span>
+                                            <span>{statusLabel(item.status)}</span>
+                                            {item.response_event_id && (
+                                                <Link to={`/timeline?event=${item.response_event_id}`}>evidence</Link>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
             {/* Detailed Distribution Table */}
             <div className="card" style={{ marginTop: 'var(--spacing-lg)' }}>
                 <div className="card-header">
@@ -291,6 +405,42 @@ export default function Resources() {
           height: 10px;
           border-radius: 50%;
           margin-right: var(--spacing-xs);
+        }
+
+        .aid-lifecycle-list {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-sm);
+        }
+
+        .aid-lifecycle-row {
+          border: 1px solid var(--border-color);
+          border-radius: var(--radius-md);
+          padding: var(--spacing-sm) var(--spacing-md);
+          background: rgba(255, 255, 255, 0.02);
+        }
+
+        .aid-lifecycle-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: var(--spacing-sm);
+          color: var(--text-muted);
+          font-size: 0.82rem;
+          text-transform: capitalize;
+          margin-top: 4px;
+        }
+
+        .aid-lifecycle-row.status-fulfilled_by_trade {
+          border-left: 3px solid var(--accent-green);
+        }
+
+        .aid-lifecycle-row.status-refused,
+        .aid-lifecycle-row.status-mechanically_unaffordable {
+          border-left: 3px solid var(--accent-red);
+        }
+
+        .aid-lifecycle-row.status-reserve_covered {
+          border-left: 3px solid var(--accent-blue);
         }
       `}</style>
         </div>

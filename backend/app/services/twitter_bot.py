@@ -334,7 +334,11 @@ class TweetFormatter:
         chart: str | None = None,
         quote: str | None = None,
     ) -> str:
-        lines = [self._trim(opener, 90), f"Stake: {self._trim(stake, 110)}", f"Consequence: {self._trim(consequence, 110)}"]
+        lines = [
+            self._trim(opener, 90),
+            f"Tension: {self._trim(stake, 110)}",
+            f"Evidence: {self._trim(consequence, 110)}",
+        ]
         if quote:
             lines.append(f"Quote: \"{self._trim(quote, 90)}\"")
         if chart:

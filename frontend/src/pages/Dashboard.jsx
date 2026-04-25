@@ -293,8 +293,7 @@ export default function Dashboard() {
                 <div className="card-body trust-note-body">
                     <ShieldCheck size={16} />
                     <p>
-                        These are simulation observations under defined assumptions, not direct claims about real-world groups.
-                        Check run evidence before making strong conclusions.
+                        Exploratory simulation results. Interpret under this run&apos;s assumptions and verify against run evidence before drawing strong conclusions.
                     </p>
                     <Link to="/method" className="trust-note-link">Method</Link>
                 </div>
@@ -349,7 +348,10 @@ export default function Dashboard() {
 
             {/* Critical Agents Banner */}
             {!idleDashboard && !loading && stats && stats.criticalFoodAgents > 0 && (
-                <CriticalAgentsBanner count={stats.criticalFoodAgents} type="food" />
+                <CriticalAgentsBanner count={stats.criticalFoodAgents} type="food" href="/resources?focus=critical-food" />
+            )}
+            {!idleDashboard && !loading && stats && stats.criticalEnergyAgents > 0 && (
+                <CriticalAgentsBanner count={stats.criticalEnergyAgents} type="energy" href="/resources?focus=critical-energy" />
             )}
 
             {/* Crisis Strip */}
@@ -373,7 +375,11 @@ export default function Dashboard() {
                         ) : (
                             <div className="crisis-strip-list">
                                 {crises.map((crisis) => (
-                                    <div key={`${crisis.event_id}-${crisis.expires_at}`} className="crisis-pill">
+                                    <Link
+                                        key={`${crisis.event_id}-${crisis.expires_at}`}
+                                        to={crisis.kind === 'resource_pressure' ? `/resources?focus=critical-${crisis.effect?.resource_type || 'food'}` : `/timeline?event=${encodeURIComponent(crisis.event_id)}`}
+                                        className="crisis-pill"
+                                    >
                                         <div className="crisis-pill-top">
                                             <span className="crisis-name">{crisis.name}</span>
                                             <span className="crisis-timer">{formatRemaining(crisis.seconds_remaining)}</span>
@@ -381,7 +387,7 @@ export default function Dashboard() {
                                         <div className="crisis-pill-bottom">
                                             <span>{crisis.affected_agents} agents affected</span>
                                         </div>
-                                    </div>
+                                    </Link>
                                 ))}
                             </div>
                         )}
@@ -400,7 +406,7 @@ export default function Dashboard() {
                     </>
                 ) : (
                     <>
-                        <div className="stat-card">
+                        <Link to="/proposals" className="stat-card stat-card-link">
                             <div className="stat-header">
                                 <span className="stat-label">Active Agents</span>
                                 <div className="stat-icon green">
@@ -411,9 +417,9 @@ export default function Dashboard() {
                             <div className="stat-change">
                                 <span>Live world state</span>
                             </div>
-                        </div>
+                        </Link>
 
-                        <div className="stat-card">
+                        <Link to="/laws" className="stat-card stat-card-link">
                             <div className="stat-header">
                                 <span className="stat-label">Dormant Agents</span>
                                 <div className="stat-icon orange">
@@ -424,7 +430,7 @@ export default function Dashboard() {
                             <div className="stat-change">
                                 <span>Live world state</span>
                             </div>
-                        </div>
+                        </Link>
 
                         <div className="stat-card">
                             <div className="stat-header">
@@ -750,10 +756,23 @@ export default function Dashboard() {
                 }
 
                 .crisis-pill {
+                    display: block;
                     border: 1px solid rgba(239, 68, 68, 0.28);
                     border-radius: var(--radius-lg);
                     padding: var(--spacing-md);
                     background: rgba(127, 29, 29, 0.18);
+                    color: inherit;
+                    text-decoration: none;
+                }
+
+                .crisis-pill:hover {
+                    border-color: rgba(239, 68, 68, 0.42);
+                    background: rgba(127, 29, 29, 0.24);
+                }
+
+                .stat-card-link {
+                    color: inherit;
+                    text-decoration: none;
                 }
 
                 .crisis-pill-top {

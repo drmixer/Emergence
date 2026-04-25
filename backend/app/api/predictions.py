@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.core.time import ensure_utc, now_utc
 from app.models.predictions import PredictionMarket, PredictionBet, UserPoints
 from app.models.models import Proposal, Agent, AgentInventory, Event, GlobalResources, Law
+from app.services.runtime_config import runtime_config_service
 from app.services.survival_config import active_energy_cost, active_food_cost, low_resource_warning_threshold
 from pydantic import BaseModel, Field
 
@@ -194,6 +195,10 @@ def _agent_label(agent: Agent | None) -> str:
     if str(agent.display_name or "").strip():
         return str(agent.display_name).strip()
     return f"Agent #{int(agent.agent_number):02d}"
+
+
+def _simulation_active() -> bool:
+    return bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
 
 
 def _agent_market_title(agent: Agent) -> str:
@@ -560,21 +565,22 @@ def _sync_auto_prediction_markets(db: Session) -> None:
         _resolve_market_bets(db, market=market, outcome=outcome, resolved_at=now_value)
         changed = True
 
-    for payload in _auto_market_payloads(db):
-        existing = _find_open_auto_market(db, payload)
-        if existing is not None:
-            continue
-        market = PredictionMarket(
-            title=str(payload.get("title") or "").strip(),
-            description=str(payload.get("description") or "").strip() or None,
-            market_type=str(payload.get("market_type") or "custom").strip(),
-            status="open",
-            related_proposal_id=payload.get("related_proposal_id"),
-            related_agent_id=payload.get("related_agent_id"),
-            closes_at=payload.get("closes_at") or (now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS)),
-        )
-        db.add(market)
-        changed = True
+    if _simulation_active():
+        for payload in _auto_market_payloads(db):
+            existing = _find_open_auto_market(db, payload)
+            if existing is not None:
+                continue
+            market = PredictionMarket(
+                title=str(payload.get("title") or "").strip(),
+                description=str(payload.get("description") or "").strip() or None,
+                market_type=str(payload.get("market_type") or "custom").strip(),
+                status="open",
+                related_proposal_id=payload.get("related_proposal_id"),
+                related_agent_id=payload.get("related_agent_id"),
+                closes_at=payload.get("closes_at") or (now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS)),
+            )
+            db.add(market)
+            changed = True
 
     if changed:
         db.commit()
@@ -648,6 +654,9 @@ def list_markets(
     """List all prediction markets with optional filters."""
     _sync_auto_prediction_markets(db)
     query = db.query(PredictionMarket)
+
+    if not _simulation_active():
+        query = query.filter(PredictionMarket.status != "open")
     
     if status:
         query = query.filter(PredictionMarket.status == status)
@@ -685,6 +694,9 @@ def place_bet(
 ):
     """Place a bet on a prediction market."""
     _sync_auto_prediction_markets(db)
+    if not _simulation_active():
+        raise HTTPException(status_code=409, detail="Prediction markets are closed while no simulation run is active")
+
     # Get market
     market = db.query(PredictionMarket).filter(PredictionMarket.id == market_id).first()
     if not market:

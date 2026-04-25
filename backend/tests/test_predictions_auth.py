@@ -144,6 +144,27 @@ def test_list_markets_auto_generates_live_audience_hooks(predictions_client):
     assert reserve_market["evidence_links"]
 
 
+def test_prediction_markets_hide_open_markets_and_reject_bets_when_inactive(predictions_client, monkeypatch):
+    client, db_session = predictions_client
+    market = db_session.query(PredictionMarket).first()
+    monkeypatch.setattr(
+        predictions_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: False if key == "SIMULATION_ACTIVE" else None,
+    )
+
+    response = client.get("/api/predictions/markets?status=open&limit=10")
+    assert response.status_code == 200
+    assert response.json() == []
+
+    bet = client.post(
+        f"/api/predictions/markets/{market.id}/bet",
+        json={"prediction": "yes", "amount": 5},
+    )
+    assert bet.status_code == 409
+    assert "no simulation run is active" in bet.json()["detail"]
+
+
 def test_list_markets_resolves_expired_auto_hook_and_pays_winner(predictions_client):
     client, db_session = predictions_client
     now = datetime.now(timezone.utc)

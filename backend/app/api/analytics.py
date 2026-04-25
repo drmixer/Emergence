@@ -860,7 +860,7 @@ def _collect_scored_plot_turns(
     candidate_limit: int,
     run_id: str | None = None,
 ) -> list[tuple[int, datetime, dict]]:
-    query = db.query(Event).filter(Event.created_at >= window_start)
+    query = db.query(Event).filter(Event.created_at >= window_start, Event.created_at <= now)
 
     clean_run_id = str(run_id or "").strip()
     if clean_run_id:
@@ -907,6 +907,30 @@ def _resolve_live_run_window(db, scope: str) -> LiveRunWindow | None:
     return get_live_run_window(db)
 
 
+def _resolve_viewer_run_window(db, *, run_id: str | None, scope: str) -> LiveRunWindow | None:
+    clean_run_id = str(run_id or "").strip()
+    if clean_run_id:
+        return get_run_window(db, clean_run_id)
+    return _resolve_live_run_window(db, scope)
+
+
+def _empty_plot_payload(source_type: str, *, hours: int, min_salience: int, run_id: str | None) -> dict[str, Any]:
+    return {
+        "source_type": source_type,
+        "window_hours": hours,
+        "min_salience": min_salience,
+        "run_id": run_id,
+        "count": 0,
+        "items": [],
+    }
+
+
+def _resolve_event_window(now: datetime, *, hours: int, run_window: LiveRunWindow | None) -> tuple[datetime, datetime]:
+    if run_window and run_window.run_id is not None and run_window.started_at is not None:
+        return run_window.started_at, _clamp_window_end(now, run_window)
+    return _clamp_window_start(now - timedelta(hours=hours), run_window), _clamp_window_end(now, run_window)
+
+
 def _clamp_window_start(window_start: datetime, run_window: LiveRunWindow | None) -> datetime:
     if run_window and run_window.started_at and run_window.started_at > window_start:
         return run_window.started_at
@@ -928,9 +952,16 @@ def get_leaderboards(scope: str = Query("active_run", description="active_run|al
 
 
 @router.get("/leaderboards/wealth")
-def leaderboard_wealth(limit: int = Query(10, le=50)):
+def leaderboard_wealth(
+    limit: int = Query(10, le=50),
+    scope: str = Query("active_run", description="active_run|all"),
+):
     """Get agents ranked by total wealth."""
-    return get_wealth_leaderboard(limit)
+    db = SessionLocal()
+    try:
+        return get_wealth_leaderboard(limit, db=db, run_window=_resolve_live_run_window(db, scope))
+    finally:
+        db.close()
 
 
 @router.get("/leaderboards/activity")
@@ -1364,13 +1395,15 @@ def plot_turns(
 
     db = SessionLocal()
     try:
-        run_window = _resolve_live_run_window(db, scope)
+        run_window = _resolve_viewer_run_window(db, run_id=run_id, scope=scope)
         effective_run_id = str(run_id or "").strip() or (run_window.run_id if run_window else None)
-        window_start = _clamp_window_start(window_start, run_window)
+        if scope != "all" and not effective_run_id:
+            return _empty_plot_payload("curated_plot_turns", hours=hours, min_salience=min_salience, run_id=None)
+        window_start, window_end = _resolve_event_window(now, hours=hours, run_window=run_window)
         scored = _collect_scored_plot_turns(
             db,
             window_start=window_start,
-            now=now,
+            now=window_end,
             min_salience=min_salience,
             candidate_limit=max(40, limit * 12),
             run_id=effective_run_id,
@@ -1408,10 +1441,21 @@ def plot_turns_replay(
 
     db = SessionLocal()
     try:
-        run_window = _resolve_live_run_window(db, scope)
+        run_window = _resolve_viewer_run_window(db, run_id=run_id, scope=scope)
         effective_run_id = str(run_id or "").strip() or (run_window.run_id if run_window else None)
-        window_start = _clamp_window_start(window_start, run_window)
-        window_end = _clamp_window_end(now, run_window)
+        if scope != "all" and not effective_run_id:
+            return {
+                "source_type": "curated_plot_turn_replay",
+                "window_hours": hours,
+                "min_salience": min_salience,
+                "bucket_minutes": bucket_minutes,
+                "bucket_count": 0,
+                "run_id": None,
+                "count": 0,
+                "items": [],
+                "buckets": [],
+            }
+        window_start, window_end = _resolve_event_window(now, hours=hours, run_window=run_window)
         total_seconds = max(1, int((window_end - window_start).total_seconds()))
         bucket_count = max(1, (total_seconds + bucket_seconds - 1) // bucket_seconds)
         scored = _collect_scored_plot_turns(
@@ -1490,13 +1534,24 @@ def plot_turns_replay_story(
 
     db = SessionLocal()
     try:
-        run_window = _resolve_live_run_window(db, scope)
+        run_window = _resolve_viewer_run_window(db, run_id=run_id, scope=scope)
         effective_run_id = str(run_id or "").strip() or (run_window.run_id if run_window else None)
-        window_start = _clamp_window_start(window_start, run_window)
+        if scope != "all" and not effective_run_id:
+            return {
+                "source_type": "curated_plot_turn_story",
+                "window_hours": hours,
+                "min_salience": min_salience,
+                "run_id": None,
+                "count": 0,
+                "chapter_count": 0,
+                "items": [],
+                "chapters": [],
+            }
+        window_start, window_end = _resolve_event_window(now, hours=hours, run_window=run_window)
         scored = _collect_scored_plot_turns(
             db,
             window_start=window_start,
-            now=now,
+            now=window_end,
             min_salience=min_salience,
             candidate_limit=max(limit * 8, 240),
             run_id=effective_run_id,
@@ -1532,13 +1587,15 @@ def best_moments(
 
     db = SessionLocal()
     try:
-        run_window = _resolve_live_run_window(db, scope)
+        run_window = _resolve_viewer_run_window(db, run_id=run_id, scope=scope)
         effective_run_id = str(run_id or "").strip() or (run_window.run_id if run_window else None)
-        window_start = _clamp_window_start(window_start, run_window)
+        if scope != "all" and not effective_run_id:
+            return _empty_plot_payload("curated_best_moments", hours=hours, min_salience=min_salience, run_id=None)
+        window_start, window_end = _resolve_event_window(now, hours=hours, run_window=run_window)
         scored = _collect_scored_plot_turns(
             db,
             window_start=window_start,
-            now=now,
+            now=window_end,
             min_salience=min_salience,
             candidate_limit=max(60, limit * 18),
             run_id=effective_run_id,

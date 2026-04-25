@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.models import Agent, AgentInventory, AgentLineage, Event, Message, Proposal, SimulationRun, Vote
 from app.services import leaderboards
+from app.services.live_run_scope import LiveRunWindow
 
 
 def _build_session():
@@ -114,6 +115,11 @@ def test_leaderboards_include_lineage_and_identity_fields(monkeypatch):
     db.commit()
 
     monkeypatch.setattr(leaderboards, "SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        leaderboards,
+        "get_live_run_window",
+        lambda _db: LiveRunWindow(run_id="real-season-1", started_at=now - timedelta(hours=4), ended_at=None),
+    )
     payload = leaderboards.get_all_leaderboards()
 
     wealth = payload.get("wealth") or []
@@ -135,5 +141,52 @@ def test_leaderboards_include_lineage_and_identity_fields(monkeypatch):
     assert second["lineage_origin"] == "fresh"
     assert second["lineage_is_fresh"] is True
     assert second["lineage_is_carryover"] is False
+
+    db.close()
+
+
+def test_active_run_leaderboards_are_empty_without_active_simulation(monkeypatch):
+    db = _build_session()
+    now = datetime.utcnow()
+
+    agent = Agent(
+        agent_number=1,
+        display_name="Tensor-01",
+        model_type="claude-sonnet-4",
+        tier=1,
+        personality_type="efficiency",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=2),
+        last_active_at=now,
+    )
+    db.add(agent)
+    db.flush()
+    db.add_all(
+        [
+            AgentInventory(agent_id=agent.id, resource_type="food", quantity=40),
+            Event(agent_id=agent.id, event_type="work", description="work-1", created_at=now - timedelta(hours=1)),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr(leaderboards, "SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        leaderboards,
+        "get_live_run_window",
+        lambda _db: LiveRunWindow(run_id=None, started_at=None, ended_at=None),
+    )
+
+    payload = leaderboards.get_all_leaderboards()
+    assert payload == {
+        "wealth": [],
+        "activity": [],
+        "influence": [],
+        "producers": [],
+        "traders": [],
+    }
+
+    all_scope_payload = leaderboards.get_all_leaderboards(scope="all")
+    assert all_scope_payload["wealth"]
 
     db.close()

@@ -26,42 +26,6 @@ function formatRecipient(recipient) {
   return 'Unknown'
 }
 
-function directConversationKey(message) {
-  const authorId = Number(message?.author?.agent_number || 0)
-  const recipientId = Number(message?.recipient?.agent_number || 0)
-  if (authorId <= 0 || recipientId <= 0) return null
-  return [authorId, recipientId].sort((a, b) => a - b).join(':')
-}
-
-function deriveReplyMessages(forumReplies, directMessages) {
-  const directReplies = []
-  const directConversations = new Map()
-
-  ;(Array.isArray(directMessages) ? directMessages : [])
-    .slice()
-    .sort((a, b) => {
-      const aTs = new Date(a?.created_at || 0).getTime()
-      const bTs = new Date(b?.created_at || 0).getTime()
-      if (aTs !== bTs) return aTs - bTs
-      return Number(a?.id || 0) - Number(b?.id || 0)
-    })
-    .forEach((message) => {
-      const key = directConversationKey(message)
-      if (!key) return
-      const seenCount = directConversations.get(key) || 0
-      directConversations.set(key, seenCount + 1)
-      if (seenCount >= 1) {
-        directReplies.push(message)
-      }
-    })
-
-  return [...(Array.isArray(forumReplies) ? forumReplies : []), ...directReplies].sort((a, b) => {
-    const aTs = new Date(a?.created_at || 0).getTime()
-    const bTs = new Date(b?.created_at || 0).getTime()
-    return bTs - aTs
-  })
-}
-
 function sortMessagesNewestFirst(messages) {
   return [...(Array.isArray(messages) ? messages : [])].sort((a, b) => {
     const aTs = new Date(a?.created_at || 0).getTime()
@@ -178,11 +142,6 @@ export default function Messages() {
     loadMessages()
   }, [])
 
-  const replies = useMemo(
-    () => deriveReplyMessages(forumReplies, directMessages),
-    [directMessages, forumReplies]
-  )
-
   const allMessages = useMemo(() => {
     const merged = [...forumPosts, ...forumReplies, ...directMessages]
     return sortMessagesNewestFirst(dedupeMessagesById(merged))
@@ -190,12 +149,10 @@ export default function Messages() {
 
   const visibleMessages =
     activeTab === 'forum'
-      ? forumPosts
-      : activeTab === 'replies'
-        ? replies
-        : activeTab === 'direct'
-          ? directMessages
-          : allMessages
+      ? sortMessagesNewestFirst(dedupeMessagesById([...forumPosts, ...forumReplies]))
+      : activeTab === 'direct'
+        ? sortMessagesNewestFirst(dedupeMessagesById(directMessages))
+        : allMessages
 
   const openThread = useCallback(async (messageId) => {
     if (!messageId) return
@@ -217,7 +174,7 @@ export default function Messages() {
 
   useEffect(() => {
     const requestedTab = String(searchParams.get('tab') || '').trim()
-    if (requestedTab === 'forum' || requestedTab === 'replies' || requestedTab === 'direct' || requestedTab === 'all') {
+    if (requestedTab === 'forum' || requestedTab === 'direct' || requestedTab === 'all') {
       setActiveTab(requestedTab)
     }
 
@@ -234,7 +191,7 @@ export default function Messages() {
           <MessageSquare size={30} />
           Agent Messages
         </h1>
-        <p className="page-description">All agent message types by default, with filters for forum posts, cross-channel replies, and direct messages.</p>
+        <p className="page-description">All messages by default, with forum threads and direct conversations available as focused views.</p>
       </div>
 
       <div className="message-tabs">
@@ -244,11 +201,7 @@ export default function Messages() {
         </button>
         <button type="button" className={`tab-btn ${activeTab === 'forum' ? 'active' : ''}`} onClick={() => setActiveTab('forum')}>
           <MessageSquare size={16} />
-          Forum Posts
-        </button>
-        <button type="button" className={`tab-btn ${activeTab === 'replies' ? 'active' : ''}`} onClick={() => setActiveTab('replies')}>
-          <MessageCircle size={16} />
-          Replies
+          Forum
         </button>
         <button type="button" className={`tab-btn ${activeTab === 'direct' ? 'active' : ''}`} onClick={() => setActiveTab('direct')}>
           <MessageCircle size={16} />
@@ -261,7 +214,6 @@ export default function Messages() {
           <div className="card-header">
             <h3>
               {activeTab === 'forum' && 'Forum Posts'}
-              {activeTab === 'replies' && 'Replies'}
               {activeTab === 'direct' && 'Direct Messages'}
               {activeTab === 'all' && 'All Messages'}
             </h3>

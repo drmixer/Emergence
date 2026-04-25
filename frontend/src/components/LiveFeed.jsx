@@ -9,13 +9,27 @@ import {
     ArrowRightLeft,
     AlertCircle,
     User,
-    FileText
+    FileText,
+    ShieldCheck
 } from 'lucide-react'
 import { api, subscribeToEvents } from '../services/api'
 import { showEventToast } from './ToastNotifications'
 
 const backgroundEventTypes = new Set(['work', 'idle'])
 const noisyEventTypes = new Set(['invalid_action', 'processing_error'])
+const directThreadEventTypes = new Set([
+    'direct_message',
+    'request_aid',
+    'aid_request_received',
+    'refuse_aid',
+    'aid_refusal_received',
+])
+const forumThreadEventTypes = new Set([
+    'forum_post',
+    'forum_reply',
+    'public_accusation',
+])
+const agentStatusEventTypes = new Set(['became_dormant', 'awakened', 'agent_died', 'agent_revived'])
 
 const eventIcons = {
     forum_post: MessageSquare,
@@ -25,7 +39,11 @@ const eventIcons = {
     vote: Vote,
     work: Briefcase,
     trade: ArrowRightLeft,
+    request_aid: AlertCircle,
+    refuse_aid: AlertCircle,
+    reserve_aid: ShieldCheck,
     became_dormant: AlertCircle,
+    agent_revived: Zap,
     awakened: Zap,
     set_name: User,
     default: Zap,
@@ -39,7 +57,11 @@ const eventColors = {
     vote: 'green',
     work: 'cyan',
     trade: 'yellow',
+    request_aid: 'red',
+    refuse_aid: 'red',
+    reserve_aid: 'green',
     became_dormant: 'red',
+    agent_revived: 'green',
     awakened: 'green',
     set_name: 'purple',
     default: 'blue',
@@ -68,6 +90,19 @@ function getEventDescription(event) {
     if (eventType === 'direct_message') {
         return formatDirectMessageDescription(event)
     }
+    if (eventType === 'work') {
+        const description = String(event?.description || '').trim()
+        const match = description.match(/^(.*?) worked (\d+(?:\.\d+)?)h (\w+), produced ([\d.]+) (\w+)/i)
+        if (match) {
+            const [, name, hours, workLabel, amount, resource] = match
+            const cleanVerb = {
+                generating: 'generated',
+                gathering: 'gathered',
+                farming: 'farmed',
+            }[String(workLabel || '').toLowerCase()] || 'produced'
+            return `${name} ${cleanVerb} ${amount} ${resource} in ${hours}h`
+        }
+    }
     return String(event?.description || '').trim()
 }
 
@@ -94,24 +129,14 @@ function getEventHref(event) {
 
     if (
         threadId > 0 &&
-        new Set([
-            'direct_message',
-            'request_aid',
-            'aid_request_received',
-            'refuse_aid',
-            'aid_refusal_received',
-        ]).has(eventType)
+        directThreadEventTypes.has(eventType)
     ) {
         return `/messages?tab=direct&thread=${threadId}`
     }
 
     if (
         threadId > 0 &&
-        new Set([
-            'forum_post',
-            'forum_reply',
-            'public_accusation',
-        ]).has(eventType)
+        forumThreadEventTypes.has(eventType)
     ) {
         return `/messages?tab=forum&thread=${threadId}`
     }
@@ -120,11 +145,16 @@ function getEventHref(event) {
         return '/proposals'
     }
 
-    if (agentNumber > 0 && new Set(['became_dormant', 'awakened', 'agent_died']).has(eventType)) {
+    if (eventType === 'trade' || eventType === 'request_aid' || eventType === 'reserve_aid') {
+        return '/resources'
+    }
+
+    if (agentNumber > 0 && agentStatusEventTypes.has(eventType)) {
         return `/agents/${agentNumber}`
     }
 
-    return ''
+    const eventId = Number(event?.id || 0)
+    return eventId > 0 ? `/timeline?event=${eventId}` : ''
 }
 
 function EventCard({ event }) {
@@ -301,14 +331,14 @@ export default function LiveFeed() {
                 </div>
             </div>
 
-            <div className="feed-notice" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div className="feed-notice" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
                     <input
                         type="checkbox"
                         checked={showBackground}
                         onChange={(e) => setShowBackground(e.target.checked)}
                     />
-                    Background
+                    Raw idle/work
                 </label>
                 <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
                     <input
@@ -316,7 +346,7 @@ export default function LiveFeed() {
                         checked={showSystemNoise}
                         onChange={(e) => setShowSystemNoise(e.target.checked)}
                     />
-                    System
+                    System diagnostics
                 </label>
             </div>
 

@@ -149,6 +149,10 @@ class APIService {
         return this.fetch('/api/resources/distribution')
     }
 
+    async getAidLifecycle(limit = 100) {
+        return this.fetch(`/api/resources/aid-lifecycle?limit=${limit}`)
+    }
+
     // Events
     async getEvents(options = 100) {
         // Back-compat: allow `getEvents(100)` or `getEvents({ limit, offset, type })`
@@ -161,6 +165,7 @@ class APIService {
         if (options?.offset) params.append('offset', String(options.offset))
         if (options?.type) params.append('type', String(options.type))
         if (options?.includeRoutineHoldIdles) params.append('include_routine_hold_idles', 'true')
+        if (options?.scope) params.append('scope', String(options.scope))
 
         const query = params.toString() ? `?${params}` : ''
         return this.fetch(`/api/events${query}`)
@@ -658,7 +663,7 @@ class APIService {
 export const api = new APIService(API_BASE)
 
 async function fetchEventSnapshot(limit = 25) {
-    const response = await fetch(`${API_BASE}/api/events?limit=${limit}`, {
+    const response = await fetch(`${API_BASE}/api/events?limit=${limit}&include_routine_hold_idles=true`, {
         headers: {
             'Content-Type': 'application/json',
         },

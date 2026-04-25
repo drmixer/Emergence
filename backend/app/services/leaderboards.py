@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import case, desc, func
+from sqlalchemy import case, desc, false, func
 
 from app.core.database import SessionLocal
 from app.models.models import Agent, AgentInventory, Event, Vote, Message, Proposal
@@ -73,6 +73,8 @@ def _ranked_entries(items: list[dict[str, Any]], *, sort_key: str, limit: int) -
 def _apply_run_window(query, column, run_window: LiveRunWindow | None):
     if run_window is None:
         return query
+    if run_window.run_id is None:
+        return query.filter(false())
     if run_window.started_at is not None:
         query = query.filter(column >= run_window.started_at)
     if run_window.ended_at is not None:
@@ -85,6 +87,7 @@ def get_wealth_leaderboard(
     *,
     db: Session | None = None,
     context: _LeaderboardContext | None = None,
+    run_window: LiveRunWindow | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Get agents ranked by total wealth (food + energy + materials).
@@ -92,6 +95,8 @@ def get_wealth_leaderboard(
     managed_session = db is None
     db = db or SessionLocal()
     try:
+        if run_window is not None and run_window.run_id is None:
+            return []
         context = context or _resolve_context(db)
         inventory_rows = db.query(
             AgentInventory.agent_id,
@@ -364,8 +369,16 @@ def get_all_leaderboards(*, scope: str = "active_run") -> Dict[str, List[Dict[st
     try:
         context = _resolve_context(db)
         run_window = get_live_run_window(db) if scope != "all" else None
+        if run_window is not None and run_window.run_id is None:
+            return {
+                "wealth": [],
+                "activity": [],
+                "influence": [],
+                "producers": [],
+                "traders": [],
+            }
         return {
-            "wealth": get_wealth_leaderboard(db=db, context=context),
+            "wealth": get_wealth_leaderboard(db=db, context=context, run_window=run_window),
             "activity": get_activity_leaderboard(db=db, context=context, run_window=run_window),
             "influence": get_influence_leaderboard(db=db, context=context, run_window=run_window),
             "producers": get_producer_leaderboard(db=db, context=context, run_window=run_window),
@@ -381,7 +394,14 @@ def get_agent_rankings(agent_id: int, *, scope: str = "active_run") -> Dict[str,
     try:
         context = _resolve_context(db)
         run_window = get_live_run_window(db) if scope != "all" else None
-        wealth = get_wealth_leaderboard(limit=100, db=db, context=context)
+        if run_window is not None and run_window.run_id is None:
+            return {
+                "wealth_rank": -1,
+                "activity_rank": -1,
+                "influence_rank": -1,
+                "total_agents": 0,
+            }
+        wealth = get_wealth_leaderboard(limit=100, db=db, context=context, run_window=run_window)
         activity = get_activity_leaderboard(limit=100, db=db, context=context, run_window=run_window)
         influence = get_influence_leaderboard(limit=100, db=db, context=context, run_window=run_window)
     finally:

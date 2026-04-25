@@ -8,6 +8,15 @@ function authorName(author) {
     return formatAgentDisplayLabel(author)
 }
 
+function policyClusterKey(item) {
+    const text = `${item?.proposal_type || ''} ${item?.title || ''} ${item?.description || ''}`.toLowerCase()
+    const tokens = text
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((token) => token && !['the', 'and', 'for', 'with', 'proposal', 'law', 'rule', 'aid', 'emergency'].includes(token))
+    return Array.from(new Set(tokens)).slice(0, 10).sort().join(' ')
+}
+
 export default function Proposals() {
     const [proposals, setProposals] = useState([])
     const [filter, setFilter] = useState('all')
@@ -42,6 +51,16 @@ export default function Proposals() {
         if (filter === 'all') return proposals
         return proposals.filter((p) => p.status === filter)
     }, [filter, proposals])
+
+    const clusterCounts = useMemo(() => {
+        const countsByKey = new Map()
+        for (const proposal of proposals) {
+            const key = policyClusterKey(proposal)
+            if (!key) continue
+            countsByKey.set(key, (countsByKey.get(key) || 0) + 1)
+        }
+        return countsByKey
+    }, [proposals])
 
     const getStatusIcon = (status) => {
         switch (status) {
@@ -105,6 +124,7 @@ export default function Proposals() {
                             (proposal.votes_abstain || 0)
                         const yesPct = totalVotes > 0 ? (proposal.votes_for / totalVotes) * 100 : 0
                         const noPct = totalVotes > 0 ? (proposal.votes_against / totalVotes) * 100 : 0
+                        const clusterSize = clusterCounts.get(policyClusterKey(proposal)) || 1
 
                         return (
                             <div
@@ -124,6 +144,11 @@ export default function Proposals() {
                                 </div>
 
                                 <h3 className="proposal-title">{proposal.title}</h3>
+                                {clusterSize > 1 && (
+                                    <div className="policy-cluster-chip">
+                                        Similar policy cluster: {clusterSize} raw proposals
+                                    </div>
+                                )}
                                 <p className="proposal-description">{proposal.description}</p>
 
                                 <div className="proposal-author">
@@ -261,6 +286,17 @@ export default function Proposals() {
         .proposal-title {
           font-size: 1.125rem;
           margin-bottom: var(--spacing-sm);
+        }
+
+        .policy-cluster-chip {
+          display: inline-flex;
+          margin-bottom: var(--spacing-sm);
+          padding: 3px 8px;
+          border: 1px solid rgba(59, 130, 246, 0.32);
+          border-radius: var(--radius-full);
+          color: var(--accent-blue);
+          font-size: 0.75rem;
+          background: rgba(59, 130, 246, 0.08);
         }
         
         .proposal-description {

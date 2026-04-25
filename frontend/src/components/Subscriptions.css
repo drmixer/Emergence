@@ -154,11 +154,11 @@
 }
 
 .notification-dropdown {
-    position: absolute;
-    top: calc(100% + var(--spacing-sm));
-    right: 0;
-    width: 340px;
-    max-height: 400px;
+    position: fixed;
+    top: 68px;
+    right: 24px;
+    width: min(380px, calc(100vw - 32px));
+    max-height: min(520px, calc(100vh - 96px));
     background: rgba(15, 15, 22, 0.95);
     backdrop-filter: blur(20px);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -212,7 +212,7 @@
 }
 
 .notification-list {
-    max-height: 340px;
+    max-height: min(440px, calc(100vh - 180px));
     overflow-y: auto;
 }
 
@@ -239,6 +239,7 @@
 
 .notification-empty span {
     font-size: 0.75rem;
+    max-width: 260px;
 }
 
 .notification-item {
