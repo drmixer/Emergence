@@ -9,7 +9,7 @@ import {
     Calendar
 } from 'lucide-react'
 import { api } from '../services/api'
-import { getMomentEvidenceHref, getMomentReplayHref } from '../utils/bestMoments'
+import { getMomentEvidenceHref, getMomentReplayHref, getStoryReplayHref } from '../utils/bestMoments'
 
 // Optional text animation for recap copy.
 function useTypewriter(text, speed = 30, enabled = true, restartKey = 0) {
@@ -309,8 +309,8 @@ export default function Recap({
                 <p className="recap-minimal-text">
                     {activeRecap.summary.stake || activeRecap.summary.headline}
                 </p>
-                <Link to="/highlights" className="recap-minimal-link">
-                    Read full recap →
+                <Link to={getStoryReplayHref(runId)} className="recap-minimal-link">
+                    Open replay →
                 </Link>
             </div>
         )

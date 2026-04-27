@@ -43,6 +43,32 @@ function formatRelative(value) {
   return formatDistanceToNow(date, { addSuffix: true })
 }
 
+function getFocusedEventTitle(event) {
+  const type = String(event?.event_type || 'event').replace(/_/g, ' ')
+  return type.charAt(0).toUpperCase() + type.slice(1)
+}
+
+function getFocusedEventRows(event) {
+  const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+  const runtime = metadata?.runtime && typeof metadata.runtime === 'object' ? metadata.runtime : {}
+  const rows = [
+    ['Event ID', event?.id],
+    ['Type', String(event?.event_type || '').replace(/_/g, ' ')],
+    ['Created', formatTimestamp(event?.created_at)],
+  ]
+  if (event?.agent_number) rows.push(['Agent', `#${event.agent_number}`])
+  if (runtime?.run_id) rows.push(['Run', runtime.run_id])
+  if (metadata?.status) rows.push(['Status', metadata.status])
+  if (metadata?.draft_id) rows.push(['Draft ID', metadata.draft_id])
+  if (metadata?.message_id) rows.push(['Source Message', metadata.message_id])
+  return rows.filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '')
+}
+
+function getFocusedEventQuote(event) {
+  const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+  return String(metadata.quote_text || '').trim()
+}
+
 const verificationStyles = {
   verified: {
     label: 'Verified',
@@ -66,6 +92,8 @@ export default function RunDetail() {
   const [searchParams] = useSearchParams()
   const requestedEventId = Number(searchParams.get('event') || 0)
   const [data, setData] = useState(null)
+  const [focusedEvent, setFocusedEvent] = useState(null)
+  const [focusedEventError, setFocusedEventError] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [shareNotice, setShareNotice] = useState('')
@@ -98,6 +126,32 @@ export default function RunDetail() {
       cancelled = true
     }
   }, [runId])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadFocusedEvent() {
+      setFocusedEvent(null)
+      setFocusedEventError('')
+      if (!requestedEventId || requestedEventId <= 0) return
+
+      try {
+        const payload = await api.getEvent(requestedEventId)
+        if (!cancelled) {
+          setFocusedEvent(payload && typeof payload === 'object' ? payload : null)
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setFocusedEventError(loadError?.message || 'Focused event could not be loaded.')
+        }
+      }
+    }
+
+    loadFocusedEvent()
+    return () => {
+      cancelled = true
+    }
+  }, [requestedEventId])
 
   useEffect(() => {
     if (loading || error || !data) return
@@ -273,12 +327,10 @@ export default function RunDetail() {
       <div className="page-header">
         <h1>
           <ShieldCheck size={30} />
-          Run Detail
+          Run Evidence
         </h1>
         <p className="page-description">
-          Public metrics and evidence traces for a specific simulation
-          {' '}
-          <GlossaryTooltip termKey="run">run</GlossaryTooltip>.
+          Public metrics, provenance, and source traces for a specific simulation <GlossaryTooltip termKey="run">run</GlossaryTooltip>.
         </p>
       </div>
 
@@ -289,7 +341,7 @@ export default function RunDetail() {
         </div>
         <div className="run-topbar-actions">
           <Link className="btn btn-secondary" to={getStoryReplayHref(runId)}>
-            Replay Story
+            Replay
           </Link>
           <Link className="btn btn-secondary" to={getTimelineReplayHref(runId)}>
             Replay Timeline
@@ -301,8 +353,8 @@ export default function RunDetail() {
           <button type="button" className="btn btn-secondary run-share-btn" onClick={copyRunOgUrl}>
             Copy Run OG URL
           </button>
-          <Link className="btn btn-secondary" to="/highlights">
-            Back to Highlights
+          <Link className="btn btn-secondary" to="/archive">
+            Back to Archive
           </Link>
         </div>
       </div>
@@ -310,6 +362,7 @@ export default function RunDetail() {
       {loading && <div className="empty-state">Loading run detail...</div>}
       {!loading && error && <div className="feed-notice">{error}</div>}
       {shareNotice && <div className="feed-notice success">{shareNotice}</div>}
+      {focusedEventError && <div className="feed-notice">{focusedEventError}</div>}
       {!loading && !error && isTuningRun && (
         <div className="feed-notice">
           This run is labeled as a tuning run and is excluded from the public archived-run history by default.
@@ -380,6 +433,39 @@ export default function RunDetail() {
             </div>
           </div>
 
+          {focusedEvent && (
+            <div className="card focused-event-card" id={`event-${focusedEvent.id}`}>
+              <div className="card-header">
+                <h3>{getFocusedEventTitle(focusedEvent)}</h3>
+                <span className="strip-meta">Focused event #{focusedEvent.id}</span>
+              </div>
+              <div className="card-body">
+                <p className="focused-event-description">{focusedEvent.description}</p>
+                {getFocusedEventQuote(focusedEvent) && (
+                  <blockquote className="focused-event-quote">
+                    {getFocusedEventQuote(focusedEvent)}
+                  </blockquote>
+                )}
+                <div className="focused-event-grid">
+                  {getFocusedEventRows(focusedEvent).map(([label, value]) => (
+                    <div key={label}>
+                      <span>{label}</span>
+                      <strong>{String(value)}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div className="focused-event-actions">
+                  <a href={`/api/events/${focusedEvent.id}`} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
+                    Event API <ExternalLink size={14} />
+                  </a>
+                  <Link to={`/timeline?event=${focusedEvent.id}`} className="btn btn-secondary">
+                    Raw Event Log
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="card">
             <div className="card-header">
               <h3>Run Activity</h3>
@@ -422,7 +508,7 @@ export default function RunDetail() {
                         Event API <ExternalLink size={14} />
                       </a>
                       <Link to={`/timeline?event=${trace.event_id}`} className="btn btn-secondary">
-                        Open Timeline
+                        Raw Event Log
                       </Link>
                       <button type="button" className="btn btn-secondary" onClick={() => shareMoment(trace.event_id)}>
                         <Share2 size={14} />

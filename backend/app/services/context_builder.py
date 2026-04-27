@@ -1,6 +1,7 @@
 """
 Context Builder - Builds the prompt context for agent decisions.
 """
+from collections import Counter
 from datetime import timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
@@ -21,6 +22,7 @@ from app.services.survival_config import (
     dormant_food_cost,
     low_resource_warning_threshold,
     reserve_active_aid_enabled,
+    reserve_auto_contribution_enabled,
     reserve_auto_revive_enabled,
     reserve_dormant_maintenance_enabled,
 )
@@ -687,6 +689,118 @@ def _strategic_autonomy_guidance(
     return guidance
 
 
+def _personality_attention_guidance(agent: Agent) -> list[str]:
+    personality = str(agent.personality_type or "neutral").strip().lower()
+    guidance_by_personality = {
+        "efficiency": [
+            "Efficiency lens: notice bottlenecks, waste, timing, quantities, and whether an action measurably changes survival odds.",
+            "Communication style: concise, numeric, specific about costs, deficits, production, or execution steps.",
+        ],
+        "equality": [
+            "Equality lens: notice uneven risk, neglected agents, burden sharing, and who receives help versus who pays.",
+            "Communication style: concrete about affected agents, fairness tests, distribution, and mutual obligation.",
+        ],
+        "freedom": [
+            "Freedom lens: notice coercion, opt-out problems, overcentralized authority, and voluntary alternatives.",
+            "Communication style: explicit about autonomy costs, consent, amendments, and less coercive mechanisms.",
+        ],
+        "stability": [
+            "Stability lens: notice enforceability, continuity, unresolved procedure, trust, and whether rules will survive future pressure.",
+            "Communication style: procedural, evidence-linked, and clear about implementation or verification steps.",
+        ],
+        "neutral": [
+            "Neutral lens: notice tradeoffs, missing information, bridging options, and where a question or summary can clarify the choice.",
+            "Communication style: balanced, specific, and useful to agents who disagree.",
+        ],
+    }
+    return guidance_by_personality.get(personality, guidance_by_personality["neutral"])
+
+
+def _soft_action_type_prior_guidance(
+    db: Session,
+    agent: Agent,
+    *,
+    recent_events: list[Event],
+    active_proposals: list[Proposal],
+    incoming_aid_request_inbox: list[dict],
+    direct_conversations: list[dict],
+    recent_social_pressure: list[Event],
+    total_dormant: int,
+    starving_agents: list[Agent],
+    food: float,
+    energy: float,
+    critical_food: float,
+    critical_energy: float,
+) -> list[str]:
+    """Prompt-only attention priors. These do not alter allowed actions."""
+    action_counts = Counter(str(event.event_type or "").strip() for event in recent_events)
+    lines = [
+        "These are prompt-only attention priors, not rules: choose a different valid action if the current evidence supports it.",
+    ]
+    if action_counts:
+        summarized = ", ".join(
+            f"{event_type}={count}"
+            for event_type, count in sorted(action_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+        )
+        lines.append(f"Recent self action mix sample: {summarized}.")
+
+    repeated_public_actions = [
+        event_type
+        for event_type in ("create_proposal", "forum_post")
+        if int(action_counts.get(event_type, 0)) >= 2
+    ]
+    if repeated_public_actions:
+        lines.append(
+            "Because your recent public actions already include repeated "
+            + "/".join(repeated_public_actions)
+            + ", prefer vote, contest_proposal, forum_reply, trade, request_aid/refuse_aid, or direct_message unless a new public item adds concrete new evidence."
+        )
+
+    unvoted_active_count = 0
+    for proposal in active_proposals:
+        has_vote = (
+            db.query(Vote)
+            .filter(Vote.proposal_id == proposal.id, Vote.agent_id == agent.id)
+            .first()
+        )
+        if has_vote is None:
+            unvoted_active_count += 1
+    if unvoted_active_count > 0:
+        lines.append(
+            f"{unvoted_active_count} active proposals are still awaiting your vote; voting or contesting is often higher signal than opening another broad proposal."
+        )
+
+    if incoming_aid_request_inbox:
+        lines.append(
+            "Incoming aid requests are pending; trade, refuse_aid, or a direct response should usually be considered before unrelated broadcast actions."
+        )
+    if direct_conversations or recent_social_pressure:
+        lines.append(
+            "Recent direct conversation or social pressure is visible; reply, direct_message, trade, refuse_aid, or contest_proposal may carry more continuity than a generic new post."
+        )
+    if food < critical_food or energy < critical_energy:
+        lines.append(
+            "You are below active survival cost; work, trade, or request_aid should stay high in your attention unless a social action directly improves survival odds."
+        )
+    elif total_dormant > 0 or starving_agents:
+        lines.append(
+            "Dormancy pressure is visible; targeted aid, trade, specific policy work, or a concise coordination reply may be more useful than another general statement."
+        )
+
+    personality = str(agent.personality_type or "neutral").strip().lower()
+    if personality == "efficiency":
+        lines.append("Efficiency prior: favor actions with concrete quantities, execution steps, or measurable bottleneck relief.")
+    elif personality == "equality":
+        lines.append("Equality prior: favor actions that name affected agents, burden sharing, or concrete aid criteria.")
+    elif personality == "freedom":
+        lines.append("Freedom prior: favor consent, opt-out, contest_proposal, or voluntary trade/direct coordination when coercion is at stake.")
+    elif personality == "stability":
+        lines.append("Stability prior: favor vote, enforcement clarity, procedural replies, or specific implementation details.")
+    else:
+        lines.append("Neutral prior: favor the action that closes the clearest information gap or bridges an unresolved disagreement.")
+    return lines
+
+
 async def build_agent_context(db: Session, agent: Agent) -> str:
     """Build the context prompt for an agent's decision."""
     now = now_utc()
@@ -879,9 +993,14 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             "Active laws are part of the live world state. You may adapt your behavior, discuss them, propose changes, or cite a law_id in enforcement if you think someone is violating one."
         )
     if survival_reserve_law_active:
-        proposal_hooks.append(
-            "A survival-reserve law is active: some food and energy work output now goes into the shared reserve automatically."
-        )
+        if reserve_auto_contribution_enabled():
+            proposal_hooks.append(
+                "A survival-reserve law is active and automatic contributions are enabled: some food and energy work output now goes into the shared reserve."
+            )
+        else:
+            proposal_hooks.append(
+                "A survival-reserve law is active, but automatic contributions are disabled for this run; reserve policy still depends on direct aid, trade, voting, enforcement, or explicit runtime-enabled mechanics."
+            )
         if starving_agents:
             proposal_hooks.append(
                 "The shared reserve is now part of survival politics: if it runs low while agents are starving, conflict over aid or production priorities may follow."
@@ -900,6 +1019,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append(f"- Agent ID: #{agent.agent_number}")
     context_parts.append(f"- Display Name: {display_name}")
     context_parts.append(f"- Status: {agent.status}")
+    context_parts.append(f"- Personality Lens: {agent.personality_type or 'neutral'}")
     context_parts.append(f"- Resources: Food: {inventory_dict.get('food', 0):.1f}, "
                         f"Energy: {inventory_dict.get('energy', 0):.1f}, "
                         f"Materials: {inventory_dict.get('materials', 0):.1f}")
@@ -1021,6 +1141,23 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append("  (No recent threads)")
     context_parts.append("")
 
+    context_parts.append("EXPRESSION AND DUPLICATE AWARENESS:")
+    context_parts.append(
+        "  - Your personality lens affects what you notice first and how you communicate; it does not require any political conclusion or preferred outcome."
+    )
+    for line in _personality_attention_guidance(agent):
+        context_parts.append(f"  - {line}")
+    context_parts.append(
+        "  - If recent forum/proposal context already contains your main point, prefer a direct reply, vote, contest_proposal, trade, request_aid/refuse_aid, direct_message, or a genuinely distinct proposal over repeating it."
+    )
+    context_parts.append(
+        "  - Start public messages with the concrete observation, name, amount, proposal/law id, trade offer, objection, or question. Generic greetings and self-introductions are usually wasted space unless they add new information."
+    )
+    context_parts.append(
+        "  - A new forum_post or create_proposal should add a specific new fact, target, mechanism, tradeoff, or unanswered question."
+    )
+    context_parts.append("")
+
     if recent_system_alerts:
         context_parts.append(f"RECENT SYSTEM ALERTS ({len(recent_system_alerts)} shown):")
         for alert in reversed(recent_system_alerts):
@@ -1140,6 +1277,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  Proposals are how discussion becomes a vote or a durable shared change.")
     context_parts.append("  Use create_proposal when you want collective action on resources, rules, infrastructure, or governance.")
     context_parts.append('  Important: if you want a passed proposal to become an actual law, use proposal_type "law".')
+    context_parts.append("  Passing a law changes policy, coordination, and enforcement context; it does not automatically override run-condition mechanics such as reserve auto-aid, dormant maintenance, or auto-revival unless those effects are enabled for this run.")
     context_parts.append('  Use proposal_type "rule" for coordination norms or priorities that are not meant to become a formal law.')
     context_parts.append("  Proposal type guide:")
     context_parts.append('  - Use "law" for recurring obligations, reserve systems, ongoing aid rules, or anything you want enforced as a durable part of the world.')
@@ -1150,10 +1288,10 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             context_parts.append(f"  - {hook}")
     else:
         context_parts.append("  - If you want the group to formally choose something, create a proposal.")
-    context_parts.append('  Law example: {"action":"create_proposal","title":"Emergency Aid Law","description":"Require the community to maintain and use a shared reserve to support dormant agents at risk of death.","proposal_type":"law"}')
-    context_parts.append('  Law example: {"action":"create_proposal","title":"Shared Survival Reserve Law","description":"Require part of future food and energy production to enter the shared reserve and allow reserve support for agents who cannot meet survival costs.","proposal_type":"law"}')
-    context_parts.append('  Allocation example: {"action":"create_proposal","title":"Emergency Aid for Dormant Agents","description":"Allocate shared food and energy to dormant agents at risk so they can return to active status.","proposal_type":"allocation"}')
-    context_parts.append('  Rule example: {"action":"create_proposal","title":"Shared Survival Reserve","description":"Reserve part of future production to help agents facing dormancy or death.","proposal_type":"rule"}')
+    context_parts.append('  Law example: {"action":"create_proposal","title":"Targeted Survival Aid Rule","description":"Define when agents at verified survival risk should receive coordinated aid and who is responsible for follow-through.","proposal_type":"law"}')
+    context_parts.append('  Law example: {"action":"create_proposal","title":"Reserve Access Verification Policy","description":"Create a transparent process for checking whether shared-reserve support is available under current run conditions before agents depend on it.","proposal_type":"law"}')
+    context_parts.append('  Allocation example: {"action":"create_proposal","title":"Immediate Recovery Allocation","description":"Allocate shared food and energy to named dormant agents whose current deficits are known.","proposal_type":"allocation"}')
+    context_parts.append('  Rule example: {"action":"create_proposal","title":"Voluntary Aid Priority Norm","description":"Ask agents with surplus to prioritize verified survival deficits before stockpiling further.","proposal_type":"rule"}')
     context_parts.append('  Infrastructure example: {"action":"create_proposal","title":"Build Shared Storage","description":"Coordinate materials and labor to build shared storage for survival resources.","proposal_type":"infrastructure"}')
     context_parts.append("")
     
@@ -1249,7 +1387,10 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         f"- Food: {common_pool.get('food', 0.0):.1f} | Energy: {common_pool.get('energy', 0.0):.1f} | Materials: {common_pool.get('materials', 0.0):.1f}"
     )
     if survival_reserve_law_active:
-        context_parts.append("- Active reserve law effect: reserve contributions are energy-biased. Normally 10% of food and 25% of energy work output go to the shared reserve; when reserve energy runs low, food contribution drops and energy contribution rises.")
+        if reserve_auto_contribution_enabled():
+            context_parts.append("- Reserve contribution effect: automatic reserve contributions are enabled. Normally 10% of food and 25% of energy work output go to the shared reserve; when reserve energy runs low, food contribution drops and energy contribution rises.")
+        else:
+            context_parts.append("- Reserve contribution effect: automatic reserve contributions are disabled for this run. A reserve law may still be discussed or enforced socially, but work output is not automatically diverted to the common pool.")
         reserve_notes = []
         if reserve_active_aid_enabled():
             reserve_notes.append("active agents may draw exact deficits to stay active")
@@ -1260,7 +1401,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         if reserve_notes:
             context_parts.append(f"- Reserve access effect: {'; '.join(reserve_notes)}.")
         else:
-            context_parts.append("- Reserve access effect: reserve exists for collective accounting, but no automatic maintenance or revival support is currently enabled.")
+            context_parts.append("- Reserve access effect: reserve exists for collective accounting and political coordination, but no automatic active aid, dormant maintenance, or revival support is currently enabled.")
     context_parts.append("")
 
     if recent_reserve_events:
@@ -1302,6 +1443,25 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         recent_outgoing_social_actions,
         recent_proposal_alignments,
         relationship_summary,
+    ):
+        context_parts.append(f"  - {line}")
+    context_parts.append("")
+
+    context_parts.append("SOFT ACTION-TYPE PRIORS:")
+    for line in _soft_action_type_prior_guidance(
+        db,
+        agent,
+        recent_events=recent_events,
+        active_proposals=active_proposals,
+        incoming_aid_request_inbox=incoming_aid_request_inbox,
+        direct_conversations=direct_conversations,
+        recent_social_pressure=recent_social_pressure,
+        total_dormant=total_dormant,
+        starving_agents=starving_agents,
+        food=food,
+        energy=energy,
+        critical_food=critical_food,
+        critical_energy=critical_energy,
     ):
         context_parts.append(f"  - {line}")
     context_parts.append("")
@@ -1360,7 +1520,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append("")
     context_parts.append("VALID ACTION JSON EXAMPLES:")
     context_parts.append('  {"action":"vote","proposal_id":123,"vote":"yes|no|abstain"}')
-    context_parts.append('  {"action":"create_proposal","title":"Emergency Aid Law","description":"Make shared aid mandatory for at-risk agents.","proposal_type":"law"}')
+    context_parts.append('  {"action":"create_proposal","title":"Targeted Aid Standard","description":"Set a specific rule for when at-risk agents receive help and how contributors are identified.","proposal_type":"law"}')
     context_parts.append('  {"action":"create_proposal","title":"Title","description":"Description","proposal_type":"law|allocation|rule|infrastructure|constitutional|other"}')
     context_parts.append('  {"action":"forum_post","content":"Your message here"}')
     context_parts.append('  {"action":"forum_reply","parent_message_id":708,"content":"I disagree with this specific request because the reserve is too low."}')

@@ -195,10 +195,96 @@ _PROPOSAL_TITLE_STOPWORDS = {
 }
 
 
+_MESSAGE_DUPLICATE_STOPWORDS = {
+    "a",
+    "about",
+    "all",
+    "am",
+    "an",
+    "and",
+    "are",
+    "as",
+    "be",
+    "but",
+    "by",
+    "for",
+    "from",
+    "greetings",
+    "has",
+    "have",
+    "i",
+    "if",
+    "in",
+    "is",
+    "it",
+    "let",
+    "need",
+    "not",
+    "of",
+    "on",
+    "or",
+    "our",
+    "please",
+    "should",
+    "so",
+    "that",
+    "the",
+    "this",
+    "to",
+    "we",
+    "with",
+    "would",
+    "you",
+}
+
+_DUPLICATE_FORUM_LOOKBACK_HOURS = 2
+_DUPLICATE_FORUM_SAMPLE_LIMIT = 50
+_DUPLICATE_FORUM_MIN_TERMS = 8
+_DUPLICATE_FORUM_MIN_OVERLAP = 7
+_DUPLICATE_FORUM_SMALLER_RATIO = 0.68
+
+
 def _normalized_proposal_title_key(title: str | None) -> str:
     words = re.findall(r"[a-z0-9]+", str(title or "").lower())
     meaningful = [word for word in words if word not in _PROPOSAL_TITLE_STOPWORDS]
     return " ".join(meaningful)
+
+
+def _normalized_message_terms(text: str | None) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", str(text or "").lower())
+    return {
+        word
+        for word in words
+        if len(word) > 2 and word not in _MESSAGE_DUPLICATE_STOPWORDS
+    }
+
+
+def _find_near_duplicate_recent_forum_message(db: Session, agent: Agent, action: dict) -> Message | None:
+    candidate_terms = _normalized_message_terms(action.get("content"))
+    if len(candidate_terms) < _DUPLICATE_FORUM_MIN_TERMS:
+        return None
+
+    now = now_utc()
+    query = db.query(Message).filter(
+        Message.message_type.in_(["forum_post", "forum_reply"]),
+        Message.created_at > now - timedelta(hours=_DUPLICATE_FORUM_LOOKBACK_HOURS),
+        Message.author_agent_id != agent.id,
+    )
+    started_at = _active_run_started_at(db)
+    if started_at is not None:
+        query = query.filter(Message.created_at >= started_at)
+
+    for message in query.order_by(Message.created_at.desc()).limit(_DUPLICATE_FORUM_SAMPLE_LIMIT).all():
+        existing_terms = _normalized_message_terms(message.content)
+        if len(existing_terms) < _DUPLICATE_FORUM_MIN_TERMS:
+            continue
+        overlap = len(candidate_terms & existing_terms)
+        smaller = min(len(candidate_terms), len(existing_terms))
+        if overlap < _DUPLICATE_FORUM_MIN_OVERLAP:
+            continue
+        if overlap / max(1, smaller) >= _DUPLICATE_FORUM_SMALLER_RATIO:
+            return message
+    return None
 
 
 def _active_run_proposal_query(db: Session):
@@ -346,6 +432,17 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Forum post requires content"}
         if len(content) > 2000:
             return {"valid": False, "reason": "Forum post too long (max 2000 chars)"}
+        duplicate_message = _find_near_duplicate_recent_forum_message(db, agent, action)
+        if duplicate_message is not None:
+            return {
+                "valid": False,
+                "reason_code": "duplicate_forum_message",
+                "message_id": duplicate_message.id,
+                "reason": (
+                    "Near-duplicate recent forum message exists; reply to the existing "
+                    f"thread/message #{duplicate_message.id} instead of opening a new post"
+                ),
+            }
     
     elif action_type == "forum_reply":
         parent_id = action.get("parent_message_id")

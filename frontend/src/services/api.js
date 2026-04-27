@@ -116,10 +116,18 @@ class APIService {
         return this.fetch(`/api/messages/thread/${id}`)
     }
 
+    async getMessageDuplicateWaves(limit = 8) {
+        return this.fetch(`/api/messages/duplicate-waves?limit=${limit}`)
+    }
+
     // Proposals
     async getProposals(status = null) {
         const query = status ? `?status=${status}` : ''
         return this.fetch(`/api/proposals${query}`)
+    }
+
+    async getProposalDuplicateWaves(limit = 8) {
+        return this.fetch(`/api/proposals/duplicate-waves?limit=${limit}`)
     }
 
     async getProposal(id) {
@@ -169,6 +177,14 @@ class APIService {
 
         const query = params.toString() ? `?${params}` : ''
         return this.fetch(`/api/events${query}`)
+    }
+
+    async getEvent(eventId) {
+        const cleanEventId = Number(eventId || 0)
+        if (!Number.isFinite(cleanEventId) || cleanEventId <= 0) {
+            throw new Error('eventId is required')
+        }
+        return this.fetch(`/api/events/${encodeURIComponent(String(cleanEventId))}`)
     }
 
     // Analytics

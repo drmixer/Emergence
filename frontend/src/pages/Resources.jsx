@@ -2,6 +2,8 @@ import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Package, TrendingUp, TrendingDown } from 'lucide-react'
 import { api } from '../services/api'
+import NoActiveRunNotice from '../components/NoActiveRunNotice'
+import ReserveSemanticsNote from '../components/ReserveSemanticsNote'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 const ResourcesCharts = lazy(() => import('../components/ResourcesCharts'))
@@ -28,6 +30,7 @@ export default function Resources() {
     const [distribution, setDistribution] = useState(null)
     const [agents, setAgents] = useState([])
     const [aidLifecycle, setAidLifecycle] = useState(null)
+    const [scope, setScope] = useState(null)
 
     useEffect(() => {
         let cancelled = false
@@ -37,11 +40,16 @@ export default function Resources() {
             setSecondaryLoading(true)
             setError(null)
             try {
-                const res = await api.getResources()
+                const [overview, res] = await Promise.all([
+                    api.fetch('/api/analytics/overview').catch(() => null),
+                    api.getResources(),
+                ])
                 if (cancelled) return
+                setScope(overview?.scope || null)
                 setResources(res)
             } catch (e) {
                 if (cancelled) return
+                setScope(null)
                 setError(e)
             } finally {
                 if (!cancelled) {
@@ -80,7 +88,10 @@ export default function Resources() {
     }, [])
 
     const totals = resources?.totals || {}
+    const reserveSemantics = resources?.reserve_semantics || null
     const focus = String(searchParams.get('focus') || '').trim()
+    const inactiveRun = !loading && scope?.simulation_active === false
+    const lastCompletedRunId = String(scope?.last_completed_run_id || '').trim()
 
     const dailyNet = useMemo(() => {
         const series = history?.series
@@ -200,6 +211,16 @@ export default function Resources() {
                 </p>
             </div>
 
+            {inactiveRun && (
+                <NoActiveRunNotice
+                    message="Live resource totals are hidden while no run is active, so the last closed run is not presented as current inventory."
+                    lastCompletedRunId={lastCompletedRunId}
+                />
+            )}
+
+            {!inactiveRun && (
+            <>
+
             {/* Resource Stats */}
             <div className="stats-grid">
                 {['food', 'energy', 'materials'].map((resourceType) => {
@@ -230,6 +251,17 @@ export default function Resources() {
                     )
                 })}
             </div>
+
+            {reserveSemantics && (
+                <div className="card reserve-overview-card">
+                    <div className="card-header">
+                        <h3>Reserve Policy vs Mechanical Access</h3>
+                    </div>
+                    <div className="card-body">
+                        <ReserveSemanticsNote semantics={reserveSemantics} />
+                    </div>
+                </div>
+            )}
 
             {secondaryLoading ? (
                 <div className="content-grid">
@@ -442,7 +474,13 @@ export default function Resources() {
         .aid-lifecycle-row.status-reserve_covered {
           border-left: 3px solid var(--accent-blue);
         }
+
+        .reserve-overview-card {
+          margin-top: var(--spacing-lg);
+        }
       `}</style>
+            </>
+            )}
         </div>
     )
 }

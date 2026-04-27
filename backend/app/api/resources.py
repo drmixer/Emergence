@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.models import Agent, AgentInventory, Event, GlobalResources, Transaction
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
+from app.services.reserve_semantics import reserve_policy_access_payload
 
 router = APIRouter()
 
@@ -82,6 +83,7 @@ def get_resources(
         return {
             "totals": {r: 0.0 for r in RESOURCE_TYPES},
             "common_pool": {r: 0.0 for r in RESOURCE_TYPES},
+            "reserve_semantics": reserve_policy_access_payload(db),
             "agent_count": 0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "scope": "inactive",
@@ -105,6 +107,7 @@ def get_resources(
     return {
         "totals": totals,
         "common_pool": common_pool,
+        "reserve_semantics": reserve_policy_access_payload(db),
         "agent_count": db.query(Agent).count(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "scope": "all" if scope == "all" else "active_run",

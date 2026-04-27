@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Scale, Check, X } from 'lucide-react'
 import { api } from '../services/api'
+import ReserveSemanticsNote from '../components/ReserveSemanticsNote'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 function authorName(author) {
@@ -125,6 +126,7 @@ export default function Laws() {
                                     </div>
                                 )}
                                 <p className="law-description">{law.description}</p>
+                                <ReserveSemanticsNote semantics={law.reserve_semantics} compact />
                                 <div className="law-meta">
                                     <span>
                                         Proposed by <strong>{authorName(law.author)}</strong>

@@ -1,6 +1,6 @@
 // Agent Subscriptions - Follow agents for updates
-import { useState, useEffect, useCallback, createContext, useContext } from 'react'
-import { Bell, BellOff, BellRing, Check, X, Star } from 'lucide-react'
+import { useState, useEffect, useCallback, createContext, useContext, useLayoutEffect, useMemo, useRef } from 'react'
+import { Activity, Bell, BellOff, BellRing, MessageCircle, ScrollText, Star, Vote, X, Zap } from 'lucide-react'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 // LocalStorage key for subscriptions
@@ -8,6 +8,30 @@ const STORAGE_KEY = 'emergence_subscriptions'
 
 // Subscription Context for global state
 const SubscriptionContext = createContext(null)
+
+const NOTIFICATION_CATEGORIES = {
+    all: { label: 'All' },
+    message: { label: 'Messages', types: ['message'], Icon: MessageCircle },
+    governance: { label: 'Governance', types: ['proposal', 'vote'], Icon: Vote },
+    status: { label: 'Status', types: ['dormant', 'awakened', 'agent_revived'], Icon: Activity },
+}
+
+function notificationCategory(type) {
+    const cleanType = String(type || '').trim()
+    if (cleanType === 'proposal' || cleanType === 'vote') return 'governance'
+    if (cleanType === 'dormant' || cleanType === 'awakened' || cleanType === 'agent_revived') return 'status'
+    if (cleanType === 'message') return 'message'
+    return 'all'
+}
+
+function NotificationTypeIcon({ type }) {
+    if (type === 'message') return <MessageCircle size={16} />
+    if (type === 'proposal') return <ScrollText size={16} />
+    if (type === 'vote') return <Vote size={16} />
+    if (type === 'dormant') return <Activity size={16} />
+    if (type === 'awakened' || type === 'agent_revived') return <Zap size={16} />
+    return <Bell size={16} />
+}
 
 // Get subscriptions from localStorage
 function getStoredSubscriptions() {
@@ -189,14 +213,58 @@ export function SubscribeButton({ agent, size = 'medium', showLabel = true }) {
 export function NotificationBell() {
     const { notifications, unreadCount, markAsRead, markAllAsRead } = useSubscriptions()
     const [isOpen, setIsOpen] = useState(false)
+    const [activeCategory, setActiveCategory] = useState('all')
+    const [dropdownStyle, setDropdownStyle] = useState(null)
+    const buttonRef = useRef(null)
 
     const toggleDropdown = () => setIsOpen(!isOpen)
+
+    useLayoutEffect(() => {
+        if (!isOpen || !buttonRef.current) return
+
+        const updatePosition = () => {
+            const rect = buttonRef.current.getBoundingClientRect()
+            const margin = 12
+            const width = Math.min(400, window.innerWidth - margin * 2)
+            const preferredLeft = rect.right - width
+            const left = Math.max(margin, Math.min(preferredLeft, window.innerWidth - width - margin))
+            const maxTop = Math.max(margin, window.innerHeight - 96)
+            const top = Math.min(rect.bottom + 10, maxTop)
+            setDropdownStyle({ top, left, width })
+        }
+
+        updatePosition()
+        window.addEventListener('resize', updatePosition)
+        window.addEventListener('scroll', updatePosition, true)
+        return () => {
+            window.removeEventListener('resize', updatePosition)
+            window.removeEventListener('scroll', updatePosition, true)
+        }
+    }, [isOpen])
+
+    const categoryCounts = useMemo(() => {
+        const counts = { all: notifications.length, message: 0, governance: 0, status: 0 }
+        for (const notification of notifications) {
+            const category = notificationCategory(notification.type)
+            if (counts[category] !== undefined) counts[category] += 1
+        }
+        return counts
+    }, [notifications])
+
+    const visibleNotifications = useMemo(() => {
+        if (activeCategory === 'all') return notifications
+        const allowedTypes = NOTIFICATION_CATEGORIES[activeCategory]?.types || []
+        return notifications.filter((notification) => allowedTypes.includes(String(notification.type || '')))
+    }, [activeCategory, notifications])
 
     return (
         <div className="notification-bell-wrapper">
             <button
+                ref={buttonRef}
                 className={`notification-bell ${unreadCount > 0 ? 'has-unread' : ''}`}
                 onClick={toggleDropdown}
+                aria-label="Open watchlist notifications"
+                aria-expanded={isOpen}
             >
                 {unreadCount > 0 ? <BellRing size={20} /> : <Bell size={20} />}
                 {unreadCount > 0 && (
@@ -207,9 +275,12 @@ export function NotificationBell() {
             {isOpen && (
                 <>
                     <div className="notification-overlay" onClick={() => setIsOpen(false)} />
-                    <div className="notification-dropdown">
+                    <div className="notification-dropdown" style={dropdownStyle || undefined}>
                         <div className="notification-header">
-                            <h4>Followed Agent Alerts</h4>
+                            <div>
+                                <h4>Watchlist Alerts</h4>
+                                <span>In-app updates for followed agents</span>
+                            </div>
                             {notifications.length > 0 && (
                                 <button onClick={markAllAsRead} className="mark-all-read">
                                     Mark all read
@@ -217,29 +288,51 @@ export function NotificationBell() {
                             )}
                         </div>
 
+                        <div className="notification-category-tabs">
+                            {Object.entries(NOTIFICATION_CATEGORIES).map(([key, config]) => {
+                                const Icon = config.Icon
+                                return (
+                                    <button
+                                        key={key}
+                                        type="button"
+                                        className={`notification-category-tab ${activeCategory === key ? 'active' : ''}`}
+                                        onClick={() => setActiveCategory(key)}
+                                    >
+                                        {Icon && <Icon size={13} />}
+                                        <span>{config.label}</span>
+                                        <strong>{categoryCounts[key] || 0}</strong>
+                                    </button>
+                                )
+                            })}
+                        </div>
+
                         <div className="notification-list">
                             {notifications.length === 0 ? (
                                 <div className="notification-empty">
                                     <Bell size={24} />
                                     <p>No notifications yet</p>
-                                    <span>Alerts appear here for followed-agent messages, proposals, votes, dormancy, and revivals.</span>
+                                    <span>Follow agents to receive in-app alerts for messages, governance actions, dormancy, and revivals.</span>
+                                </div>
+                            ) : visibleNotifications.length === 0 ? (
+                                <div className="notification-empty">
+                                    <Bell size={24} />
+                                    <p>No {NOTIFICATION_CATEGORIES[activeCategory]?.label.toLowerCase()} alerts</p>
+                                    <span>Other watchlist categories may still have unread items.</span>
                                 </div>
                             ) : (
-                                notifications.slice(0, 10).map(notification => (
+                                visibleNotifications.slice(0, 10).map(notification => (
                                     <div
                                         key={notification.id}
                                         className={`notification-item ${notification.read ? 'read' : 'unread'}`}
                                         onClick={() => markAsRead(notification.id)}
                                     >
-                                        <div className="notification-icon">
-                                            {notification.type === 'message' && <span>💬</span>}
-                                            {notification.type === 'proposal' && <span>📋</span>}
-                                            {notification.type === 'vote' && <span>🗳️</span>}
-                                            {notification.type === 'dormant' && <span>💀</span>}
-                                            {notification.type === 'awakened' && <span>✨</span>}
-                                            {!notification.type && <span>📢</span>}
+                                        <div className={`notification-icon category-${notificationCategory(notification.type)}`}>
+                                            <NotificationTypeIcon type={notification.type} />
                                         </div>
                                         <div className="notification-content">
+                                            <span className="notification-category-label">
+                                                {NOTIFICATION_CATEGORIES[notificationCategory(notification.type)]?.label || 'Alert'}
+                                            </span>
                                             <span className="notification-title">{notification.title}</span>
                                             <span className="notification-text">{notification.text}</span>
                                         </div>
@@ -247,6 +340,9 @@ export function NotificationBell() {
                                     </div>
                                 ))
                             )}
+                        </div>
+                        <div className="notification-footer">
+                            Watchlist alerts are local in-app notifications, not browser push.
                         </div>
                     </div>
                 </>
@@ -363,10 +459,11 @@ export function useSubscriptionEvents(eventSource) {
                             }
                             break
                         case 'awakened':
+                        case 'agent_revived':
                             notification = {
                                 agent_number: agentNumber,
-                                type: 'awakened',
-                                title: `${agentLabel} awakened!`,
+                                type: data.event_type || data.type,
+                                title: `${agentLabel} revived`,
                                 text: 'They are back in action'
                             }
                             break

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.database import get_db
 from app.models.models import Proposal, Vote, Agent
+from app.services.duplicate_waves import collect_duplicate_waves
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 
 router = APIRouter()
@@ -122,6 +123,23 @@ def list_proposals(
         )
 
     return results
+
+
+@router.get("/duplicate-waves")
+def list_proposal_duplicate_waves(
+    limit: int = Query(8, ge=1, le=50),
+    scope: str = Query("active_run", description="active_run|all"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Cluster repeated proposal waves for viewer diagnostics."""
+    run_window = get_live_run_window(db) if scope != "all" else None
+    return collect_duplicate_waves(
+        db,
+        run_window=run_window,
+        sources=("proposal",),
+        min_cluster_size=2,
+        limit=limit,
+    )
 
 
 @router.get("/{proposal_id}", response_model=ProposalDetailResponse)

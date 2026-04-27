@@ -20,6 +20,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import { resolveApiBase } from '../services/api'
 import GlossaryTooltip from '../components/GlossaryTooltip'
+import NoActiveRunNotice from '../components/NoActiveRunNotice'
 
 // API base URL
 const API_BASE = resolveApiBase()
@@ -76,6 +77,7 @@ export default function Predictions() {
     const [betError, setBetError] = useState(null)
     const [betSuccess, setBetSuccess] = useState(null)
     const [loading, setLoading] = useState(true)
+    const [scope, setScope] = useState(null)
 
     // Fetch data on mount
     useEffect(() => {
@@ -85,16 +87,19 @@ export default function Predictions() {
     const loadData = async () => {
         setLoading(true)
         try {
-            const [marketsData, leaderboardData, me] = await Promise.all([
+            const [overview, marketsData, leaderboardData, me] = await Promise.all([
+                fetchJson('/api/analytics/overview').catch(() => null),
                 fetchJson('/api/predictions/markets'),
                 fetchJson('/api/predictions/leaderboard'),
                 fetchJson('/api/predictions/me', { credentials: 'include' }).catch(() => null),
             ])
 
+            setScope(overview?.scope || null)
             setMarkets(Array.isArray(marketsData) ? marketsData : [])
             setLeaderboard(Array.isArray(leaderboardData) ? leaderboardData : [])
             if (me) setUserStats(me)
         } catch (_error) {
+            setScope(null)
             setMarkets([])
             setLeaderboard([])
         } finally {
@@ -107,8 +112,17 @@ export default function Predictions() {
         if (activeTab === 'resolved') return m.status === 'resolved'
         return true
     })
+    const inactiveRun = !loading && scope?.simulation_active === false
+    const lastCompletedRunId = String(scope?.last_completed_run_id || '').trim()
+
+    useEffect(() => {
+        if (inactiveRun && activeTab === 'open') {
+            setActiveTab('resolved')
+        }
+    }, [activeTab, inactiveRun])
 
     const openBetModal = (market) => {
+        if (inactiveRun) return
         setSelectedMarket(market)
         setBetAmount(10)
         setBetPrediction(null)
@@ -183,16 +197,27 @@ export default function Predictions() {
                 </p>
             </div>
 
+            {inactiveRun && (
+                <NoActiveRunNotice
+                    message="Prediction markets are closed while no run is active, so old markets cannot accept new picks."
+                    lastCompletedRunId={lastCompletedRunId}
+                />
+            )}
+
             <div className="prediction-intro">
                 <div>
-                    <strong>Come back when these settle.</strong>
-                    <p>Each live hook resolves from public run evidence after the clock runs out: law passes, reserve shortfalls, deaths, and <GlossaryTooltip termKey="at-risk">at-risk</GlossaryTooltip> agent survival.</p>
+                    <strong>{inactiveRun ? 'Markets are paused between runs.' : 'Come back when these settle.'}</strong>
+                    <p>
+                        {inactiveRun
+                            ? 'Resolved markets remain available for review. New prediction hooks open when the next simulation starts.'
+                            : <>Each live hook resolves from public run evidence after the clock runs out: law passes, reserve shortfalls, deaths, and <GlossaryTooltip termKey="at-risk">at-risk</GlossaryTooltip> agent survival.</>}
+                    </p>
                 </div>
                 <span className="prediction-intro-note">Virtual EP only. No effect on agent incentives.</span>
             </div>
 
             {/* User Stats Bar */}
-            <div className="user-stats-bar">
+            {!inactiveRun && <div className="user-stats-bar">
                 <div className="stat-item balance">
                     <Coins size={20} className="stat-icon" />
                     <div className="stat-content">
@@ -230,7 +255,7 @@ export default function Predictions() {
                         </div>
                     </div>
                 )}
-            </div>
+            </div>}
 
             <div className="predictions-layout">
                 {/* Markets Section */}
@@ -239,7 +264,9 @@ export default function Predictions() {
                     <div className="market-tabs">
                         <button
                             className={`tab-btn ${activeTab === 'open' ? 'active' : ''}`}
+                            disabled={inactiveRun}
                             onClick={() => setActiveTab('open')}
+                            title={inactiveRun ? 'Open markets return when a run is active' : undefined}
                         >
                             <Sparkles size={16} />
                             Open Markets
@@ -277,8 +304,8 @@ export default function Predictions() {
                                 return (
                                     <div
                                         key={market.id}
-                                        className={`market-card ${market.status}`}
-                                        onClick={() => isOpen && openBetModal(market)}
+                                        className={`market-card ${market.status} ${inactiveRun ? 'paused' : ''}`}
+                                        onClick={() => isOpen && !inactiveRun && openBetModal(market)}
                                     >
                                         <div className="market-header">
                                             <div className="market-badges">
@@ -308,41 +335,43 @@ export default function Predictions() {
                                             </div>
                                         </div>
 
-                                        <h3 className="market-title">{market.title}</h3>
-                                        {market.description && (
-                                            <p className="market-description">{market.description}</p>
-                                        )}
-                                        {(market.stake || market.why_this_matters || market.resolution_basis) && (
-                                            <div className="market-context">
-                                                {market.stake && (
-                                                    <div className="market-context-row">
-                                                        <span>Stake</span>
-                                                        <p>{market.stake}</p>
-                                                    </div>
-                                                )}
-                                                {market.why_this_matters && (
-                                                    <div className="market-context-row">
-                                                        <span>Why Watch</span>
-                                                        <p>{market.why_this_matters}</p>
-                                                    </div>
-                                                )}
-                                                {market.resolution_basis && (
-                                                    <div className="market-context-row">
-                                                        <span>Settles</span>
-                                                        <p>{market.resolution_basis}</p>
-                                                    </div>
-                                                )}
-                                                {Array.isArray(market.evidence_links) && market.evidence_links.length > 0 && (
+                                        <div className="market-context">
+                                            <div className="market-context-row question">
+                                                <span>Question</span>
+                                                <div>
+                                                    <h3 className="market-title">{market.title}</h3>
+                                                    {market.description && (
+                                                        <p className="market-description">{market.description}</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="market-context-row">
+                                                <span>Why watch</span>
+                                                <p>{market.why_this_matters || market.stake || 'This market tracks a visible run outcome that can change how viewers read the simulation.'}</p>
+                                            </div>
+                                            <div className="market-context-row">
+                                                <span>How it resolves</span>
+                                                <p>{market.resolution_basis || 'Resolved after the run from public evidence and archived event data.'}</p>
+                                            </div>
+                                            <div className="market-context-row">
+                                                <span>Evidence</span>
+                                                {Array.isArray(market.evidence_links) && market.evidence_links.length > 0 ? (
                                                     <div className="market-evidence">
                                                         {market.evidence_links.map((link) => (
-                                                            <a key={`${market.id}-${link.href}`} href={link.href}>
+                                                            <a
+                                                                key={`${market.id}-${link.href}`}
+                                                                href={link.href}
+                                                                onClick={(event) => event.stopPropagation()}
+                                                            >
                                                                 {link.label}
                                                             </a>
                                                         ))}
                                                     </div>
+                                                ) : (
+                                                    <p>Uses public run evidence when the market resolves.</p>
                                                 )}
                                             </div>
-                                        )}
+                                        </div>
 
                                         <div className="probability-bar">
                                             <div className="prob-yes" style={{ width: `${yesPercent}%` }}>
@@ -362,7 +391,7 @@ export default function Predictions() {
                                                 <Users size={14} />
                                                 <span>{market.bet_count} bets</span>
                                             </div>
-                                            {isOpen && (
+                                            {isOpen && !inactiveRun && (
                                                 <button className="bet-btn">
                                                     Place Bet <ChevronRight size={16} />
                                                 </button>
@@ -418,7 +447,7 @@ export default function Predictions() {
             </div>
 
             {/* Bet Modal */}
-            {selectedMarket && (
+            {selectedMarket && !inactiveRun && (
                 <div className="modal-overlay" onClick={closeBetModal}>
                     <div className="bet-modal" onClick={e => e.stopPropagation()}>
                         <button className="modal-close" onClick={closeBetModal}>&times;</button>

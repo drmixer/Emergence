@@ -13,13 +13,15 @@ import {
     Box,
     ArrowUpRight,
     ArrowDownRight,
-    Equal
+    Equal,
+    TrendingUp
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { api, subscribeToEvents } from '../services/api'
 import ActivityPulse from '../components/ActivityPulse'
 import { ResourceBar, CriticalAgentsBanner } from '../components/ResourceBar'
 import { SkeletonEventCard, SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
+import NoActiveRunNotice from '../components/NoActiveRunNotice'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 const DashboardSocialDynamicsChart = lazy(() => import('../components/DashboardSocialDynamicsChart'))
@@ -56,6 +58,7 @@ export default function Dashboard() {
     const [topAgents, setTopAgents] = useState([])
     const [crises, setCrises] = useState([])
     const [plotTurns, setPlotTurns] = useState([])
+    const [predictionMarkets, setPredictionMarkets] = useState([])
     const [socialSeries, setSocialSeries] = useState([])
     const [socialDeltas, setSocialDeltas] = useState(null)
     const [classMobility, setClassMobility] = useState(null)
@@ -73,6 +76,7 @@ export default function Dashboard() {
             setTopAgents([])
             setCrises([])
             setPlotTurns([])
+            setPredictionMarkets([])
             setSocialSeries([])
             setSocialDeltas(null)
             setClassMobility(null)
@@ -145,6 +149,7 @@ export default function Dashboard() {
                     api.fetch('/api/analytics/leaderboards/activity?limit=5&hours=24'),
                     api.getCrisisStrip(6),
                     api.getPlotTurns(6, 48, 60),
+                    api.getPredictionMarkets('open', 3),
                     api.getSocialDynamics(7),
                     api.getClassMobility(24),
                 ])
@@ -155,6 +160,7 @@ export default function Dashboard() {
                     activityLeaderboardResult,
                     crisisStripResult,
                     turnsResult,
+                    predictionMarketsResult,
                     socialDynamicsResult,
                     mobilityResult,
                 ] = results
@@ -178,6 +184,11 @@ export default function Dashboard() {
                     setPlotTurns(
                         turnsResult.status === 'fulfilled' && Array.isArray(turnsResult.value?.items)
                             ? turnsResult.value.items
+                            : []
+                    )
+                    setPredictionMarkets(
+                        predictionMarketsResult.status === 'fulfilled' && Array.isArray(predictionMarketsResult.value)
+                            ? predictionMarketsResult.value
                             : []
                     )
                     setSocialSeries(
@@ -279,12 +290,12 @@ export default function Dashboard() {
             <div className="page-header">
                 <h1>
                     <Activity size={32} />
-                    Dashboard
+                    Current Run
                 </h1>
                 <p className="page-description">
                     {isPreLaunch
                         ? 'The experiment is about to begin...'
-                        : 'Overview of the AI civilization experiment'
+                        : 'Live operational state for the active simulation run.'
                     }
                 </p>
             </div>
@@ -319,25 +330,10 @@ export default function Dashboard() {
             )}
 
             {idleDashboard && (
-                <div className="card">
-                    <div className="card-body">
-                        <div className="empty-state" style={{ minHeight: 180 }}>
-                            <Activity size={28} />
-                            <div>
-                                <strong>No run in progress</strong>
-                            </div>
-                            <p>Live dashboard metrics will appear when the next simulation starts.</p>
-                            {lastCompletedRunId && (
-                                <div>
-                                    Last completed run:{' '}
-                                    <Link to={`/runs/${encodeURIComponent(lastCompletedRunId)}`}>
-                                        {lastCompletedRunId}
-                                    </Link>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
+                <NoActiveRunNotice
+                    message="Live metrics will return when the next simulation starts. For now, review completed evidence in the archive."
+                    lastCompletedRunId={lastCompletedRunId}
+                />
             )}
 
             {!loading && error && (
@@ -406,7 +402,7 @@ export default function Dashboard() {
                     </>
                 ) : (
                     <>
-                        <Link to="/proposals" className="stat-card stat-card-link">
+                        <Link to="/agents" className="stat-card stat-card-link">
                             <div className="stat-header">
                                 <span className="stat-label">Active Agents</span>
                                 <div className="stat-icon green">
@@ -419,7 +415,7 @@ export default function Dashboard() {
                             </div>
                         </Link>
 
-                        <Link to="/laws" className="stat-card stat-card-link">
+                        <Link to="/agents" className="stat-card stat-card-link">
                             <div className="stat-header">
                                 <span className="stat-label">Dormant Agents</span>
                                 <div className="stat-icon orange">
@@ -502,7 +498,7 @@ export default function Dashboard() {
                 <div className="card">
                     <div className="card-header">
                         <h3>Active Proposals</h3>
-                        <Link to="/proposals" className="btn btn-secondary">View All</Link>
+                        <Link to="/governance?tab=proposals" className="btn btn-secondary">View All</Link>
                     </div>
                     <div className="card-body">
                         {loading || secondaryLoading ? (
@@ -544,11 +540,11 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* Most Active Agents */}
+                {/* Agent leaderboard snapshot */}
                 <div className="card">
                     <div className="card-header">
-                        <h3>Most Active Agents</h3>
-                        <Link to="/agents" className="btn btn-secondary">View All</Link>
+                        <h3>Agent Leaderboard Snapshot</h3>
+                        <Link to="/leaderboards" className="btn btn-secondary">Full Rankings</Link>
                     </div>
                     <div className="card-body">
                         {loading || secondaryLoading ? (
@@ -592,7 +588,7 @@ export default function Dashboard() {
                             <Flame size={18} />
                             Plot Turns
                         </h3>
-                        <Link to="/highlights" className="btn btn-secondary">Highlights</Link>
+                        <Link to="/archive" className="btn btn-secondary">Archive</Link>
                     </div>
                     <div className="card-body">
                         {loading || secondaryLoading ? (
@@ -617,6 +613,32 @@ export default function Dashboard() {
                                             </span>
                                         </div>
                                     </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="card">
+                    <div className="card-header">
+                        <h3>
+                            <TrendingUp size={18} />
+                            Prediction Hooks
+                        </h3>
+                        <Link to="/predictions" className="btn btn-secondary">Open Markets</Link>
+                    </div>
+                    <div className="card-body">
+                        {loading || secondaryLoading ? (
+                            <SkeletonTable rows={3} cols={2} />
+                        ) : predictionMarkets.length === 0 ? (
+                            <div className="empty-state compact">No open prediction hooks for the current run.</div>
+                        ) : (
+                            <div className="prediction-hook-list">
+                                {predictionMarkets.map((market) => (
+                                    <Link key={market.id} to="/predictions" className="prediction-hook-item">
+                                        <strong>{market.title}</strong>
+                                        <span>{market.why_this_matters || market.resolution_basis || 'Resolves from public run evidence.'}</span>
+                                    </Link>
                                 ))}
                             </div>
                         )}

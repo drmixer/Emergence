@@ -64,6 +64,34 @@
     letter-spacing: 0.05em;
 }
 
+.feed-layer-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.feed-layer-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 28px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.feed-layer-toggle input {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--text-primary);
+    flex-shrink: 0;
+}
+
 .events-list {
     flex: 1;
     overflow-y: auto;

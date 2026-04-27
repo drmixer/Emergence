@@ -278,8 +278,11 @@ export default function Landing() {
             : TEASER_QUOTES
     const currentQuote = activeQuotes[currentQuoteIndex % activeQuotes.length]
     const ctaHref = isIdle && lastCompletedRunId
-        ? `/runs/${encodeURIComponent(lastCompletedRunId)}`
+        ? getStoryReplayHref(lastCompletedRunId)
         : '/dashboard'
+    const latestReplayHref = isIdle && lastCompletedRunId
+        ? getStoryReplayHref(lastCompletedRunId)
+        : getStoryReplayHref()
 
     const shareMoment = async (turn) => {
         const eventId = Number(turn?.event_id || 0)
@@ -457,7 +460,7 @@ export default function Landing() {
                             <span className="hero-best-moments-eyebrow">{isIdle ? 'Latest Run' : 'Best Moments'}</span>
                             <p>
                                 {isPreLaunch
-                                    ? 'Highlights will appear after the next run produces evidence-backed moments.'
+                                    ? 'Replays will appear after the next run produces evidence-backed moments.'
                                     : isIdle
                                         ? 'Evidence-backed turning points from the latest completed run.'
                                         : 'Evidence-backed turning points from the live run.'}
@@ -467,7 +470,7 @@ export default function Landing() {
                             <button
                                 type="button"
                                 className="hero-best-moments-link"
-                                onClick={() => navigate(getStoryReplayHref())}
+                                onClick={() => navigate(latestReplayHref)}
                             >
                                 {isIdle ? 'Open latest replay' : 'Open 60s replay'}
                                 <ArrowUpRight size={15} />

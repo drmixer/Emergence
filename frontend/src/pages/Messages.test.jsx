@@ -6,6 +6,7 @@ const { api } = vi.hoisted(() => ({
   api: {
     getMessages: vi.fn(),
     getMessageThread: vi.fn(),
+    getMessageDuplicateWaves: vi.fn(),
   },
 }))
 
@@ -39,11 +40,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.getMessages.mockImplementation(async (_limit, messageType) => {
     if (messageType === 'forum_post') return []
-    if (messageType === 'forum_reply') return []
     if (messageType === 'direct_message') return [makeMessage()]
     return []
   })
   api.getMessageThread.mockResolvedValue(null)
+  api.getMessageDuplicateWaves.mockResolvedValue({ summary: {}, waves: [] })
 })
 
 afterEach(() => {
@@ -54,22 +55,21 @@ describe('Messages', () => {
   it('defaults to all messages so direct-only activity is still visible', async () => {
     renderMessages('/messages')
 
-    expect(await screen.findByRole('heading', { name: /All Messages/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /All Conversations/i })).toBeInTheDocument()
     expect(screen.getByText(/Direct coordination message/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /All Messages/i })).toHaveClass('active')
+    expect(screen.getByRole('button', { name: /^All$/i })).toHaveClass('active')
   })
 
   it('still respects an explicit forum tab query parameter', async () => {
     renderMessages('/messages?tab=forum')
 
-    expect(await screen.findByRole('heading', { name: /Forum Posts/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Forum Threads/i })).toBeInTheDocument()
     expect(screen.getByText(/No messages in this view yet/i)).toBeInTheDocument()
   })
 
   it('does not classify direct follow-ups as replies', async () => {
     api.getMessages.mockImplementation(async (_limit, messageType) => {
       if (messageType === 'forum_post') return []
-      if (messageType === 'forum_reply') return []
       if (messageType === 'direct_message') {
         return [
           makeMessage({
@@ -115,7 +115,6 @@ describe('Messages', () => {
           }),
         ]
       }
-      if (messageType === 'forum_reply') return []
       if (messageType === 'direct_message') {
         return [
           makeMessage({
@@ -137,9 +136,45 @@ describe('Messages', () => {
 
     renderMessages('/messages')
 
-    expect(await screen.findByRole('heading', { name: /All Messages/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /All Conversations/i })).toBeInTheDocument()
     expect(screen.getByText(/Public forum post/i)).toBeInTheDocument()
     expect(screen.getByText(/Initial outreach/i)).toBeInTheDocument()
     expect(screen.getAllByText(/Follow-up response/i)).toHaveLength(1)
+  })
+
+  it('keeps forum replies out of the primary conversation list', async () => {
+    api.getMessages.mockImplementation(async (_limit, messageType) => {
+      if (messageType === 'forum_post') {
+        return [
+          makeMessage({
+            id: 10,
+            message_type: 'forum_post',
+            content: 'Root forum thread',
+            recipient: null,
+            created_at: '2026-04-21T02:19:00.000Z',
+          }),
+        ]
+      }
+      if (messageType === 'direct_message') return []
+      if (messageType === 'forum_reply') {
+        return [
+          makeMessage({
+            id: 11,
+            message_type: 'forum_reply',
+            content: 'Nested reply should stay inside thread view',
+            recipient: null,
+            parent_message_id: 10,
+            created_at: '2026-04-21T02:20:00.000Z',
+          }),
+        ]
+      }
+      return []
+    })
+
+    renderMessages('/messages')
+
+    expect(await screen.findByText(/Root forum thread/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Nested reply should stay inside thread view/i)).not.toBeInTheDocument()
+    expect(api.getMessages).not.toHaveBeenCalledWith(120, 'forum_reply')
   })
 })

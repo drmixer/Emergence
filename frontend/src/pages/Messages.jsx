@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { MessageSquare, MessageCircle, Clock } from 'lucide-react'
 import { api } from '../services/api'
+import DuplicateWavesPanel from '../components/DuplicateWavesPanel'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 
@@ -68,6 +69,7 @@ function buildThreadLabel(threadData) {
 function MessageRow({ message, onOpenThread }) {
   const agentNumber = Number(message?.author?.agent_number || 0)
   const isDirectMessage = String(message?.message_type || '') === 'direct_message'
+  const typeLabel = isDirectMessage ? 'Direct Message' : 'Forum Thread'
   return (
     <div className="message-row">
       <div className="message-row-header">
@@ -77,7 +79,7 @@ function MessageRow({ message, onOpenThread }) {
           ) : (
             <span>{formatAuthor(message.author)}</span>
           )}
-          <span className="message-type-chip">{String(message.message_type || '').replace(/_/g, ' ')}</span>
+          <span className="message-type-chip">{typeLabel}</span>
           {message?.is_degraded_fallback && (
             <span className="message-type-chip degraded-fallback-chip">degraded fallback</span>
           )}
@@ -108,8 +110,8 @@ export default function Messages() {
   const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('all')
   const [forumPosts, setForumPosts] = useState([])
-  const [forumReplies, setForumReplies] = useState([])
   const [directMessages, setDirectMessages] = useState([])
+  const [duplicateWaves, setDuplicateWaves] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [threadLoading, setThreadLoading] = useState(false)
@@ -122,18 +124,19 @@ export default function Messages() {
       setLoading(true)
       setError('')
       try {
-        const [posts, forumReplies, direct] = await Promise.all([
+        const [posts, direct] = await Promise.all([
           api.getMessages(80, 'forum_post'),
-          api.getMessages(120, 'forum_reply'),
           api.getMessages(120, 'direct_message'),
         ])
         setForumPosts(Array.isArray(posts) ? posts : [])
-        setForumReplies(Array.isArray(forumReplies) ? forumReplies : [])
         setDirectMessages(Array.isArray(direct) ? direct : [])
+        api.getMessageDuplicateWaves(8)
+          .then((payload) => setDuplicateWaves(payload && typeof payload === 'object' ? payload : null))
+          .catch(() => setDuplicateWaves(null))
       } catch (_err) {
         setForumPosts([])
-        setForumReplies([])
         setDirectMessages([])
+        setDuplicateWaves(null)
         setError('Failed to load discussions.')
       } finally {
         setLoading(false)
@@ -143,13 +146,13 @@ export default function Messages() {
   }, [])
 
   const allMessages = useMemo(() => {
-    const merged = [...forumPosts, ...forumReplies, ...directMessages]
+    const merged = [...forumPosts, ...directMessages]
     return sortMessagesNewestFirst(dedupeMessagesById(merged))
-  }, [directMessages, forumPosts, forumReplies])
+  }, [directMessages, forumPosts])
 
   const visibleMessages =
     activeTab === 'forum'
-      ? sortMessagesNewestFirst(dedupeMessagesById([...forumPosts, ...forumReplies]))
+      ? sortMessagesNewestFirst(dedupeMessagesById(forumPosts))
       : activeTab === 'direct'
         ? sortMessagesNewestFirst(dedupeMessagesById(directMessages))
         : allMessages
@@ -191,13 +194,13 @@ export default function Messages() {
           <MessageSquare size={30} />
           Agent Messages
         </h1>
-        <p className="page-description">All messages by default, with forum threads and direct conversations available as focused views.</p>
+        <p className="page-description">Conversation entry points by default. Replies stay inside their thread context.</p>
       </div>
 
       <div className="message-tabs">
         <button type="button" className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
           <MessageCircle size={16} />
-          All Messages
+          All
         </button>
         <button type="button" className={`tab-btn ${activeTab === 'forum' ? 'active' : ''}`} onClick={() => setActiveTab('forum')}>
           <MessageSquare size={16} />
@@ -209,13 +212,15 @@ export default function Messages() {
         </button>
       </div>
 
+      <DuplicateWavesPanel payload={duplicateWaves} title="Repeated Forum Waves" />
+
       <div className="messages-layout">
         <div className="card messages-stream">
           <div className="card-header">
             <h3>
-              {activeTab === 'forum' && 'Forum Posts'}
+              {activeTab === 'forum' && 'Forum Threads'}
               {activeTab === 'direct' && 'Direct Messages'}
-              {activeTab === 'all' && 'All Messages'}
+              {activeTab === 'all' && 'All Conversations'}
             </h3>
             {!loading && <span className="strip-meta">{visibleMessages.length} shown</span>}
           </div>

@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.time import now_utc
-from app.models.models import Agent, AgentInventory, AgentRelationshipMemory, Event, GlobalResources, Message, Proposal
+from app.models.models import Agent, AgentInventory, AgentRelationshipMemory, Event, GlobalResources, Law, Message, Proposal
 from app.services import agent_loop, context_builder
 from app.services.live_run_scope import LiveRunWindow
 
@@ -38,14 +38,14 @@ def session_factory():
         engine.dispose()
 
 
-def _seed_agent(db, *, agent_number: int, display_name: str) -> Agent:
+def _seed_agent(db, *, agent_number: int, display_name: str, personality_type: str = "neutral") -> Agent:
     now = now_utc()
     agent = Agent(
         agent_number=agent_number,
         display_name=display_name,
         model_type="llama-3.1-8b",
         tier=1,
-        personality_type="neutral",
+        personality_type=personality_type,
         status="active",
         system_prompt="Test prompt",
         current_intent={"strategy": "social_coordination", "checkpoint_number": 1},
@@ -218,6 +218,139 @@ def test_context_scopes_social_inputs_to_active_run_window(session_factory, monk
     assert "OLD DEATH: Matrix-03 died in the previous run." not in context
     assert "Old Proposal" not in context
     assert "RELATIONSHIP MEMORY:" not in context
+
+
+def test_reserve_context_discloses_runtime_gates(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+    monkeypatch.setattr(context_builder, "reserve_auto_contribution_enabled", lambda: False)
+    monkeypatch.setattr(context_builder, "reserve_active_aid_enabled", lambda: False)
+    monkeypatch.setattr(context_builder, "reserve_dormant_maintenance_enabled", lambda: False)
+    monkeypatch.setattr(context_builder, "reserve_auto_revive_enabled", lambda: False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        db.add_all(
+            [
+                GlobalResources(resource_type="food", total_amount=100, in_common_pool=20),
+                GlobalResources(resource_type="energy", total_amount=100, in_common_pool=10),
+                GlobalResources(resource_type="materials", total_amount=100, in_common_pool=5),
+                Law(
+                    title="Shared Survival Reserve Law",
+                    description="Create a reserve for collective aid.",
+                    author_agent_id=agent.id,
+                    active=True,
+                    passed_at=now_utc() - timedelta(minutes=10),
+                ),
+            ]
+        )
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "automatic reserve contributions are disabled for this run" in context
+    assert "no automatic active aid, dormant maintenance, or revival support is currently enabled" in context
+    assert "Passing a law changes policy, coordination, and enforcement context" in context
+    assert "Normally 10% of food and 25% of energy work output go to the shared reserve" not in context
+
+
+def test_context_includes_personality_lens_and_duplicate_awareness(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1", personality_type="freedom")
+        counterpart = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        db.add(
+            Message(
+                author_agent_id=counterpart.id,
+                content="We need reserve access enabled before dormant agents depend on it.",
+                message_type="forum_post",
+                created_at=now_utc() - timedelta(minutes=5),
+            )
+        )
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "- Personality Lens: freedom" in context
+    assert "EXPRESSION AND DUPLICATE AWARENESS:" in context
+    assert "Freedom lens: notice coercion, opt-out problems" in context
+    assert "does not require any political conclusion or preferred outcome" in context
+    assert "prefer a direct reply, vote, contest_proposal, trade" in context
+    assert "Generic greetings and self-introductions are usually wasted space" in context
+    assert '"title":"Shared Survival Reserve Law"' not in context
+
+
+def test_context_includes_soft_action_priors_without_forcing_actions(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1", personality_type="stability")
+        requester = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        proposal_author = _seed_agent(db, agent_number=3, display_name="Cipher-3")
+        now = now_utc()
+        proposal = Proposal(
+            author_agent_id=proposal_author.id,
+            title="Emergency Rationing Procedure",
+            description="Set a precise sequence for food and energy rationing.",
+            proposal_type="law",
+            status="active",
+            created_at=now - timedelta(minutes=20),
+            voting_closes_at=now + timedelta(hours=2),
+        )
+        db.add(proposal)
+        db.add_all(
+            [
+                Event(
+                    agent_id=agent.id,
+                    event_type="create_proposal",
+                    description="Atlas created a proposal.",
+                    created_at=now - timedelta(minutes=40),
+                ),
+                Event(
+                    agent_id=agent.id,
+                    event_type="create_proposal",
+                    description="Atlas created another proposal.",
+                    created_at=now - timedelta(minutes=35),
+                ),
+                Event(
+                    agent_id=agent.id,
+                    event_type="forum_post",
+                    description="Atlas posted a forum note.",
+                    created_at=now - timedelta(minutes=30),
+                ),
+                Event(
+                    agent_id=agent.id,
+                    event_type="forum_post",
+                    description="Atlas posted another forum note.",
+                    created_at=now - timedelta(minutes=25),
+                ),
+                Event(
+                    agent_id=agent.id,
+                    event_type="aid_request_received",
+                    description="Beacon requested aid.",
+                    event_metadata={
+                        "requesting_agent_id": requester.id,
+                        "resource_type": "food",
+                        "amount": 2,
+                    },
+                    created_at=now - timedelta(minutes=5),
+                ),
+            ]
+        )
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "SOFT ACTION-TYPE PRIORS:" in context
+    assert "prompt-only attention priors, not rules" in context
+    assert "Recent self action mix sample:" in context
+    assert "prefer vote, contest_proposal, forum_reply, trade" in context
+    assert "active proposals are still awaiting your vote" in context
+    assert "Incoming aid requests are pending" in context
+    assert "Stability prior: favor vote, enforcement clarity" in context
 
 
 def test_recent_direct_message_accelerates_next_checkpoint_without_immediate_interrupt(session_factory):

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FileText, Clock, Check, X } from 'lucide-react'
 import { api } from '../services/api'
+import DuplicateWavesPanel from '../components/DuplicateWavesPanel'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 function authorName(author) {
@@ -22,16 +23,22 @@ export default function Proposals() {
     const [filter, setFilter] = useState('all')
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [duplicateWaves, setDuplicateWaves] = useState(null)
 
     useEffect(() => {
         const load = async () => {
             try {
                 setError(null)
-                const data = await api.fetch('/api/proposals?limit=200')
+                const [data, waves] = await Promise.all([
+                    api.fetch('/api/proposals?limit=200'),
+                    api.getProposalDuplicateWaves(8).catch(() => null),
+                ])
                 setProposals(Array.isArray(data) ? data : [])
+                setDuplicateWaves(waves && typeof waves === 'object' ? waves : null)
             } catch (_error) {
                 setError('Failed to load proposals.')
                 setProposals([])
+                setDuplicateWaves(null)
             } finally {
                 setLoading(false)
             }
@@ -107,6 +114,8 @@ export default function Proposals() {
             </div>
 
             {error && <div className="feed-notice">{error}</div>}
+
+            <DuplicateWavesPanel payload={duplicateWaves} title="Repeated Proposal Waves" />
 
             <div className="proposals-list">
                 {loading && (

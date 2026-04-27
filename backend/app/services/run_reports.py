@@ -25,7 +25,10 @@ from app.services.condition_reports import (
     generate_and_record_condition_comparison,
     generate_and_record_run_summary,
 )
+from app.services.duplicate_waves import collect_duplicate_waves
 from app.services.emergence_metrics import COOPERATION_EVENT_TYPES, CONFLICT_EVENT_TYPES
+from app.services.live_run_scope import LiveRunWindow
+from app.services.reserve_semantics import reserve_policy_access_payload
 from app.services.runtime_config import runtime_config_service
 
 logger = logging.getLogger(__name__)
@@ -777,6 +780,13 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         run_id=run_id,
         run_started_at=run_started_at,
     )
+    duplicate_waves = collect_duplicate_waves(
+        db,
+        run_window=LiveRunWindow(run_id=run_id, started_at=run_started_at, ended_at=run_ended_at),
+        sources=("proposal", "forum"),
+        min_cluster_size=2,
+        limit=12,
+    )
 
     return {
         "run_id": run_id,
@@ -790,6 +800,8 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "verification_source": source,
         "llm": llm_payload,
         "activity": activity_payload,
+        "reserve_semantics": reserve_policy_access_payload(db),
+        "duplicate_waves": duplicate_waves,
         "social_followthrough": social_followthrough,
         "behavior_hygiene": behavior_hygiene,
         "inequality_gini_current": _gini(wealth_values),
@@ -1160,6 +1172,9 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
     activity = payload.get("activity") if isinstance(payload, dict) else {}
     social_followthrough = payload.get("social_followthrough") if isinstance(payload, dict) else {}
     behavior_hygiene = payload.get("behavior_hygiene") if isinstance(payload, dict) else {}
+    closeout_comparison = payload.get("closeout_comparison") if isinstance(payload, dict) else {}
+    reserve_semantics = payload.get("reserve_semantics") if isinstance(payload, dict) else {}
+    duplicate_waves = payload.get("duplicate_waves") if isinstance(payload, dict) else {}
     rows = [
         f"# Run {payload.get('run_id')} Technical Report",
         "",
@@ -1269,6 +1284,123 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
             rows.append(
                 f"  - count={int(row.get('count') or 0)}; example={str(row.get('example') or '').strip()}"
             )
+    if reserve_semantics:
+        policy = reserve_semantics.get("policy_intent") or {}
+        mechanics = reserve_semantics.get("mechanical_access") or {}
+        mode_labels = mechanics.get("mode_labels") or {}
+        enabled_modes = [
+            str(mode_labels.get(mode) or mode).replace("_", " ")
+            for mode in mechanics.get("enabled_modes") or []
+        ]
+        disabled_modes = [
+            str(mode_labels.get(mode) or mode).replace("_", " ")
+            for mode in mechanics.get("disabled_modes") or []
+        ]
+        rows.extend(
+            [
+                "",
+                "## Reserve Policy vs Mechanical Access",
+                f"- Status: {reserve_semantics.get('status')}",
+                f"- Policy intent: {policy.get('label')} ({int(policy.get('reserve_law_count') or 0)} active reserve laws)",
+                f"- Mechanical access: {mechanics.get('label')}",
+                f"- Automatic reserve mechanics available: {bool(mechanics.get('automatic_mechanics_available'))}",
+                f"- Enabled runtime gates: {', '.join(enabled_modes) if enabled_modes else 'none'}",
+                f"- Disabled runtime gates: {', '.join(disabled_modes) if disabled_modes else 'none'}",
+            ]
+        )
+    if duplicate_waves:
+        duplicate_summary = duplicate_waves.get("summary") or {}
+        rows.extend(
+            [
+                "",
+                "## Duplicate Waves",
+                f"- Repeated proposal/forum waves: {int(duplicate_summary.get('wave_count') or 0):,}",
+                f"- Proposal waves: {int(duplicate_summary.get('proposal_wave_count') or 0):,}",
+                f"- Forum-message waves: {int(duplicate_summary.get('forum_wave_count') or 0):,}",
+                f"- Clustered proposal/forum items: {int(duplicate_summary.get('clustered_item_count') or 0):,}",
+            ]
+        )
+        for wave in (duplicate_waves.get("waves") or [])[:5]:
+            representative = wave.get("representative") or {}
+            rows.append(
+                "- "
+                + f"{wave.get('source')} wave {wave.get('id')}: "
+                + f"count={int(wave.get('count') or 0)}, "
+                + f"actors={int(wave.get('actor_count') or 0)}, "
+                + f"example={str(representative.get('title') or representative.get('text') or '').strip()[:180]}"
+            )
+    if closeout_comparison:
+        rows.extend(
+            [
+                "",
+                "## Closeout Comparison",
+                f"- Previous run: {closeout_comparison.get('previous_run_id')}",
+                f"- Previous condition: {closeout_comparison.get('previous_condition_name')}",
+            ]
+        )
+        rows.append("- Metric deltas:")
+        for row in closeout_comparison.get("metrics") or []:
+            rows.append(
+                "  - "
+                + f"{str(row.get('key') or '').replace('_', ' ')}: "
+                + f"current={int(row.get('current') or 0):,}, "
+                + f"previous={int(row.get('previous') or 0):,}, "
+                + f"delta={int(row.get('delta') or 0):+d}"
+            )
+        aid = closeout_comparison.get("aid_followthrough") or {}
+        current_aid = aid.get("current") or {}
+        previous_aid = aid.get("previous") or {}
+        current_top = current_aid.get("dominant_target") or {}
+        previous_top = previous_aid.get("dominant_target") or {}
+        rows.extend(
+            [
+                "- Aid follow-through:",
+                "  - "
+                + f"current requests={int(current_aid.get('aid_requests') or 0):,}, "
+                + f"answered={int(current_aid.get('answered') or 0):,}, "
+                + f"clean_unanswered={int(current_aid.get('clean_unanswered') or 0):,}, "
+                + f"rate={float(current_aid.get('clean_followthrough_rate') or 0.0):.4f}, "
+                + f"distinct_responders={int(current_aid.get('distinct_responders') or 0):,}",
+                "  - "
+                + f"previous requests={int(previous_aid.get('aid_requests') or 0):,}, "
+                + f"answered={int(previous_aid.get('answered') or 0):,}, "
+                + f"clean_unanswered={int(previous_aid.get('clean_unanswered') or 0):,}, "
+                + f"rate={float(previous_aid.get('clean_followthrough_rate') or 0.0):.4f}, "
+                + f"distinct_responders={int(previous_aid.get('distinct_responders') or 0):,}",
+            ]
+        )
+        if current_top:
+            current_top_label = current_top.get("display_name") or f"Agent #{current_top.get('agent_number')}"
+            rows.append(
+                "  - current dominant requested donor: "
+                + f"{current_top_label} "
+                + f"({float(current_top.get('request_share') or 0.0):.1%} request share)"
+            )
+        if previous_top:
+            previous_top_label = previous_top.get("display_name") or f"Agent #{previous_top.get('agent_number')}"
+            rows.append(
+                "  - previous dominant requested donor: "
+                + f"{previous_top_label} "
+                + f"({float(previous_top.get('request_share') or 0.0):.1%} request share)"
+            )
+        repeated_delta = closeout_comparison.get("repeated_message_fingerprints") or {}
+        rows.append(
+            "- Repeated-message fingerprint clusters: "
+            + f"current={int(repeated_delta.get('current') or 0):,}, "
+            + f"previous={int(repeated_delta.get('previous') or 0):,}, "
+            + f"delta={int(repeated_delta.get('delta') or 0):+d}"
+        )
+        duplicate_wave_delta = closeout_comparison.get("duplicate_waves") or {}
+        rows.append(
+            "- Duplicate proposal/forum waves: "
+            + f"current={int(duplicate_wave_delta.get('current') or 0):,}, "
+            + f"previous={int(duplicate_wave_delta.get('previous') or 0):,}, "
+            + f"delta={int(duplicate_wave_delta.get('delta') or 0):+d}, "
+            + f"current_proposal={int(duplicate_wave_delta.get('current_proposal_waves') or 0):,}, "
+            + f"current_forum={int(duplicate_wave_delta.get('current_forum_waves') or 0):,}"
+        )
+        for line in closeout_comparison.get("interpretation") or []:
+            rows.append(f"- Interpretation: {str(line)}")
     rows.extend(["", "## Caveats"])
     for caveat in payload.get("caveats") or []:
         rows.append(f"- {str(caveat)}")
@@ -1349,25 +1481,210 @@ def _planner_markdown(payload: dict[str, Any]) -> str:
 
 
 def _collect_previous_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any] | None:
-    previous = db.execute(
-        text(
-            """
-            SELECT run_id, MAX(created_at) AS last_seen
-            FROM llm_usage
-            WHERE run_id IS NOT NULL
-              AND run_id <> ''
-              AND run_id <> :run_id
-            GROUP BY run_id
-            ORDER BY last_seen DESC
-            LIMIT 1
-            """
-        ),
-        {"run_id": run_id},
-    ).first()
+    current_started_at = None
+    current_run = db.query(SimulationRun).filter(SimulationRun.run_id == str(run_id)).first()
+    if current_run and current_run.started_at:
+        current_started_at = _coerce_utc_datetime(current_run.started_at)
+
+    if current_started_at is None:
+        current_seen = db.execute(
+            text(
+                """
+                SELECT MIN(created_at) AS first_seen
+                FROM llm_usage
+                WHERE run_id = :run_id
+                """
+            ),
+            {"run_id": run_id},
+        ).first()
+        if current_seen and current_seen.first_seen:
+            current_started_at = _coerce_utc_datetime(current_seen.first_seen)
+
+    previous = None
+    if current_started_at is not None:
+        previous = db.execute(
+            text(
+                """
+                SELECT run_id, ended_at AS last_seen
+                FROM simulation_runs
+                WHERE run_id IS NOT NULL
+                  AND run_id <> ''
+                  AND run_id <> :run_id
+                  AND started_at < :current_started_at
+                ORDER BY started_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"run_id": run_id, "current_started_at": current_started_at},
+        ).first()
+
+    if previous is None:
+        previous = db.execute(
+            text(
+                """
+                SELECT run_id, MAX(created_at) AS last_seen
+                FROM llm_usage
+                WHERE run_id IS NOT NULL
+                  AND run_id <> ''
+                  AND run_id <> :run_id
+                  AND (:current_started_at IS NULL OR created_at < :current_started_at)
+                GROUP BY run_id
+                ORDER BY last_seen DESC
+                LIMIT 1
+                """
+            ),
+            {"run_id": run_id, "current_started_at": current_started_at},
+        ).first()
+
     previous_run_id = str((previous.run_id if previous else "") or "").strip()
     if not previous_run_id:
         return None
     return _collect_run_snapshot(db, run_id=previous_run_id)
+
+
+def _dominant_aid_target(social_followthrough: dict[str, Any]) -> dict[str, Any] | None:
+    targets = social_followthrough.get("targets") if isinstance(social_followthrough, dict) else []
+    if not isinstance(targets, list) or not targets:
+        return None
+    aid_requests = int(social_followthrough.get("aid_requests") or 0)
+    answered = int(social_followthrough.get("answered") or 0)
+    target = max(
+        (item for item in targets if isinstance(item, dict)),
+        key=lambda item: (int(item.get("requests") or 0), int(item.get("answered") or 0), -int(item.get("agent_number") or 0)),
+        default=None,
+    )
+    if not target:
+        return None
+    requests = int(target.get("requests") or 0)
+    target_answered = int(target.get("answered") or 0)
+    return {
+        "agent_number": int(target.get("agent_number") or 0),
+        "display_name": str(target.get("display_name") or "").strip() or None,
+        "requests": requests,
+        "answered": target_answered,
+        "request_share": _safe_ratio(requests, aid_requests),
+        "answered_share": _safe_ratio(target_answered, answered),
+    }
+
+
+def _build_closeout_comparison(
+    *,
+    current_snapshot: dict[str, Any],
+    previous_snapshot: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not previous_snapshot:
+        return None
+
+    current_activity = current_snapshot.get("activity") if isinstance(current_snapshot, dict) else {}
+    previous_activity = previous_snapshot.get("activity") if isinstance(previous_snapshot, dict) else {}
+    current_social = current_snapshot.get("social_followthrough") if isinstance(current_snapshot, dict) else {}
+    previous_social = previous_snapshot.get("social_followthrough") if isinstance(previous_snapshot, dict) else {}
+    current_hygiene = current_snapshot.get("behavior_hygiene") if isinstance(current_snapshot, dict) else {}
+    previous_hygiene = previous_snapshot.get("behavior_hygiene") if isinstance(previous_snapshot, dict) else {}
+    current_duplicate_summary = (current_snapshot.get("duplicate_waves") or {}).get("summary") if isinstance(current_snapshot, dict) else {}
+    previous_duplicate_summary = (previous_snapshot.get("duplicate_waves") or {}).get("summary") if isinstance(previous_snapshot, dict) else {}
+
+    metric_keys = [
+        "became_dormant",
+        "agent_revived",
+        "reserve_aid",
+        "reserve_shortfall",
+        "starvation_warnings",
+        "deaths",
+        "trade_actions",
+        "proposal_actions",
+        "vote_actions",
+        "laws_passed",
+        "forum_actions",
+    ]
+    metrics = []
+    for key in metric_keys:
+        current_value = int((current_activity or {}).get(key) or 0)
+        previous_value = int((previous_activity or {}).get(key) or 0)
+        metrics.append(
+            {
+                "key": key,
+                "current": current_value,
+                "previous": previous_value,
+                "delta": current_value - previous_value,
+            }
+        )
+
+    current_deaths = int((current_activity or {}).get("deaths") or 0)
+    previous_deaths = int((previous_activity or {}).get("deaths") or 0)
+    previous_revivals = int((previous_activity or {}).get("agent_revived") or 0)
+    previous_reserve_aid = int((previous_activity or {}).get("reserve_aid") or 0)
+    current_reserve_aid = int((current_activity or {}).get("reserve_aid") or 0)
+
+    interpretation = []
+    if previous_deaths == 0 and previous_revivals > 0 and previous_reserve_aid > 0 and current_deaths > 0 and current_reserve_aid == 0:
+        interpretation.append(
+            "The current run resolves the prior auto-revival confound: deaths occurred after reserve-backed revival disappeared."
+        )
+    elif current_deaths > previous_deaths:
+        interpretation.append("Death reachability increased relative to the previous run.")
+    elif current_deaths == 0 and previous_deaths == 0:
+        interpretation.append("Death reachability remains unresolved across the current and previous run.")
+    else:
+        interpretation.append("Death pressure did not increase relative to the previous run.")
+
+    current_top = _dominant_aid_target(current_social or {})
+    previous_top = _dominant_aid_target(previous_social or {})
+    if current_top:
+        current_top_label = current_top.get("display_name") or f"Agent #{current_top.get('agent_number')}"
+        interpretation.append(
+            "Aid remained donor-concentrated around "
+            + f"{current_top_label}"
+            + f" ({float(current_top.get('request_share') or 0.0):.1%} of requests)."
+        )
+
+    repeated_current = int((current_hygiene or {}).get("repeated_message_fingerprint_count") or 0)
+    repeated_previous = int((previous_hygiene or {}).get("repeated_message_fingerprint_count") or 0)
+    if repeated_current >= repeated_previous and repeated_current > 0:
+        interpretation.append("Repeated-message fingerprints persisted and should be treated as convergence-wave evidence, not separate independent claims.")
+    duplicate_wave_current = int((current_duplicate_summary or {}).get("wave_count") or 0)
+    duplicate_wave_previous = int((previous_duplicate_summary or {}).get("wave_count") or 0)
+    if duplicate_wave_current > 0:
+        interpretation.append(
+            "Duplicate proposal/forum waves were clustered before interpretation so repeated waves are not counted as independent events."
+        )
+
+    return {
+        "previous_run_id": previous_snapshot.get("run_id"),
+        "previous_condition_name": previous_snapshot.get("condition_name"),
+        "metrics": metrics,
+        "aid_followthrough": {
+            "current": {
+                "aid_requests": int((current_social or {}).get("aid_requests") or 0),
+                "answered": int((current_social or {}).get("answered") or 0),
+                "clean_unanswered": int((current_social or {}).get("clean_unanswered") or 0),
+                "clean_followthrough_rate": float((current_social or {}).get("clean_followthrough_rate") or 0.0),
+                "distinct_responders": int((current_social or {}).get("distinct_responders") or 0),
+                "dominant_target": current_top,
+            },
+            "previous": {
+                "aid_requests": int((previous_social or {}).get("aid_requests") or 0),
+                "answered": int((previous_social or {}).get("answered") or 0),
+                "clean_unanswered": int((previous_social or {}).get("clean_unanswered") or 0),
+                "clean_followthrough_rate": float((previous_social or {}).get("clean_followthrough_rate") or 0.0),
+                "distinct_responders": int((previous_social or {}).get("distinct_responders") or 0),
+                "dominant_target": previous_top,
+            },
+        },
+        "repeated_message_fingerprints": {
+            "current": repeated_current,
+            "previous": repeated_previous,
+            "delta": repeated_current - repeated_previous,
+        },
+        "duplicate_waves": {
+            "current": duplicate_wave_current,
+            "previous": duplicate_wave_previous,
+            "delta": duplicate_wave_current - duplicate_wave_previous,
+            "current_proposal_waves": int((current_duplicate_summary or {}).get("proposal_wave_count") or 0),
+            "current_forum_waves": int((current_duplicate_summary or {}).get("forum_wave_count") or 0),
+        },
+        "interpretation": interpretation,
+    }
 
 
 def _build_story_sections(
@@ -1490,6 +1807,7 @@ def _build_story_sections(
 def _build_technical_payload(
     *,
     snapshot: dict[str, Any],
+    previous_snapshot: dict[str, Any] | None = None,
     status_label: str,
     evidence_completeness: str,
     condition_name: str,
@@ -1516,7 +1834,7 @@ def _build_technical_payload(
             "Death reachability is confounded when reserve-backed revival is active: dormancy pressure was reached, but zero deaths do not prove death is unreachable under intended non-auto-revival semantics."
         )
 
-    return {
+    payload = {
         **snapshot,
         "template_version": REPORT_TEMPLATE_VERSION,
         "generator_version": REPORT_GENERATOR_VERSION,
@@ -1532,6 +1850,13 @@ def _build_technical_payload(
         "replicate_count": replicate_count,
         "caveats": caveats,
     }
+    closeout_comparison = _build_closeout_comparison(
+        current_snapshot=snapshot,
+        previous_snapshot=previous_snapshot,
+    )
+    if closeout_comparison:
+        payload["closeout_comparison"] = closeout_comparison
+    return payload
 
 
 def _build_story_payload(
@@ -1808,9 +2133,11 @@ def generate_run_technical_artifact(
         run_class=run_class,
     )
     topic_tags = _select_topic_tags(snapshot)
+    previous_snapshot = _collect_previous_run_snapshot(db, run_id=clean_run_id)
 
     payload = _build_technical_payload(
         snapshot=snapshot,
+        previous_snapshot=previous_snapshot,
         status_label=status_label,
         evidence_completeness=evidence_completeness,
         condition_name=clean_condition,

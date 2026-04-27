@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.models.models import AdminConfigChange, Agent, AgentInventory, Event, SimulationRun
+from app.models.models import AdminConfigChange, Agent, AgentInventory, Event, Law, Message, Proposal, SimulationRun
 from app.services import run_reports
 
 
@@ -26,6 +26,56 @@ def _sample_snapshot() -> dict[str, object]:
         "llm": {
             "calls": 510,
             "estimated_cost_usd": 0.47,
+        },
+        "reserve_semantics": {
+            "status": "policy_only",
+            "policy_intent": {
+                "reserve_law_active": True,
+                "reserve_law_count": 1,
+                "active_law_ids": [77],
+                "label": "Active reserve policy intent",
+            },
+            "mechanical_access": {
+                "auto_contribution_enabled": False,
+                "active_aid_enabled": False,
+                "dormant_maintenance_enabled": False,
+                "auto_revive_enabled": False,
+                "enabled_modes": [],
+                "disabled_modes": ["auto_contribution", "active_aid", "dormant_maintenance", "auto_revive"],
+                "mode_labels": {
+                    "auto_contribution": "Auto contribution",
+                    "active_aid": "Active-agent aid",
+                    "dormant_maintenance": "Dormant maintenance",
+                    "auto_revive": "Auto revive",
+                },
+                "label": "Reserve policy is active, but automatic runtime paths are gated off.",
+                "automatic_mechanics_available": False,
+                "automatic_support_available": False,
+            },
+        },
+        "duplicate_waves": {
+            "summary": {
+                "wave_count": 2,
+                "proposal_wave_count": 1,
+                "forum_wave_count": 1,
+                "clustered_item_count": 5,
+            },
+            "waves": [
+                {
+                    "id": "proposal:10",
+                    "source": "proposal",
+                    "count": 3,
+                    "actor_count": 2,
+                    "representative": {"title": "Emergency food rationing"},
+                },
+                {
+                    "id": "forum:40",
+                    "source": "forum",
+                    "count": 2,
+                    "actor_count": 2,
+                    "representative": {"text": "Food shortage coordination"},
+                },
+            ],
         },
         "key_moments": [
             {"event_id": 1001, "event_type": "create_proposal", "description": "A coalition agenda formed."},
@@ -186,6 +236,124 @@ def test_story_payload_and_markdown_include_exploratory_claim_boundary():
     assert "Exploratory claim boundary" in markdown
 
 
+def test_closeout_comparison_flags_auto_revival_confound_resolution():
+    previous = _sample_snapshot()
+    previous["run_id"] = "real-20260425T021634Z"
+    previous["condition_name"] = "canary_h"
+    previous["activity"] = {
+        **previous["activity"],
+        "became_dormant": 115,
+        "agent_revived": 101,
+        "reserve_aid": 101,
+        "reserve_shortfall": 0,
+        "starvation_warnings": 0,
+        "deaths": 0,
+        "trade_actions": 22,
+        "forum_actions": 95,
+    }
+    previous["social_followthrough"] = {
+        "aid_requests": 20,
+        "answered": 13,
+        "clean_unanswered": 0,
+        "clean_followthrough_rate": 1.0,
+        "distinct_responders": 4,
+        "targets": [{"agent_number": 33, "display_name": "Glyph-33", "requests": 9, "answered": 7}],
+    }
+    previous["behavior_hygiene"] = {"repeated_message_fingerprint_count": 12}
+
+    current = _sample_snapshot()
+    current["run_id"] = "real-20260425T203241Z"
+    current["condition_name"] = "canary_i"
+    current["activity"] = {
+        **current["activity"],
+        "became_dormant": 32,
+        "agent_revived": 2,
+        "reserve_aid": 0,
+        "reserve_shortfall": 0,
+        "starvation_warnings": 72,
+        "deaths": 8,
+        "trade_actions": 21,
+        "forum_actions": 123,
+    }
+    current["social_followthrough"] = {
+        "aid_requests": 18,
+        "answered": 16,
+        "clean_unanswered": 2,
+        "clean_followthrough_rate": 0.8889,
+        "distinct_responders": 5,
+        "targets": [{"agent_number": 6, "display_name": "Sigma-06", "requests": 8, "answered": 8}],
+    }
+    current["behavior_hygiene"] = {"repeated_message_fingerprint_count": 12}
+    current["duplicate_waves"] = {
+        "summary": {
+            "wave_count": 2,
+            "proposal_wave_count": 1,
+            "forum_wave_count": 1,
+            "clustered_item_count": 5,
+        },
+        "waves": [],
+    }
+
+    comparison = run_reports._build_closeout_comparison(
+        current_snapshot=current,
+        previous_snapshot=previous,
+    )
+
+    assert comparison is not None
+    assert comparison["previous_run_id"] == "real-20260425T021634Z"
+    metric_deltas = {row["key"]: row["delta"] for row in comparison["metrics"]}
+    assert metric_deltas["deaths"] == 8
+    assert metric_deltas["reserve_aid"] == -101
+    assert comparison["aid_followthrough"]["current"]["dominant_target"]["display_name"] == "Sigma-06"
+    assert comparison["duplicate_waves"]["current"] == 2
+    assert comparison["duplicate_waves"]["current_proposal_waves"] == 1
+    assert any("resolves the prior auto-revival confound" in line for line in comparison["interpretation"])
+
+
+def test_technical_markdown_includes_closeout_comparison_section():
+    payload = {
+        **_sample_snapshot(),
+        "generated_at_utc": "2026-04-26T12:40:00+00:00",
+        "run_started_at": "2026-04-25T20:33:12+00:00",
+        "run_ended_at": "2026-04-26T12:32:44+00:00",
+        "verification_state": "verified",
+        "verification_source": "run_registry",
+        "status_label": run_reports.STATUS_OBSERVATIONAL,
+        "evidence_completeness": run_reports.EVIDENCE_FULL,
+        "condition_name": "canary_i",
+        "replicate_count": 1,
+        "social_followthrough": {},
+        "behavior_hygiene": {},
+        "closeout_comparison": {
+            "previous_run_id": "real-20260425T021634Z",
+            "previous_condition_name": "canary_h",
+            "metrics": [{"key": "deaths", "current": 8, "previous": 0, "delta": 8}],
+            "aid_followthrough": {
+                "current": {"aid_requests": 18, "answered": 16, "clean_unanswered": 2, "clean_followthrough_rate": 0.8889, "distinct_responders": 5},
+                "previous": {"aid_requests": 20, "answered": 13, "clean_unanswered": 0, "clean_followthrough_rate": 1.0, "distinct_responders": 4},
+            },
+            "repeated_message_fingerprints": {"current": 12, "previous": 12, "delta": 0},
+            "duplicate_waves": {"current": 2, "previous": 0, "delta": 2, "current_proposal_waves": 1, "current_forum_waves": 1},
+            "interpretation": ["The current run resolves the prior auto-revival confound."],
+        },
+        "caveats": [],
+        "evidence_links": [{"label": "Run Detail", "href": "/runs/real-20260425T203241Z"}],
+    }
+
+    markdown = run_reports._technical_markdown(payload)
+
+    assert "## Closeout Comparison" in markdown
+    assert "## Reserve Policy vs Mechanical Access" in markdown
+    assert "Policy intent: Active reserve policy intent (1 active reserve laws)" in markdown
+    assert "Automatic reserve mechanics available: False" in markdown
+    assert "## Duplicate Waves" in markdown
+    assert "Repeated proposal/forum waves: 2" in markdown
+    assert "Duplicate proposal/forum waves: current=2, previous=0, delta=+2" in markdown
+    assert "Previous run: real-20260425T021634Z" in markdown
+    assert "deaths: current=8, previous=0, delta=+8" in markdown
+    assert "resolves the prior auto-revival confound" in markdown
+
+
 def _build_snapshot_session():
     engine = create_engine(
         "sqlite://",
@@ -203,6 +371,9 @@ def _build_snapshot_session():
     SimulationRun.__table__.create(bind=engine)
     Agent.__table__.create(bind=engine)
     AgentInventory.__table__.create(bind=engine)
+    Message.__table__.create(bind=engine)
+    Proposal.__table__.create(bind=engine)
+    Law.__table__.create(bind=engine)
     Event.__table__.create(bind=engine)
     AdminConfigChange.__table__.create(bind=engine)
 

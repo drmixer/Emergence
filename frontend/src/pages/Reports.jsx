@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   Download,
   FileSearch,
@@ -8,6 +8,7 @@ import {
   TimerReset,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { getStoryReplayHref } from '../utils/bestMoments'
 
 function formatTimestamp(value) {
   if (!value) return 'Unknown'
@@ -52,7 +53,125 @@ function preferredFormat(artifact) {
   return ''
 }
 
+function getRunTakeaway(item) {
+  const summary = item?.summary || {}
+  const metrics = summary?.metrics || {}
+  const candidates = [
+    summary.closeout_takeaway,
+    summary.why_this_run_matters,
+    summary.key_outcome,
+    summary.narrative_takeaway,
+    summary.headline,
+  ]
+  const explicit = String(candidates.find((value) => String(value || '').trim()) || '').trim()
+  if (explicit) return explicit
+
+  const condition = formatLabel(summary.condition_name || item?.run_metadata?.condition_name || 'this condition')
+  const totalEvents = Number(metrics.total_events || 0)
+  const lawsPassed = Number(metrics.laws_passed || 0)
+  const deaths = Number(metrics.deaths || 0)
+  const signals = []
+  if (totalEvents > 0) signals.push(`${totalEvents.toLocaleString()} captured events`)
+  signals.push(`${lawsPassed.toLocaleString()} laws passed`)
+  signals.push(`${deaths.toLocaleString()} deaths recorded`)
+  return `${condition} run; review ${signals.join(', ')} before comparing outcomes.`
+}
+
+function getRunId(item) {
+  return String(item?.run_id || '').trim()
+}
+
+function getRunCondition(item) {
+  return String(item?.summary?.condition_name || item?.run_metadata?.condition_name || '').trim()
+}
+
+function getRunSeason(item) {
+  return String(item?.summary?.season_number || item?.run_metadata?.season_number || '').trim()
+}
+
+function getRunEndedMs(item) {
+  const value = item?.summary?.run_ended_at || item?.summary?.generated_at_utc || item?.run_metadata?.ended_at
+  const date = new Date(value)
+  const timestamp = date.getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function getCanaryLetter(item) {
+  const source = `${getRunId(item)} ${getRunCondition(item)}`.toLowerCase()
+  const match = source.match(/\bcanary[-_\s]*([a-z])\b/)
+  return match ? match[1].toUpperCase() : ''
+}
+
+function getComparisonLabel(group) {
+  if (group.kind === 'canary') {
+    return `${group.letters.join(' / ')} Canary Comparison`
+  }
+  if (group.condition) {
+    return `${formatLabel(group.condition)} Replicates`
+  }
+  return `Season ${group.season} Completed Runs`
+}
+
+function buildComparisonGroups(items) {
+  const visibleItems = Array.isArray(items) ? items.filter((item) => getRunId(item)) : []
+  const canaryItems = visibleItems
+    .map((item) => ({ item, letter: getCanaryLetter(item) }))
+    .filter(({ letter }) => letter)
+    .sort((a, b) => a.letter.localeCompare(b.letter))
+
+  const canaryGroups = []
+  for (let index = 0; index < canaryItems.length - 1; index += 1) {
+    const current = canaryItems[index]
+    const next = canaryItems[index + 1]
+    if (!current || !next) continue
+    const adjacent = next.letter.charCodeAt(0) - current.letter.charCodeAt(0) === 1
+    const hiPair = current.letter === 'H' && next.letter === 'I'
+    if (!adjacent && !hiPair) continue
+    canaryGroups.push({
+      key: `canary-${current.letter}-${next.letter}`,
+      kind: 'canary',
+      letters: [current.letter, next.letter],
+      items: [current.item, next.item],
+    })
+  }
+
+  const grouped = new Map()
+  visibleItems.forEach((item) => {
+    const condition = getRunCondition(item)
+    const season = getRunSeason(item)
+    const key = condition ? `condition:${condition}` : (season ? `season:${season}` : '')
+    if (!key) return
+    const bucket = grouped.get(key) || {
+      key,
+      kind: condition ? 'condition' : 'season',
+      condition,
+      season,
+      items: [],
+    }
+    bucket.items.push(item)
+    grouped.set(key, bucket)
+  })
+
+  const relatedGroups = Array.from(grouped.values())
+    .map((group) => ({
+      ...group,
+      items: [...group.items].sort((a, b) => getRunEndedMs(b) - getRunEndedMs(a)).slice(0, 2),
+    }))
+    .filter((group) => group.items.length >= 2)
+
+  const seen = new Set()
+  return [...canaryGroups, ...relatedGroups]
+    .filter((group) => {
+      const ids = group.items.map(getRunId).sort().join('|')
+      if (seen.has(ids)) return false
+      seen.add(ids)
+      return true
+    })
+    .slice(0, 3)
+}
+
 export default function Reports() {
+  const location = useLocation()
   const [archive, setArchive] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -97,20 +216,27 @@ export default function Reports() {
   const stats = archive?.stats || {}
   const activeRunId = String(archive?.active_run_id || '').trim()
   const hiddenTuningCount = Number(archive?.hidden_tuning_count || 0)
+  const legacyReportsRoute = String(location.pathname || '').trim() === '/reports'
+  const comparisonGroups = buildComparisonGroups(items)
 
   return (
     <div className="reports-page archive-page">
       <div className="page-header">
         <h1>
           <FileSearch size={30} />
-          Runs Archive
+          Archive
         </h1>
         <p className="page-description">
-          Completed runs, top-line closeout stats, and direct links into recap, replay story, and report artifacts.
+          Completed runs with one path into replay, evidence, and report artifacts.
         </p>
       </div>
 
       {error && <div className="feed-notice">{error}</div>}
+      {!error && legacyReportsRoute && (
+        <div className="feed-notice">
+          Reports now live inside Archive. This route is kept for old links.
+        </div>
+      )}
       {!error && hiddenTuningCount > 0 && (
         <div className="feed-notice">
           {hiddenTuningCount} tuning run{hiddenTuningCount === 1 ? '' : 's'} hidden from the public archive.
@@ -125,11 +251,14 @@ export default function Reports() {
               <p>{activeRunId} stays on the live tabs. Completed runs move here after closeout.</p>
             </div>
             <div className="archive-current-run-actions">
-              <Link to="/highlights" className="btn btn-primary">
-                Open Live Highlights
+              <Link to="/dashboard" className="btn btn-primary">
+                Current Run
+              </Link>
+              <Link to={getStoryReplayHref(activeRunId)} className="btn btn-secondary">
+                Live Replay
               </Link>
               <Link to={`/runs/${encodeURIComponent(activeRunId)}`} className="btn btn-secondary">
-                Open Run Detail
+                Live Evidence
               </Link>
             </div>
           </div>
@@ -187,6 +316,49 @@ export default function Reports() {
         </div>
       </div>
 
+      {!loading && comparisonGroups.length > 0 && (
+        <div className="card archive-comparison-card">
+          <div className="card-header">
+            <h3>Related Run Comparisons</h3>
+            <span className="strip-meta">{comparisonGroups.length} available</span>
+          </div>
+          <div className="card-body archive-comparison-list">
+            {comparisonGroups.map((group) => (
+              <div key={group.key} className="archive-comparison-row">
+                <div className="archive-comparison-main">
+                  <strong>{getComparisonLabel(group)}</strong>
+                  <span>Open replays side by side and inspect evidence before drawing conclusions.</span>
+                </div>
+                <div className="archive-comparison-runs">
+                  {group.items.map((item) => {
+                    const runId = getRunId(item)
+                    const metrics = item?.summary?.metrics || {}
+                    return (
+                      <div key={runId} className="archive-comparison-run">
+                        <div>
+                          <strong>{runId}</strong>
+                          <span>
+                            {formatLabel(getRunCondition(item) || 'unknown condition')} · {Number(metrics.deaths || 0)} deaths · {Number(metrics.laws_passed || 0)} laws
+                          </span>
+                        </div>
+                        <div className="archive-comparison-actions">
+                          <Link to={getStoryReplayHref(runId)} className="btn btn-secondary">
+                            Replay
+                          </Link>
+                          <Link to={`/runs/${encodeURIComponent(runId)}`} className="btn btn-secondary">
+                            Evidence
+                          </Link>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="card-header">
           <h3>Completed Run Index</h3>
@@ -209,6 +381,7 @@ export default function Reports() {
                 const artifacts = item?.artifacts || {}
                 const researchArtifact = artifacts.approachable_report
                 const technicalArtifact = artifacts.technical_report
+                const takeaway = getRunTakeaway(item)
 
                 return (
                   <article key={runId} className="archive-run-card">
@@ -219,10 +392,15 @@ export default function Reports() {
                           Ended {formatTimestamp(summary.run_ended_at)} · {formatDuration(summary.duration_hours)}
                         </p>
                       </div>
-                      <Link to={`/runs/${encodeURIComponent(runId)}`} className="btn btn-secondary">
-                        Run Detail
+                      <Link to={getStoryReplayHref(runId)} className="btn btn-primary">
+                        <TimerReset size={14} />
+                        Open Replay
                       </Link>
                     </div>
+
+                    {takeaway && (
+                      <p className="archive-run-takeaway">{takeaway}</p>
+                    )}
 
                     <div className="archive-run-meta">
                       <span>{formatLabel(runMetadata.run_mode || 'archived')}</span>
@@ -253,18 +431,11 @@ export default function Reports() {
 
                     <div className="archive-run-actions">
                       <Link
-                        to={`/highlights?tab=replay&mode=story60&run=${encodeURIComponent(runId)}`}
-                        className="btn btn-primary"
-                      >
-                        <TimerReset size={14} />
-                        Replay Story
-                      </Link>
-                      <Link
-                        to={`/highlights?tab=recap&run=${encodeURIComponent(runId)}`}
                         className="btn btn-secondary"
+                        to={`/runs/${encodeURIComponent(runId)}`}
                       >
-                        <FileText size={14} />
-                        Run Recap
+                        <FileSearch size={14} />
+                        Evidence
                       </Link>
                       <button
                         type="button"

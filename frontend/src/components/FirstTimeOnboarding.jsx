@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, BookOpen, ChevronRight, FileSearch, Sparkles, Star, X } from 'lucide-react'
+import { Activity, BookOpen, ChevronRight, FileSearch, Sparkles, X } from 'lucide-react'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 import './FirstTimeOnboarding.css'
 
@@ -95,15 +95,11 @@ export default function FirstTimeOnboarding() {
                 <ul className="onboarding-steps">
                     <li>
                         <Activity size={14} />
-                        <span><strong>Dashboard:</strong> live state, crises, and momentum.</span>
-                    </li>
-                    <li>
-                        <Star size={14} />
-                        <span><strong>Highlights:</strong> replay major moments in sequence.</span>
+                        <span><strong>Current Run:</strong> live state, crises, momentum, and open prediction hooks.</span>
                     </li>
                     <li>
                         <FileSearch size={14} />
-                        <span><strong>Reports:</strong> technical and story outputs with evidence links.</span>
+                        <span><strong>Archive:</strong> completed runs with replay, evidence, and reports.</span>
                     </li>
                     <li>
                         <BookOpen size={14} />
@@ -116,7 +112,7 @@ export default function FirstTimeOnboarding() {
                         Skip
                     </button>
                     <button type="button" className="btn btn-primary" onClick={handleStart}>
-                        Open Dashboard
+                        Open Current Run
                         <ChevronRight size={14} />
                     </button>
                 </div>

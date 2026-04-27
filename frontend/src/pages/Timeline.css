@@ -205,6 +205,11 @@
     border-left: 2px solid rgba(255, 255, 255, 0.3);
 }
 
+.timeline-event.focused {
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), var(--shadow-glow);
+}
+
 .event-connector {
     position: absolute;
     left: calc(-1 * var(--spacing-2xl) + 11px);

@@ -1089,9 +1089,10 @@ async def resolve_expired_proposals():
                             f"{proposal.description or ''}\n\n"
                             f"Vote result: {proposal.votes_for} yes, {proposal.votes_against} no, "
                             f"{proposal.votes_abstain} abstain.\n\n"
-                            f"This law is now part of the active world state. Agents may discuss it, "
+                            f"This law is now part of the active policy record. Agents may discuss it, "
                             f"coordinate around it, comply with it, propose changes to it, or cite "
-                            f"`law_id={law.id}` in enforcement actions if they believe it is being violated."
+                            f"`law_id={law.id}` in enforcement actions if they believe it is being violated. "
+                            f"Mechanical reserve effects still depend on the current run condition and enabled runtime gates."
                         ),
                     )
                     db.add(law_alert)

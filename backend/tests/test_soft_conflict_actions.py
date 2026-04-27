@@ -352,6 +352,122 @@ def test_duplicate_proposal_checkpoint_recovery_discusses_when_already_voted(ses
     assert action["parent_message_id"] == discussion.id
 
 
+def test_forum_post_rejects_near_duplicate_recent_message(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        existing = Message(
+            author_agent_id=author.id,
+            content=(
+                "The Shared Survival Reserve Law is active but reserve access remains disabled. "
+                "Contributions are mandatory while benefits are not accessible. This creates an "
+                "imbalance and risks dormancy."
+            ),
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=10),
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "Law #144 is active, but reserve access remains disabled. Contributions "
+                        "are mandatory and benefits are inaccessible, creating an imbalance that "
+                        "risks dormancy."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_forum_message"
+    assert validation["message_id"] == existing.id
+    assert "Near-duplicate recent forum message exists" in validation["reason"]
+
+
+def test_duplicate_forum_checkpoint_recovery_replies_to_existing_message(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        existing = Message(
+            author_agent_id=author.id,
+            content=(
+                "Reserve access remains disabled despite active reserve laws. Contributions are "
+                "mandatory while benefits are inaccessible, creating an imbalance for exposed agents."
+            ),
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=10),
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+
+        attempted_action = {
+            "action": "forum_post",
+            "content": (
+                "The reserve access mechanism remains disabled despite active laws. Contributions "
+                "are mandatory but benefits are inaccessible, creating an imbalance for exposed agents."
+            ),
+        }
+        validation = asyncio.run(actions.validate_action(db, poster, attempted_action))
+
+        followup = asyncio.run(
+            AgentProcessor()._build_duplicate_forum_followup(
+                db,
+                poster,
+                attempted_action=attempted_action,
+                validation=validation,
+            )
+        )
+
+    assert followup is not None
+    action, followup_validation = followup
+    assert followup_validation == {"valid": True}
+    assert action["action"] == "forum_reply"
+    assert action["parent_message_id"] == existing.id
+    assert action["content"].startswith("Adding this to the existing thread")
+
+
+def test_forum_post_allows_distinct_same_topic_message(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        db.add(
+            Message(
+                author_agent_id=author.id,
+                content=(
+                    "Reserve access remains disabled despite active reserve laws. Contributions are "
+                    "mandatory while benefits are inaccessible, creating an imbalance for exposed agents."
+                ),
+                message_type="forum_post",
+                created_at=now_utc() - timedelta(minutes=10),
+            )
+        )
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "I oppose making the next reserve rule mandatory unless agents can opt out "
+                        "when their own food margin is below one cycle."
+                    ),
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
 def test_idle_action_descriptions_distinguish_routine_hold(session_factory):
     with session_factory() as db:
         agent = _seed_agent(db, agent_number=17, display_name="Pulse-17")

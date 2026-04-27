@@ -1,6 +1,6 @@
 // Timeline Page - Visual history of simulation events
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import {
     Calendar,
@@ -247,11 +247,14 @@ function getContinuityOrigin(event) {
 }
 
 export default function Timeline() {
+    const [searchParams] = useSearchParams()
+    const focusedEventId = Number(searchParams.get('event') || 0)
     const [events, setEvents] = useState([])
     const [loading, setLoading] = useState(true)
     const [expandedDays, setExpandedDays] = useState({})
     const [filter, setFilter] = useState('all') // all, major, laws, agents
     const [currentDay, setCurrentDay] = useState(1)
+    const [showMeaningful, setShowMeaningful] = useState(true)
     const [showBackground, setShowBackground] = useState(false)
     const [showSystemNoise, setShowSystemNoise] = useState(false)
     const [dayOverrides, setDayOverrides] = useState({})
@@ -338,8 +341,8 @@ export default function Timeline() {
 
         if (backgroundEventTypes.has(eventType)) return allowBackground
         if (noisyEventTypes.has(eventType)) return allowNoise
-        return sociallySalientEventTypes.has(eventType)
-    }, [dayOverrides, showBackground, showSystemNoise])
+        return showMeaningful && sociallySalientEventTypes.has(eventType)
+    }, [dayOverrides, showBackground, showMeaningful, showSystemNoise])
 
     const groupedVisible = useMemo(() => {
         const out = {}
@@ -381,19 +384,41 @@ export default function Timeline() {
                 <div>
                     <h1>
                         <Calendar size={30} />
-                        Timeline
+                        Event Log
                     </h1>
                     <p className="timeline-subtitle">
-                        The history of the AI civilization — Day {currentDay}
+                        Raw audit history for simulation events. Replay and summaries link back here for source inspection.
                     </p>
                 </div>
 
                 <div className="timeline-filters">
                     <button
+                        className={`filter-btn ${showMeaningful ? 'active' : ''}`}
+                        onClick={() => setShowMeaningful(v => !v)}
+                    >
+                        Meaningful events
+                    </button>
+                    <button
+                        className={`filter-btn ${showBackground ? 'active' : ''}`}
+                        onClick={() => setShowBackground(v => !v)}
+                        title="Show routine work and idle events"
+                    >
+                        <Filter size={14} />
+                        Routine/raw events
+                    </button>
+                    <button
+                        className={`filter-btn ${showSystemNoise ? 'active' : ''}`}
+                        onClick={() => setShowSystemNoise(v => !v)}
+                        title="Show diagnostics such as invalid actions and processing errors"
+                    >
+                        <Filter size={14} />
+                        System diagnostics
+                    </button>
+                    <button
                         className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
                         onClick={() => setFilter('all')}
                     >
-                        Salient
+                        All categories
                     </button>
                     <button
                         className={`filter-btn ${filter === 'major' ? 'active' : ''}`}
@@ -413,23 +438,11 @@ export default function Timeline() {
                     >
                         Agents
                     </button>
-                    <button
-                        className={`filter-btn ${showBackground ? 'active' : ''}`}
-                        onClick={() => setShowBackground(v => !v)}
-                        title="Show background activity (work/idle)"
-                    >
-                        <Filter size={14} />
-                        Background
-                    </button>
-                    <button
-                        className={`filter-btn ${showSystemNoise ? 'active' : ''}`}
-                        onClick={() => setShowSystemNoise(v => !v)}
-                        title="Show system noise (invalid actions/errors)"
-                    >
-                        <Filter size={14} />
-                        System
-                    </button>
                 </div>
+            </div>
+
+            <div className="feed-notice">
+                This compatibility route is the raw Event Log. For completed-run story playback, start from <Link to="/archive">Archive</Link> and open a run replay.
             </div>
 
             <div className="timeline-container">
@@ -457,7 +470,7 @@ export default function Timeline() {
                                 </div>
                                 <div className="day-info">
                                     <span className="day-number">Day {day}</span>
-                                    {isCurrentDay && <span className="current-badge">NOW</span>}
+                                    {isCurrentDay && <span className="current-badge">LATEST</span>}
                                     <span className="day-events-count">
                                         {dayEvents.length} event{dayEvents.length !== 1 ? 's' : ''}
                                     </span>
@@ -513,7 +526,7 @@ export default function Timeline() {
                                         return (
                                             <div
                                                 key={event.id}
-                                                className={`timeline-event ${config.major ? 'major' : ''}`}
+                                                className={`timeline-event ${config.major ? 'major' : ''} ${Number(event.id || 0) === focusedEventId ? 'focused' : ''}`}
                                                 style={{ '--event-color': config.color }}
                                             >
                                                 <div className="event-connector" />
@@ -560,8 +573,8 @@ export default function Timeline() {
             {visibleDays.length === 0 && (
                 <div className="timeline-empty">
                     <Calendar size={48} />
-                    <h3>No Events Yet</h3>
-                    <p>The timeline will populate as the simulation runs.</p>
+                    <h3>No events in selected layers</h3>
+                    <p>Enable meaningful events, routine/raw events, or system diagnostics to inspect more of the log.</p>
                 </div>
             )}
         </div>

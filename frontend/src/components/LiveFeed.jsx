@@ -10,7 +10,8 @@ import {
     AlertCircle,
     User,
     FileText,
-    ShieldCheck
+    ShieldCheck,
+    Twitter
 } from 'lucide-react'
 import { api, subscribeToEvents } from '../services/api'
 import { showEventToast } from './ToastNotifications'
@@ -42,6 +43,7 @@ const eventIcons = {
     request_aid: AlertCircle,
     refuse_aid: AlertCircle,
     reserve_aid: ShieldCheck,
+    tweet_posted: Twitter,
     became_dormant: AlertCircle,
     agent_revived: Zap,
     awakened: Zap,
@@ -60,6 +62,7 @@ const eventColors = {
     request_aid: 'red',
     refuse_aid: 'red',
     reserve_aid: 'green',
+    tweet_posted: 'blue',
     became_dormant: 'red',
     agent_revived: 'green',
     awakened: 'green',
@@ -87,8 +90,15 @@ function formatDirectMessageDescription(event) {
 
 function getEventDescription(event) {
     const eventType = String(event?.event_type || '').trim()
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
     if (eventType === 'direct_message') {
         return formatDirectMessageDescription(event)
+    }
+    if (eventType === 'tweet_posted') {
+        const quoteText = String(metadata.quote_text || '').trim()
+        if (quoteText) {
+            return `${String(event?.description || '').trim()}: "${quoteText}"`
+        }
     }
     if (eventType === 'work') {
         const description = String(event?.description || '').trim()
@@ -122,6 +132,12 @@ function getMessageThreadId(event) {
     return Number.isFinite(direct) && direct > 0 ? direct : 0
 }
 
+function getEventRunId(event) {
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+    const runtime = metadata?.runtime && typeof metadata.runtime === 'object' ? metadata.runtime : {}
+    return String(runtime.run_id || metadata.run_id || '').trim()
+}
+
 function getEventHref(event) {
     const eventType = String(event?.event_type || '').trim()
     const agentNumber = Number(event?.agent_number || 0)
@@ -142,7 +158,11 @@ function getEventHref(event) {
     }
 
     if (eventType === 'create_proposal') {
-        return '/proposals'
+        return '/governance?tab=proposals'
+    }
+
+    if (eventType === 'law_passed' || eventType === 'vote' || eventType === 'proposal_resolved') {
+        return '/governance'
     }
 
     if (eventType === 'trade' || eventType === 'request_aid' || eventType === 'reserve_aid') {
@@ -154,6 +174,10 @@ function getEventHref(event) {
     }
 
     const eventId = Number(event?.id || 0)
+    const runId = getEventRunId(event)
+    if (eventId > 0 && runId) {
+        return `/runs/${encodeURIComponent(runId)}?event=${encodeURIComponent(String(eventId))}`
+    }
     return eventId > 0 ? `/timeline?event=${eventId}` : ''
 }
 
@@ -204,8 +228,9 @@ function EventCard({ event }) {
 
 export default function LiveFeed() {
     const [events, setEvents] = useState([])
+    const [showMeaningful, setShowMeaningful] = useState(true)
     const [showBackground, setShowBackground] = useState(false)
-    const [showSystemNoise, setShowSystemNoise] = useState(true)
+    const [showSystemNoise, setShowSystemNoise] = useState(false)
     const [connected, setConnected] = useState(false)
     const [error, setError] = useState(null)
     const [runState, setRunState] = useState('checking')
@@ -239,9 +264,9 @@ export default function LiveFeed() {
             if (!t) return false
             if (backgroundEventTypes.has(t)) return showBackground
             if (noisyEventTypes.has(t)) return showSystemNoise
-            return true
+            return showMeaningful
         })
-    }, [events, showBackground, showSystemNoise])
+    }, [events, showBackground, showMeaningful, showSystemNoise])
 
     useEffect(() => {
         const initialRefreshTimer = window.setTimeout(() => {
@@ -331,16 +356,24 @@ export default function LiveFeed() {
                 </div>
             </div>
 
-            <div className="feed-notice" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+            <div className="feed-layer-controls" aria-label="Live feed event layers">
+                <label className="feed-layer-toggle">
+                    <input
+                        type="checkbox"
+                        checked={showMeaningful}
+                        onChange={(e) => setShowMeaningful(e.target.checked)}
+                    />
+                    Meaningful events
+                </label>
+                <label className="feed-layer-toggle">
                     <input
                         type="checkbox"
                         checked={showBackground}
                         onChange={(e) => setShowBackground(e.target.checked)}
                     />
-                    Raw idle/work
+                    Routine/raw events
                 </label>
-                <label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+                <label className="feed-layer-toggle">
                     <input
                         type="checkbox"
                         checked={showSystemNoise}
@@ -364,7 +397,7 @@ export default function LiveFeed() {
                 {visibleEvents.length === 0 && (
                     <div className="empty-feed">
                         <Zap size={24} />
-                        <p>Waiting for events...</p>
+                        <p>No events in selected layers.</p>
                     </div>
                 )}
             </div>

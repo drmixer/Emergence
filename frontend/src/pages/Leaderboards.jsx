@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../services/api'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import AgentAvatar from '../components/AgentAvatar'
+import NoActiveRunNotice from '../components/NoActiveRunNotice'
 
 const leaderboardConfig = {
     wealth: { icon: DollarSign, label: 'Wealthiest', color: 'gold', valueKey: 'total_wealth', valueLabel: 'Total' },
@@ -51,12 +52,17 @@ export default function Leaderboards() {
     const [leaderboards, setLeaderboards] = useState({ wealth: [], activity: [], influence: [], producers: [], traders: [] })
     const [activeBoard, setActiveBoard] = useState('wealth')
     const [loading, setLoading] = useState(true)
+    const [scope, setScope] = useState(null)
 
     useEffect(() => {
         async function load() {
             setLoading(true)
             try {
-                const data = await api.fetch('/api/analytics/leaderboards')
+                const [overview, data] = await Promise.all([
+                    api.fetch('/api/analytics/overview').catch(() => null),
+                    api.fetch('/api/analytics/leaderboards'),
+                ])
+                setScope(overview?.scope || null)
                 setLeaderboards({
                     wealth: data?.wealth || [],
                     activity: data?.activity || [],
@@ -65,6 +71,7 @@ export default function Leaderboards() {
                     traders: data?.traders || [],
                 })
             } catch {
+                setScope(null)
                 setLeaderboards({ wealth: [], activity: [], influence: [], producers: [], traders: [] })
             } finally {
                 setLoading(false)
@@ -79,6 +86,8 @@ export default function Leaderboards() {
     const topWealthLabel = leaderboards.wealth[0] ? formatAgentDisplayLabel(leaderboards.wealth[0]) : '—'
     const topActivityLabel = leaderboards.activity[0] ? formatAgentDisplayLabel(leaderboards.activity[0]) : '—'
     const topInfluenceLabel = leaderboards.influence[0] ? formatAgentDisplayLabel(leaderboards.influence[0]) : '—'
+    const inactiveRun = !loading && scope?.simulation_active === false
+    const lastCompletedRunId = String(scope?.last_completed_run_id || '').trim()
 
     return (
         <div className="leaderboards-page">
@@ -92,8 +101,15 @@ export default function Leaderboards() {
                 </p>
             </div>
 
+            {inactiveRun && (
+                <NoActiveRunNotice
+                    message="Live leaderboards are hidden while no run is active. Use archived run evidence for completed rankings."
+                    lastCompletedRunId={lastCompletedRunId}
+                />
+            )}
+
             {/* Leaderboard Type Selector */}
-            <div className="board-selector">
+            {!inactiveRun && <div className="board-selector">
                 {Object.entries(leaderboardConfig).map(([key, cfg]) => {
                     const BoardIcon = cfg.icon
                     return (
@@ -107,10 +123,10 @@ export default function Leaderboards() {
                         </button>
                     )
                 })}
-            </div>
+            </div>}
 
             {/* Leaderboard Display */}
-            <div className="leaderboard-container">
+            {!inactiveRun && <div className="leaderboard-container">
                 <div className="leaderboard-header">
                     <Icon size={24} className={`header-icon ${config.color}`} />
                     <h2>{config.label}</h2>
@@ -160,10 +176,10 @@ export default function Leaderboards() {
                         </Link>
                     ))}
                 </div>
-            </div>
+            </div>}
 
             {/* Quick Stats */}
-            <div className="quick-stats">
+            {!inactiveRun && <div className="quick-stats">
                 <div className="quick-stat-card">
                     <h4>Top Wealthy</h4>
                     <div className="quick-stat-value">{topWealthLabel}</div>
@@ -185,7 +201,7 @@ export default function Leaderboards() {
                         {leaderboards.influence[0] ? `${formatLeaderboardValue(leaderboards.influence[0]?.influence_score)} influence` : '—'}
                     </div>
                 </div>
-            </div>
+            </div>}
 
             <style>{`
         .board-selector {

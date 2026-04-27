@@ -1,5 +1,5 @@
 import { Suspense, createElement, lazy, useEffect, useState } from 'react'
-import { Routes, Route, NavLink } from 'react-router-dom'
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
 import {
   Activity,
   Users,
@@ -9,16 +9,12 @@ import {
   Package,
   ExternalLink,
   Github,
-  Star,
   FileSearch,
-  Trophy,
   Info,
   Menu,
   X,
   Share2,
-  Calendar,
   TrendingUp,
-  Shield,
   BookOpen,
 } from 'lucide-react'
 
@@ -27,11 +23,12 @@ const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Agents = lazy(() => import('./pages/Agents'))
 const Agent = lazy(() => import('./pages/Agent'))
 const Messages = lazy(() => import('./pages/Messages'))
+const Governance = lazy(() => import('./pages/Governance'))
 const Proposals = lazy(() => import('./pages/Proposals'))
 const Laws = lazy(() => import('./pages/Laws'))
 const Resources = lazy(() => import('./pages/Resources'))
 const About = lazy(() => import('./pages/About'))
-const Highlights = lazy(() => import('./pages/Highlights'))
+const HighlightsCompatibility = lazy(() => import('./pages/HighlightsCompatibility'))
 const Leaderboards = lazy(() => import('./pages/Leaderboards'))
 const Network = lazy(() => import('./pages/Network'))
 const Timeline = lazy(() => import('./pages/Timeline'))
@@ -40,6 +37,7 @@ const Ops = lazy(() => import('./pages/Ops'))
 const Method = lazy(() => import('./pages/Method'))
 const Glossary = lazy(() => import('./pages/Glossary'))
 const RunDetail = lazy(() => import('./pages/RunDetail'))
+const RunReplay = lazy(() => import('./pages/RunReplay'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Privacy = lazy(() => import('./pages/Privacy'))
 const Terms = lazy(() => import('./pages/Terms'))
@@ -79,26 +77,23 @@ function syncAppIcons() {
 
 function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const location = useLocation()
+  const showLiveFeedSidebar = location.pathname === '/dashboard'
 
   useEffect(() => {
     syncAppIcons()
   }, [])
 
   const navItems = [
-    { path: '/dashboard', icon: Activity, label: 'Dashboard' },
+    { path: '/dashboard', icon: Activity, label: 'Current Run' },
     { path: '/agents', icon: Users, label: 'Agents' },
     { path: '/messages', icon: MessageSquare, label: 'Messages' },
     { path: '/network', icon: Share2, label: 'Network' },
-    { path: '/proposals', icon: FileText, label: 'Proposals' },
-    { path: '/laws', icon: Scale, label: 'Laws' },
+    { path: '/governance', icon: Scale, label: 'Governance' },
     { path: '/resources', icon: Package, label: 'Resources' },
-    { path: '/timeline', icon: Calendar, label: 'Timeline' },
-    { path: '/highlights', icon: Star, label: 'Highlights' },
     { path: '/archive', icon: FileSearch, label: 'Archive' },
-    { path: '/glossary', icon: BookOpen, label: 'Glossary' },
     { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
-    { path: '/leaderboards', icon: Trophy, label: 'Leaderboards' },
-    { path: '/ops', icon: Shield, label: 'Ops' },
+    { path: '/glossary', icon: BookOpen, label: 'Glossary' },
   ]
 
   const handleNavClick = () => {
@@ -188,7 +183,7 @@ function App() {
           </div>
         </nav>
 
-        <div className="app">
+        <div className={`app ${showLiveFeedSidebar ? '' : 'no-feed-sidebar'}`}>
           {/* Sidebar Navigation */}
           <aside className="sidebar">
             <div className="sidebar-header">
@@ -247,12 +242,13 @@ function App() {
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/agents/:id" element={<Agent />} />
                 <Route path="/messages" element={<Messages />} />
+                <Route path="/governance" element={<Governance />} />
                 <Route path="/proposals" element={<Proposals />} />
                 <Route path="/laws" element={<Laws />} />
                 <Route path="/resources" element={<Resources />} />
                 <Route path="/network" element={<Network />} />
                 <Route path="/timeline" element={<Timeline />} />
-                <Route path="/highlights" element={<Highlights />} />
+                <Route path="/highlights" element={<HighlightsCompatibility />} />
                 <Route path="/archive" element={<Reports />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/leaderboards" element={<Leaderboards />} />
@@ -263,17 +259,19 @@ function App() {
                 <Route path="/privacy" element={<Privacy />} />
                 <Route path="/terms" element={<Terms />} />
                 <Route path="/ops" element={<Ops />} />
+                <Route path="/runs/:runId/replay" element={<RunReplay />} />
                 <Route path="/runs/:runId" element={<RunDetail />} />
               </Routes>
             </Suspense>
           </main>
 
-          {/* Live Feed Sidebar */}
-          <aside className="feed-sidebar">
-            <Suspense fallback={<div className="feed-loading">Loading feed...</div>}>
-              <LiveFeed />
-            </Suspense>
-          </aside>
+          {showLiveFeedSidebar && (
+            <aside className="feed-sidebar">
+              <Suspense fallback={<div className="feed-loading">Loading feed...</div>}>
+                <LiveFeed />
+              </Suspense>
+            </aside>
+          )}
         </div>
         <Suspense fallback={null}>
           <ToastProvider />

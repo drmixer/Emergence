@@ -297,11 +297,11 @@ function getWhyThisMatters(turn) {
   return 'This high-salience event changed momentum and helps explain why subsequent actions unfolded the way they did.'
 }
 
-export default function Highlights() {
+export default function Highlights({ runIdOverride = '', initialTab = '' }) {
   const [searchParams] = useSearchParams()
-  const requestedTab = String(searchParams.get('tab') || '').trim()
+  const requestedTab = String(initialTab || searchParams.get('tab') || '').trim()
   const requestedEventId = Number(searchParams.get('event') || 0)
-  const runFilter = String(searchParams.get('run') || '').trim()
+  const runFilter = String(runIdOverride || searchParams.get('run') || '').trim()
   const requestedReplayMode = String(searchParams.get('mode') || '').trim()
 
   const [summary, setSummary] = useState(null)
@@ -596,6 +596,7 @@ export default function Highlights() {
     : (showLiveStateStrip ? 'Active run' : 'Latest available run')
   const recapTabLabel = isArchiveView ? 'Run Recap' : 'Run Summary So Far'
   const plotTurnsLabel = isArchiveView ? 'Key Moments' : 'What Changed'
+  const pageTitle = isArchiveView ? 'Run Replay' : 'Highlights'
 
   const stateStrip = useMemo(() => {
     const day = Number(overview?.day_number || 0)
@@ -744,13 +745,13 @@ export default function Highlights() {
       <div className="page-header">
         <h1>
           <Star size={32} />
-          Highlights
+          {pageTitle}
         </h1>
         <p className="page-description">
           {invalidArchiveState
             ? `Requested archived run ${invalidArchivedRunId} could not be found`
             : isArchiveView && selectedRunId
-            ? `Run recap, replay, and evidence surfaces for archived run ${selectedRunId}`
+            ? `Chaptered replay, recap, and evidence links for completed run ${selectedRunId}`
             : activeRunId
               ? 'Live story desk for the current run: recap, what changed, replay, and summary'
               : 'Recap, key moments, replay, and summary from the latest available run'}
@@ -758,7 +759,9 @@ export default function Highlights() {
       </div>
 
       <div className="feed-notice">
-        Highlights are observational summaries from simulation data. For claim-level evidence, review run detail traces and the <Link to="/method">method notes</Link>.
+        {isArchiveView
+          ? <>Replay is an observational reconstruction from run events. For claim-level evidence, review <Link to={`/runs/${encodeURIComponent(selectedRunId || runFilter)}`}>run evidence</Link> and the <Link to="/method">method notes</Link>.</>
+          : <>Highlights are observational summaries from simulation data. For claim-level evidence, review run detail traces and the <Link to="/method">method notes</Link>.</>}
       </div>
 
       {requestedTab === 'predictions' && (

@@ -310,6 +310,22 @@ class AgentProcessor:
                             action_data, validation = duplicate_followup
                             runtime_metadata["redirected_from_invalid_action"] = "duplicate_active_proposal"
                             runtime_metadata["redirect_target_proposal_id"] = redirect_target_proposal_id
+                    if (
+                        not validation["valid"]
+                        and checkpoint_reason
+                        and validation.get("reason_code") == "duplicate_forum_message"
+                    ):
+                        duplicate_followup = await self._build_duplicate_forum_followup(
+                            db,
+                            agent,
+                            attempted_action=action_data,
+                            validation=validation,
+                        )
+                        if duplicate_followup is not None:
+                            redirect_target_message_id = validation.get("message_id")
+                            action_data, validation = duplicate_followup
+                            runtime_metadata["redirected_from_invalid_action"] = "duplicate_forum_message"
+                            runtime_metadata["redirect_target_message_id"] = redirect_target_message_id
                     if not validation["valid"]:
                         self._apply_rate_limit_backoff(agent_id, validation, runtime_metadata=runtime_metadata)
                         # If checkpoint output is invalid, use the run-class-aware deterministic policy.
@@ -590,6 +606,43 @@ class AgentProcessor:
             "action": "idle",
             "reasoning": f"Conserving energy because the planned action was not affordable: {reason}",
         }
+
+    async def _build_duplicate_forum_followup(
+        self,
+        db: Session,
+        agent: Agent,
+        *,
+        attempted_action: dict,
+        validation: dict,
+    ) -> Optional[tuple[dict, dict]]:
+        message_id = validation.get("message_id")
+        if not message_id:
+            return None
+        parent_message = db.query(Message).filter(Message.id == message_id).first()
+        if parent_message is None:
+            return None
+
+        attempted_content = " ".join(str((attempted_action or {}).get("content") or "").split())
+        if not attempted_content:
+            return None
+        if len(attempted_content) > 900:
+            attempted_content = attempted_content[:897].rstrip() + "..."
+
+        reply_action = {
+            "action": "forum_reply",
+            "parent_message_id": parent_message.id,
+            "content": (
+                "Adding this to the existing thread instead of opening a duplicate post: "
+                f"{attempted_content}"
+            ),
+            "reasoning": (
+                "Checkpoint recovery: similar forum message already exists, so reply in-thread."
+            ),
+        }
+        reply_validation = await validate_action(db, agent, reply_action)
+        if reply_validation["valid"]:
+            return reply_action, reply_validation
+        return None
 
     async def _build_duplicate_proposal_followup(
         self,

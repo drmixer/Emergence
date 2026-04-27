@@ -4,6 +4,7 @@ import { Users, Search } from 'lucide-react'
 import { api } from '../services/api'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
 import GlossaryTooltip from '../components/GlossaryTooltip'
+import NoActiveRunNotice from '../components/NoActiveRunNotice'
 import { formatDistanceToNow } from 'date-fns'
 import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { ALLY_BUCKET_CONFIG, RIVAL_BUCKET_CONFIG, getRelationshipBucketMaps } from '../utils/relationshipBuckets'
@@ -55,6 +56,7 @@ const DANGER_TERM_KEYS = {
 export default function Agents() {
     const [agents, setAgents] = useState([])
     const [loading, setLoading] = useState(true)
+    const [scope, setScope] = useState(null)
     const [filters, setFilters] = useState({
         status: '',
         tier: '',
@@ -66,13 +68,18 @@ export default function Agents() {
         const fetchAgents = async () => {
             setLoading(true)
             try {
-                const data = await api.getAgents({
+                const [overview, data] = await Promise.all([
+                    api.fetch('/api/analytics/overview').catch(() => null),
+                    api.getAgents({
                     status: filters.status || undefined,
                     tier: filters.tier || undefined,
                     personality_type: filters.personality || undefined,
-                })
+                    }),
+                ])
+                setScope(overview?.scope || null)
                 setAgents(Array.isArray(data) ? data : [])
             } catch (_error) {
+                setScope(null)
                 setAgents([])
             } finally {
                 setLoading(false)
@@ -96,6 +103,9 @@ export default function Agents() {
         return true
     }), [agents, filters.personality, filters.search, filters.status, filters.tier])
 
+    const inactiveRun = !loading && scope?.simulation_active === false
+    const lastCompletedRunId = String(scope?.last_completed_run_id || '').trim()
+
     return (
         <div className="agents-page">
             <div className="page-header">
@@ -111,8 +121,15 @@ export default function Agents() {
                 </p>
             </div>
 
+            {inactiveRun && (
+                <NoActiveRunNotice
+                    message="The live agent roster is hidden while no run is active, so closed-run statuses are not mistaken for current state."
+                    lastCompletedRunId={lastCompletedRunId}
+                />
+            )}
+
             {/* Filters */}
-            <div className="filters">
+            {!inactiveRun && <div className="filters">
                 <div className="filter-group">
                     <label className="filter-label">Search</label>
                     <div style={{ position: 'relative' }}>
@@ -168,14 +185,14 @@ export default function Agents() {
                         <option value="neutral">Neutral</option>
                     </select>
                 </div>
-            </div>
+            </div>}
 
-            <div style={{ marginBottom: 'var(--spacing-md)', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+            {!inactiveRun && <div style={{ marginBottom: 'var(--spacing-md)', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
                 {loading ? 'Loading agents…' : `Showing ${filteredAgents.length} of ${agents.length} agents`}
-            </div>
+            </div>}
 
             {/* Agent Grid */}
-            <div className="agent-grid">
+            {!inactiveRun && <div className="agent-grid">
                 {!loading && filteredAgents.length === 0 && (
                     <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
                         No agents found.
@@ -280,7 +297,7 @@ export default function Agents() {
                         })()}
                     </Link>
                 ))}
-            </div>
+            </div>}
 
             <style>{`
         .agent-meta {

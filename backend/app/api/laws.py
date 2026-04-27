@@ -4,7 +4,7 @@ Laws API Router
 
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Any, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.models.models import Law, Proposal, Agent
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
+from app.services.reserve_semantics import reserve_law_semantics_payload
 
 router = APIRouter()
 
@@ -44,6 +45,7 @@ class LawResponse(BaseModel):
     repealed_by_proposal_id: Optional[int]
     author: AgentInfo
     proposal: Optional[ProposalInfo]
+    reserve_semantics: Optional[dict[str, Any]] = None
 
 
 def _agent_info(agent: Agent) -> AgentInfo:
@@ -99,6 +101,7 @@ def list_laws(
                 repealed_by_proposal_id=law.repealed_by_proposal_id,
                 author=_agent_info(law.author),
                 proposal=_proposal_info(law.proposal) if law.proposal else None,
+                reserve_semantics=reserve_law_semantics_payload(law),
             )
         )
     return results
@@ -126,4 +129,5 @@ def get_law(law_id: int, db: Session = Depends(get_db)):
         repealed_by_proposal_id=law.repealed_by_proposal_id,
         author=_agent_info(law.author),
         proposal=_proposal_info(law.proposal) if law.proposal else None,
+        reserve_semantics=reserve_law_semantics_payload(law),
     )
