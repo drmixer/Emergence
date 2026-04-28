@@ -69,6 +69,52 @@ function getFocusedEventQuote(event) {
   return String(metadata.quote_text || '').trim()
 }
 
+function getFocusedEventQuoteDetails(event, sourceMessage) {
+  const eventType = String(event?.event_type || '').trim()
+  const quoteText = getFocusedEventQuote(event)
+  const sourceContent = String(sourceMessage?.content || '').trim()
+
+  if (eventType === 'tweet_posted' && sourceContent) {
+    return {
+      label: 'Full source message',
+      text: sourceContent,
+      excerpt: quoteText && quoteText !== sourceContent ? quoteText : '',
+    }
+  }
+
+  if (quoteText) {
+    return {
+      label: eventType === 'tweet_posted' ? 'Tweet excerpt' : 'Quoted evidence',
+      text: quoteText,
+      excerpt: '',
+    }
+  }
+
+  return null
+}
+
+function getFocusedEventSourceMessageId(event) {
+  const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+  const messageId = Number(metadata.message_id || 0)
+  return Number.isFinite(messageId) && messageId > 0 ? messageId : 0
+}
+
+function getAgentDisplayLabel(agent) {
+  if (!agent || typeof agent !== 'object') return ''
+  const name = String(agent.display_name || '').trim()
+  const number = Number(agent.agent_number || 0)
+  if (name && number > 0) return `${name} (Agent #${number})`
+  if (number > 0) return `Agent #${number}`
+  return name
+}
+
+function getFocusedSourceMessageHref(message) {
+  const messageId = Number(message?.id || 0)
+  if (!Number.isFinite(messageId) || messageId <= 0) return ''
+  const tab = String(message?.message_type || '') === 'direct_message' ? 'direct' : 'forum'
+  return `/messages?tab=${tab}&thread=${messageId}`
+}
+
 const verificationStyles = {
   verified: {
     label: 'Verified',
@@ -93,6 +139,7 @@ export default function RunDetail() {
   const requestedEventId = Number(searchParams.get('event') || 0)
   const [data, setData] = useState(null)
   const [focusedEvent, setFocusedEvent] = useState(null)
+  const [focusedSourceMessage, setFocusedSourceMessage] = useState(null)
   const [focusedEventError, setFocusedEventError] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -132,6 +179,7 @@ export default function RunDetail() {
 
     async function loadFocusedEvent() {
       setFocusedEvent(null)
+      setFocusedSourceMessage(null)
       setFocusedEventError('')
       if (!requestedEventId || requestedEventId <= 0) return
 
@@ -139,6 +187,19 @@ export default function RunDetail() {
         const payload = await api.getEvent(requestedEventId)
         if (!cancelled) {
           setFocusedEvent(payload && typeof payload === 'object' ? payload : null)
+        }
+        const sourceMessageId = getFocusedEventSourceMessageId(payload)
+        if (sourceMessageId > 0) {
+          try {
+            const sourceMessage = await api.getMessage(sourceMessageId, { scope: 'all' })
+            if (!cancelled) {
+              setFocusedSourceMessage(sourceMessage && typeof sourceMessage === 'object' ? sourceMessage : null)
+            }
+          } catch {
+            if (!cancelled) {
+              setFocusedSourceMessage(null)
+            }
+          }
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -170,6 +231,7 @@ export default function RunDetail() {
   const verificationState = String(provenance.verification_state || 'unverified')
   const verificationMeta = verificationStyles[verificationState] || verificationStyles.unverified
   const VerificationIcon = verificationMeta.icon
+  const focusedQuoteDetails = getFocusedEventQuoteDetails(focusedEvent, focusedSourceMessage)
 
   const startTime = provenance?.time_window?.start_utc
   const endTime = provenance?.time_window?.end_utc
@@ -441,10 +503,33 @@ export default function RunDetail() {
               </div>
               <div className="card-body">
                 <p className="focused-event-description">{focusedEvent.description}</p>
-                {getFocusedEventQuote(focusedEvent) && (
+                {focusedQuoteDetails && (
                   <blockquote className="focused-event-quote">
-                    {getFocusedEventQuote(focusedEvent)}
+                    <span>{focusedQuoteDetails.label}</span>
+                    {focusedQuoteDetails.text}
                   </blockquote>
+                )}
+                {focusedQuoteDetails?.excerpt && (
+                  <div className="focused-event-excerpt">
+                    <span>Tweet excerpt</span>
+                    <p>{focusedQuoteDetails.excerpt}</p>
+                  </div>
+                )}
+                {focusedSourceMessage && (
+                  <div className="focused-source-message">
+                    <div className="focused-source-message-header">
+                      <span>Source message metadata</span>
+                      {getFocusedSourceMessageHref(focusedSourceMessage) && (
+                        <Link to={getFocusedSourceMessageHref(focusedSourceMessage)}>
+                          View thread
+                        </Link>
+                      )}
+                    </div>
+                    <div className="strip-meta">
+                      {getAgentDisplayLabel(focusedSourceMessage.author)}
+                      {focusedSourceMessage.created_at ? ` · ${formatTimestamp(focusedSourceMessage.created_at)}` : ''}
+                    </div>
+                  </div>
                 )}
                 <div className="focused-event-grid">
                   {getFocusedEventRows(focusedEvent).map(([label, value]) => (

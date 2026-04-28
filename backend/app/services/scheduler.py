@@ -148,6 +148,38 @@ def _reserve_support_priority(
     )
 
 
+def _dormant_upkeep_failure_context(
+    *,
+    food_amount: Decimal,
+    energy_amount: Decimal,
+    required_food: Decimal,
+    required_energy: Decimal,
+) -> dict[str, str]:
+    food_short = food_amount < required_food
+    energy_short = energy_amount < required_energy
+
+    if energy_short and not food_short:
+        return {
+            "cause": "energy_upkeep_failure",
+            "label": "dormant energy upkeep failure",
+            "warning": "cannot cover dormant energy upkeep",
+            "tweet_cause": "energy upkeep failure",
+        }
+    if food_short and not energy_short:
+        return {
+            "cause": "food_upkeep_failure",
+            "label": "dormant food upkeep failure",
+            "warning": "cannot cover dormant food upkeep",
+            "tweet_cause": "food upkeep failure",
+        }
+    return {
+        "cause": "dormant_upkeep_failure",
+        "label": "dormant food and energy upkeep failure",
+        "warning": "cannot cover dormant food and energy upkeep",
+        "tweet_cause": "dormant upkeep failure",
+    }
+
+
 def _reserve_resource_map(db: Session) -> dict[str, GlobalResources]:
     rows = db.query(GlobalResources).filter(GlobalResources.resource_type.in_(("food", "energy"))).all()
     return {str(row.resource_type): row for row in rows}
@@ -900,6 +932,12 @@ async def process_daily_consumption():
                     
                 else:
                     # CAN'T PAY EVEN REDUCED COST - STARVATION WORSENS
+                    failure_context = _dormant_upkeep_failure_context(
+                        food_amount=food_amount,
+                        energy_amount=energy_amount,
+                        required_food=dormant_food,
+                        required_energy=dormant_energy,
+                    )
                     agent.starvation_cycles += 1
                     
                     agents_starving.append((
@@ -911,7 +949,7 @@ async def process_daily_consumption():
                     
                     logger.warning(
                         f"💀 {agent_name} cannot pay survival cost! "
-                        f"Starvation cycle {agent.starvation_cycles}/{dormant_death_threshold}"
+                        f"{failure_context['label']} cycle {agent.starvation_cycles}/{dormant_death_threshold}"
                     )
                     
                     # Check for PERMANENT DEATH
@@ -921,7 +959,7 @@ async def process_daily_consumption():
                         # ========================================
                         agent.status = "dead"
                         agent.died_at = datetime.utcnow()
-                        agent.death_cause = "starvation"
+                        agent.death_cause = failure_context["cause"]
                         
                         agents_died.append((
                             agent.id,
@@ -934,10 +972,17 @@ async def process_daily_consumption():
                         event = Event(
                             agent_id=agent.id,
                             event_type="agent_died",
-                            description=f"☠️ {agent_name} has DIED from starvation after {agent.starvation_cycles} cycles without resources",
+                            description=(
+                                f"☠️ {agent_name} has DIED after {agent.starvation_cycles} unpaid "
+                                f"dormant upkeep cycles: {failure_context['label']}"
+                            ),
                             event_metadata=_with_runtime_metadata({
-                                "cause": "starvation",
+                                "cause": failure_context["cause"],
+                                "failure_label": failure_context["label"],
                                 "starvation_cycles": agent.starvation_cycles,
+                                "unpaid_upkeep_cycles": agent.starvation_cycles,
+                                "required_food": float(dormant_food),
+                                "required_energy": float(dormant_energy),
                                 "final_food": float(food_amount),
                                 "final_energy": float(energy_amount)
                             }),
@@ -949,7 +994,7 @@ async def process_daily_consumption():
                             asyncio.create_task(tweet_agent_died(
                                 agent.agent_number,
                                 agent.display_name,
-                                "starvation",
+                                failure_context["tweet_cause"],
                                 agent.starvation_cycles
                             ))
                         
@@ -960,10 +1005,18 @@ async def process_daily_consumption():
                         event = Event(
                             agent_id=agent.id,
                             event_type="starvation_warning",
-                            description=f"⚠️ {agent_name} is starving! Cycle {agent.starvation_cycles}/{dormant_death_threshold} until death",
+                            description=(
+                                f"⚠️ {agent_name} {failure_context['warning']}. "
+                                f"Cycle {agent.starvation_cycles}/{dormant_death_threshold} until death"
+                            ),
                             event_metadata=_with_runtime_metadata({
+                                "cause": failure_context["cause"],
+                                "failure_label": failure_context["label"],
                                 "starvation_cycles": agent.starvation_cycles,
+                                "unpaid_upkeep_cycles": agent.starvation_cycles,
                                 "cycles_until_death": dormant_death_threshold - agent.starvation_cycles,
+                                "required_food": float(dormant_food),
+                                "required_energy": float(dormant_energy),
                                 "food": float(food_amount),
                                 "energy": float(energy_amount),
                                 "reserve_decision": reserve_decision,

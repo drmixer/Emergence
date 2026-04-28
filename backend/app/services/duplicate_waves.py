@@ -244,6 +244,54 @@ def _cluster_payload(cluster: WaveCluster, *, item_limit: int) -> dict[str, Any]
     }
 
 
+def _cross_wave_actor_payload(clusters: list[WaveCluster]) -> list[dict[str, Any]]:
+    actors_by_number: dict[int, dict[str, Any]] = {}
+    wave_ids_by_number: dict[int, set[str]] = {}
+    item_counts_by_number: Counter[int] = Counter()
+    sources_by_number: dict[int, set[str]] = {}
+
+    for cluster in clusters:
+        ordered = sorted(cluster.items, key=lambda item: (item.created_at or datetime.min, item.id))
+        if not ordered:
+            continue
+        wave_id = f"{cluster.source}:{ordered[0].id}"
+        seen_in_wave: set[int] = set()
+        for item in ordered:
+            actor = item.actor
+            actor_number = int((actor or {}).get("agent_number") or 0)
+            if actor is None or actor_number <= 0:
+                continue
+            actors_by_number.setdefault(actor_number, actor)
+            item_counts_by_number[actor_number] += 1
+            sources_by_number.setdefault(actor_number, set()).add(cluster.source)
+            if actor_number not in seen_in_wave:
+                wave_ids_by_number.setdefault(actor_number, set()).add(wave_id)
+                seen_in_wave.add(actor_number)
+
+    rows: list[dict[str, Any]] = []
+    for actor_number, wave_ids in wave_ids_by_number.items():
+        if len(wave_ids) < 2:
+            continue
+        rows.append(
+            {
+                "actor": actors_by_number.get(actor_number),
+                "wave_count": len(wave_ids),
+                "item_count": int(item_counts_by_number.get(actor_number, 0)),
+                "sources": sorted(sources_by_number.get(actor_number, set())),
+                "wave_ids": sorted(wave_ids),
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            -int(row.get("wave_count") or 0),
+            -int(row.get("item_count") or 0),
+            int((row.get("actor") or {}).get("agent_number") or 0),
+        )
+    )
+    return rows[:12]
+
+
 def collect_duplicate_waves(
     db: Session,
     *,
@@ -274,12 +322,15 @@ def collect_duplicate_waves(
         )
     )
     waves = [_cluster_payload(cluster, item_limit=item_limit) for cluster in clusters[:limit]]
+    cross_wave_actors = _cross_wave_actor_payload(clusters)
     return {
         "summary": {
             "wave_count": len(clusters),
             "proposal_wave_count": sum(1 for cluster in clusters if cluster.source == "proposal"),
             "forum_wave_count": sum(1 for cluster in clusters if cluster.source == "forum"),
             "clustered_item_count": sum(len(cluster.items) for cluster in clusters),
+            "cross_wave_actor_count": len(cross_wave_actors),
         },
         "waves": waves,
+        "cross_wave_actors": cross_wave_actors,
     }

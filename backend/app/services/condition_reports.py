@@ -261,22 +261,23 @@ def _resolve_run_window(db: Session, *, run_id: str, run_row: SimulationRun | No
 
 
 def _event_counts_for_run(db: Session, *, run_id: str, started_at: Any, ended_at: Any) -> dict[str, int]:
-    run_fragment = f'%"{run_id}"%'
     rows = db.execute(
         text(
             """
             SELECT e.event_type, COUNT(*) AS count
             FROM events e
-            WHERE e.created_at >= :started_at
-              AND e.created_at <= :ended_at
-              AND (
-                e.agent_id IN (
+            WHERE (
+                (e.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                OR (
+                  e.created_at >= :started_at
+                  AND e.created_at <= :ended_at
+                  AND e.agent_id IN (
                     SELECT DISTINCT u.agent_id
                     FROM llm_usage u
                     WHERE u.run_id = :run_id
                       AND u.agent_id IS NOT NULL
+                  )
                 )
-                OR CAST(e.event_metadata AS TEXT) LIKE :run_fragment
               )
             GROUP BY e.event_type
             """
@@ -285,7 +286,6 @@ def _event_counts_for_run(db: Session, *, run_id: str, started_at: Any, ended_at
             "run_id": run_id,
             "started_at": started_at,
             "ended_at": ended_at,
-            "run_fragment": run_fragment,
         },
     ).fetchall()
 

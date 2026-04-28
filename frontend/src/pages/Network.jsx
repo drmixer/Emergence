@@ -66,7 +66,6 @@ export default function Network() {
 
                 const selectedAgents = agentsArr
                     .filter(a => involvedIds.has(Number(a.id)))
-                    .slice(0, 40)
 
                 setAgents(selectedAgents)
                 setRelationships(edges)

@@ -108,8 +108,11 @@ class APIService {
         return this.fetch(`/api/messages?${params.toString()}`)
     }
 
-    async getMessage(id) {
-        return this.fetch(`/api/messages/${id}`)
+    async getMessage(id, options = {}) {
+        const params = new URLSearchParams()
+        if (options?.scope) params.append('scope', String(options.scope))
+        const query = params.toString() ? `?${params.toString()}` : ''
+        return this.fetch(`/api/messages/${id}${query}`)
     }
 
     async getMessageThread(id) {
@@ -678,7 +681,7 @@ class APIService {
 
 export const api = new APIService(API_BASE)
 
-async function fetchEventSnapshot(limit = 25) {
+async function fetchEventSnapshot(limit = 500) {
     const response = await fetch(`${API_BASE}/api/events?limit=${limit}&include_routine_hold_idles=true`, {
         headers: {
             'Content-Type': 'application/json',

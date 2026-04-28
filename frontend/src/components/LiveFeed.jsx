@@ -15,23 +15,13 @@ import {
 } from 'lucide-react'
 import { api, subscribeToEvents } from '../services/api'
 import { showEventToast } from './ToastNotifications'
+import { getEventHref } from '../utils/eventLinks'
 
 const backgroundEventTypes = new Set(['work', 'idle'])
 const noisyEventTypes = new Set(['invalid_action', 'processing_error'])
-const directThreadEventTypes = new Set([
-    'direct_message',
-    'request_aid',
-    'aid_request_received',
-    'refuse_aid',
-    'aid_refusal_received',
-])
-const forumThreadEventTypes = new Set([
-    'forum_post',
-    'forum_reply',
-    'public_accusation',
-])
-const agentStatusEventTypes = new Set(['became_dormant', 'awakened', 'agent_died', 'agent_revived'])
-
+const meaningfulEventLimit = 300
+const backgroundEventLimit = 50
+const systemNoiseEventLimit = 50
 const eventIcons = {
     forum_post: MessageSquare,
     forum_reply: MessageSquare,
@@ -125,60 +115,26 @@ function getContinuityOrigin(payload) {
     return origin === 'carryover' || origin === 'fresh' ? origin : ''
 }
 
-function getMessageThreadId(event) {
-    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
-    const result = metadata?.result && typeof metadata.result === 'object' ? metadata.result : {}
-    const direct = Number(result.message_id || metadata.message_id || 0)
-    return Number.isFinite(direct) && direct > 0 ? direct : 0
-}
-
-function getEventRunId(event) {
-    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
-    const runtime = metadata?.runtime && typeof metadata.runtime === 'object' ? metadata.runtime : {}
-    return String(runtime.run_id || metadata.run_id || '').trim()
-}
-
-function getEventHref(event) {
-    const eventType = String(event?.event_type || '').trim()
-    const agentNumber = Number(event?.agent_number || 0)
-    const threadId = getMessageThreadId(event)
-
-    if (
-        threadId > 0 &&
-        directThreadEventTypes.has(eventType)
-    ) {
-        return `/messages?tab=direct&thread=${threadId}`
+function pruneFeedEvents(items) {
+    const counts = {
+        meaningful: 0,
+        background: 0,
+        noise: 0,
     }
 
-    if (
-        threadId > 0 &&
-        forumThreadEventTypes.has(eventType)
-    ) {
-        return `/messages?tab=forum&thread=${threadId}`
-    }
-
-    if (eventType === 'create_proposal') {
-        return '/governance?tab=proposals'
-    }
-
-    if (eventType === 'law_passed' || eventType === 'vote' || eventType === 'proposal_resolved') {
-        return '/governance'
-    }
-
-    if (eventType === 'trade' || eventType === 'request_aid' || eventType === 'reserve_aid') {
-        return '/resources'
-    }
-
-    if (agentNumber > 0 && agentStatusEventTypes.has(eventType)) {
-        return `/agents/${agentNumber}`
-    }
-
-    const eventId = Number(event?.id || 0)
-    const runId = getEventRunId(event)
-    if (eventId > 0 && runId) {
-        return `/runs/${encodeURIComponent(runId)}?event=${encodeURIComponent(String(eventId))}`
-    }
-    return eventId > 0 ? `/timeline?event=${eventId}` : ''
+    return items.filter((item) => {
+        const eventType = String(item?.event_type || '').trim()
+        if (backgroundEventTypes.has(eventType)) {
+            counts.background += 1
+            return counts.background <= backgroundEventLimit
+        }
+        if (noisyEventTypes.has(eventType)) {
+            counts.noise += 1
+            return counts.noise <= systemNoiseEventLimit
+        }
+        counts.meaningful += 1
+        return counts.meaningful <= meaningfulEventLimit
+    })
 }
 
 function EventCard({ event }) {
@@ -237,7 +193,7 @@ export default function LiveFeed() {
     const [lastCompletedRunId, setLastCompletedRunId] = useState('')
 
     const addEvent = useCallback((newEvent) => {
-        setEvents(prev => [newEvent, ...prev].slice(0, 100))
+        setEvents(prev => pruneFeedEvents([newEvent, ...prev]))
         setRunState('live')
 
         // Show toast notification for notable events

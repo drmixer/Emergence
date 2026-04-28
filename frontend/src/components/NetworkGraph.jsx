@@ -130,13 +130,19 @@ export default function NetworkGraph({ agents, relationships }) {
     })
     const [nodes, setNodes, onNodesChange] = useNodesState([])
     const [edges, setEdges, onEdgesChange] = useEdgesState([])
+    const visibleRelationships = useMemo(() => {
+        const visibleAgentIds = new Set(agents.map((agent) => Number(agent.id)))
+        return relationships.filter((rel) =>
+            visibleAgentIds.has(Number(rel.source_id)) && visibleAgentIds.has(Number(rel.target_id))
+        )
+    }, [agents, relationships])
 
     useEffect(() => {
         if (agents.length === 0) return
-        const { nodes: newNodes, edges: newEdges } = dataToFlow(agents, relationships, filters)
+        const { nodes: newNodes, edges: newEdges } = dataToFlow(agents, visibleRelationships, filters)
         setNodes(newNodes)
         setEdges(newEdges)
-    }, [agents, relationships, filters, setNodes, setEdges])
+    }, [agents, visibleRelationships, filters, setNodes, setEdges])
 
     const onNodeClick = useCallback((_event, node) => {
         setSelectedNode(node)
@@ -176,10 +182,10 @@ export default function NetworkGraph({ agents, relationships }) {
     const stats = useMemo(() => ({
         totalAgents: agents.length,
         totalConnections: edges.length,
-        communication: relationships.filter((r) => r.type === 'communication').length,
-        trade: relationships.filter((r) => r.type === 'trade').length,
-        voting: relationships.filter((r) => r.type === 'voting').length
-    }), [agents, edges.length, relationships])
+        communication: visibleRelationships.filter((r) => r.type === 'communication').length,
+        trade: visibleRelationships.filter((r) => r.type === 'trade').length,
+        voting: visibleRelationships.filter((r) => r.type === 'voting').length
+    }), [agents, edges.length, visibleRelationships])
 
     return (
         <>

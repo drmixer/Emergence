@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.models.models import Agent, Message, Proposal, SimulationRun
-from app.services import live_run_scope
+from app.services import duplicate_waves, live_run_scope
 
 messages_api = importlib.import_module("app.api.messages")
 proposals_api = importlib.import_module("app.api.proposals")
@@ -138,5 +138,70 @@ def test_duplicate_wave_endpoints_cluster_proposals_and_forum_messages(monkeypat
         assert message_body["summary"]["forum_wave_count"] == 1
         assert message_body["waves"][0]["count"] == 2
         assert message_body["waves"][0]["source"] == "forum"
+    finally:
+        db_session.close()
+
+
+def test_duplicate_waves_report_cross_wave_participants_without_counting_single_wave_pileups():
+    db_session = _build_session()
+    try:
+        started_at = datetime(2026, 4, 26, 12, 0, tzinfo=timezone.utc)
+        agents = [
+            Agent(
+                agent_number=idx,
+                display_name=f"Agent {idx}",
+                model_type="gm_gemini_2_5_flash",
+                tier=1,
+                personality_type="neutral",
+                status="active",
+                system_prompt="prompt",
+            )
+            for idx in (1, 2, 3)
+        ]
+        db_session.add_all(agents)
+        db_session.flush()
+        db_session.add_all(
+            [
+                Message(
+                    author_agent_id=agents[0].id,
+                    content="Reserve aid framework needs fair distribution criteria and emergency support rules.",
+                    message_type="forum_post",
+                    created_at=started_at + timedelta(minutes=1),
+                ),
+                Message(
+                    author_agent_id=agents[1].id,
+                    content="Emergency support rules need reserve aid framework with fair distribution criteria.",
+                    message_type="forum_post",
+                    created_at=started_at + timedelta(minutes=2),
+                ),
+                Message(
+                    author_agent_id=agents[0].id,
+                    content="Contribution enforcement needs reciprocal burden sharing and clear surplus obligations.",
+                    message_type="forum_post",
+                    created_at=started_at + timedelta(minutes=10),
+                ),
+                Message(
+                    author_agent_id=agents[2].id,
+                    content="Clear surplus obligations and reciprocal burden sharing need contribution enforcement.",
+                    message_type="forum_post",
+                    created_at=started_at + timedelta(minutes=11),
+                ),
+            ]
+        )
+        db_session.commit()
+
+        payload = duplicate_waves.collect_duplicate_waves(
+            db_session,
+            sources=("forum",),
+            min_cluster_size=2,
+            threshold=0.58,
+        )
+
+        assert payload["summary"]["forum_wave_count"] == 2
+        assert payload["summary"]["cross_wave_actor_count"] == 1
+        cross_wave = payload["cross_wave_actors"][0]
+        assert cross_wave["actor"]["agent_number"] == 1
+        assert cross_wave["wave_count"] == 2
+        assert cross_wave["item_count"] == 2
     finally:
         db_session.close()

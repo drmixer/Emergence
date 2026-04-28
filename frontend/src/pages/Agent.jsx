@@ -5,7 +5,8 @@ import {
     MessageSquare,
     Vote,
     Package,
-    Activity
+    Activity,
+    ExternalLink
 } from 'lucide-react'
 import { api } from '../services/api'
 import ShareButton from '../components/ShareButton'
@@ -16,6 +17,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 import { ALLY_BUCKET_CONFIG, RIVAL_BUCKET_CONFIG, getRelationshipBucketMaps } from '../utils/relationshipBuckets'
+import { getEventHref, getEventSourceHref } from '../utils/eventLinks'
 
 const modelNames = {
     'claude-sonnet-4': 'Claude Sonnet 4',
@@ -34,6 +36,72 @@ const STATUS_TERM_KEYS = {
 const DANGER_TERM_KEYS = {
     critical: 'critical',
     exposed: 'exposed',
+}
+
+function formatActionType(action) {
+    if (action?.event_type === 'starvation_warning') return 'dormant upkeep warning'
+    return String(action?.event_type || 'activity').replace(/_/g, ' ')
+}
+
+function formatActionDescription(action) {
+    if (action?.event_type !== 'starvation_warning') {
+        return action?.description || ''
+    }
+
+    const metadata = action?.metadata && typeof action.metadata === 'object' ? action.metadata : {}
+    const food = Number(metadata.food)
+    const energy = Number(metadata.energy)
+    const cycles = Number(metadata.starvation_cycles || 0)
+    const cyclesLeft = Number(metadata.cycles_until_death || 0)
+    const deathLimit = cycles > 0 && cyclesLeft >= 0 ? cycles + cyclesLeft : 0
+    const resourceParts = []
+    if (Number.isFinite(food)) resourceParts.push(`F${food.toFixed(2)}`)
+    if (Number.isFinite(energy)) resourceParts.push(`E${energy.toFixed(2)}`)
+
+    const reason =
+        Number.isFinite(energy) && energy < 1 && (!Number.isFinite(food) || food >= 1)
+            ? 'cannot cover dormant energy upkeep'
+            : Number.isFinite(food) && food < 1 && (!Number.isFinite(energy) || energy >= 1)
+                ? 'cannot cover dormant food upkeep'
+                : 'cannot cover dormant upkeep'
+
+    const cycleText = cycles > 0 && deathLimit > 0 ? ` Cycle ${cycles}/${deathLimit}` : ''
+    const deathText = cyclesLeft > 0 ? `; ${cyclesLeft} cycle(s) until death.` : '.'
+    const resourcesText = resourceParts.length ? ` (${resourceParts.join(' / ')}).` : '.'
+    return `${reason.charAt(0).toUpperCase()}${reason.slice(1)}${resourcesText}${cycleText}${deathText}`
+}
+
+function ActivityRow({ action, agentNumber }) {
+    const event = { ...action, agent_number: agentNumber }
+    const href = getEventHref(event)
+    const sourceHref = getEventSourceHref(event)
+    const content = (
+        <>
+            <div className="activity-type">{formatActionType(action)}</div>
+            <div className="activity-description">{formatActionDescription(action)}</div>
+            <div className="activity-time">
+                {new Date(action.created_at).toLocaleString()}
+            </div>
+        </>
+    )
+
+    return (
+        <div className="activity-item activity-item-sourced">
+            {href ? (
+                <Link to={href} className="activity-main-link">
+                    {content}
+                </Link>
+            ) : (
+                <div className="activity-main-static">{content}</div>
+            )}
+            {sourceHref && sourceHref !== href && (
+                <Link to={sourceHref} className="activity-source-link">
+                    <ExternalLink size={13} />
+                    Source event
+                </Link>
+            )}
+        </div>
+    )
 }
 
 export default function Agent() {
@@ -404,13 +472,7 @@ export default function Agent() {
                             <div className="empty-state">No recent activity yet.</div>
                         )}
                         {actions.map(action => (
-                            <div key={action.id} className="activity-item">
-                                <div className="activity-type">{action.event_type.replace(/_/g, ' ')}</div>
-                                <div className="activity-description">{action.description}</div>
-                                <div className="activity-time">
-                                    {new Date(action.created_at).toLocaleString()}
-                                </div>
-                            </div>
+                            <ActivityRow key={action.id} action={action} agentNumber={agent.agent_number} />
                         ))}
                     </div>
                 )}
@@ -790,8 +852,47 @@ export default function Agent() {
         }
         
         .activity-item, .message-item, .vote-item {
+          display: block;
           padding: var(--spacing-md);
           border-bottom: 1px solid var(--border-color);
+        }
+
+        .activity-item-sourced {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: var(--spacing-md);
+        }
+
+        .activity-main-link,
+        .activity-main-static {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .activity-main-link {
+          color: inherit;
+          border-radius: var(--radius-sm);
+          transition: color var(--transition-fast);
+        }
+
+        .activity-main-link:hover {
+          color: var(--text-primary);
+        }
+
+        .activity-source-link {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          flex: 0 0 auto;
+          color: var(--text-muted);
+          font-size: 0.75rem;
+          white-space: nowrap;
+          transition: color var(--transition-fast);
+        }
+
+        .activity-source-link:hover {
+          color: var(--accent-blue);
         }
         
         .activity-item:last-child, .message-item:last-child, .vote-item:last-child {
@@ -812,6 +913,12 @@ export default function Agent() {
         .activity-time, .message-time, .vote-time {
           font-size: 0.75rem;
           color: var(--text-muted);
+        }
+
+        @media (max-width: 700px) {
+          .activity-item-sourced {
+            flex-direction: column;
+          }
         }
         
         .vote-item {

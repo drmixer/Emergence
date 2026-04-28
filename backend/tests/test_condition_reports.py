@@ -193,6 +193,68 @@ def test_generate_run_report_summary_includes_replicate_context_and_metrics():
         db_session.close()
 
 
+def test_generate_run_report_summary_counts_run_tagged_events_after_registry_end():
+    db_session = _build_session()
+    try:
+        agent = Agent(
+            agent_number=1,
+            display_name="Agent 1",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add(agent)
+        db_session.flush()
+
+        t0 = datetime(2026, 2, 11, 0, 0, tzinfo=timezone.utc)
+        db_session.add(
+            SimulationRun(
+                run_id="run-final-tick",
+                run_mode="real",
+                protocol_version="protocol_v1",
+                condition_name="baseline_v1",
+                run_class="special_exploratory",
+                started_at=t0,
+                ended_at=t0 + timedelta(hours=1),
+            )
+        )
+        _seed_llm_usage_rows(
+            db_session,
+            run_id="run-final-tick",
+            agent_id=agent.id,
+            calls=1,
+            cost_per_call=0.05,
+            start_at=t0,
+        )
+        db_session.add_all(
+            [
+                Event(
+                    agent_id=agent.id,
+                    event_type="agent_died",
+                    description="final tick death",
+                    event_metadata={"runtime": {"run_id": "run-final-tick"}},
+                    created_at=t0 + timedelta(hours=1, seconds=10),
+                ),
+                Event(
+                    agent_id=agent.id,
+                    event_type="agent_died",
+                    description="later untagged death should not be attributed",
+                    event_metadata={},
+                    created_at=t0 + timedelta(hours=1, minutes=5),
+                ),
+            ]
+        )
+        db_session.commit()
+
+        summary = generate_run_report_summary(db_session, run_id="run-final-tick")
+
+        assert summary["metrics"]["deaths"] == 1
+    finally:
+        db_session.close()
+
+
 def test_compare_condition_runs_computes_median_and_spread():
     db_session = _build_session()
     try:

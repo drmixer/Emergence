@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { MessageSquare, MessageCircle, Clock } from 'lucide-react'
 import { api } from '../services/api'
-import DuplicateWavesPanel from '../components/DuplicateWavesPanel'
+import DuplicateWavesPanel, { duplicateWaveClusteredIds } from '../components/DuplicateWavesPanel'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 
@@ -112,6 +112,7 @@ export default function Messages() {
   const [forumPosts, setForumPosts] = useState([])
   const [directMessages, setDirectMessages] = useState([])
   const [duplicateWaves, setDuplicateWaves] = useState(null)
+  const [showClusteredRaw, setShowClusteredRaw] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [threadLoading, setThreadLoading] = useState(false)
@@ -150,12 +151,21 @@ export default function Messages() {
     return sortMessagesNewestFirst(dedupeMessagesById(merged))
   }, [directMessages, forumPosts])
 
-  const visibleMessages =
+  const clusteredRawIds = useMemo(() => duplicateWaveClusteredIds(duplicateWaves), [duplicateWaves])
+
+  const rawVisibleMessages =
     activeTab === 'forum'
       ? sortMessagesNewestFirst(dedupeMessagesById(forumPosts))
       : activeTab === 'direct'
         ? sortMessagesNewestFirst(dedupeMessagesById(directMessages))
         : allMessages
+
+  const visibleMessages = useMemo(() => {
+    if (showClusteredRaw || activeTab === 'direct' || clusteredRawIds.size === 0) return rawVisibleMessages
+    return rawVisibleMessages.filter((message) => !clusteredRawIds.has(Number(message?.id || 0)))
+  }, [activeTab, clusteredRawIds, rawVisibleMessages, showClusteredRaw])
+
+  const hiddenClusteredCount = Math.max(0, rawVisibleMessages.length - visibleMessages.length)
 
   const openThread = useCallback(async (messageId) => {
     if (!messageId) return
@@ -225,6 +235,16 @@ export default function Messages() {
             {!loading && <span className="strip-meta">{visibleMessages.length} shown</span>}
           </div>
           <div className="card-body">
+            {!loading && hiddenClusteredCount > 0 && (
+              <div className="clustered-message-notice">
+                <span>
+                  {hiddenClusteredCount} repeated forum {hiddenClusteredCount === 1 ? 'item is' : 'items are'} summarized in Repeated Forum Waves.
+                </span>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowClusteredRaw((value) => !value)}>
+                  {showClusteredRaw ? 'Hide clustered raw posts' : 'Show clustered raw posts'}
+                </button>
+              </div>
+            )}
             {loading && <div className="empty-state">Loading discussions…</div>}
             {!loading && error && <div className="empty-state">{error}</div>}
             {!loading && !error && visibleMessages.length === 0 && (
@@ -309,6 +329,24 @@ export default function Messages() {
         .messages-thread .card-body {
           max-height: 70vh;
           overflow: auto;
+        }
+        .clustered-message-notice {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--spacing-md);
+          margin-bottom: var(--spacing-md);
+          padding: var(--spacing-md);
+          border: 1px solid rgba(147, 197, 253, 0.18);
+          border-radius: var(--radius-md);
+          background: rgba(147, 197, 253, 0.06);
+          color: var(--text-secondary);
+          font-size: 0.82rem;
+        }
+        .clustered-message-notice .btn {
+          flex: 0 0 auto;
+          padding: 0.45rem 0.7rem;
+          font-size: 0.75rem;
         }
         .message-row {
           border: 1px solid var(--border-color);

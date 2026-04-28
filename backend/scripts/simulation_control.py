@@ -295,6 +295,22 @@ def _upsert_run_registry_start(
         db.close()
 
 
+def _retire_inherited_governance_state_for_start(run_id: str) -> dict[str, int]:
+    db = SessionLocal()
+    try:
+        result = retire_inherited_governance_state(db, run_id=run_id)
+        db.commit()
+        return {
+            "proposals_expired": int(result.proposals_expired),
+            "laws_deactivated": int(result.laws_deactivated),
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def _mark_run_registry_stop(*, run_id: str, reason: str) -> dict[str, Any]:
     clean_run_id = str(run_id or "").strip()
     if not clean_run_id:
@@ -412,11 +428,9 @@ def main() -> None:
             tuning_run=resolved_tuning_run,
             reason="Operator start via simulation_control.py",
         )
-        db = SessionLocal()
-        try:
-            retire_inherited_governance_state(db, run_id=resolved_run_id)
-        finally:
-            db.close()
+        result["governance_boundary"] = _retire_inherited_governance_state_for_start(
+            resolved_run_id
+        )
         print(json.dumps(result, indent=2))
         print(json.dumps(_status_payload(), indent=2))
         return

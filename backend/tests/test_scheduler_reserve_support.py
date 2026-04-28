@@ -315,6 +315,63 @@ def test_reserve_does_not_cover_dormant_maintenance_when_disabled(session_factor
     assert len(warnings) == 1
 
 
+def test_dormant_upkeep_warning_names_binding_resource(session_factory, monkeypatch):
+    _configure_reserve(monkeypatch, session_factory)
+
+    with session_factory() as db:
+        dormant_agent = _seed_agent(
+            db,
+            agent_number=42,
+            status="dormant",
+            food="10.00",
+            energy="0.10",
+            starvation_cycles=1,
+        )
+        dormant_agent_id = dormant_agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["starving"] == 1
+
+    with session_factory() as db:
+        warning = db.query(Event).filter(Event.event_type == "starvation_warning").one()
+        refreshed_agent = db.query(Agent).filter(Agent.id == dormant_agent_id).one()
+
+    assert refreshed_agent.status == "dormant"
+    assert "cannot cover dormant energy upkeep" in warning.description
+    assert "starving" not in warning.description.lower()
+    assert warning.event_metadata["cause"] == "energy_upkeep_failure"
+    assert warning.event_metadata["failure_label"] == "dormant energy upkeep failure"
+
+
+def test_dormant_death_names_upkeep_failure_cause(session_factory, monkeypatch):
+    _configure_reserve(monkeypatch, session_factory)
+
+    with session_factory() as db:
+        dormant_agent = _seed_agent(
+            db,
+            agent_number=43,
+            status="dormant",
+            food="10.00",
+            energy="0.10",
+            starvation_cycles=4,
+        )
+        dormant_agent_id = dormant_agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["died"] == 1
+
+    with session_factory() as db:
+        death = db.query(Event).filter(Event.event_type == "agent_died").one()
+        refreshed_agent = db.query(Agent).filter(Agent.id == dormant_agent_id).one()
+
+    assert refreshed_agent.status == "dead"
+    assert refreshed_agent.death_cause == "energy_upkeep_failure"
+    assert "dormant energy upkeep failure" in death.description
+    assert "from starvation" not in death.description.lower()
+    assert death.event_metadata["cause"] == "energy_upkeep_failure"
+    assert death.event_metadata["unpaid_upkeep_cycles"] == 5
+
+
 def test_reserve_support_saves_smallest_active_deficit_first(session_factory, monkeypatch):
     _configure_reserve(
         monkeypatch,

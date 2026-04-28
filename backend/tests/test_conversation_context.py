@@ -419,6 +419,10 @@ def test_recent_forum_reply_accelerates_next_checkpoint_without_immediate_interr
 
 def test_context_includes_canary_b_shared_problem_and_public_actor_snapshot(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+    monkeypatch.setattr(context_builder, "reserve_auto_contribution_enabled", lambda: True)
+    monkeypatch.setattr(context_builder, "reserve_active_aid_enabled", lambda: False)
+    monkeypatch.setattr(context_builder, "reserve_dormant_maintenance_enabled", lambda: False)
+    monkeypatch.setattr(context_builder, "reserve_auto_revive_enabled", lambda: False)
 
     with session_factory() as db:
         focal = _seed_agent(db, agent_number=1, display_name="Atlas-1")
@@ -473,6 +477,13 @@ def test_context_includes_canary_b_shared_problem_and_public_actor_snapshot(sess
                     voting_closes_at=now + timedelta(minutes=45),
                     created_at=now - timedelta(minutes=10),
                 ),
+                Law(
+                    title="Shared Survival Reserve Law",
+                    description="Create a shared survival reserve for dormant aid.",
+                    author_agent_id=richest.id,
+                    active=True,
+                    passed_at=now - timedelta(minutes=5),
+                ),
             ]
         )
         db.commit()
@@ -489,6 +500,12 @@ def test_context_includes_canary_b_shared_problem_and_public_actor_snapshot(sess
     assert "Governance focal point: proposal #" in context
     assert "\"Emergency Reserve Vote\"" in context
     assert "has 2 no votes" in context
+    assert "dormant agents have unpaid dormant upkeep cycles" in context
+    assert "bounded system preset normally diverts 10% of food and 25% of energy work output" in context
+    assert "passing a reserve law records policy intent" in context
+    assert "Immediate rescue requires executable resource movement" in context
+    assert "Enforcement is vote-based and punitive" in context
+    assert "do not create a second near-identical allocation" in context
 
 
 def test_public_actor_snapshot_prefers_active_stockpiles_over_dormant_ones(session_factory, monkeypatch):

@@ -565,6 +565,32 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
     low_energy = low_resource_warning_threshold(active_energy)
     death_limit = int(death_threshold())
 
+    def _resource_shortfall_reason(
+        *,
+        food: float,
+        energy: float,
+        required_food: float,
+        required_energy: float,
+        cycle_label: str,
+    ) -> str:
+        missing: list[str] = []
+        covered: list[str] = []
+        if food < required_food:
+            missing.append(f"food {food:.2f}/{required_food:.2f}")
+        else:
+            covered.append(f"food {food:.2f}/{required_food:.2f}")
+        if energy < required_energy:
+            missing.append(f"energy {energy:.2f}/{required_energy:.2f}")
+        else:
+            covered.append(f"energy {energy:.2f}/{required_energy:.2f}")
+
+        if missing:
+            reason = f"Cannot cover the next {cycle_label} upkeep cycle: {', '.join(missing)}."
+            if covered:
+                reason += f" Covered: {', '.join(covered)}."
+            return reason
+        return f"Resource buffer covers the next {cycle_label} upkeep cycle."
+
     legibility_by_agent_id: dict[int, dict] = {}
     for agent_id, agent in tracked_agents_by_id.items():
         resources = inventory_by_agent_id.get(int(agent_id), {})
@@ -585,7 +611,15 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
             if int(agent.starvation_cycles or 0) > 0 or food < float(dormant_food) or energy < float(dormant_energy):
                 danger_level = "critical"
                 danger_label = "At Risk"
-                danger_reason = f"Dormant and already starving, with {cycles_left} cycle(s) until permanent death."
+                danger_reason = _resource_shortfall_reason(
+                    food=food,
+                    energy=energy,
+                    required_food=float(dormant_food),
+                    required_energy=float(dormant_energy),
+                    cycle_label="dormant",
+                )
+                if int(agent.starvation_cycles or 0) > 0:
+                    danger_reason += f" Death counter is at {int(agent.starvation_cycles or 0)}/{death_limit}, with {cycles_left} cycle(s) until permanent death."
             else:
                 danger_level = "elevated"
                 danger_label = "Dormant"
@@ -593,7 +627,13 @@ def _build_legibility_map(db: Session, *, agents: list[Agent]) -> dict[int, dict
         elif food < float(active_food) or energy < float(active_energy):
             danger_level = "critical"
             danger_label = "At Risk"
-            danger_reason = "Current reserves do not clearly cover the next active survival cycle."
+            danger_reason = _resource_shortfall_reason(
+                food=food,
+                energy=energy,
+                required_food=float(active_food),
+                required_energy=float(active_energy),
+                cycle_label="active",
+            )
         elif food < float(low_food) or energy < float(low_energy):
             danger_level = "elevated"
             danger_label = "Exposed"

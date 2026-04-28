@@ -1,5 +1,6 @@
 // Agent Subscriptions - Follow agents for updates
 import { useState, useEffect, useCallback, createContext, useContext, useLayoutEffect, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Activity, Bell, BellOff, BellRing, MessageCircle, ScrollText, Star, Vote, X, Zap } from 'lucide-react'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
@@ -272,7 +273,7 @@ export function NotificationBell() {
                 )}
             </button>
 
-            {isOpen && (
+            {isOpen && typeof document !== 'undefined' && createPortal(
                 <>
                     <div className="notification-overlay" onClick={() => setIsOpen(false)} />
                     <div className="notification-dropdown" style={dropdownStyle || undefined}>
@@ -345,7 +346,8 @@ export function NotificationBell() {
                             Watchlist alerts are local in-app notifications, not browser push.
                         </div>
                     </div>
-                </>
+                </>,
+                document.body
             )}
         </div>
     )

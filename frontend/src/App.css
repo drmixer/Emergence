@@ -831,6 +831,67 @@ tr:last-child td {
   background: rgba(147, 197, 253, 0.07);
   color: var(--text-primary);
   line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.focused-event-quote span,
+.focused-event-excerpt span {
+  display: block;
+  margin-bottom: var(--spacing-xs);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.focused-event-excerpt {
+  margin: calc(-1 * var(--spacing-sm)) 0 var(--spacing-lg);
+  padding: var(--spacing-md);
+  border: 1px solid rgba(147, 197, 253, 0.14);
+  border-radius: var(--radius-md);
+  background: rgba(147, 197, 253, 0.035);
+}
+
+.focused-event-excerpt p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.focused-source-message {
+  margin: 0 0 var(--spacing-lg);
+  padding: var(--spacing-lg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.focused-source-message-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.focused-source-message-header a {
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.focused-source-message p {
+  margin: 0 0 var(--spacing-md);
+  color: var(--text-primary);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 
 .focused-event-grid {
@@ -1695,8 +1756,73 @@ tr:last-child td {
   font-size: 0.82rem;
 }
 
+.duplicate-wave-explainer {
+  margin: 0 0 var(--spacing-md);
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
 .duplicate-wave-summary {
   margin-bottom: var(--spacing-md);
+}
+
+.cross-wave-actors {
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.cross-wave-actors-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+
+.cross-wave-actors-head strong {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.cross-wave-actors-head span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.cross-wave-actor-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--spacing-xs);
+}
+
+.cross-wave-actor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.cross-wave-actor-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cross-wave-actor-row strong {
+  flex: 0 0 auto;
+  color: var(--accent-blue);
+  font-size: 0.76rem;
 }
 
 .duplicate-wave-list {
@@ -1734,6 +1860,46 @@ tr:last-child td {
   color: var(--text-secondary);
   font-size: 0.82rem;
   margin-top: 4px;
+}
+
+.duplicate-wave-samples {
+  margin-top: var(--spacing-xs);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.duplicate-wave-samples summary {
+  cursor: pointer;
+  color: var(--accent-blue);
+}
+
+.duplicate-wave-sample-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-xs);
+}
+
+.duplicate-wave-sample {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.duplicate-wave-sample-meta,
+.duplicate-wave-sample-note {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.duplicate-wave-sample p {
+  margin: 4px 0 0;
+  line-height: 1.45;
+}
+
+.duplicate-wave-sample-note {
+  margin-top: var(--spacing-xs);
 }
 
 .duplicate-wave-link {

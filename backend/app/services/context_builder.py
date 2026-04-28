@@ -968,10 +968,13 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         )
     if starving_agents:
         proposal_hooks.append(
-            f"{len(starving_agents)} dormant agents are starving. An allocation or rule proposal could coordinate aid or recovery."
+            f"{len(starving_agents)} dormant agents have unpaid dormant upkeep cycles. An allocation or rule proposal could coordinate aid or recovery."
         )
         proposal_hooks.append(
             "If you want recurring aid, reserve access, or an ongoing obligation across future cycles, prefer proposal_type \"law\" instead of a one-off allocation."
+        )
+        proposal_hooks.append(
+            "Before creating a new recovery allocation, check active proposals: if a similar allocation is already live, vote, contest, or reply with an amendment instead of duplicating it."
         )
     if total_dormant > 0:
         proposal_hooks.append(
@@ -995,7 +998,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     if survival_reserve_law_active:
         if reserve_auto_contribution_enabled():
             proposal_hooks.append(
-                "A survival-reserve law is active and automatic contributions are enabled: some food and energy work output now goes into the shared reserve."
+                "A survival-reserve law is active and automatic contributions are enabled: the bounded system preset diverts food and energy work output into the shared reserve."
             )
         else:
             proposal_hooks.append(
@@ -1149,6 +1152,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append(f"  - {line}")
     context_parts.append(
         "  - If recent forum/proposal context already contains your main point, prefer a direct reply, vote, contest_proposal, trade, request_aid/refuse_aid, direct_message, or a genuinely distinct proposal over repeating it."
+    )
+    context_parts.append(
+        "  - For emergency allocations, do not create a second near-identical allocation when one is already active. Use vote, contest_proposal, or forum_reply to support, oppose, narrow, or amend the existing proposal."
     )
     context_parts.append(
         "  - Start public messages with the concrete observation, name, amount, proposal/law id, trade offer, objection, or question. Generic greetings and self-introductions are usually wasted space unless they add new information."
@@ -1388,7 +1394,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     )
     if survival_reserve_law_active:
         if reserve_auto_contribution_enabled():
-            context_parts.append("- Reserve contribution effect: automatic reserve contributions are enabled. Normally 10% of food and 25% of energy work output go to the shared reserve; when reserve energy runs low, food contribution drops and energy contribution rises.")
+            context_parts.append("- Reserve contribution effect: automatic reserve contributions are enabled. The bounded system preset normally diverts 10% of food and 25% of energy work output to the shared reserve; when reserve energy runs low, food contribution drops and energy contribution rises.")
         else:
             context_parts.append("- Reserve contribution effect: automatic reserve contributions are disabled for this run. A reserve law may still be discussed or enforced socially, but work output is not automatically diverted to the common pool.")
         reserve_notes = []
@@ -1402,6 +1408,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             context_parts.append(f"- Reserve access effect: {'; '.join(reserve_notes)}.")
         else:
             context_parts.append("- Reserve access effect: reserve exists for collective accounting and political coordination, but no automatic active aid, dormant maintenance, or revival support is currently enabled.")
+        context_parts.append("- Reserve execution note: passing a reserve law records policy intent. It only creates automatic resource movement for mechanics that are explicitly enabled in the current run settings.")
     context_parts.append("")
 
     if recent_reserve_events:
@@ -1420,7 +1427,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     # Agents at risk
     if starving_agents:
         context_parts.append("AGENTS AT RISK OF DEATH:")
-        context_parts.append(f"  - {len(starving_agents)} dormant agents are currently starving")
+        context_parts.append(f"  - {len(starving_agents)} dormant agents have unpaid dormant upkeep cycles")
         context_parts.append("")
     
     # Action costs explanation (Phase 2: Teeth)
@@ -1468,6 +1475,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
 
     context_parts.append("CONFLICT AND PRESSURE:")
     context_parts.append("  - You can ask specific agents for help with request_aid when survival pressure is immediate.")
+    context_parts.append("  - Immediate rescue requires executable resource movement: trade, direct aid, or an enabled reserve mechanic. A law or allocation vote alone may not move resources before the next survival cycle.")
     context_parts.append("  - You do not need to grant aid just because it was requested; refuse_aid is a legitimate response when help would hurt you, your allies, or your priorities.")
     context_parts.append("  - Before formal enforcement, you can create social pressure with public_accusation or refuse_aid.")
     context_parts.append("  - You can publicly challenge a live proposal with contest_proposal if you think it is dangerous, unfair, exploitative, or poorly designed.")
@@ -1479,6 +1487,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  - You do not need to appear fair to everyone. Favoring allies, protecting your faction, or resisting asymmetric sacrifice are valid strategic choices.")
     context_parts.append("  - If someone recently accused you, refused you, contested your proposal, or asked you for aid, responding is often more salient than starting an unrelated new forum post.")
     context_parts.append("  - Formal punishment still requires a live law plus enforcement actions.")
+    context_parts.append("  - Enforcement is vote-based and punitive: sanction/seizure/exile actions do not automatically revive dormant agents or route resources into the common pool.")
     context_parts.append("")
 
     checkpoint_priority_lines: list[str] = []

@@ -18,6 +18,21 @@ function policyClusterKey(item) {
     return Array.from(new Set(tokens)).slice(0, 10).sort().join(' ')
 }
 
+function proposalKindLabel(proposal) {
+    const type = String(proposal?.proposal_type || '').trim().toLowerCase()
+    const status = String(proposal?.status || '').trim().toLowerCase()
+    if (status === 'passed' && type === 'law') return 'Passed law'
+    if (status === 'passed' && type === 'rule') return 'Passed rule'
+    if (type === 'law' || type === 'rule') return 'Rule proposal'
+    return 'Proposal'
+}
+
+function proposalKindBadgeClass(proposal) {
+    const type = String(proposal?.proposal_type || '').trim().toLowerCase()
+    const status = String(proposal?.status || '').trim().toLowerCase()
+    return status === 'passed' && type === 'law' ? 'badge-tier-1' : 'badge-tier-2'
+}
+
 export default function Proposals() {
     const [proposals, setProposals] = useState([])
     const [filter, setFilter] = useState('all')
@@ -142,9 +157,9 @@ export default function Proposals() {
                             >
                                 <div className="proposal-header">
                                     <span
-                                        className={`proposal-type badge badge-tier-${proposal.proposal_type === 'law' ? 1 : 2}`}
+                                        className={`proposal-type badge ${proposalKindBadgeClass(proposal)}`}
                                     >
-                                        {proposal.proposal_type}
+                                        {proposalKindLabel(proposal)}
                                     </span>
                                     <span className={`proposal-status ${proposal.status}`}>
                                         {getStatusIcon(proposal.status)}

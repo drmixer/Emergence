@@ -51,3 +51,42 @@ def test_resolve_start_runtime_updates_preserves_explicit_values():
     assert updates["SIMULATION_RUN_CLASS"] == "special_exploratory"
     assert updates["SIMULATION_CONDITION_NAME"] == "scarcity_canary_v2"
     assert updates["SIMULATION_SEASON_NUMBER"] == 3
+
+
+def test_retire_inherited_governance_state_commits(monkeypatch):
+    class FakeCleanup:
+        proposals_expired = 2
+        laws_deactivated = 3
+
+    class FakeSession:
+        committed = False
+        rolled_back = False
+        closed = False
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            self.closed = True
+
+    session = FakeSession()
+    calls = []
+
+    monkeypatch.setattr(simulation_control, "SessionLocal", lambda: session)
+
+    def fake_retire(db, *, run_id):
+        calls.append((db, run_id))
+        return FakeCleanup()
+
+    monkeypatch.setattr(simulation_control, "retire_inherited_governance_state", fake_retire)
+
+    result = simulation_control._retire_inherited_governance_state_for_start("real-test")
+
+    assert result == {"proposals_expired": 2, "laws_deactivated": 3}
+    assert calls == [(session, "real-test")]
+    assert session.committed is True
+    assert session.rolled_back is False
+    assert session.closed is True
