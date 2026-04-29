@@ -23,7 +23,8 @@ function proposalKindLabel(proposal) {
     const status = String(proposal?.status || '').trim().toLowerCase()
     if (status === 'passed' && type === 'law') return 'Passed law'
     if (status === 'passed' && type === 'rule') return 'Passed rule'
-    if (type === 'law' || type === 'rule') return 'Rule proposal'
+    if (type === 'law') return 'Law proposal'
+    if (type === 'rule') return 'Rule proposal'
     return 'Proposal'
 }
 

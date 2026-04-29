@@ -699,9 +699,10 @@ export function subscribeToEvents(onEvent, onError) {
     let closed = false
     let pollTimer = null
     let connected = false
+    let initialSnapshotDelivered = false
     const seenIds = new Set()
 
-    const emitEvents = (items) => {
+    const emitEvents = (items, { snapshotReplay = false } = {}) => {
         const ordered = [...items].sort((a, b) => {
             const aTime = new Date(a?.created_at || 0).getTime()
             const bTime = new Date(b?.created_at || 0).getTime()
@@ -716,6 +717,7 @@ export function subscribeToEvents(onEvent, onError) {
             }
             onEvent({
                 type: 'event',
+                snapshot_replay: snapshotReplay,
                 ...item,
             })
         }
@@ -739,7 +741,9 @@ export function subscribeToEvents(onEvent, onError) {
             if (items.length === 0) {
                 onEvent({ type: 'snapshot_empty' })
             } else {
-                emitEvents(items)
+                const snapshotReplay = !initialSnapshotDelivered
+                emitEvents(items, { snapshotReplay })
+                initialSnapshotDelivered = true
             }
         } catch (error) {
             connected = false

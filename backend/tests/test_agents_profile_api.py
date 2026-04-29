@@ -240,7 +240,7 @@ def test_list_agents_includes_lineage_fields_for_current_season():
     db.commit()
 
     with _make_client(db) as client:
-        response = client.get("/api/agents")
+        response = client.get("/api/agents?scope=all")
 
     assert response.status_code == 200
     payload = response.json()
@@ -328,7 +328,7 @@ def test_list_agents_hides_weak_relationships_and_avoids_defaulting_everyone_to_
     db.commit()
 
     with _make_client(db) as client:
-        response = client.get("/api/agents")
+        response = client.get("/api/agents?scope=all")
 
     assert response.status_code == 200
     payload = response.json()
@@ -410,7 +410,7 @@ def test_list_agents_hides_support_only_vote_alignment_until_signal_is_strong():
     db.commit()
 
     with _make_client(db) as client:
-        response = client.get("/api/agents")
+        response = client.get("/api/agents?scope=all")
 
     assert response.status_code == 200
     payload = response.json()
@@ -511,7 +511,7 @@ def test_list_agents_prefers_trade_or_collaboration_over_vote_only_alignment():
     db.commit()
 
     with _make_client(db) as client:
-        response = client.get("/api/agents")
+        response = client.get("/api/agents?scope=all")
 
     assert response.status_code == 200
     payload = response.json()

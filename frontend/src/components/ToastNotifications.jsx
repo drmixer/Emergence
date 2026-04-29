@@ -14,6 +14,9 @@ import {
 } from 'lucide-react'
 import { subscribeToEvents } from '../services/api'
 
+const maxVisibleEventToasts = 3
+const activeEventToastIds = []
+
 // Event type to icon/color mapping
 const eventConfig = {
     law_passed: {
@@ -139,7 +142,14 @@ export function showEventToast(event) {
         return
     }
 
-    toast.custom(
+    while (activeEventToastIds.length >= maxVisibleEventToasts) {
+        const oldestToastId = activeEventToastIds.shift()
+        if (oldestToastId) {
+            toast.dismiss(oldestToastId)
+        }
+    }
+
+    const toastId = toast.custom(
         (t) => (
             <div
                 className={`toast-wrapper ${t.visible ? 'toast-enter' : 'toast-exit'}`}
@@ -154,6 +164,13 @@ export function showEventToast(event) {
             position: 'bottom-right',
         }
     )
+    activeEventToastIds.push(toastId)
+    window.setTimeout(() => {
+        const index = activeEventToastIds.indexOf(toastId)
+        if (index >= 0) {
+            activeEventToastIds.splice(index, 1)
+        }
+    }, proposalToast ? 3800 : 5300)
 }
 
 // Hook to subscribe to SSE events and show toasts
@@ -161,7 +178,7 @@ export function useEventToasts(enabled = true) {
     const [lastEventId, setLastEventId] = useState(null)
 
     const handleEvent = useCallback((event) => {
-        if (event.type === 'event' && event.id !== lastEventId) {
+        if (event.type === 'event' && !event.snapshot_replay && event.id !== lastEventId) {
             setLastEventId(event.id)
             showEventToast(event)
         }

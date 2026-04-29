@@ -97,26 +97,30 @@ function dataToFlow(agents, relationships, filters) {
 
     const edges = relationships
         .filter((rel) => filters[rel.type])
-        .map((rel, index) => ({
-            id: `edge-${index}`,
-            source: `agent-${rel.source_id}`,
-            target: `agent-${rel.target_id}`,
-            type: 'default',
-            animated: false,
-            style: {
-                stroke: edgeColors[rel.type],
-                strokeWidth: Math.min(rel.strength / 5 + 1, 4),
-                opacity: 0.6
-            },
-            markerEnd: {
-                type: MarkerType.ArrowClosed,
-                color: edgeColors[rel.type]
-            },
-            data: {
-                type: rel.type,
-                strength: rel.strength
+        .map((rel, index) => {
+            const baseStrokeWidth = Math.min(rel.strength / 5 + 1, 4)
+            return {
+                id: `edge-${index}`,
+                source: `agent-${rel.source_id}`,
+                target: `agent-${rel.target_id}`,
+                type: 'default',
+                animated: false,
+                style: {
+                    stroke: edgeColors[rel.type],
+                    strokeWidth: baseStrokeWidth,
+                    opacity: 0.6
+                },
+                markerEnd: {
+                    type: MarkerType.ArrowClosed,
+                    color: edgeColors[rel.type]
+                },
+                data: {
+                    type: rel.type,
+                    strength: rel.strength,
+                    baseStrokeWidth
+                }
             }
-        }))
+        })
 
     return { nodes, edges }
 }
@@ -148,12 +152,13 @@ export default function NetworkGraph({ agents, relationships }) {
         setSelectedNode(node)
         setEdges((eds) => eds.map((edge) => {
             const isConnected = edge.source === node.id || edge.target === node.id
+            const baseStrokeWidth = Number(edge.data?.baseStrokeWidth || edge.style?.strokeWidth || 2)
             return {
                 ...edge,
                 style: {
                     ...edge.style,
                     opacity: isConnected ? 1 : 0.2,
-                    strokeWidth: isConnected ? (edge.style.strokeWidth || 2) + 1 : edge.style.strokeWidth
+                    strokeWidth: isConnected ? Math.min(baseStrokeWidth + 1, 5) : baseStrokeWidth
                 },
                 animated: isConnected
             }
@@ -166,7 +171,8 @@ export default function NetworkGraph({ agents, relationships }) {
             ...edge,
             style: {
                 ...edge.style,
-                opacity: 0.6
+                opacity: 0.6,
+                strokeWidth: Number(edge.data?.baseStrokeWidth || edge.style?.strokeWidth || 2)
             },
             animated: false
         })))

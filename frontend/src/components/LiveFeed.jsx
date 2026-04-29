@@ -196,8 +196,9 @@ export default function LiveFeed() {
         setEvents(prev => pruneFeedEvents([newEvent, ...prev]))
         setRunState('live')
 
-        // Show toast notification for notable events
-        showEventToast(newEvent)
+        if (!newEvent?.snapshot_replay) {
+            showEventToast(newEvent)
+        }
     }, [])
 
     const refreshRunState = useCallback(async () => {

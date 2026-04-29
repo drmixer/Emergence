@@ -32,6 +32,11 @@ def predictions_client(monkeypatch):
 
     monkeypatch.setattr(predictions_api.settings, "SECRET_KEY", "test-secret", raising=False)
     monkeypatch.setattr(predictions_api.settings, "ENVIRONMENT", "test", raising=False)
+    monkeypatch.setattr(
+        predictions_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: True if key == "SIMULATION_ACTIVE" else None,
+    )
 
     db_session.add(
         PredictionMarket(
