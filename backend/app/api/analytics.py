@@ -523,6 +523,21 @@ def _event_runtime_run_id(event: Event) -> str:
     return str(runtime.get("run_id") or "").strip()
 
 
+def _coerce_utc_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return ensure_utc(value)
+    text_value = str(value or "").strip()
+    if not text_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    return ensure_utc(parsed)
+
+
 def _serialize_playback_event(event: Event) -> dict[str, Any]:
     score = _score_plot_turn(event)
     return {
@@ -859,27 +874,33 @@ def _collect_scored_plot_turns(
     min_salience: int,
     candidate_limit: int,
     run_id: str | None = None,
+    strict_run_scope: bool = False,
 ) -> list[tuple[int, datetime, dict]]:
     query = db.query(Event).filter(Event.created_at >= window_start, Event.created_at <= now)
 
     clean_run_id = str(run_id or "").strip()
     if clean_run_id:
-        query = query.filter(
-            text(
-                """
-                (
-                  (events.event_metadata -> 'runtime' ->> 'run_id') = :run_id
-                  OR events.agent_id IN (
-                    SELECT DISTINCT u.agent_id
-                    FROM llm_usage u
-                    WHERE u.agent_id IS NOT NULL
-                      AND u.run_id = :run_id
-                      AND u.created_at >= :window_start
-                  )
+        if strict_run_scope:
+            query = query.filter(
+                text("(events.event_metadata -> 'runtime' ->> 'run_id') = :run_id")
+            ).params(run_id=clean_run_id)
+        else:
+            query = query.filter(
+                text(
+                    """
+                    (
+                      (events.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                      OR events.agent_id IN (
+                        SELECT DISTINCT u.agent_id
+                        FROM llm_usage u
+                        WHERE u.agent_id IS NOT NULL
+                          AND u.run_id = :run_id
+                          AND u.created_at >= :window_start
+                      )
+                    )
+                    """
                 )
-                """
-            )
-        ).params(run_id=clean_run_id, window_start=window_start)
+            ).params(run_id=clean_run_id, window_start=window_start)
 
     candidates = query.order_by(Event.created_at.desc()).limit(candidate_limit).all()
 
@@ -1465,6 +1486,7 @@ def plot_turns_replay(
             min_salience=min_salience,
             candidate_limit=max(limit * 6, 240),
             run_id=effective_run_id,
+            strict_run_scope=bool(effective_run_id),
         )
         scored.sort(key=lambda item: (item[1], item[0]))
         if len(scored) > limit:
@@ -1555,6 +1577,7 @@ def plot_turns_replay_story(
             min_salience=min_salience,
             candidate_limit=max(limit * 8, 240),
             run_id=effective_run_id,
+            strict_run_scope=bool(effective_run_id),
         )
         story = _build_replay_story_payload([item[2] for item in scored], target_count=limit)
         return {
@@ -1599,6 +1622,7 @@ def best_moments(
             min_salience=min_salience,
             candidate_limit=max(60, limit * 18),
             run_id=effective_run_id,
+            strict_run_scope=bool(effective_run_id),
         )
         moments = _select_best_moments_payloads([item[2] for item in scored], limit)
         return {
@@ -2589,29 +2613,63 @@ def run_detail(
             .first()
         )
 
-        llm_first_seen = db.execute(
+        llm_window = db.execute(
             text(
                 """
-                SELECT MIN(created_at) AS first_seen
+                SELECT MIN(created_at) AS first_seen, MAX(created_at) AS last_seen
                 FROM llm_usage
                 WHERE run_id = :run_id
                 """
             ),
             {"run_id": clean_run_id},
-        ).scalar()
+        ).first()
+        event_window = db.execute(
+            text(
+                """
+                SELECT MIN(created_at) AS first_seen, MAX(created_at) AS last_seen
+                FROM events
+                WHERE (event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                """
+            ),
+            {"run_id": clean_run_id},
+        ).first()
 
         start_candidates = []
         if run_row and run_row.started_at:
-            start_candidates.append(ensure_utc(run_row.started_at))
+            start_candidates.append(_coerce_utc_datetime(run_row.started_at))
         if run_start_change and run_start_change.created_at:
-            start_candidates.append(ensure_utc(run_start_change.created_at))
-        if llm_first_seen:
-            start_candidates.append(ensure_utc(llm_first_seen))
+            start_candidates.append(_coerce_utc_datetime(run_start_change.created_at))
+        if llm_window and llm_window.first_seen:
+            start_candidates.append(_coerce_utc_datetime(llm_window.first_seen))
+        if event_window and event_window.first_seen:
+            start_candidates.append(_coerce_utc_datetime(event_window.first_seen))
+        start_candidates = [candidate for candidate in start_candidates if candidate is not None]
 
         fallback_start = now - timedelta(hours=int(hours_fallback))
         run_started_at = min(start_candidates) if start_candidates else fallback_start
         if not run_started_at:
             run_started_at = fallback_start
+
+        end_candidates = []
+        if run_row and run_row.ended_at:
+            end_candidates.append(_coerce_utc_datetime(run_row.ended_at))
+        elif (
+            bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
+            and clean_run_id
+            == str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
+        ):
+            end_candidates.append(now)
+        if not end_candidates:
+            if llm_window and llm_window.last_seen:
+                end_candidates.append(_coerce_utc_datetime(llm_window.last_seen))
+            if event_window and event_window.last_seen:
+                end_candidates.append(_coerce_utc_datetime(event_window.last_seen))
+        end_candidates = [candidate for candidate in end_candidates if candidate is not None]
+        run_ended_at = max(end_candidates) if end_candidates else now
+        if run_ended_at > now:
+            run_ended_at = now
+        if run_ended_at < run_started_at:
+            run_ended_at = run_started_at
 
         llm_totals = db.execute(
             text(
@@ -2625,9 +2683,10 @@ def run_detail(
                 FROM llm_usage
                 WHERE run_id = :run_id
                   AND created_at >= :since_ts
+                  AND created_at <= :until_ts
                 """
             ),
-            {"run_id": clean_run_id, "since_ts": run_started_at},
+            {"run_id": clean_run_id, "since_ts": run_started_at, "until_ts": run_ended_at},
         ).first()
 
         runtime_actions = db.execute(
@@ -2645,28 +2704,21 @@ def run_detail(
                   COALESCE(SUM(CASE WHEN e.event_type = 'agent_died' THEN 1 ELSE 0 END), 0) AS deaths
                 FROM events e
                 WHERE e.created_at >= :since_ts
-                  AND (
-                    (e.event_metadata -> 'runtime' ->> 'run_id') = :run_id
-                    OR e.agent_id IN (
-                      SELECT DISTINCT u.agent_id
-                      FROM llm_usage u
-                      WHERE u.agent_id IS NOT NULL
-                        AND u.run_id = :run_id
-                        AND u.created_at >= :since_ts
-                    )
-                  )
+                  AND e.created_at <= :until_ts
+                  AND (e.event_metadata -> 'runtime' ->> 'run_id') = :run_id
                 """
             ),
-            {"run_id": clean_run_id, "since_ts": run_started_at},
+            {"run_id": clean_run_id, "since_ts": run_started_at, "until_ts": run_ended_at},
         ).first()
 
         scored = _collect_scored_plot_turns(
             db,
             window_start=run_started_at,
-            now=now,
+            now=run_ended_at,
             min_salience=min_salience,
             candidate_limit=max(trace_limit * 12, 120),
             run_id=clean_run_id,
+            strict_run_scope=True,
         )
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
         trace_items = []
@@ -2707,8 +2759,10 @@ def run_detail(
             source = "simulation_runs_registry"
         elif run_start_change and run_start_change.created_at:
             source = "admin_config_change"
-        elif llm_first_seen:
+        elif llm_window and llm_window.first_seen:
             source = "llm_first_seen"
+        elif event_window and event_window.first_seen:
+            source = "event_metadata_runtime_run_id"
 
         return {
             "run_id": clean_run_id,
@@ -2754,7 +2808,7 @@ def run_detail(
                 "run_id": clean_run_id,
                 "time_window": {
                     "start_utc": run_started_at.isoformat(),
-                    "end_utc": now.isoformat(),
+                    "end_utc": run_ended_at.isoformat(),
                 },
                 "verification_state": verification_state,
                 "verification_source": source,
