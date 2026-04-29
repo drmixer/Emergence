@@ -21,7 +21,12 @@ from app.services.survival_config import (
     dormant_energy_cost,
     dormant_food_cost,
     low_resource_warning_threshold,
+    reserve_active_aid_min_pool_remaining,
+    reserve_active_aid_target_energy,
+    reserve_active_aid_target_food,
     reserve_active_aid_enabled,
+    reserve_active_aid_trigger_energy,
+    reserve_active_aid_trigger_food,
     reserve_auto_contribution_enabled,
     reserve_auto_revive_enabled,
     reserve_dormant_maintenance_enabled,
@@ -974,7 +979,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             "If you want recurring aid, reserve access, or an ongoing obligation across future cycles, prefer proposal_type \"law\" instead of a one-off allocation."
         )
         proposal_hooks.append(
-            "Before creating a new recovery allocation, check active proposals: if a similar allocation is already live, vote, contest, or reply with an amendment instead of duplicating it."
+            "Before creating a new recovery allocation, check active proposals: if a similar allocation is already live, do not create a second near-identical allocation; vote, contest, or reply with an amendment instead."
         )
     if total_dormant > 0:
         proposal_hooks.append(
@@ -1154,7 +1159,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         "  - If recent forum/proposal context already contains your main point, prefer a direct reply, vote, contest_proposal, trade, request_aid/refuse_aid, direct_message, or a genuinely distinct proposal over repeating it."
     )
     context_parts.append(
-        "  - For emergency allocations, do not create a second near-identical allocation when one is already active. Use vote, contest_proposal, or forum_reply to support, oppose, narrow, or amend the existing proposal."
+        "  - Do not create a second near-identical proposal when one is already active. Use vote, contest_proposal, or forum_reply to support, oppose, narrow, or amend the existing proposal."
     )
     context_parts.append(
         "  - Start public messages with the concrete observation, name, amount, proposal/law id, trade offer, objection, or question. Generic greetings and self-introductions are usually wasted space unless they add new information."
@@ -1284,20 +1289,20 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  Use create_proposal when you want collective action on resources, rules, infrastructure, or governance.")
     context_parts.append('  Important: if you want a passed proposal to become an actual law, use proposal_type "law".')
     context_parts.append("  Passing a law changes policy, coordination, and enforcement context; it does not automatically override run-condition mechanics such as reserve auto-aid, dormant maintenance, or auto-revival unless those effects are enabled for this run.")
-    context_parts.append('  Use proposal_type "rule" for coordination norms or priorities that are not meant to become a formal law.')
+    context_parts.append('  Use proposal_type "rule" only for non-binding coordination norms or priorities that are not meant to become a formal law.')
     context_parts.append("  Proposal type guide:")
-    context_parts.append('  - Use "law" for recurring obligations, reserve systems, ongoing aid rules, or anything you want enforced as a durable part of the world.')
+    context_parts.append('  - Use "law" for binding obligations, mandatory contributions, automatic allocation, enforcement, penalties, reserve systems, ongoing aid rules, or anything you want enforced as a durable part of the world.')
     context_parts.append('  - Use "allocation" for one-time resource distributions that do not need to persist across future cycles.')
-    context_parts.append('  - Use "rule" for soft norms or coordination preferences that are not meant to become a formal law.')
+    context_parts.append('  - Use "rule" for soft norms, opt-in coordination, or preferences that are not binding and are not meant to become a formal law.')
     if proposal_hooks:
         for hook in proposal_hooks[:5]:
             context_parts.append(f"  - {hook}")
     else:
         context_parts.append("  - If you want the group to formally choose something, create a proposal.")
-    context_parts.append('  Law example: {"action":"create_proposal","title":"Targeted Survival Aid Rule","description":"Define when agents at verified survival risk should receive coordinated aid and who is responsible for follow-through.","proposal_type":"law"}')
+    context_parts.append('  Law example: {"action":"create_proposal","title":"Targeted Survival Aid Law","description":"Define binding aid eligibility, required contributor duties, and follow-through obligations for verified survival risk.","proposal_type":"law"}')
     context_parts.append('  Law example: {"action":"create_proposal","title":"Reserve Access Verification Policy","description":"Create a transparent process for checking whether shared-reserve support is available under current run conditions before agents depend on it.","proposal_type":"law"}')
     context_parts.append('  Allocation example: {"action":"create_proposal","title":"Immediate Recovery Allocation","description":"Allocate shared food and energy to named dormant agents whose current deficits are known.","proposal_type":"allocation"}')
-    context_parts.append('  Rule example: {"action":"create_proposal","title":"Voluntary Aid Priority Norm","description":"Ask agents with surplus to prioritize verified survival deficits before stockpiling further.","proposal_type":"rule"}')
+    context_parts.append('  Rule example: {"action":"create_proposal","title":"Voluntary Aid Priority Norm","description":"Encourage agents with surplus to prioritize verified survival deficits before stockpiling further, without mandatory contributions or enforcement.","proposal_type":"rule"}')
     context_parts.append('  Infrastructure example: {"action":"create_proposal","title":"Build Shared Storage","description":"Coordinate materials and labor to build shared storage for survival resources.","proposal_type":"infrastructure"}')
     context_parts.append("")
     
@@ -1399,7 +1404,15 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             context_parts.append("- Reserve contribution effect: automatic reserve contributions are disabled for this run. A reserve law may still be discussed or enforced socially, but work output is not automatically diverted to the common pool.")
         reserve_notes = []
         if reserve_active_aid_enabled():
-            reserve_notes.append("active agents may draw exact deficits to stay active")
+            reserve_notes.append(
+                "active agents may receive threshold aid when food "
+                f"< {float(reserve_active_aid_trigger_food()):.1f} or energy "
+                f"< {float(reserve_active_aid_trigger_energy()):.1f}; aid tops up to at least "
+                f"F{float(max(reserve_active_aid_target_food(), active_food_cost())):.1f}/"
+                f"E{float(max(reserve_active_aid_target_energy(), active_energy_cost())):.1f} "
+                f"while leaving at least {float(reserve_active_aid_min_pool_remaining()):.1f} "
+                "of the aided resource in the pool"
+            )
         if reserve_dormant_maintenance_enabled():
             reserve_notes.append("dormant agents may be stabilized at reduced upkeep")
         if reserve_auto_revive_enabled():
@@ -1529,7 +1542,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append("")
     context_parts.append("VALID ACTION JSON EXAMPLES:")
     context_parts.append('  {"action":"vote","proposal_id":123,"vote":"yes|no|abstain"}')
-    context_parts.append('  {"action":"create_proposal","title":"Targeted Aid Standard","description":"Set a specific rule for when at-risk agents receive help and how contributors are identified.","proposal_type":"law"}')
+    context_parts.append('  {"action":"create_proposal","title":"Targeted Aid Law","description":"Set binding conditions for when at-risk agents receive help and how contributors are identified.","proposal_type":"law"}')
     context_parts.append('  {"action":"create_proposal","title":"Title","description":"Description","proposal_type":"law|allocation|rule|infrastructure|constitutional|other"}')
     context_parts.append('  {"action":"forum_post","content":"Your message here"}')
     context_parts.append('  {"action":"forum_reply","parent_message_id":708,"content":"I disagree with this specific request because the reserve is too low."}')

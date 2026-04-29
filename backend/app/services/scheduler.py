@@ -38,7 +38,12 @@ from app.services.survival_config import (
     death_threshold,
     dormant_energy_cost,
     dormant_food_cost,
+    reserve_active_aid_min_pool_remaining,
+    reserve_active_aid_target_energy,
+    reserve_active_aid_target_food,
     reserve_active_aid_enabled,
+    reserve_active_aid_trigger_energy,
+    reserve_active_aid_trigger_food,
     reserve_auto_revive_enabled,
     reserve_dormant_maintenance_enabled,
 )
@@ -231,6 +236,7 @@ def _apply_survival_reserve_support(
     reserve_resources: dict[str, GlobalResources],
     emit_shortfall_event: bool = True,
     event_metadata: dict | None = None,
+    min_pool_remaining: Decimal = Decimal("0"),
 ) -> tuple[AgentInventory | None, AgentInventory | None, Decimal, Decimal, bool, dict | None]:
     food_amount = Decimal(str(food_inv.quantity)) if food_inv else Decimal("0")
     energy_amount = Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0")
@@ -252,7 +258,17 @@ def _apply_survival_reserve_support(
     available_energy = Decimal(str(energy_pool.in_common_pool)) if energy_pool else Decimal("0")
 
     agent_name = agent.display_name or f"Agent #{agent.agent_number}"
-    if available_food < food_deficit or available_energy < energy_deficit:
+    food_pool_after_if_granted = available_food - food_deficit
+    energy_pool_after_if_granted = available_energy - energy_deficit
+    food_pool_floor_violation = food_deficit > 0 and food_pool_after_if_granted < min_pool_remaining
+    energy_pool_floor_violation = energy_deficit > 0 and energy_pool_after_if_granted < min_pool_remaining
+
+    if (
+        available_food < food_deficit
+        or available_energy < energy_deficit
+        or food_pool_floor_violation
+        or energy_pool_floor_violation
+    ):
         diagnostics = _reserve_decision_metadata(
             agent=agent,
             status_before=status_before,
@@ -266,6 +282,10 @@ def _apply_survival_reserve_support(
             available_food_after=available_food,
             available_energy_after=available_energy,
             aid_granted=False,
+        )
+        diagnostics["reserve_min_pool_remaining"] = float(min_pool_remaining)
+        diagnostics["reserve_pool_floor_violation"] = bool(
+            food_pool_floor_violation or energy_pool_floor_violation
         )
         if emit_shortfall_event:
             metadata = dict(diagnostics)
@@ -334,6 +354,8 @@ def _apply_survival_reserve_support(
         available_energy_after=available_energy_after,
         aid_granted=True,
     )
+    diagnostics["reserve_min_pool_remaining"] = float(min_pool_remaining)
+    diagnostics["reserve_pool_floor_violation"] = False
     db.add(
         Event(
             agent_id=agent.id,
@@ -351,6 +373,71 @@ def _apply_survival_reserve_support(
         )
     )
     return food_inv, energy_inv, food_amount, energy_amount, True, diagnostics
+
+
+def _active_aid_requirement(
+    *,
+    amount: Decimal,
+    trigger: Decimal,
+    configured_target: Decimal,
+    upkeep_cost: Decimal,
+) -> Decimal:
+    if amount >= trigger:
+        return amount
+    return max(configured_target, upkeep_cost)
+
+
+def _apply_active_survival_reserve_aid(
+    db: Session,
+    *,
+    agent: Agent,
+    food_inv: AgentInventory | None,
+    energy_inv: AgentInventory | None,
+    active_food: Decimal,
+    active_energy: Decimal,
+    reserve_resources: dict[str, GlobalResources],
+) -> tuple[AgentInventory | None, AgentInventory | None, Decimal, Decimal, bool, dict | None]:
+    food_amount = Decimal(str(food_inv.quantity)) if food_inv else Decimal("0")
+    energy_amount = Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0")
+
+    food_trigger = reserve_active_aid_trigger_food()
+    energy_trigger = reserve_active_aid_trigger_energy()
+    food_target = max(reserve_active_aid_target_food(), active_food)
+    energy_target = max(reserve_active_aid_target_energy(), active_energy)
+
+    required_food = _active_aid_requirement(
+        amount=food_amount,
+        trigger=food_trigger,
+        configured_target=food_target,
+        upkeep_cost=active_food,
+    )
+    required_energy = _active_aid_requirement(
+        amount=energy_amount,
+        trigger=energy_trigger,
+        configured_target=energy_target,
+        upkeep_cost=active_energy,
+    )
+    if required_food <= food_amount and required_energy <= energy_amount:
+        return food_inv, energy_inv, food_amount, energy_amount, False, None
+
+    min_pool_remaining = reserve_active_aid_min_pool_remaining()
+    return _apply_survival_reserve_support(
+        db,
+        agent=agent,
+        food_inv=food_inv,
+        energy_inv=energy_inv,
+        required_food=required_food,
+        required_energy=required_energy,
+        reserve_resources=reserve_resources,
+        event_metadata={
+            "support_mode": "active_threshold_aid",
+            "active_aid_trigger_food": float(food_trigger),
+            "active_aid_trigger_energy": float(energy_trigger),
+            "active_aid_target_food": float(food_target),
+            "active_aid_target_energy": float(energy_target),
+        },
+        min_pool_remaining=min_pool_remaining,
+    )
 
 
 QUOTE_STOPWORDS = {
@@ -761,13 +848,13 @@ async def process_daily_consumption():
             # ================================================================
             if agent.status == "active":
                 if reserve_laws and reserve_active_aid_enabled():
-                    food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_survival_reserve_support(
+                    food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_active_survival_reserve_aid(
                         db,
                         agent=agent,
                         food_inv=food_inv,
                         energy_inv=energy_inv,
-                        required_food=active_food,
-                        required_energy=active_energy,
+                        active_food=active_food,
+                        active_energy=active_energy,
                         reserve_resources=reserve_resources,
                     )
                 can_pay_food = food_amount >= active_food

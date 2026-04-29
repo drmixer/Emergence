@@ -253,6 +253,75 @@ def test_create_proposal_rejects_near_duplicate_active_current_run_title(session
     assert "Near-duplicate active proposal exists" in validation["reason"]
 
 
+def test_create_proposal_rejects_binding_rule_proposal(session_factory):
+    with session_factory() as db:
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Mandatory Common Pool Rule",
+                    "description": (
+                        "Agents must contribute 1 food and 1 energy per cycle. "
+                        "Violations trigger sanctions."
+                    ),
+                    "proposal_type": "rule",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "binding_rule_proposal"
+    assert "Use proposal_type law" in validation["reason"]
+
+
+def test_create_proposal_allows_non_binding_voluntary_rule(session_factory):
+    with session_factory() as db:
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Voluntary Aid Priority Norm",
+                    "description": (
+                        "Encourage agents with surplus to prioritize verified survival deficits. "
+                        "Contributions are voluntary, not mandatory, and carry no enforcement."
+                    ),
+                    "proposal_type": "rule",
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
+def test_create_proposal_rejects_unknown_proposal_type(session_factory):
+    with session_factory() as db:
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Mystery Governance Type",
+                    "description": "Use an unsupported proposal type.",
+                    "proposal_type": "edict",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "invalid_proposal_type"
+
+
 def test_duplicate_proposal_checkpoint_recovery_votes_on_existing_proposal(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")

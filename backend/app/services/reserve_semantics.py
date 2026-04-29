@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session
 from app.models.models import Law
 from app.services.law_effects import active_survival_reserve_laws, is_survival_reserve_law
 from app.services.survival_config import (
+    active_energy_cost,
+    active_food_cost,
+    reserve_active_aid_min_pool_remaining,
+    reserve_active_aid_target_energy,
+    reserve_active_aid_target_food,
     reserve_active_aid_enabled,
+    reserve_active_aid_trigger_energy,
+    reserve_active_aid_trigger_food,
     reserve_auto_contribution_enabled,
     reserve_auto_revive_enabled,
     reserve_dormant_maintenance_enabled,
@@ -43,6 +50,13 @@ def reserve_mechanical_access_payload() -> dict[str, Any]:
         "enabled_modes": enabled_modes,
         "disabled_modes": disabled_modes,
         "mode_labels": RESERVE_GATE_LABELS,
+        "active_aid_thresholds": {
+            "food_trigger_below": float(reserve_active_aid_trigger_food()),
+            "energy_trigger_below": float(reserve_active_aid_trigger_energy()),
+            "food_target": float(max(reserve_active_aid_target_food(), active_food_cost())),
+            "energy_target": float(max(reserve_active_aid_target_energy(), active_energy_cost())),
+            "min_pool_remaining": float(reserve_active_aid_min_pool_remaining()),
+        },
         "label": label,
         "description": (
             "Runtime gates determine whether reserve law text can trigger automatic contributions, "

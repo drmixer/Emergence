@@ -16,12 +16,14 @@ from app.models.models import (
     Law, Event, Transaction, AgentAction, GlobalResources
 )
 from app.services.law_effects import (
+    active_survival_reserve_laws,
     current_energy_reserve,
     survival_reserve_contribution_rate,
     survival_reserve_law_active,
 )
 from app.services.live_run_scope import get_live_run_window
 from app.services.events_generator import event_generator
+from app.services.reserve_semantics import reserve_mechanical_access_payload
 from app.services.relationship_memory import relationship_memory_service
 from app.services.runtime_config import runtime_config_service
 from app.services.survival_config import active_energy_cost, active_food_cost
@@ -108,6 +110,36 @@ def work_base_yield(work_type: str) -> Decimal:
     except Exception:
         value = Decimal(str(work_info["base_yield"]))
     return max(Decimal("0.01"), value)
+
+
+def _decimal_payload(value: Decimal | int | float | None) -> float | None:
+    if value is None:
+        return None
+    return float(Decimal(str(value)).quantize(Decimal("0.01")))
+
+
+def _reserve_accessibility_context(db: Session, active_laws: list[Law] | None = None) -> dict:
+    laws = active_laws if active_laws is not None else active_survival_reserve_laws(db)
+    mechanics = reserve_mechanical_access_payload()
+    active_law_ids = [int(law.id) for law in laws if getattr(law, "id", None) is not None]
+    context = {
+        "reserve_law_active": bool(laws),
+        "active_reserve_law_ids": active_law_ids,
+        "active_reserve_law_count": len(laws),
+        "auto_contribution_enabled": bool(mechanics.get("auto_contribution_enabled")),
+        "active_aid_enabled": bool(mechanics.get("active_aid_enabled")),
+        "dormant_maintenance_enabled": bool(mechanics.get("dormant_maintenance_enabled")),
+        "auto_revive_enabled": bool(mechanics.get("auto_revive_enabled")),
+        "automatic_support_available": bool(laws)
+        and any(
+            bool(mechanics.get(f"{mode}_enabled"))
+            for mode in ("active_aid", "dormant_maintenance", "auto_revive")
+        ),
+    }
+    active_aid_thresholds = mechanics.get("active_aid_thresholds")
+    if isinstance(active_aid_thresholds, dict):
+        context["active_aid_thresholds"] = active_aid_thresholds
+    return context
 
 
 RATE_LIMIT_REASON = "Rate limit exceeded (max actions per hour)"
@@ -243,11 +275,71 @@ _DUPLICATE_FORUM_MIN_TERMS = 8
 _DUPLICATE_FORUM_MIN_OVERLAP = 7
 _DUPLICATE_FORUM_SMALLER_RATIO = 0.68
 
+_VALID_PROPOSAL_TYPES = {
+    "law",
+    "allocation",
+    "rule",
+    "infrastructure",
+    "constitutional",
+    "other",
+}
+
+_RULE_BINDING_NEGATED_PHRASES = (
+    "does not carry enforcement",
+    "without mandatory contributions",
+    "without enforcement",
+    "without coercion",
+    "no enforcement",
+    "not mandatory",
+    "not required",
+    "not enforced",
+    "never mandatory",
+    "non binding",
+    "non-binding",
+    "opt in",
+    "opt-in",
+)
+
+_RULE_BINDING_PATTERNS = (
+    (
+        r"\b(must|shall|mandate|mandates|mandated|mandatory|required|requires|requirement|obligated|obligation|compel|compulsory)\b",
+        "binding obligation",
+    ),
+    (
+        r"\b(automatic|automatically|auto allocation|auto contribution|auto rescue)\b",
+        "automatic mechanic",
+    ),
+    (
+        r"\b(enforce|enforced|enforcement|violation|violations|penalty|penalties|sanction|seizure|seize|exile|punish)\b",
+        "enforcement or penalty",
+    ),
+)
+
 
 def _normalized_proposal_title_key(title: str | None) -> str:
     words = re.findall(r"[a-z0-9]+", str(title or "").lower())
     meaningful = [word for word in words if word not in _PROPOSAL_TITLE_STOPWORDS]
     return " ".join(meaningful)
+
+
+def _binding_signal_for_rule_proposal(action: dict) -> str | None:
+    text = " ".join(
+        re.findall(
+            r"[a-z0-9-]+",
+            f"{action.get('title') or ''} {action.get('description') or ''}".lower(),
+        )
+    )
+    if not text:
+        return None
+
+    binding_text = text
+    for phrase in _RULE_BINDING_NEGATED_PHRASES:
+        binding_text = binding_text.replace(phrase, " ")
+
+    for pattern, label in _RULE_BINDING_PATTERNS:
+        if re.search(pattern, binding_text):
+            return label
+    return None
 
 
 def _normalized_message_terms(text: str | None) -> set[str]:
@@ -574,6 +666,25 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         
         if not action.get("title") or not action.get("description"):
             return {"valid": False, "reason": "Proposal requires title and description"}
+        proposal_type = str(action.get("proposal_type") or "other").strip().lower()
+        if proposal_type not in _VALID_PROPOSAL_TYPES:
+            return {
+                "valid": False,
+                "reason": "Proposal type must be law|allocation|rule|infrastructure|constitutional|other",
+                "reason_code": "invalid_proposal_type",
+            }
+        action["proposal_type"] = proposal_type
+        if proposal_type == "rule":
+            binding_signal = _binding_signal_for_rule_proposal(action)
+            if binding_signal is not None:
+                return {
+                    "valid": False,
+                    "reason_code": "binding_rule_proposal",
+                    "reason": (
+                        "Rule proposals must be non-binding. Use proposal_type law for "
+                        f"mandatory, automatic, enforcement-backed, or durable obligations ({binding_signal})."
+                    ),
+                }
         duplicate = _find_near_duplicate_active_proposal(db, action)
         if duplicate is not None:
             return {
@@ -1122,7 +1233,7 @@ async def _execute_create_proposal(db: Session, agent: Agent, action: dict) -> d
         author_agent_id=agent.id,
         title=action["title"],
         description=action["description"],
-        proposal_type=action.get("proposal_type", "other"),
+        proposal_type=str(action.get("proposal_type") or "other").strip().lower(),
         voting_closes_at=now_utc() + voting_period
     )
     db.add(proposal)
@@ -1191,10 +1302,15 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
         * production_modifier
     ).quantize(Decimal("0.01"))
     contribution_amount = Decimal("0")
+    contribution_rate = Decimal("0")
     reserve_active = False
+    active_reserve_laws: list[Law] = []
+    pool_before: Decimal | None = None
+    pool_after: Decimal | None = None
 
     if resource_type in {"food", "energy"} and survival_reserve_law_active(db):
         reserve_active = True
+        active_reserve_laws = active_survival_reserve_laws(db)
         contribution_rate = survival_reserve_contribution_rate(
             resource_type,
             energy_reserve=current_energy_reserve(db),
@@ -1226,7 +1342,9 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
             GlobalResources.resource_type == resource_type
         ).first()
         if global_resource:
+            pool_before = Decimal(str(global_resource.in_common_pool or 0))
             global_resource.in_common_pool += contribution_amount
+            pool_after = Decimal(str(global_resource.in_common_pool or 0))
         db.add(
             Transaction(
                 from_agent_id=agent.id,
@@ -1258,7 +1376,26 @@ async def _execute_work(db: Session, agent: Agent, action: dict) -> dict:
         description += (
             f" and contributed {float(contribution_amount):.2f} {resource_type} to the shared reserve"
         )
-    return {"success": True, "description": description}
+    result = {"success": True, "description": description}
+    if reserve_active and contribution_amount > 0:
+        result["reserve_contribution"] = {
+            "resource": resource_type,
+            "amount": _decimal_payload(contribution_amount),
+            "rate": float(contribution_rate),
+            "produced_amount": _decimal_payload(produced_amount),
+            "kept_amount": _decimal_payload(amount_kept),
+            "pool_before": _decimal_payload(pool_before),
+            "pool_after": _decimal_payload(pool_after),
+            "active_law_ids": [
+                int(law.id) for law in active_reserve_laws if getattr(law, "id", None) is not None
+            ],
+            "active_law_count": len(active_reserve_laws),
+        }
+        result["pool_accessibility_context"] = _reserve_accessibility_context(
+            db,
+            active_laws=active_reserve_laws,
+        )
+    return result
 
 
 async def _execute_trade(db: Session, agent: Agent, action: dict) -> dict:

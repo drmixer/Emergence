@@ -114,6 +114,36 @@ MUTABLE_SETTINGS: dict[str, MutableSettingSpec] = {
         python_type=bool,
         description="Allow shared reserve to cover active-agent survival shortfalls before dormancy.",
     ),
+    "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_FOOD": MutableSettingSpec(
+        python_type=float,
+        min_value=0.0,
+        max_value=100.0,
+        description="Food level below which active-agent reserve aid may trigger.",
+    ),
+    "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_ENERGY": MutableSettingSpec(
+        python_type=float,
+        min_value=0.0,
+        max_value=100.0,
+        description="Energy level below which active-agent reserve aid may trigger.",
+    ),
+    "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD": MutableSettingSpec(
+        python_type=float,
+        min_value=0.0,
+        max_value=100.0,
+        description="Food level active reserve aid tries to reach before upkeep is charged.",
+    ),
+    "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY": MutableSettingSpec(
+        python_type=float,
+        min_value=0.0,
+        max_value=100.0,
+        description="Energy level active reserve aid tries to reach before upkeep is charged.",
+    ),
+    "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING": MutableSettingSpec(
+        python_type=float,
+        min_value=0.0,
+        max_value=10000.0,
+        description="Minimum per-resource reserve balance that active aid must leave after aid.",
+    ),
     "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": MutableSettingSpec(
         python_type=bool,
         description="Allow shared reserve to cover dormant-agent upkeep deficits before starvation progresses.",

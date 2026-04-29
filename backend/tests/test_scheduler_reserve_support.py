@@ -154,7 +154,13 @@ def test_reserve_can_support_active_agents_when_runtime_override_enabled(session
     _configure_reserve(
         monkeypatch,
         session_factory,
-        runtime_values={"SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True},
+        runtime_values={
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING": 0.0,
+            "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+        },
     )
 
     with session_factory() as db:
@@ -188,7 +194,95 @@ def test_reserve_can_support_active_agents_when_runtime_override_enabled(session
     assert len(reserve_aids) == 1
     aid_meta = reserve_aids[0].event_metadata or {}
     assert aid_meta["status_before"] == "active"
-    assert aid_meta["support_mode"] == "active_maintenance"
+    assert aid_meta["support_mode"] == "active_threshold_aid"
+
+
+def test_active_reserve_aid_uses_declared_threshold_not_general_upkeep_gap(session_factory, monkeypatch):
+    _configure_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={
+            "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
+            "SURVIVAL_ACTIVE_ENERGY_COST": 3.5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_FOOD": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_ENERGY": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD": 3.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY": 3.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING": 25.0,
+            "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+        },
+    )
+
+    with session_factory() as db:
+        active_agent = _seed_agent(
+            db,
+            agent_number=8,
+            status="active",
+            food="2.50",
+            energy="2.50",
+        )
+        _seed_reserve(db, food="100.00", energy="100.00")
+        active_agent_id = active_agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["active_fed"] == 0
+    assert result["became_dormant"] == 1
+
+    with session_factory() as db:
+        refreshed_active = db.query(Agent).filter(Agent.id == active_agent_id).one()
+        reserve_aids = db.query(Event).filter(Event.event_type == "reserve_aid").all()
+
+    assert refreshed_active.status == "dormant"
+    assert reserve_aids == []
+
+
+def test_active_reserve_aid_tops_up_below_threshold_and_preserves_pool_floor(session_factory, monkeypatch):
+    _configure_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={
+            "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
+            "SURVIVAL_ACTIVE_ENERGY_COST": 3.5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_FOOD": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_ENERGY": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD": 3.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY": 3.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING": 25.0,
+            "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+        },
+    )
+
+    with session_factory() as db:
+        active_agent = _seed_agent(
+            db,
+            agent_number=9,
+            status="active",
+            food="3.00",
+            energy="1.90",
+        )
+        _seed_reserve(db, food="30.00", energy="27.00")
+        active_agent_id = active_agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["active_fed"] == 1
+    assert result["became_dormant"] == 0
+
+    with session_factory() as db:
+        refreshed_active = db.query(Agent).filter(Agent.id == active_agent_id).one()
+        reserve_aid = db.query(Event).filter(Event.event_type == "reserve_aid").one()
+        energy_pool = db.query(GlobalResources).filter(GlobalResources.resource_type == "energy").one()
+
+    assert refreshed_active.status == "active"
+    assert float(energy_pool.in_common_pool) == pytest.approx(25.40)
+    aid_meta = reserve_aid.event_metadata or {}
+    assert aid_meta["support_mode"] == "active_threshold_aid"
+    assert aid_meta["active_aid_trigger_energy"] == pytest.approx(2.0)
+    assert aid_meta["active_aid_target_energy"] == pytest.approx(3.5)
+    assert aid_meta["energy_deficit"] == pytest.approx(1.6)
+    assert aid_meta["reserve_min_pool_remaining"] == pytest.approx(25.0)
+    assert aid_meta["reserve_pool_floor_violation"] is False
 
 
 def test_reserve_can_revive_dormant_agent_when_pool_covers_active_cycle(session_factory, monkeypatch):
@@ -376,7 +470,13 @@ def test_reserve_support_saves_smallest_active_deficit_first(session_factory, mo
     _configure_reserve(
         monkeypatch,
         session_factory,
-        runtime_values={"SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True},
+        runtime_values={
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING": 0.0,
+            "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+        },
     )
 
     with session_factory() as db:
@@ -418,7 +518,7 @@ def test_reserve_support_saves_smallest_active_deficit_first(session_factory, mo
     shortfall_meta = shortfall.event_metadata or {}
     assert shortfall_meta["aid_granted"] is False
     assert shortfall_meta["status_before"] == "active"
-    assert shortfall_meta["support_mode"] == "active_maintenance"
+    assert shortfall_meta["support_mode"] == "active_threshold_aid"
     assert shortfall_meta["reserve_pool_food_before"] == pytest.approx(0.05)
     assert shortfall_meta["reserve_pool_energy_before"] == pytest.approx(0.05)
 

@@ -440,6 +440,10 @@ class AgentProcessor:
             "action": action,
             "result": result,
         }
+        for telemetry_key in ("reserve_contribution", "pool_accessibility_context"):
+            telemetry_payload = result.get(telemetry_key)
+            if isinstance(telemetry_payload, dict):
+                metadata[telemetry_key] = telemetry_payload
         if runtime_metadata:
             metadata["runtime"] = runtime_metadata
         if (

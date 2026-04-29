@@ -205,6 +205,31 @@ def test_internal_canary_k_bounded_contribution_keeps_j_survival_window_with_aut
     assert preset.common_pool_targets == {"food": 450.0, "energy": 300.0, "materials": 500.0}
 
 
+def test_internal_canary_k3_paired_active_aid_enables_only_threshold_support():
+    preset = get_scarcity_preset("internal_canary_k3_paired_active_aid_v1")
+
+    assert preset.recommended_run_class == "special_exploratory"
+    assert preset.runtime_overrides["AGENT_LOOP_DELAY_SECONDS"] == 180
+    assert preset.runtime_overrides["PROPOSAL_VOTING_HOURS"] == 2.0
+    assert preset.runtime_overrides["PROPOSAL_RESOLUTION_INTERVAL_SECONDS"] == 60
+    assert preset.runtime_overrides["SURVIVAL_ACTIVE_FOOD_COST"] == 3.0
+    assert preset.runtime_overrides["SURVIVAL_ACTIVE_ENERGY_COST"] == 3.5
+    assert preset.runtime_overrides["SURVIVAL_DORMANT_FOOD_COST"] == 0.5
+    assert preset.runtime_overrides["SURVIVAL_DORMANT_ENERGY_COST"] == 0.75
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_ENABLED"] is True
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_FOOD"] == 2.0
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_ENERGY"] == 2.0
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD"] == 3.0
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY"] == 3.0
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING"] == 25.0
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED"] is False
+    assert preset.runtime_overrides["SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED"] is True
+    assert preset.runtime_overrides["WORLD_EVENT_GENERATION_ENABLED"] is False
+    assert preset.agent_resource_targets == {"food": 22.0, "energy": 24.0, "materials": 20.0}
+    assert preset.common_pool_targets == {"food": 450.0, "energy": 300.0, "materials": 500.0}
+
+
 def test_standard_reset_preset_restores_named_baseline():
     preset = get_scarcity_preset("standard_reset_v2")
 
@@ -234,6 +259,7 @@ def test_list_scarcity_presets_is_sorted_and_complete():
         "internal_canary_c_survival_window_v1",
         "internal_canary_d_revival_window_v1",
         "internal_canary_e_response_loop_v1",
+        "internal_canary_k3_paired_active_aid_v1",
         "internal_canary_k_bounded_contribution_v1",
         "internal_scarcity_tight_v1",
         "internal_scarcity_tight_v2",

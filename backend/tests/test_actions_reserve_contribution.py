@@ -9,8 +9,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.models.models import Agent, AgentInventory, GlobalResources
+from app.models.models import Agent, AgentInventory, Event, GlobalResources
 from app.services import actions
+from app.services.agent_loop import AgentProcessor
 from app.services import law_effects
 
 
@@ -93,6 +94,101 @@ def test_reserve_contribution_rates_favor_energy(session_factory, monkeypatch):
     assert float(energy_inventory.quantity) == pytest.approx(0.90)
     assert float(food_pool.in_common_pool) == pytest.approx(0.10)
     assert float(energy_pool.in_common_pool) == pytest.approx(0.60)
+
+
+def test_reserve_contribution_result_includes_structured_pool_telemetry(session_factory, monkeypatch):
+    class _Law:
+        id = 123
+
+    monkeypatch.setattr(actions, "survival_reserve_law_active", lambda _db: True)
+    monkeypatch.setattr(actions, "active_survival_reserve_laws", lambda _db: [_Law()])
+    monkeypatch.setattr(
+        actions,
+        "reserve_mechanical_access_payload",
+        lambda: {
+            "auto_contribution_enabled": True,
+            "active_aid_enabled": True,
+            "dormant_maintenance_enabled": False,
+            "auto_revive_enabled": False,
+        },
+    )
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=9)
+
+        result = asyncio.run(actions._execute_work(db, agent, {"work_type": "generate", "hours": 1}))
+        db.commit()
+
+    assert result["success"] is True
+    assert result["reserve_contribution"] == {
+        "resource": "energy",
+        "amount": pytest.approx(0.60),
+        "rate": pytest.approx(0.4),
+        "produced_amount": pytest.approx(1.50),
+        "kept_amount": pytest.approx(0.90),
+        "pool_before": pytest.approx(0.00),
+        "pool_after": pytest.approx(0.60),
+        "active_law_ids": [123],
+        "active_law_count": 1,
+    }
+    assert result["pool_accessibility_context"] == {
+        "reserve_law_active": True,
+        "active_reserve_law_ids": [123],
+        "active_reserve_law_count": 1,
+        "auto_contribution_enabled": True,
+        "active_aid_enabled": True,
+        "dormant_maintenance_enabled": False,
+        "auto_revive_enabled": False,
+        "automatic_support_available": True,
+    }
+
+
+def test_action_logger_promotes_reserve_telemetry_to_event_metadata(session_factory, monkeypatch):
+    monkeypatch.setattr(AgentProcessor, "_runtime_accepts_agent_work", lambda _self: True)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=10)
+        processor = AgentProcessor()
+        result = {
+            "success": True,
+            "description": "Agent #10 generated energy",
+            "reserve_contribution": {
+                "resource": "energy",
+                "amount": 0.6,
+                "rate": 0.4,
+                "pool_before": 0.0,
+                "pool_after": 0.6,
+                "active_law_ids": [123],
+                "active_law_count": 1,
+            },
+            "pool_accessibility_context": {
+                "reserve_law_active": True,
+                "active_reserve_law_ids": [123],
+                "active_reserve_law_count": 1,
+                "auto_contribution_enabled": True,
+                "active_aid_enabled": False,
+                "dormant_maintenance_enabled": False,
+                "auto_revive_enabled": False,
+                "automatic_support_available": False,
+            },
+        }
+
+        asyncio.run(
+            processor._log_action(
+                db,
+                agent.id,
+                {"action": "work", "work_type": "generate", "hours": 1},
+                result,
+                runtime_metadata={"run_id": "test-run"},
+            )
+        )
+
+        event = db.query(Event).filter(Event.event_type == "work").one()
+
+    metadata = event.event_metadata
+    assert metadata["reserve_contribution"] == result["reserve_contribution"]
+    assert metadata["pool_accessibility_context"] == result["pool_accessibility_context"]
+    assert metadata["result"]["reserve_contribution"] == result["reserve_contribution"]
 
 
 def test_reserve_contribution_uses_normal_rates_when_energy_buffer_is_healthy(session_factory, monkeypatch):

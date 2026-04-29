@@ -97,6 +97,46 @@ def reserve_active_aid_enabled() -> bool:
     )
 
 
+def reserve_active_aid_trigger_food() -> Decimal:
+    return _runtime_decimal(
+        "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_FOOD",
+        settings.SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_FOOD,
+        minimum="0.00",
+    )
+
+
+def reserve_active_aid_trigger_energy() -> Decimal:
+    return _runtime_decimal(
+        "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_ENERGY",
+        settings.SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_ENERGY,
+        minimum="0.00",
+    )
+
+
+def reserve_active_aid_target_food() -> Decimal:
+    return _runtime_decimal(
+        "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD",
+        settings.SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD,
+        minimum="0.00",
+    )
+
+
+def reserve_active_aid_target_energy() -> Decimal:
+    return _runtime_decimal(
+        "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY",
+        settings.SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY,
+        minimum="0.00",
+    )
+
+
+def reserve_active_aid_min_pool_remaining() -> Decimal:
+    return _runtime_decimal(
+        "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING",
+        settings.SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING,
+        minimum="0.00",
+    )
+
+
 def reserve_dormant_maintenance_enabled() -> bool:
     return _runtime_bool(
         "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED",
