@@ -2337,8 +2337,8 @@ def usage_budget_status():
     calls_gemini = int(snapshot.calls_gemini or 0)
     cost_usd = float(snapshot.estimated_cost_usd or 0.0)
 
-    soft_budget = float(getattr(settings, "LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0)
-    hard_budget = float(getattr(settings, "LLM_DAILY_BUDGET_USD_HARD", 0.0) or 0.0)
+    soft_budget = float(runtime_config_service.get_effective_value_cached("LLM_DAILY_BUDGET_USD_SOFT") or 0.0)
+    hard_budget = float(runtime_config_service.get_effective_value_cached("LLM_DAILY_BUDGET_USD_HARD") or 0.0)
     max_total = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_TOTAL", 0) or 0)
     max_or_free = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_OPENROUTER_FREE", 0) or 0)
     max_gemini = int(getattr(settings, "LLM_MAX_CALLS_PER_DAY_GEMINI", 0) or 0)

@@ -103,6 +103,8 @@ def _status_payload() -> dict[str, Any]:
             ),
             "simulation_condition_name": str(effective.get("SIMULATION_CONDITION_NAME") or ""),
             "simulation_season_number": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
+            "llm_daily_budget_usd_soft": float(effective.get("LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0),
+            "llm_daily_budget_usd_hard": float(effective.get("LLM_DAILY_BUDGET_USD_HARD", 0.0) or 0.0),
             "simulation_auto_stop_at": str(effective.get("SIMULATION_AUTO_STOP_AT") or "").strip() or None,
             "simulation_auto_stop_run_id": str(effective.get("SIMULATION_AUTO_STOP_RUN_ID") or "").strip() or None,
             "run_started_at": run_row.started_at.isoformat() if run_row and run_row.started_at else None,
@@ -158,6 +160,8 @@ def _update_runtime(updates: dict[str, Any], reason: str) -> dict[str, Any]:
                 "SIMULATION_RUN_CLASS": coerce_run_class(effective.get("SIMULATION_RUN_CLASS")),
                 "SIMULATION_CONDITION_NAME": str(effective.get("SIMULATION_CONDITION_NAME") or ""),
                 "SIMULATION_SEASON_NUMBER": int(effective.get("SIMULATION_SEASON_NUMBER") or 0),
+                "LLM_DAILY_BUDGET_USD_SOFT": float(effective.get("LLM_DAILY_BUDGET_USD_SOFT", 0.0) or 0.0),
+                "LLM_DAILY_BUDGET_USD_HARD": float(effective.get("LLM_DAILY_BUDGET_USD_HARD", 0.0) or 0.0),
                 "SIMULATION_AUTO_STOP_AT": str(effective.get("SIMULATION_AUTO_STOP_AT") or "").strip() or None,
                 "SIMULATION_AUTO_STOP_RUN_ID": str(effective.get("SIMULATION_AUTO_STOP_RUN_ID") or "").strip() or None,
             },
@@ -359,6 +363,9 @@ def main() -> None:
 
     sub.add_parser("stop", help="Pause simulation processing.")
     sub.add_parser("status", help="Show effective simulation runtime state.")
+    budget = sub.add_parser("budget", help="Set daily LLM budget caps. Use 0 to disable a cap.")
+    budget.add_argument("--soft", type=float, required=True)
+    budget.add_argument("--hard", type=float, required=True)
     schedule_stop = sub.add_parser("schedule-stop", help="Schedule a Railway-side guarded stop for a specific run.")
     schedule_stop.add_argument("--stop-at", required=True, help="ISO-8601 timestamp with timezone, e.g. 2026-04-16T14:20:00-07:00")
     schedule_stop.add_argument("--run-id", default=None, help="Run id to stop. Defaults to the currently active run id.")
@@ -430,6 +437,18 @@ def main() -> None:
         )
         result["governance_boundary"] = _retire_inherited_governance_state_for_start(
             resolved_run_id
+        )
+        print(json.dumps(result, indent=2))
+        print(json.dumps(_status_payload(), indent=2))
+        return
+
+    if args.command == "budget":
+        result = _update_runtime(
+            {
+                "LLM_DAILY_BUDGET_USD_SOFT": args.soft,
+                "LLM_DAILY_BUDGET_USD_HARD": args.hard,
+            },
+            "Operator budget-cap update via simulation_control.py",
         )
         print(json.dumps(result, indent=2))
         print(json.dumps(_status_payload(), indent=2))

@@ -404,7 +404,7 @@ export default function Dashboard() {
                     </>
                 ) : (
                     <>
-                        <Link to="/agents" className="stat-card stat-card-link">
+                        <Link to="/agents?status=active" className="stat-card stat-card-link">
                             <div className="stat-header">
                                 <span className="stat-label">Active Agents</span>
                                 <div className="stat-icon green">
@@ -417,7 +417,7 @@ export default function Dashboard() {
                             </div>
                         </Link>
 
-                        <Link to="/agents" className="stat-card stat-card-link">
+                        <Link to="/agents?status=dormant" className="stat-card stat-card-link">
                             <div className="stat-header">
                                 <span className="stat-label">Dormant Agents</span>
                                 <div className="stat-icon orange">
@@ -430,7 +430,7 @@ export default function Dashboard() {
                             </div>
                         </Link>
 
-                        <div className="stat-card">
+                        <Link to="/governance?tab=proposals&status=active" className="stat-card stat-card-link">
                             <div className="stat-header">
                                 <span className="stat-label">Active Proposals</span>
                                 <div className="stat-icon blue">
@@ -441,9 +441,9 @@ export default function Dashboard() {
                             <div className="stat-change">
                                 <span>Open right now</span>
                             </div>
-                        </div>
+                        </Link>
 
-                        <div className="stat-card">
+                        <Link to="/governance?tab=laws" className="stat-card stat-card-link">
                             <div className="stat-header">
                                 <span className="stat-label">Passed Laws</span>
                                 <div className="stat-icon purple">
@@ -454,7 +454,7 @@ export default function Dashboard() {
                             <div className="stat-change">
                                 <span>Cumulative in loaded history</span>
                             </div>
-                        </div>
+                        </Link>
                     </>
                 )}
             </div>}

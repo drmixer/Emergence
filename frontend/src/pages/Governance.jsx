@@ -61,6 +61,7 @@ function ProposalStatusIcon({ status }) {
 export default function Governance() {
     const [searchParams, setSearchParams] = useSearchParams()
     const initialTab = searchParams.get('tab') === 'laws' ? 'laws' : 'proposals'
+    const proposalStatusFilter = String(searchParams.get('status') || '').trim().toLowerCase()
     const [activeTab, setActiveTab] = useState(initialTab)
     const [proposals, setProposals] = useState([])
     const [laws, setLaws] = useState([])
@@ -133,13 +134,20 @@ export default function Governance() {
         return counts
     }, [laws])
 
-    const visibleProposals = activeTab === 'proposals' ? proposals : []
+    const visibleProposals = activeTab === 'proposals'
+        ? proposals.filter((proposal) => (
+            proposalStatusFilter ? String(proposal.status || '').trim().toLowerCase() === proposalStatusFilter : true
+        ))
+        : []
     const visibleLaws = activeTab === 'laws' ? laws : []
 
     function selectTab(tab) {
         setActiveTab(tab)
         const next = new URLSearchParams(searchParams)
         next.set('tab', tab)
+        if (tab !== 'proposals') {
+            next.delete('status')
+        }
         setSearchParams(next, { replace: true })
     }
 
@@ -219,7 +227,7 @@ export default function Governance() {
                         <div className="empty-state">
                             <FileText size={48} />
                             <h3>No Proposals</h3>
-                            <p>No proposals are available for this scope.</p>
+                            <p>No {proposalStatusFilter || ''} proposals are available for this scope.</p>
                         </div>
                     ) : (
                         visibleProposals.map((proposal) => {

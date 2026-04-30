@@ -29,9 +29,21 @@ LAW_CLASSES = {"standing_law", "advisory_law", "amendment", "emergency_action"}
 
 EFFECT_COMMON_POOL_ALLOCATION = "common_pool_allocation"
 EFFECT_ACTIVE_RESERVE_AID = "active_reserve_aid"
-SUPPORTED_RUNTIME_EFFECTS = {EFFECT_COMMON_POOL_ALLOCATION, EFFECT_ACTIVE_RESERVE_AID}
+EFFECT_ACTIVE_RESERVE_AID_AMENDMENT = "active_reserve_aid_amendment"
+SUPPORTED_RUNTIME_EFFECTS = {
+    EFFECT_COMMON_POOL_ALLOCATION,
+    EFFECT_ACTIVE_RESERVE_AID,
+    EFFECT_ACTIVE_RESERVE_AID_AMENDMENT,
+}
 
 RESOURCE_TYPES = {"food", "energy", "materials"}
+ACTIVE_RESERVE_AID_AMENDABLE_FIELDS = {
+    "trigger_food_below",
+    "trigger_energy_below",
+    "target_food",
+    "target_energy",
+    "min_pool_remaining",
+}
 
 
 def normalize_governance_class(proposal_type: str | None, governance_class: str | None, runtime_effect: Any = None) -> str:
@@ -51,6 +63,8 @@ def normalize_governance_class(proposal_type: str | None, governance_class: str 
         return "amendment"
     if ptype == "emergency_action":
         return "emergency_action"
+    if effect_type == EFFECT_ACTIVE_RESERVE_AID_AMENDMENT:
+        return "amendment"
     if ptype == "law" and effect_type == EFFECT_ACTIVE_RESERVE_AID:
         return "standing_law"
     if ptype == "law":
@@ -78,12 +92,16 @@ def normalize_runtime_effect(raw_effect: Any, *, governance_class: str, db: Sess
 
     effect_type = _effect_type(raw_effect)
     if effect_type not in SUPPORTED_RUNTIME_EFFECTS:
-        return {}, ["runtime_effect.type must be common_pool_allocation or active_reserve_aid"]
+        return {}, [
+            "runtime_effect.type must be common_pool_allocation, active_reserve_aid, or active_reserve_aid_amendment"
+        ]
 
     if effect_type == EFFECT_COMMON_POOL_ALLOCATION:
         return _normalize_common_pool_allocation(raw_effect, governance_class=governance_class, db=db)
     if effect_type == EFFECT_ACTIVE_RESERVE_AID:
         return _normalize_active_reserve_aid(raw_effect, governance_class=governance_class)
+    if effect_type == EFFECT_ACTIVE_RESERVE_AID_AMENDMENT:
+        return _normalize_active_reserve_aid_amendment(raw_effect, governance_class=governance_class, db=db)
     return {}, ["unsupported runtime_effect.type"]
 
 
@@ -227,12 +245,125 @@ def execute_allocation_effect_for_passed_proposal(db: Session, proposal: Proposa
     )
 
 
+def execute_active_reserve_aid_amendment_for_passed_proposal(
+    db: Session,
+    proposal: Proposal,
+    *,
+    amendment_law: Law | None = None,
+) -> dict[str, Any] | None:
+    effect = proposal.runtime_effect if isinstance(proposal.runtime_effect, dict) else {}
+    if _effect_type(effect) != EFFECT_ACTIVE_RESERVE_AID_AMENDMENT:
+        return None
+
+    governance_class = normalize_governance_class(
+        proposal.proposal_type,
+        proposal.governance_class,
+        effect,
+    )
+    if governance_class not in {"amendment", "emergency_action"}:
+        return _log_governance_execution(
+            db,
+            agent_id=proposal.author_agent_id,
+            proposal=proposal,
+            law=amendment_law,
+            effect=effect,
+            status="skipped",
+            block_reason="active_reserve_aid_amendment requires amendment or emergency_action governance_class",
+            transfers=[],
+            details={},
+        )
+
+    target_law_id = int(effect.get("target_law_id") or 0)
+    target_law = db.query(Law).filter(Law.id == target_law_id).first()
+    if target_law is None:
+        return _log_governance_execution(
+            db,
+            agent_id=proposal.author_agent_id,
+            proposal=proposal,
+            law=amendment_law,
+            effect=effect,
+            status="skipped",
+            block_reason=f"target Law #{target_law_id} not found",
+            transfers=[],
+            details={"target_law_id": target_law_id},
+        )
+    target_effect = target_law.runtime_effect if isinstance(target_law.runtime_effect, dict) else {}
+    if _effect_type(target_effect) != EFFECT_ACTIVE_RESERVE_AID:
+        return _log_governance_execution(
+            db,
+            agent_id=proposal.author_agent_id,
+            proposal=proposal,
+            law=amendment_law,
+            effect=effect,
+            status="skipped",
+            block_reason=f"target Law #{target_law_id} is not an active reserve aid law",
+            transfers=[],
+            details={"target_law_id": target_law_id},
+        )
+    if target_law.active is not True:
+        return _log_governance_execution(
+            db,
+            agent_id=proposal.author_agent_id,
+            proposal=proposal,
+            law=amendment_law,
+            effect=effect,
+            status="skipped",
+            block_reason=f"target Law #{target_law_id} is inactive",
+            transfers=[],
+            details={"target_law_id": target_law_id},
+        )
+
+    updates = {
+        key: effect[key]
+        for key in ACTIVE_RESERVE_AID_AMENDABLE_FIELDS
+        if key in effect
+    }
+    if not updates:
+        return _log_governance_execution(
+            db,
+            agent_id=proposal.author_agent_id,
+            proposal=proposal,
+            law=amendment_law,
+            effect=effect,
+            status="skipped",
+            block_reason="no amendable active reserve aid fields supplied",
+            transfers=[],
+            details={"target_law_id": target_law_id},
+        )
+
+    before_effect = dict(target_effect)
+    after_effect = dict(target_effect)
+    after_effect.update(updates)
+    target_law.runtime_effect = after_effect
+    db.add(target_law)
+
+    return _log_governance_execution(
+        db,
+        agent_id=proposal.author_agent_id,
+        proposal=proposal,
+        law=amendment_law,
+        effect=effect,
+        status="executed",
+        block_reason="",
+        transfers=[],
+        details={
+            "target_law_id": target_law_id,
+            "target_law_title": target_law.title,
+            "applied_updates": updates,
+            "previous_runtime_effect": before_effect,
+            "updated_runtime_effect": after_effect,
+        },
+    )
+
+
 def runtime_effect_label(runtime_effect: Any) -> str:
     effect_type = _effect_type(runtime_effect)
     if effect_type == EFFECT_COMMON_POOL_ALLOCATION:
         return "Allocation: one-time transfer"
     if effect_type == EFFECT_ACTIVE_RESERVE_AID:
         return "Standing Law: executable"
+    if effect_type == EFFECT_ACTIVE_RESERVE_AID_AMENDMENT:
+        return "Amendment: updates executable law"
     return "Advisory only: unsupported effect"
 
 
@@ -351,13 +482,62 @@ def _normalize_active_reserve_aid(
     }, []
 
 
+def _normalize_active_reserve_aid_amendment(
+    raw_effect: dict[str, Any],
+    *,
+    governance_class: str,
+    db: Session | None,
+) -> tuple[dict[str, Any], list[str]]:
+    if governance_class not in {"amendment", "emergency_action"}:
+        return {}, ["active_reserve_aid_amendment requires governance_class amendment or emergency_action"]
+
+    errors: list[str] = []
+    try:
+        target_law_id = int(raw_effect.get("target_law_id") or raw_effect.get("targetLawId") or 0)
+    except (TypeError, ValueError):
+        target_law_id = 0
+    if target_law_id <= 0:
+        errors.append("active_reserve_aid_amendment requires target_law_id")
+    elif db is not None:
+        target_law = db.query(Law).filter(Law.id == target_law_id).first()
+        if target_law is None:
+            errors.append(f"target Law #{target_law_id} not found")
+        elif _effect_type(target_law.runtime_effect) != EFFECT_ACTIVE_RESERVE_AID:
+            errors.append(f"target Law #{target_law_id} is not an active_reserve_aid law")
+
+    effect: dict[str, Any] = {
+        "type": EFFECT_ACTIVE_RESERVE_AID_AMENDMENT,
+        "description": "One-time bounded amendment to an existing active reserve aid law runtime effect.",
+        "target_law_id": target_law_id,
+    }
+    for field in ACTIVE_RESERVE_AID_AMENDABLE_FIELDS:
+        if field not in raw_effect:
+            continue
+        try:
+            value = Decimal(str(raw_effect.get(field))).quantize(Decimal("0.01"))
+        except Exception:
+            errors.append(f"{field} must be numeric")
+            continue
+        if value < 0:
+            errors.append(f"{field} must be >= 0")
+        if value > Decimal("1000"):
+            errors.append(f"{field} must be <= 1000")
+        effect[field] = float(value)
+
+    if not any(field in effect for field in ACTIVE_RESERVE_AID_AMENDABLE_FIELDS):
+        errors.append("active_reserve_aid_amendment requires at least one amendable field")
+    if errors:
+        return {}, errors
+    return effect, []
+
+
 def _governance_payload(*, governance_class: str, runtime_effect: dict[str, Any]) -> dict[str, Any]:
     executable = _effect_type(runtime_effect) in SUPPORTED_RUNTIME_EFFECTS
     labels_by_class = {
         "resolution": "Resolution: non-binding",
         "standing_law": "Standing Law: executable" if executable else "Standing Law: no supported effect",
         "allocation": "Allocation: one-time transfer" if executable else "Allocation: unsupported effect",
-        "amendment": "Amendment",
+        "amendment": "Amendment: executable" if executable else "Amendment",
         "emergency_action": "Emergency Action",
         "advisory_law": "Advisory only: unsupported effect",
     }
@@ -381,6 +561,7 @@ def _log_governance_execution(
     status: str,
     block_reason: str,
     transfers: list[dict[str, Any]],
+    details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     target = proposal or law
     title = str(getattr(target, "title", "") or "Governance effect")
@@ -391,6 +572,7 @@ def _log_governance_execution(
         "execution_status": status,
         "block_reason": block_reason or None,
         "transfers": transfers,
+        "details": dict(details or {}),
     })
     event = Event(
         agent_id=agent_id,

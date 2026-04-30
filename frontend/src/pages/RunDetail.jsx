@@ -148,6 +148,7 @@ export default function RunDetail() {
   const [focusedEvent, setFocusedEvent] = useState(null)
   const [focusedSourceMessage, setFocusedSourceMessage] = useState(null)
   const [focusedEventError, setFocusedEventError] = useState('')
+  const [overviewScope, setOverviewScope] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [shareNotice, setShareNotice] = useState('')
@@ -159,13 +160,25 @@ export default function RunDetail() {
       setLoading(true)
       setError('')
       try {
-        const payload = await api.getRunDetail(runId, 48, 16, 55)
+        const [detailResult, overviewResult] = await Promise.allSettled([
+          api.getRunDetail(runId, 48, 16, 55),
+          api.fetch('/api/analytics/overview'),
+        ])
+        if (detailResult.status !== 'fulfilled') {
+          throw detailResult.reason
+        }
         if (!cancelled) {
-          setData(payload)
+          setData(detailResult.value)
+          setOverviewScope(
+            overviewResult.status === 'fulfilled' && overviewResult.value?.scope
+              ? overviewResult.value.scope
+              : null
+          )
         }
       } catch (loadError) {
         if (!cancelled) {
           setData(null)
+          setOverviewScope(null)
           setError(loadError?.message || 'Failed to load run details')
         }
       } finally {
@@ -246,6 +259,11 @@ export default function RunDetail() {
   const isArchivedRun = Boolean(runEndedAt)
   const runCondition = String(runMetadata?.condition_name || data?.condition_name || '').trim()
   const runClass = String(runMetadata?.run_class || '').trim()
+  const latestCompletedRunId = String(overviewScope?.last_completed_run_id || '').trim()
+  const cleanCurrentRunId = String(runId || '').trim()
+  const isNotLatestCompletedRun = Boolean(
+    latestCompletedRunId && cleanCurrentRunId && latestCompletedRunId !== cleanCurrentRunId
+  )
   const timeWindowSummary =
     startTime && endTime ? `${formatTimestamp(startTime)} -> ${formatTimestamp(endTime)}` : 'Unknown time window'
 
@@ -456,6 +474,11 @@ export default function RunDetail() {
       {!loading && !error && data && isArchivedRun && (
         <div className="feed-notice">
           Viewing archived evidence for {runId}; these counters are scoped to this run, not the current or latest run.
+        </div>
+      )}
+      {!loading && !error && data && isNotLatestCompletedRun && (
+        <div className="feed-notice">
+          This is not the latest completed run. <Link to={`/runs/${encodeURIComponent(latestCompletedRunId)}`}>Open latest evidence</Link>.
         </div>
       )}
       {!loading && !error && isTuningRun && (

@@ -109,7 +109,9 @@ def _resolve_download_path(raw_path: str) -> Path:
     return artifact_path
 
 
-def _artifact_media_type(artifact_format: str) -> str:
+def _artifact_media_type(artifact_format: str, *, inline_view: bool = False) -> str:
+    if artifact_format == "markdown" and inline_view:
+        return "text/plain; charset=utf-8"
     return "application/json" if artifact_format == "json" else "text/markdown; charset=utf-8"
 
 
@@ -170,7 +172,10 @@ def _artifact_response(
     return FileResponse(
         path=str(artifact_path),
         filename=artifact_path.name,
-        media_type=_artifact_media_type(artifact_format),
+        media_type=_artifact_media_type(
+            artifact_format,
+            inline_view=content_disposition_type == "inline",
+        ),
         content_disposition_type=content_disposition_type,
     )
 

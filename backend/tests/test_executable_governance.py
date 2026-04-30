@@ -10,9 +10,12 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.time import now_utc
-from app.models.models import Agent, AgentInventory, Event, GlobalResources, Message, Proposal
+from app.models.models import Agent, AgentInventory, Event, GlobalResources, Law, Message, Proposal
 from app.services import actions
-from app.services.executable_governance import execute_allocation_effect_for_passed_proposal
+from app.services.executable_governance import (
+    execute_active_reserve_aid_amendment_for_passed_proposal,
+    execute_allocation_effect_for_passed_proposal,
+)
 
 
 def _session_factory():
@@ -181,6 +184,128 @@ def test_common_pool_allocation_executes_and_logs_transfer():
             assert float(recipient_food.quantity) == 2.0
             assert execution_event.event_metadata["execution_status"] == "executed"
             assert execution_event.event_metadata["transfers"][0]["recipient_agent_number"] == 2
+    finally:
+        engine.dispose()
+
+
+def test_create_proposal_infers_bounded_active_aid_amendment_effect():
+    engine, factory = _session_factory()
+    try:
+        with factory() as db:
+            author = _seed_agent(db, agent_number=1)
+            energy = (
+                db.query(AgentInventory)
+                .filter(AgentInventory.agent_id == author.id, AgentInventory.resource_type == "energy")
+                .one()
+            )
+            energy.quantity = Decimal("5")
+            law = Law(
+                title="Active Threshold Aid Standing Law",
+                description="Top up active agents below thresholds.",
+                law_class="standing_law",
+                runtime_effect={
+                    "type": "active_reserve_aid",
+                    "trigger_food_below": 2,
+                    "trigger_energy_below": 2,
+                    "target_food": 3,
+                    "target_energy": 3,
+                    "min_pool_remaining": 25,
+                },
+                active=True,
+                author_agent_id=author.id,
+            )
+            db.add(law)
+            db.commit()
+
+            action = {
+                "action": "create_proposal",
+                "title": f"Amendment to Law #{law.id}: Proactive Energy Threshold",
+                "description": "Amend Law to adjust the energy trigger to E3.0 and target to E4.0.",
+                "proposal_type": "amendment",
+            }
+
+            validation = asyncio.run(actions.validate_action(db, author, action))
+
+            assert validation == {"valid": True}
+            assert action["governance_class"] == "amendment"
+            assert action["runtime_effect"] == {
+                "type": "active_reserve_aid_amendment",
+                "description": "One-time bounded amendment to an existing active reserve aid law runtime effect.",
+                "target_law_id": law.id,
+                "trigger_energy_below": 3.0,
+                "target_energy": 4.0,
+            }
+    finally:
+        engine.dispose()
+
+
+def test_active_aid_amendment_executes_against_target_law():
+    engine, factory = _session_factory()
+    try:
+        with factory() as db:
+            author = _seed_agent(db, agent_number=1)
+            target_law = Law(
+                title="Active Threshold Aid Standing Law",
+                description="Top up active agents below thresholds.",
+                law_class="standing_law",
+                runtime_effect={
+                    "type": "active_reserve_aid",
+                    "trigger_food_below": 2,
+                    "trigger_energy_below": 2,
+                    "target_food": 3,
+                    "target_energy": 3,
+                    "min_pool_remaining": 25,
+                },
+                active=True,
+                author_agent_id=author.id,
+            )
+            db.add(target_law)
+            db.flush()
+            proposal = Proposal(
+                author_agent_id=author.id,
+                title="Amendment to Law: Proactive Energy Aid",
+                description="Raise the energy trigger and target.",
+                proposal_type="amendment",
+                governance_class="amendment",
+                runtime_effect={
+                    "type": "active_reserve_aid_amendment",
+                    "target_law_id": target_law.id,
+                    "trigger_energy_below": 3,
+                    "target_energy": 4,
+                },
+                status="passed",
+                voting_closes_at=now_utc() - timedelta(minutes=1),
+            )
+            amendment_law = Law(
+                proposal_id=proposal.id,
+                title=proposal.title,
+                description=proposal.description,
+                law_class="amendment",
+                runtime_effect=proposal.runtime_effect,
+                active=True,
+                author_agent_id=author.id,
+            )
+            db.add_all([proposal, amendment_law])
+            db.flush()
+
+            result = execute_active_reserve_aid_amendment_for_passed_proposal(
+                db,
+                proposal,
+                amendment_law=amendment_law,
+            )
+            db.commit()
+
+            db.refresh(target_law)
+            execution_event = db.query(Event).filter(Event.event_type == "governance_execution").one()
+
+            assert result["status"] == "executed"
+            assert target_law.runtime_effect["trigger_energy_below"] == 3
+            assert target_law.runtime_effect["target_energy"] == 4
+            assert execution_event.event_metadata["details"]["target_law_id"] == target_law.id
+            assert execution_event.event_metadata["details"]["applied_updates"] == {
+                "trigger_energy_below": 3,
+                "target_energy": 4,
+            }
     finally:
         engine.dispose()
 

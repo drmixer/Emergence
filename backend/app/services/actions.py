@@ -336,6 +336,7 @@ _RULE_BINDING_PATTERNS = (
 
 _UNSUPPORTED_RUNTIME_EFFECT_ERRORS = {
     "runtime_effect.type must be common_pool_allocation or active_reserve_aid",
+    "runtime_effect.type must be common_pool_allocation, active_reserve_aid, or active_reserve_aid_amendment",
     "unsupported runtime_effect.type",
 }
 
@@ -399,6 +400,14 @@ def _proposal_mechanism_signature(
     effect_type = _runtime_effect_type(runtime_effect)
     if effect_type == "active_reserve_aid":
         return "active_reserve_aid"
+    if effect_type == "active_reserve_aid_amendment" and isinstance(runtime_effect, dict):
+        fields = [
+            key
+            for key in ("trigger_food_below", "trigger_energy_below", "target_food", "target_energy", "min_pool_remaining")
+            if key in runtime_effect
+        ]
+        target_law_id = str(runtime_effect.get("target_law_id") or "").strip()
+        return f"active_reserve_aid_amendment:{target_law_id}:{','.join(fields)}"
 
     text = _proposal_policy_text(title, description)
     if not text:
@@ -500,6 +509,83 @@ def _downgrade_unsupported_runtime_effect(action: dict, effect_errors: list[str]
     action["unsupported_runtime_effect_type"] = original_type
     action["unsupported_runtime_effect_reason"] = "; ".join(effect_errors)
     return downgraded_class
+
+
+def _infer_active_reserve_aid_amendment_effect(db: Session, action: dict) -> None:
+    """Infer only the bounded Law #N active-aid amendment template."""
+    if isinstance(action.get("runtime_effect"), dict) and action["runtime_effect"]:
+        return
+
+    proposal_type = str(action.get("proposal_type") or "").strip().lower()
+    governance_class = str(action.get("governance_class") or action.get("governanceClass") or "").strip().lower()
+    title = str(action.get("title") or "")
+    description = str(action.get("description") or "")
+    text = f"{title}\n{description}"
+    lowered = text.lower()
+    if proposal_type not in {"amendment", "constitutional"} and governance_class != "amendment":
+        if "amendment to law" not in lowered and "amend law" not in lowered:
+            return
+
+    target_match = re.search(r"\blaw\s*#?\s*(\d+)\b", lowered)
+    if not target_match:
+        return
+    target_law_id = int(target_match.group(1))
+    target_law = db.query(Law).filter(Law.id == target_law_id).first()
+    target_effect = target_law.runtime_effect if target_law is not None and isinstance(target_law.runtime_effect, dict) else {}
+    if _runtime_effect_type(target_effect) != "active_reserve_aid":
+        return
+
+    effect: dict[str, object] = {
+        "type": "active_reserve_aid_amendment",
+        "target_law_id": target_law_id,
+    }
+
+    def _first_number(patterns: tuple[str, ...]) -> float | None:
+        for pattern in patterns:
+            match = re.search(pattern, lowered)
+            if match:
+                try:
+                    return float(match.group(1))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    energy_trigger = _first_number((
+        r"\benergy\s+trigger(?:\s+threshold)?(?:\s+from\s+e?\d+(?:\.\d+)?)?\s+(?:to|at)\s+e?(\d+(?:\.\d+)?)\b",
+        r"\btrigger(?:\s+threshold)?(?:\s+from\s+e?\d+(?:\.\d+)?)?\s+(?:to|at)\s+e(\d+(?:\.\d+)?)\b",
+    ))
+    energy_target = _first_number((
+        r"\btarget(?:\s+energy)?(?:\s+from\s+e?\d+(?:\.\d+)?)?\s+(?:to|at)\s+e?(\d+(?:\.\d+)?)\b",
+        r"\benergy\s+target(?:\s+from\s+e?\d+(?:\.\d+)?)?\s+(?:to|at)\s+e?(\d+(?:\.\d+)?)\b",
+    ))
+    food_trigger = _first_number((
+        r"\bfood\s+trigger(?:\s+threshold)?(?:\s+from\s+f?\d+(?:\.\d+)?)?\s+(?:to|at)\s+f?(\d+(?:\.\d+)?)\b",
+        r"\btrigger(?:\s+threshold)?(?:\s+from\s+f?\d+(?:\.\d+)?)?\s+(?:to|at)\s+f(\d+(?:\.\d+)?)\b",
+    ))
+    food_target = _first_number((
+        r"\btarget(?:\s+food)?(?:\s+from\s+f?\d+(?:\.\d+)?)?\s+(?:to|at)\s+f?(\d+(?:\.\d+)?)\b",
+        r"\bfood\s+target(?:\s+from\s+f?\d+(?:\.\d+)?)?\s+(?:to|at)\s+f?(\d+(?:\.\d+)?)\b",
+    ))
+    pool_floor = _first_number((
+        r"\b(?:pool\s+floor|min(?:imum)?_?pool(?:_remaining)?|minimum\s+pool\s+remaining)\s+(?:to|at|of)?\s*(\d+(?:\.\d+)?)\b",
+    ))
+
+    if energy_trigger is not None:
+        effect["trigger_energy_below"] = energy_trigger
+    if energy_target is not None:
+        effect["target_energy"] = energy_target
+    if food_trigger is not None:
+        effect["trigger_food_below"] = food_trigger
+    if food_target is not None:
+        effect["target_food"] = food_target
+    if pool_floor is not None:
+        effect["min_pool_remaining"] = pool_floor
+
+    if len(effect) <= 2:
+        return
+    action["proposal_type"] = "amendment"
+    action["governance_class"] = "amendment"
+    action["runtime_effect"] = effect
 
 
 def _normalized_message_terms(text: str | None) -> set[str]:
@@ -950,6 +1036,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 "reason_code": "invalid_proposal_type",
             }
         action["proposal_type"] = proposal_type
+        _infer_active_reserve_aid_amendment_effect(db, action)
+        proposal_type = str(action.get("proposal_type") or "other").strip().lower()
         governance_class = normalize_governance_class(
             proposal_type,
             action.get("governance_class") or action.get("governanceClass"),

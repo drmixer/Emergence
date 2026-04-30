@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Users, Search } from 'lucide-react'
 import { api } from '../services/api'
 import AgentAvatar, { PersonalityBadge } from '../components/AgentAvatar'
@@ -53,16 +53,40 @@ const DANGER_TERM_KEYS = {
     exposed: 'exposed',
 }
 
+const VALID_STATUS_FILTERS = new Set(['active', 'dormant', 'dead'])
+
 export default function Agents() {
+    const [searchParams, setSearchParams] = useSearchParams()
+    const statusParam = String(searchParams.get('status') || '').trim().toLowerCase()
+    const initialStatus = VALID_STATUS_FILTERS.has(statusParam) ? statusParam : ''
     const [agents, setAgents] = useState([])
     const [loading, setLoading] = useState(true)
     const [scope, setScope] = useState(null)
     const [filters, setFilters] = useState({
-        status: '',
+        status: initialStatus,
         tier: '',
         personality: '',
         search: '',
     })
+
+    useEffect(() => {
+        const nextStatus = VALID_STATUS_FILTERS.has(statusParam) ? statusParam : ''
+        setFilters((current) => (
+            current.status === nextStatus ? current : { ...current, status: nextStatus }
+        ))
+    }, [statusParam])
+
+    function updateFilter(key, value) {
+        setFilters((current) => ({ ...current, [key]: value }))
+        if (key !== 'status') return
+        const next = new URLSearchParams(searchParams)
+        if (value) {
+            next.set('status', value)
+        } else {
+            next.delete('status')
+        }
+        setSearchParams(next, { replace: true })
+    }
 
     useEffect(() => {
         const fetchAgents = async () => {
@@ -138,7 +162,7 @@ export default function Agents() {
                             type="text"
                             placeholder="Search agents..."
                             value={filters.search}
-                            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                            onChange={(e) => updateFilter('search', e.target.value)}
                             style={{ paddingLeft: 36, width: 200 }}
                         />
                     </div>
@@ -148,7 +172,7 @@ export default function Agents() {
                     <label className="filter-label">Status</label>
                     <select
                         value={filters.status}
-                        onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                        onChange={(e) => updateFilter('status', e.target.value)}
                     >
                         <option value="">All</option>
                         <option value="active">Active</option>
@@ -161,7 +185,7 @@ export default function Agents() {
                     <label className="filter-label">Tier</label>
                     <select
                         value={filters.tier}
-                        onChange={(e) => setFilters({ ...filters, tier: e.target.value })}
+                        onChange={(e) => updateFilter('tier', e.target.value)}
                     >
                         <option value="">All</option>
                         <option value="1">Tier 1</option>
@@ -175,7 +199,7 @@ export default function Agents() {
                     <label className="filter-label">Personality</label>
                     <select
                         value={filters.personality}
-                        onChange={(e) => setFilters({ ...filters, personality: e.target.value })}
+                        onChange={(e) => updateFilter('personality', e.target.value)}
                     >
                         <option value="">All</option>
                         <option value="efficiency">Efficiency</option>

@@ -28,8 +28,11 @@ from app.services.emergence_metrics import persist_completed_day_snapshot
 from app.services.events_generator import event_generator
 from app.services.executable_governance import (
     EFFECT_ACTIVE_RESERVE_AID,
+    EFFECT_ACTIVE_RESERVE_AID_AMENDMENT,
+    EFFECT_COMMON_POOL_ALLOCATION,
     active_executable_active_aid_laws,
     execute_allocation_effect_for_passed_proposal,
+    execute_active_reserve_aid_amendment_for_passed_proposal,
     law_class_for_proposal,
 )
 from app.services.law_effects import active_survival_reserve_laws
@@ -1323,7 +1326,8 @@ async def resolve_expired_proposals():
                 result = "passed"
                 
                 # If it's a law proposal, create the law
-                if str(proposal.proposal_type or "").strip().lower() in {"law", "standing_law"}:
+                proposal_type = str(proposal.proposal_type or "").strip().lower()
+                if proposal_type in {"law", "standing_law", "amendment", "emergency_action"}:
                     law_class = law_class_for_proposal(proposal)
                     law = Law(
                         proposal_id=proposal.id,
@@ -1380,7 +1384,18 @@ async def resolve_expired_proposals():
                             proposal.votes_against,
                             proposal.description or ""
                         ))
-                elif str(proposal.proposal_type or "").strip().lower() in {"allocation", "emergency_action"}:
+
+                    runtime_effect = proposal.runtime_effect if isinstance(proposal.runtime_effect, dict) else {}
+                    runtime_effect_type = str(runtime_effect.get("type") or "").strip().lower()
+                    if runtime_effect_type == EFFECT_ACTIVE_RESERVE_AID_AMENDMENT:
+                        execute_active_reserve_aid_amendment_for_passed_proposal(
+                            db,
+                            proposal,
+                            amendment_law=law,
+                        )
+                    elif runtime_effect_type == EFFECT_COMMON_POOL_ALLOCATION:
+                        execute_allocation_effect_for_passed_proposal(db, proposal)
+                elif proposal_type in {"allocation", "emergency_action"}:
                     execute_allocation_effect_for_passed_proposal(db, proposal)
             else:
                 # Majority no or tie = failed

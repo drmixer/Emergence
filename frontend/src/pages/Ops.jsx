@@ -967,6 +967,22 @@ export default function Ops() {
                       <span>Est. cost</span>
                       <strong>${Number(status.llm_budget?.estimated_cost_usd || 0).toFixed(4)}</strong>
                     </div>
+                    <div className="ops-kv-item">
+                      <span>Budget soft cap</span>
+                      <strong>
+                        {Number(status.llm_budget?.soft_cap_usd || 0) > 0
+                          ? `$${Number(status.llm_budget?.soft_cap_usd || 0).toFixed(2)}`
+                          : 'disabled'}
+                      </strong>
+                    </div>
+                    <div className="ops-kv-item">
+                      <span>Budget hard cap</span>
+                      <strong>
+                        {Number(status.llm_budget?.hard_cap_usd || 0) > 0
+                          ? `$${Number(status.llm_budget?.hard_cap_usd || 0).toFixed(2)}`
+                          : 'disabled'}
+                      </strong>
+                    </div>
                     </div>
                   <div className="ops-report-pipeline">
                     <div className="ops-report-pipeline-head">
