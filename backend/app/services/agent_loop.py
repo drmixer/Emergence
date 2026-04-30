@@ -816,9 +816,12 @@ class AgentProcessor:
             f"{context}\n\n"
             "SOCIAL ACTION REQUIRED THIS TURN:\n"
             f"- Your previous candidate action was `{attempted_action}`, but this run is producing governance without conversation.\n"
-            "- Choose one social action now: forum_post, forum_reply, direct_message, contest_proposal, request_aid, refuse_aid, trade, or public_accusation.\n"
+            "- Choose one targeted social action now: direct_message, contest_proposal, request_aid, refuse_aid, trade, public_accusation, or forum_reply to an existing thread.\n"
+            "- Do not choose a top-level forum_post on this retry. If a live proposal is visible, message its author, contest it, ask a named agent for support, or make a concrete trade/aid move.\n"
             "- Do not return vote, create_proposal, work, or idle on this retry unless you are below 2 food or 2 energy.\n"
-            "- Refer to a specific proposal id or named agent. Use first-person stance and concrete terms, not a procedural status memo.\n"
+            "- Refer to a specific proposal id or named agent. Use first-person stance and concrete terms.\n"
+            "- Forbidden style: do not start with 'Observation:', 'Proposal opportunity:', 'Next steps:', 'Efficiency checkpoint:', or write a status memo.\n"
+            "- Do not write 'I propose...' here. If you want a formal policy, use the active proposal path on a later turn; this retry is for conversation.\n"
             "- Respond with only the replacement JSON action."
         )
         retry_action = await get_agent_action(

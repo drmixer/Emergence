@@ -691,6 +691,7 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
                 db.add(Vote(proposal_id=proposal.id, agent_id=author.id, vote="yes"))
         db.commit()
         agent_id = agent.id
+        author_id = author.id
 
     calls = []
 
@@ -699,8 +700,9 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
         if len(calls) == 1:
             return {"action": "vote", "proposal_id": proposal_ids[0], "vote": "yes"}
         return {
-            "action": "forum_post",
-            "content": "I voted for threshold aid, but I want proposal supporters to name who gets helped first.",
+            "action": "direct_message",
+            "recipient_agent_id": author_id,
+            "content": "I voted for threshold aid. I need you to name who gets helped first before I keep backing it.",
         }
 
     monkeypatch.setattr(agent_loop, "get_agent_action", fake_get_agent_action)
@@ -713,7 +715,9 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
 
     assert len(calls) == 2
     assert "SOCIAL ACTION REQUIRED THIS TURN" in calls[1]
-    assert message.message_type == "forum_post"
+    assert "Do not choose a top-level forum_post" in calls[1]
+    assert message.message_type == "direct_message"
+    assert message.recipient_agent_id == author_id
     assert "who gets helped first" in message.content
 
 
