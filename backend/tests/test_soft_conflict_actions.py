@@ -253,29 +253,27 @@ def test_create_proposal_rejects_near_duplicate_active_current_run_title(session
     assert "Near-duplicate active proposal exists" in validation["reason"]
 
 
-def test_create_proposal_rejects_binding_rule_proposal(session_factory):
+def test_create_proposal_coerces_binding_rule_to_resolution(session_factory):
     with session_factory() as db:
         proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        action = {
+            "action": "create_proposal",
+            "title": "Mandatory Common Pool Rule",
+            "description": (
+                "Agents must contribute 1 food and 1 energy per cycle. "
+                "Violations trigger sanctions."
+            ),
+            "proposal_type": "rule",
+        }
 
-        validation = asyncio.run(
-            actions.validate_action(
-                db,
-                proposer,
-                {
-                    "action": "create_proposal",
-                    "title": "Mandatory Common Pool Rule",
-                    "description": (
-                        "Agents must contribute 1 food and 1 energy per cycle. "
-                        "Violations trigger sanctions."
-                    ),
-                    "proposal_type": "rule",
-                },
-            )
-        )
+        validation = asyncio.run(actions.validate_action(db, proposer, action))
 
-    assert validation["valid"] is False
-    assert validation["reason_code"] == "binding_rule_proposal"
-    assert "Use proposal_type law" in validation["reason"]
+    assert validation == {"valid": True}
+    assert action["proposal_type"] == "rule"
+    assert action["governance_class"] == "resolution"
+    assert action["runtime_effect"] == {}
+    assert action["binding_rule_coerced_to_resolution"] is True
+    assert action["binding_rule_signal"] == "binding obligation"
 
 
 def test_create_proposal_allows_non_binding_voluntary_rule(session_factory):

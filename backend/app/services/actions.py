@@ -791,14 +791,10 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         if proposal_type == "rule":
             binding_signal = _binding_signal_for_rule_proposal(action)
             if binding_signal is not None:
-                return {
-                    "valid": False,
-                    "reason_code": "binding_rule_proposal",
-                    "reason": (
-                        "Rule proposals must be non-binding. Use proposal_type law for "
-                        f"mandatory, automatic, enforcement-backed, or durable obligations ({binding_signal})."
-                    ),
-                }
+                action["governance_class"] = "resolution"
+                action["runtime_effect"] = {}
+                action["binding_rule_coerced_to_resolution"] = True
+                action["binding_rule_signal"] = binding_signal
         duplicate = _find_near_duplicate_active_proposal(db, action)
         if duplicate is not None:
             return {

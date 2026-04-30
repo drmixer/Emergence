@@ -1337,11 +1337,19 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("PROPOSAL OPPORTUNITIES:")
     context_parts.append("  Proposals are how discussion becomes a vote or a durable shared change.")
     context_parts.append("  Use create_proposal when you want collective action on resources, rules, infrastructure, or governance.")
+    if len(active_proposals) >= 3:
+        context_parts.append(
+            "  Many proposals are already active. Prefer vote, contest_proposal, forum_post, forum_reply, direct_message, request_aid, refuse_aid, or trade unless you have a clearly new mechanism."
+        )
+    elif active_proposals:
+        context_parts.append(
+            "  If an active proposal already covers your mechanism, use vote, contest_proposal, forum_post, forum_reply, or direct_message instead of opening another similar proposal."
+        )
     context_parts.append('  Important: if you want a passed proposal to become an actual law, use proposal_type "law" with governance_class "standing_law" or "advisory_law".')
     context_parts.append("  Legal Text explains what agents intend. Runtime Effect is the separate structured template the system can actually execute.")
     context_parts.append("  Passing advisory legal text does not automatically move resources. Only supported runtime_effect templates execute, and unsupported effects remain advisory.")
     context_parts.append("  Passing a law changes policy, coordination, and enforcement context; it does not automatically override run-condition mechanics such as reserve auto-aid, dormant maintenance, or auto-revival unless those effects are enabled for this run or attached as a supported Runtime Effect.")
-    context_parts.append('  Use proposal_type "rule" only for non-binding coordination norms or priorities that are not meant to become a formal law.')
+    context_parts.append('  Use proposal_type "rule" only for non-binding coordination norms or priorities that are not meant to become a formal law. If you accidentally use binding language in a rule, it is treated as a non-binding resolution.')
     context_parts.append("  Proposal type guide:")
     context_parts.append('  - Resolution: non-binding intent; use proposal_type "rule" or governance_class "resolution".')
     context_parts.append('  - Standing Law: recurring executable rule only when runtime_effect is a supported template.')
@@ -1582,7 +1590,11 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         )
     if active_proposals:
         checkpoint_priority_lines.append(
-            "When active proposals exist, voting or contesting them is usually more valuable than another routine work action unless you must produce resources immediately to survive."
+            "When active proposals exist, voting, contesting, or discussing them is usually more valuable than another routine work action unless you must produce resources immediately to survive."
+        )
+    if len(active_proposals) >= 3:
+        checkpoint_priority_lines.append(
+            "Proposal queue is already crowded. If you have already voted, use forum_post, forum_reply, direct_message, request_aid/refuse_aid, trade, or contest_proposal instead of creating another proposal."
         )
     if total_dormant > 0:
         checkpoint_priority_lines.append(
@@ -1606,15 +1618,16 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append("")
     context_parts.append("VALID ACTION JSON EXAMPLES:")
     context_parts.append('  {"action":"vote","proposal_id":123,"vote":"yes|no|abstain"}')
+    context_parts.append('  {"action":"forum_post","content":"I support threshold aid, but we need to decide who is protected before the first dormancy wave."}')
+    context_parts.append('  {"action":"forum_reply","parent_message_id":708,"content":"I disagree with this specific request because the reserve is too low."}')
+    context_parts.append('  {"action":"direct_message","recipient_agent_id":42,"content":"I can back your allocation if you lower the pool draw and name the recipients clearly."}')
+    context_parts.append('  {"action":"request_aid","target_agent_id":42,"resource_type":"food","amount":3,"reason":"I will go dormant next cycle without help."}')
+    context_parts.append('  {"action":"refuse_aid","target_agent_id":42,"reason":"I cannot spare food while I am close to dormancy myself."}')
+    context_parts.append('  {"action":"contest_proposal","proposal_id":123,"reason":"This proposal centralizes too much reserve power and needs revision."}')
     context_parts.append('  {"action":"create_proposal","title":"Active Threshold Aid Standing Law","description":"Use common-pool resources to top up active agents below declared thresholds while preserving a pool floor.","proposal_type":"law","governance_class":"standing_law","runtime_effect":{"type":"active_reserve_aid","trigger_food_below":2,"trigger_energy_below":2,"target_food":3,"target_energy":3,"min_pool_remaining":25}}')
     context_parts.append('  {"action":"create_proposal","title":"One-Time Common Pool Allocation","description":"Transfer named resources once after passage if the common pool can preserve its floor.","proposal_type":"allocation","governance_class":"allocation","runtime_effect":{"type":"common_pool_allocation","transfers":[{"recipient_agent_id":42,"resource_type":"food","amount":2}],"min_pool_remaining":25}}')
     context_parts.append('  {"action":"create_proposal","title":"Title","description":"Description","proposal_type":"law|allocation|rule|infrastructure|constitutional|other"}')
-    context_parts.append('  {"action":"forum_post","content":"Your message here"}')
-    context_parts.append('  {"action":"forum_reply","parent_message_id":708,"content":"I disagree with this specific request because the reserve is too low."}')
-    context_parts.append('  {"action":"request_aid","target_agent_id":42,"resource_type":"food","amount":3,"reason":"I will go dormant next cycle without help."}')
     context_parts.append('  {"action":"public_accusation","target_agent_id":42,"content":"You are hoarding shared food while others go dormant."}')
-    context_parts.append('  {"action":"refuse_aid","target_agent_id":42,"reason":"I cannot spare food while I am close to dormancy myself."}')
-    context_parts.append('  {"action":"contest_proposal","proposal_id":123,"reason":"This proposal centralizes too much reserve power and needs revision."}')
     context_parts.append('  {"action":"work","work_type":"farm|generate|gather","hours":1}')
     context_parts.append('  {"action":"initiate_sanction","target_agent_id":42,"law_id":3,"violation_description":"Reason","sanction_cycles":3}')
     context_parts.append('  {"action":"vote_enforcement","enforcement_id":10,"vote":"support|oppose"}')
