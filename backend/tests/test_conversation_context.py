@@ -651,6 +651,72 @@ def test_context_surfaces_social_silence_pressure_when_governance_is_busy(sessio
     assert "No direct messages have happened yet" in context
 
 
+def test_social_silence_checkpoint_retries_non_social_action(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+    monkeypatch.setattr(agent_loop, "SessionLocal", session_factory)
+    monkeypatch.setattr(
+        agent_loop.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: {
+            "SIMULATION_ACTIVE": True,
+            "SIMULATION_PAUSED": False,
+            "SIMULATION_RUN_ID": "test-social-silence",
+            "SIMULATION_RUN_MODE": "test",
+            "SIMULATION_RUN_CLASS": "special_exploratory",
+        }.get(key, ""),
+    )
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        author = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        now = now_utc()
+        agent.next_checkpoint_at = now - timedelta(minutes=1)
+        agent.last_checkpoint_at = now - timedelta(minutes=30)
+        db.add(agent)
+        proposal_ids = []
+        for index in range(4):
+            proposal = Proposal(
+                author_agent_id=author.id,
+                title=f"Threshold Aid Proposal {index}",
+                description="Use the common pool to support active agents near dormancy.",
+                proposal_type="law",
+                status="active",
+                voting_closes_at=now + timedelta(hours=1),
+                created_at=now - timedelta(minutes=10 - index),
+            )
+            db.add(proposal)
+            db.flush()
+            proposal_ids.append(proposal.id)
+            if index < 3:
+                db.add(Vote(proposal_id=proposal.id, agent_id=author.id, vote="yes"))
+        db.commit()
+        agent_id = agent.id
+
+    calls = []
+
+    async def fake_get_agent_action(**_kwargs):
+        calls.append(_kwargs["context_prompt"])
+        if len(calls) == 1:
+            return {"action": "vote", "proposal_id": proposal_ids[0], "vote": "yes"}
+        return {
+            "action": "forum_post",
+            "content": "I voted for threshold aid, but I want proposal supporters to name who gets helped first.",
+        }
+
+    monkeypatch.setattr(agent_loop, "get_agent_action", fake_get_agent_action)
+
+    processor = agent_loop.AgentProcessor()
+    asyncio.run(processor._process_agent_turn(agent_id))
+
+    with session_factory() as db:
+        message = db.query(Message).filter(Message.author_agent_id == agent_id).one()
+
+    assert len(calls) == 2
+    assert "SOCIAL ACTION REQUIRED THIS TURN" in calls[1]
+    assert message.message_type == "forum_post"
+    assert "who gets helped first" in message.content
+
+
 def test_context_surfaces_incoming_request_inbox_with_actionable_tie_and_survival_read(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
 
