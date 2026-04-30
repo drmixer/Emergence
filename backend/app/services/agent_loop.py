@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import ObjectDeletedError
@@ -808,6 +809,7 @@ class AgentProcessor:
                 return action_data, False
             if not self._social_silence_pressure_active(db, agent):
                 return action_data, False
+            recipient_guidance = self._social_retry_recipient_guidance(db)
         finally:
             db.close()
 
@@ -822,6 +824,7 @@ class AgentProcessor:
             "- Refer to a specific proposal id or named agent. Use first-person stance and concrete terms.\n"
             "- Forbidden style: do not start with 'Observation:', 'Proposal opportunity:', 'Next steps:', 'Efficiency checkpoint:', or write a status memo.\n"
             "- Do not write 'I propose...' here. If you want a formal policy, use the active proposal path on a later turn; this retry is for conversation.\n"
+            f"{recipient_guidance}"
             "- Respond with only the replacement JSON action."
         )
         retry_action = await get_agent_action(
@@ -878,6 +881,37 @@ class AgentProcessor:
         message_count = int(messages_query.count() or 0)
 
         return message_count < 6 and (vote_count + active_proposal_count) >= 4
+
+    def _social_retry_recipient_guidance(self, db: Session) -> str:
+        run_window = get_live_run_window(db)
+        query = (
+            db.query(
+                Message.recipient_agent_id,
+                Agent.display_name,
+                Agent.agent_number,
+                func.count(Message.id).label("message_count"),
+            )
+            .join(Agent, Agent.id == Message.recipient_agent_id)
+            .filter(
+                Message.message_type == "direct_message",
+                Message.recipient_agent_id.isnot(None),
+            )
+        )
+        query = apply_live_run_window(query, Message.created_at, run_window)
+        row = (
+            query.group_by(Message.recipient_agent_id, Agent.display_name, Agent.agent_number)
+            .order_by(func.count(Message.id).desc())
+            .first()
+        )
+        if row is None or int(row.message_count or 0) < 3:
+            return ""
+
+        recipient_name = str(row.display_name or f"Agent #{row.agent_number}")
+        return (
+            f"- Recipient diversity: {recipient_name} has already received "
+            f"{int(row.message_count or 0)} direct messages in this run. Do not direct_message "
+            "that agent on this retry; choose another named agent or a non-DM social action.\n"
+        )
 
     def _agent_exists(self, db: Session, agent_id: int) -> bool:
         return db.query(Agent.id).filter(Agent.id == agent_id).first() is not None

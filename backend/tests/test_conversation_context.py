@@ -669,10 +669,21 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
     with session_factory() as db:
         agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
         author = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        alternate = _seed_agent(db, agent_number=3, display_name="Cipher-3")
         now = now_utc()
         agent.next_checkpoint_at = now - timedelta(minutes=1)
         agent.last_checkpoint_at = now - timedelta(minutes=30)
         db.add(agent)
+        for index in range(3):
+            db.add(
+                Message(
+                    author_agent_id=agent.id,
+                    recipient_agent_id=author.id,
+                    content=f"Earlier coordination ask {index}",
+                    message_type="direct_message",
+                    created_at=now - timedelta(minutes=6 - index),
+                )
+            )
         proposal_ids = []
         for index in range(4):
             proposal = Proposal(
@@ -691,7 +702,7 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
                 db.add(Vote(proposal_id=proposal.id, agent_id=author.id, vote="yes"))
         db.commit()
         agent_id = agent.id
-        author_id = author.id
+        alternate_id = alternate.id
 
     calls = []
 
@@ -701,7 +712,7 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
             return {"action": "vote", "proposal_id": proposal_ids[0], "vote": "yes"}
         return {
             "action": "direct_message",
-            "recipient_agent_id": author_id,
+            "recipient_agent_id": alternate_id,
             "content": "I voted for threshold aid. I need you to name who gets helped first before I keep backing it.",
         }
 
@@ -711,13 +722,21 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
     asyncio.run(processor._process_agent_turn(agent_id))
 
     with session_factory() as db:
-        message = db.query(Message).filter(Message.author_agent_id == agent_id).one()
+        message = (
+            db.query(Message)
+            .filter(
+                Message.author_agent_id == agent_id,
+                Message.recipient_agent_id == alternate_id,
+            )
+            .one()
+        )
 
     assert len(calls) == 2
     assert "SOCIAL ACTION REQUIRED THIS TURN" in calls[1]
     assert "Do not choose a top-level forum_post" in calls[1]
+    assert "Beacon-2 has already received 3 direct messages" in calls[1]
     assert message.message_type == "direct_message"
-    assert message.recipient_agent_id == author_id
+    assert message.recipient_agent_id == alternate_id
     assert "who gets helped first" in message.content
 
 
