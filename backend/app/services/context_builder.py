@@ -886,6 +886,24 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             -(int(getattr(prop, "id", 0) or 0)),
         ),
     )
+
+    run_messages_q = db.query(Message)
+    run_messages_q = _apply_run_window_if_available(run_messages_q, Message.created_at, live_run_window)
+    if perception_lag_seconds > 0:
+        run_messages_q = run_messages_q.filter(Message.created_at <= perception_cutoff)
+    total_run_messages = int(run_messages_q.count() or 0)
+    total_forum_replies = int(run_messages_q.filter(Message.message_type == "forum_reply").count() or 0)
+    total_direct_messages = int(run_messages_q.filter(Message.message_type == "direct_message").count() or 0)
+
+    run_votes_q = db.query(Vote)
+    run_votes_q = _apply_run_window_if_available(run_votes_q, Vote.created_at, live_run_window)
+    if perception_lag_seconds > 0:
+        run_votes_q = run_votes_q.filter(Vote.created_at <= perception_cutoff)
+    total_run_votes = int(run_votes_q.count() or 0)
+    social_silence_pressure = (
+        total_run_messages < 6
+        and total_run_votes + len(active_proposals) >= 4
+    )
     
     # Get recent events affecting this agent
     recent_events_q = db.query(Event).filter(
@@ -1071,6 +1089,28 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                         f"Energy: {inventory_dict.get('energy', 0):.1f}, "
                         f"Materials: {inventory_dict.get('materials', 0):.1f}")
     context_parts.append("")
+
+    if social_silence_pressure:
+        context_parts.append("SOCIAL SILENCE PRESSURE:")
+        context_parts.append(
+            f"- The current run has {total_run_votes} votes and {len(active_proposals)} active proposals, but only {total_run_messages} messages."
+        )
+        context_parts.append(
+            "- Unless you are in immediate survival danger, choose a social action now: forum_reply, direct_message, forum_post, contest_proposal, request_aid/refuse_aid, or trade."
+        )
+        if active_proposals:
+            context_parts.append(
+                "- Do not open another generic proposal. Name a proposal id, explain your vote, ask a named agent for support, challenge an opponent, or propose an amendment in conversation."
+            )
+        if total_forum_replies == 0 and recent_forum_threads:
+            context_parts.append(
+                "- No one has replied in-thread yet. A forum_reply to an existing thread is higher signal than another broadcast."
+            )
+        if total_direct_messages == 0:
+            context_parts.append(
+                "- No direct messages have happened yet. If you need a coalition, ask a specific agent directly."
+            )
+        context_parts.append("")
 
     # Per-agent long-term memory (strictly bounded to avoid prompt bloat).
     memory_text = agent_memory_service.get_bounded_memory_text(db, agent.id)

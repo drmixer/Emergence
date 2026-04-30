@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.time import now_utc
-from app.models.models import Agent, AgentInventory, AgentRelationshipMemory, Event, GlobalResources, Law, Message, Proposal
+from app.models.models import Agent, AgentInventory, AgentRelationshipMemory, Event, GlobalResources, Law, Message, Proposal, Vote
 from app.services import agent_loop, context_builder
 from app.services.live_run_scope import LiveRunWindow
 
@@ -618,6 +618,37 @@ def test_civic_checkpoint_actions_schedule_near_term_followup():
     assert civic_next <= now + timedelta(minutes=processor.CIVIC_FOLLOWUP_MAX_INTERVAL_MINUTES + 2)
     assert civic_next >= now + timedelta(minutes=processor.CIVIC_FOLLOWUP_MIN_INTERVAL_MINUTES)
     assert work_next >= now + timedelta(minutes=processor.CHECKPOINT_MIN_INTERVAL_MINUTES)
+
+
+def test_context_surfaces_social_silence_pressure_when_governance_is_busy(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        author = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        now = now_utc()
+        for index in range(4):
+            proposal = Proposal(
+                author_agent_id=author.id,
+                title=f"Threshold Aid Proposal {index}",
+                description="Use the common pool to support active agents near dormancy.",
+                proposal_type="law",
+                status="active",
+                voting_closes_at=now + timedelta(hours=1),
+                created_at=now - timedelta(minutes=10 - index),
+            )
+            db.add(proposal)
+            db.flush()
+            if index < 3:
+                db.add(Vote(proposal_id=proposal.id, agent_id=author.id, vote="yes"))
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "SOCIAL SILENCE PRESSURE:" in context
+    assert "choose a social action now" in context
+    assert "No direct messages have happened yet" in context
 
 
 def test_context_surfaces_incoming_request_inbox_with_actionable_tie_and_survival_read(session_factory, monkeypatch):
