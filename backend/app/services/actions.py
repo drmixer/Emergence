@@ -284,11 +284,19 @@ _MESSAGE_DUPLICATE_STOPWORDS = {
     "you",
 }
 
-_DUPLICATE_FORUM_LOOKBACK_HOURS = 2
-_DUPLICATE_FORUM_SAMPLE_LIMIT = 50
+_DUPLICATE_FORUM_LOOKBACK_HOURS = 6
+_DUPLICATE_FORUM_SAMPLE_LIMIT = 200
 _DUPLICATE_FORUM_MIN_TERMS = 8
-_DUPLICATE_FORUM_MIN_OVERLAP = 7
-_DUPLICATE_FORUM_SMALLER_RATIO = 0.68
+_DUPLICATE_FORUM_MIN_OVERLAP = 6
+_DUPLICATE_FORUM_SMALLER_RATIO = 0.55
+
+_PROCEDURAL_STATUS_MEMO_PREFIXES = (
+    "observation:",
+    "proposal opportunity:",
+    "next steps:",
+    "efficiency checkpoint:",
+    "status update:",
+)
 
 _VALID_PROPOSAL_TYPES = {
     "law",
@@ -597,9 +605,53 @@ def _normalized_message_terms(text: str | None) -> set[str]:
     }
 
 
+def _procedural_status_memo_reason(content: str | None) -> str | None:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return None
+    for prefix in _PROCEDURAL_STATUS_MEMO_PREFIXES:
+        if normalized.startswith(prefix):
+            return prefix.rstrip(":")
+    return None
+
+
+def _forum_semantic_signature(text: str | None) -> str | None:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    if not normalized:
+        return None
+    ids = ",".join(re.findall(r"\b(?:proposal|law)\s*#?\s*(\d+)\b", normalized)[:4])
+    id_part = ids or "no-id"
+
+    if (
+        "dormant" in normalized
+        and ("one-time allocation" in normalized or "allocation proposal" in normalized)
+        and ("revive" in normalized or "recovery gap" in normalized or "already dormant" in normalized)
+    ):
+        return f"dormant-recovery-allocation:{id_part}"
+    if (
+        ("trigger" in normalized or "threshold" in normalized)
+        and ("proactive" in normalized or "reactive" in normalized)
+        and ("sigma-06" in normalized or "energy" in normalized)
+    ):
+        return f"proactive-threshold-amendment:{id_part}"
+    if (
+        ("mandatory contribution" in normalized or "mandates contribution" in normalized)
+        and ("coercion" in normalized or "coercive" in normalized or "voluntary" in normalized)
+    ):
+        return f"mandatory-contribution-objection:{id_part}"
+    if (
+        "public log" in normalized
+        and ("auto-aid" in normalized or "aid trigger" in normalized or "transfer" in normalized)
+        and ("transparency" in normalized or "trust" in normalized or "verification" in normalized)
+    ):
+        return f"aid-log-transparency:{id_part}"
+    return None
+
+
 def _find_near_duplicate_recent_forum_message(db: Session, agent: Agent, action: dict) -> Message | None:
     candidate_terms = _normalized_message_terms(action.get("content"))
-    if len(candidate_terms) < _DUPLICATE_FORUM_MIN_TERMS:
+    candidate_signature = _forum_semantic_signature(action.get("content"))
+    if len(candidate_terms) < _DUPLICATE_FORUM_MIN_TERMS and not candidate_signature:
         return None
 
     now = now_utc()
@@ -613,6 +665,8 @@ def _find_near_duplicate_recent_forum_message(db: Session, agent: Agent, action:
         query = query.filter(Message.created_at >= started_at)
 
     for message in query.order_by(Message.created_at.desc()).limit(_DUPLICATE_FORUM_SAMPLE_LIMIT).all():
+        if candidate_signature and candidate_signature == _forum_semantic_signature(message.content):
+            return message
         existing_terms = _normalized_message_terms(message.content)
         if len(existing_terms) < _DUPLICATE_FORUM_MIN_TERMS:
             continue
@@ -830,6 +884,16 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Forum post requires content"}
         if len(content) > 2000:
             return {"valid": False, "reason": "Forum post too long (max 2000 chars)"}
+        procedural_reason = _procedural_status_memo_reason(content)
+        if procedural_reason:
+            return {
+                "valid": False,
+                "reason_code": "procedural_status_memo",
+                "reason": (
+                    f"Forum post starts like a procedural status memo ({procedural_reason}); "
+                    "rewrite with a first-person stance, named target, concrete offer/refusal, or new evidence"
+                ),
+            }
         duplicate_proposal = _find_duplicate_live_proposal_for_forum_post(db, action)
         if duplicate_proposal is not None:
             return {
@@ -867,6 +931,16 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Forum reply requires content"}
         if len(content) > 2000:
             return {"valid": False, "reason": "Forum reply too long (max 2000 chars)"}
+        procedural_reason = _procedural_status_memo_reason(content)
+        if procedural_reason:
+            return {
+                "valid": False,
+                "reason_code": "procedural_status_memo",
+                "reason": (
+                    f"Forum reply starts like a procedural status memo ({procedural_reason}); "
+                    "answer the thread with a concrete stance, named target, offer/refusal, or new evidence"
+                ),
+            }
         thread_root = _message_thread_root(db, parent)
         duplicate_message = _find_near_duplicate_recent_forum_message(db, agent, action)
         if (

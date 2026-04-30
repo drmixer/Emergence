@@ -450,6 +450,24 @@ def test_collect_run_snapshot_uses_runtime_tagged_events_when_llm_usage_is_absen
         db_session.close()
 
 
+def test_rebuild_run_bundle_refuses_missing_run_data():
+    db_session = _build_snapshot_session()
+    try:
+        try:
+            run_reports.rebuild_run_bundle(
+                db_session,
+                run_id="missing-run",
+                actor_id="test",
+            )
+        except ValueError as exc:
+            assert "Refusing to generate report bundle" in str(exc)
+            assert "no run-scoped events or LLM usage" in str(exc)
+        else:
+            raise AssertionError("Expected missing run data to block report generation")
+    finally:
+        db_session.close()
+
+
 def test_artifact_generation_derives_condition_and_season_from_run_registry(tmp_path, monkeypatch):
     db_session = _build_snapshot_session()
     try:

@@ -375,3 +375,78 @@ def test_repeated_refusal_to_same_latest_aid_request_is_rejected():
             assert result["reason_code"] == "aid_request_already_refused"
     finally:
         engine.dispose()
+
+
+def test_procedural_observation_forum_post_is_rejected():
+    engine, factory = _session_factory()
+    try:
+        with factory() as db:
+            agent = _seed_agent(db, agent_number=1)
+            energy = (
+                db.query(AgentInventory)
+                .filter(AgentInventory.agent_id == agent.id, AgentInventory.resource_type == "energy")
+                .one()
+            )
+            energy.quantity = Decimal("5")
+            db.commit()
+
+            result = asyncio.run(
+                actions.validate_action(
+                    db,
+                    agent,
+                    {
+                        "action": "forum_post",
+                        "content": "Observation: Law #227 is active and the common pool is visible.",
+                    },
+                )
+            )
+
+            assert result["valid"] is False
+            assert result["reason_code"] == "procedural_status_memo"
+    finally:
+        engine.dispose()
+
+
+def test_repeated_dormant_allocation_forum_wave_is_rejected():
+    engine, factory = _session_factory()
+    try:
+        with factory() as db:
+            first = _seed_agent(db, agent_number=1)
+            second = _seed_agent(db, agent_number=2)
+            energy = (
+                db.query(AgentInventory)
+                .filter(AgentInventory.agent_id == second.id, AgentInventory.resource_type == "energy")
+                .one()
+            )
+            energy.quantity = Decimal("5")
+            db.add(
+                Message(
+                    author_agent_id=first.id,
+                    message_type="forum_post",
+                    content=(
+                        "Law #227 is executable but does not revive dormant agents retroactively. "
+                        "A one-time allocation proposal naming the dormant agents is needed to close the recovery gap."
+                    ),
+                    created_at=now_utc(),
+                )
+            )
+            db.commit()
+
+            result = asyncio.run(
+                actions.validate_action(
+                    db,
+                    second,
+                    {
+                        "action": "forum_post",
+                        "content": (
+                            "Law #227 is active and executable, but 8 agents are already dormant. "
+                            "A one-time allocation proposal naming recipients and amounts is needed to revive them."
+                        ),
+                    },
+                )
+            )
+
+            assert result["valid"] is False
+            assert result["reason_code"] == "duplicate_forum_message"
+    finally:
+        engine.dispose()

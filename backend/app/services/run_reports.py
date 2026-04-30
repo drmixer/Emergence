@@ -819,6 +819,16 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
     }
 
 
+def _assert_snapshot_has_run_data(snapshot: dict[str, Any], *, run_id: str) -> None:
+    if str((snapshot or {}).get("verification_state") or "") != "missing_run_data":
+        return
+    warning = str((snapshot or {}).get("data_source_warning") or "").strip()
+    raise ValueError(
+        f"Refusing to generate report bundle for {run_id}: no run-scoped events or LLM usage "
+        f"were found in this database. {warning}"
+    )
+
+
 def _collect_aid_request_followthrough(
     db: Session,
     *,
@@ -2127,6 +2137,7 @@ def generate_run_technical_artifact(
 ) -> dict[str, Any]:
     clean_run_id = _coerce_run_id(run_id)
     snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    _assert_snapshot_has_run_data(snapshot, run_id=clean_run_id)
     clean_condition, clean_season_number = _resolve_report_context(
         snapshot=snapshot,
         condition_name=condition_name,
@@ -2212,6 +2223,7 @@ def generate_run_story_artifact(
 ) -> dict[str, Any]:
     clean_run_id = _coerce_run_id(run_id)
     snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    _assert_snapshot_has_run_data(snapshot, run_id=clean_run_id)
     clean_condition, clean_season_number = _resolve_report_context(
         snapshot=snapshot,
         condition_name=condition_name,
@@ -2279,6 +2291,7 @@ def generate_next_run_plan_artifact(
 ) -> dict[str, Any]:
     clean_run_id = _coerce_run_id(run_id)
     current_snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    _assert_snapshot_has_run_data(current_snapshot, run_id=clean_run_id)
     clean_condition, _clean_season_number = _resolve_report_context(
         snapshot=current_snapshot,
         condition_name=condition_name,
@@ -2339,6 +2352,7 @@ def rebuild_run_bundle(
 ) -> RunBundleResult:
     clean_run_id = _coerce_run_id(run_id)
     initial_snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    _assert_snapshot_has_run_data(initial_snapshot, run_id=clean_run_id)
     clean_condition, clean_season_number = _resolve_report_context(
         snapshot=initial_snapshot,
         condition_name=condition_name,

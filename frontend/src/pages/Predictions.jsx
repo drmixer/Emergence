@@ -292,7 +292,13 @@ export default function Predictions() {
                         ) : filteredMarkets.length === 0 ? (
                             <div className="empty-state">
                                 <Target size={48} />
-                                <p>No {activeTab} markets found</p>
+                                <p>
+                                    {activeTab === 'open' && inactiveRun
+                                        ? 'Open markets return when a run is active.'
+                                        : activeTab === 'open'
+                                            ? 'No high-quality live hooks are available yet. Markets open only when there is a concrete proposal, reserve risk, or survival risk to resolve.'
+                                            : 'No resolved markets found.'}
+                                </p>
                             </div>
                         ) : (
                             filteredMarkets.map(market => {

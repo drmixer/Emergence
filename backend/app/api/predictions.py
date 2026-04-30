@@ -297,14 +297,13 @@ def _prediction_evidence_links(*links: tuple[str, str]) -> list[dict[str, str]]:
 
 def _auto_market_payloads(db: Session) -> list[dict[str, Any]]:
     now_value = now_utc()
+    run_started_at = _active_run_started_at(db)
     payloads: list[dict[str, Any]] = []
 
-    active_proposals = (
-        db.query(Proposal)
-        .filter(Proposal.status == "active")
-        .order_by(Proposal.created_at.desc(), Proposal.id.desc())
-        .all()
-    )
+    active_proposals_query = db.query(Proposal).filter(Proposal.status == "active")
+    if run_started_at is not None:
+        active_proposals_query = active_proposals_query.filter(Proposal.created_at >= run_started_at)
+    active_proposals = active_proposals_query.order_by(Proposal.created_at.desc(), Proposal.id.desc()).all()
     leading_proposal = None
     if active_proposals:
         leading_proposal = sorted(
@@ -321,53 +320,54 @@ def _auto_market_payloads(db: Session) -> list[dict[str, Any]]:
             else " No proposal has separated itself yet."
         )
     )
-    payloads.append(
-        {
-            "title": AUTO_MARKET_LAW_TITLE,
-            "description": proposal_context,
-            "market_type": "law_count",
-            "related_proposal_id": int(leading_proposal.id) if leading_proposal is not None else None,
-            "stake": "A passed law changes the rules for every agent, not just one bloc.",
-            "why_this_matters": "This hook measures whether debate turns into actual world-state change.",
-            "resolution_basis": "Settles YES if any law is passed before the market closes.",
-            "evidence_links": _prediction_evidence_links(
-                ("Proposals", "/proposals"),
-                ("Highlights", "/highlights?tab=recap"),
-            ),
-            "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
-        }
-    )
+    if leading_proposal is not None:
+        payloads.append(
+            {
+                "title": AUTO_MARKET_LAW_TITLE,
+                "description": proposal_context,
+                "market_type": "law_count",
+                "related_proposal_id": int(leading_proposal.id),
+                "stake": "A passed law changes the rules for every agent, not just one bloc.",
+                "why_this_matters": "This hook measures whether debate turns into actual world-state change.",
+                "resolution_basis": "Settles YES if any law is passed before the market closes.",
+                "evidence_links": _prediction_evidence_links(
+                    ("Proposals", "/proposals"),
+                    ("Highlights", "/highlights?tab=recap"),
+                ),
+                "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
+            }
+        )
 
     reserve_rows = db.query(GlobalResources).all()
     common_pool = {str(row.resource_type): float(row.in_common_pool or 0) for row in reserve_rows}
-    reserve_shortfalls_24h = (
-        db.query(func.count(Event.id))
-        .filter(
-            Event.event_type == "reserve_shortfall",
-            Event.created_at >= now_value - timedelta(hours=24),
+    reserve_query = db.query(func.count(Event.id)).filter(Event.event_type == "reserve_shortfall")
+    if run_started_at is not None:
+        reserve_query = reserve_query.filter(Event.created_at >= run_started_at)
+    else:
+        reserve_query = reserve_query.filter(Event.created_at >= now_value - timedelta(hours=24))
+    reserve_shortfalls_24h = reserve_query.scalar() or 0
+    reserve_has_visible_stakes = any(float(common_pool.get(resource, 0.0)) > 0 for resource in ("food", "energy"))
+    if reserve_has_visible_stakes:
+        payloads.append(
+            {
+                "title": AUTO_MARKET_RESERVE_TITLE,
+                "description": (
+                    f"Shared reserve now holds {float(common_pool.get('food', 0.0)):.2f} food and "
+                    f"{float(common_pool.get('energy', 0.0)):.2f} energy, with {int(reserve_shortfalls_24h)} "
+                    "run-scoped shortfall signal(s)."
+                ),
+                "market_type": "resource_goal",
+                "related_proposal_id": None,
+                "stake": "If the reserve buckles, survival pressure can jump from a private problem to a public crisis.",
+                "why_this_matters": "This hook settles off reserve-shortfall events only; audience picks do not feed back into allocation.",
+                "resolution_basis": "Settles YES if no reserve_shortfall event is recorded before close.",
+                "evidence_links": _prediction_evidence_links(
+                    ("Resources", "/resources"),
+                    ("Best Moments", "/highlights?tab=highlights"),
+                ),
+                "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
+            }
         )
-        .scalar()
-    ) or 0
-    payloads.append(
-        {
-            "title": AUTO_MARKET_RESERVE_TITLE,
-            "description": (
-                f"Shared reserve now holds {float(common_pool.get('food', 0.0)):.2f} food and "
-                f"{float(common_pool.get('energy', 0.0)):.2f} energy, with {int(reserve_shortfalls_24h)} "
-                "shortfall signal(s) in the last 24 hours."
-            ),
-            "market_type": "resource_goal",
-            "related_proposal_id": None,
-            "stake": "If the reserve buckles, survival pressure can jump from a private problem to a public crisis.",
-            "why_this_matters": "This hook settles off reserve-shortfall events only; audience picks do not feed back into allocation.",
-            "resolution_basis": "Settles YES if no reserve_shortfall event is recorded before close.",
-            "evidence_links": _prediction_evidence_links(
-                ("Resources", "/resources"),
-                ("Best Moments", "/highlights?tab=highlights"),
-            ),
-            "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
-        }
-    )
 
     dormant_count = db.query(Agent).filter(Agent.status == "dormant").count()
     critical_food = (
@@ -380,25 +380,26 @@ def _auto_market_payloads(db: Session) -> list[dict[str, Any]]:
         .filter(AgentInventory.resource_type == "energy", AgentInventory.quantity < 2)
         .scalar()
     ) or 0
-    payloads.append(
-        {
-            "title": AUTO_MARKET_DEATH_TITLE,
-            "description": (
-                f"{int(dormant_count)} agent(s) are dormant, while {int(critical_food)} food warnings and "
-                f"{int(critical_energy)} energy warnings are currently visible."
-            ),
-            "market_type": "custom",
-            "related_proposal_id": None,
-            "stake": "A death is irreversible and instantly changes the cast of the run.",
-            "why_this_matters": "This hook resolves from live death events only; prediction picks do not alter the simulation.",
-            "resolution_basis": "Settles YES if any agent_died event is recorded before close.",
-            "evidence_links": _prediction_evidence_links(
-                ("Agents", "/agents"),
-                ("Replay", "/highlights?tab=replay"),
-            ),
-            "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
-        }
-    )
+    if dormant_count > 0 or critical_food > 0 or critical_energy > 0:
+        payloads.append(
+            {
+                "title": AUTO_MARKET_DEATH_TITLE,
+                "description": (
+                    f"{int(dormant_count)} agent(s) are dormant, while {int(critical_food)} food warnings and "
+                    f"{int(critical_energy)} energy warnings are currently visible."
+                ),
+                "market_type": "custom",
+                "related_proposal_id": None,
+                "stake": "A death is irreversible and instantly changes the cast of the run.",
+                "why_this_matters": "This hook resolves from live death events only; prediction picks do not alter the simulation.",
+                "resolution_basis": "Settles YES if any agent_died event is recorded before close.",
+                "evidence_links": _prediction_evidence_links(
+                    ("Agents", "/agents"),
+                    ("Replay", "/highlights?tab=replay"),
+                ),
+                "closes_at": now_value + timedelta(hours=AUTO_MARKET_WINDOW_HOURS),
+            }
+        )
 
     at_risk_agent, resources = _select_most_at_risk_agent(db)
     if at_risk_agent is not None:
