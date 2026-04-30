@@ -31,9 +31,18 @@ def resolve_registered_artifact_path(raw_path: str) -> Path:
     root = reports_root().resolve()
     try:
         artifact_path.relative_to(root)
+        return artifact_path
     except ValueError as exc:
+        parts = artifact_path.parts
+        for index in range(len(parts) - 1):
+            if parts[index] == "output" and parts[index + 1] == "reports":
+                remapped = root.joinpath(*parts[index + 2 :]).resolve()
+                try:
+                    remapped.relative_to(root)
+                except ValueError:
+                    break
+                return remapped
         raise ValueError("artifact path is outside reports root") from exc
-    return artifact_path
 
 
 def _regenerate_artifact(db: Session, row: RunReportArtifact) -> RunReportArtifact | None:

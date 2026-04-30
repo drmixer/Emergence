@@ -185,6 +185,35 @@ def test_download_run_report_regenerates_missing_artifact(reports_client, monkey
     assert '"regenerated": true' in response.text
 
 
+def test_view_run_report_remaps_stale_absolute_reports_path(reports_client):
+    client, db_session, tmp_dir = reports_client
+    artifact_file = tmp_dir / "runs" / "run-stale-path" / "technical_report.md"
+    artifact_file.parent.mkdir(parents=True, exist_ok=True)
+    artifact_file.write_text("# remapped\n", encoding="utf-8")
+
+    db_session.add(
+        RunReportArtifact(
+            run_id="run-stale-path",
+            artifact_type="technical_report",
+            artifact_format="markdown",
+            artifact_path="/Users/operator/code/Emergence/output/reports/runs/run-stale-path/technical_report.md",
+            status="completed",
+            metadata_json={"condition_name": "baseline_v1"},
+        )
+    )
+    db_session.commit()
+
+    with client:
+        response = client.get(
+            "/api/reports/runs/run-stale-path/view",
+            params={"artifact_type": "technical_report", "format": "markdown"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("inline;")
+    assert "# remapped" in response.text
+
+
 def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_client, monkeypatch):
     client, db_session, tmp_dir = reports_client
 
