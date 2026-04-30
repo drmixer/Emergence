@@ -175,6 +175,17 @@ def _message_thread_root(db: Session, message: Message) -> Message:
     return root
 
 
+def _direct_message_recipient_count_this_run(db: Session, recipient: Agent) -> int:
+    query = db.query(Message).filter(
+        Message.message_type == "direct_message",
+        Message.recipient_agent_id == recipient.id,
+    )
+    started_at = _active_run_started_at(db)
+    if started_at is not None:
+        query = query.filter(Message.created_at >= started_at)
+    return int(query.count() or 0)
+
+
 def _proposal_is_within_active_run(db: Session, proposal: Proposal) -> bool:
     started_at = _active_run_started_at(db)
     if started_at is None:
@@ -798,6 +809,21 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         recipient = db.query(Agent).filter(Agent.agent_number == recipient_id).first()
         if not recipient:
             return {"valid": False, "reason": "Recipient agent not found"}
+        recipient_message_count = _direct_message_recipient_count_this_run(db, recipient)
+        if recipient_message_count >= 3 and recipient.id != agent.id:
+            recipient_name = recipient.display_name or f"Agent #{recipient.agent_number}"
+            return {
+                "valid": False,
+                "reason_code": "recipient_message_saturation",
+                "recipient_agent_id": recipient.id,
+                "recipient_agent_number": recipient.agent_number,
+                "recipient_name": recipient_name,
+                "reason": (
+                    f"{recipient_name} has already received {recipient_message_count} direct messages "
+                    "in this run; choose another "
+                    "recipient or a non-DM social action"
+                ),
+            }
 
     elif action_type == "request_aid":
         target_id = action.get("target_agent_id")

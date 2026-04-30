@@ -317,6 +317,27 @@ class AgentProcessor:
                     if validation.get("reason_code") == "rate_limit":
                         self._apply_rate_limit_backoff(agent_id, validation, runtime_metadata=runtime_metadata)
                         return
+                    if (
+                        not validation["valid"]
+                        and checkpoint_reason
+                        and validation.get("reason_code") == "recipient_message_saturation"
+                    ):
+                        saturated_retry = await self._build_saturated_recipient_retry(
+                            db,
+                            agent,
+                            attempted_action=action_data,
+                            validation=validation,
+                            model_type=model_type or "llama-3.1-8b",
+                            system_prompt=system_prompt or LLM_GUARDRAIL_PREFIX,
+                            context=context or "",
+                            checkpoint_number=checkpoint_number_hint,
+                            run_class=run_class,
+                        )
+                        if saturated_retry is not None:
+                            action_data, validation, retry_meta = saturated_retry
+                            if isinstance(retry_meta, dict):
+                                llm_meta = retry_meta
+                            runtime_metadata["recipient_saturation_retry"] = True
                     if self._is_energy_constraint(validation, action_data):
                         idle_fallback = self._build_constraint_idle_action(validation["reason"])
                         idle_validation = await validate_action(db, agent, idle_fallback)
@@ -912,6 +933,50 @@ class AgentProcessor:
             f"{int(row.message_count or 0)} direct messages in this run. Do not direct_message "
             "that agent on this retry; choose another named agent or a non-DM social action.\n"
         )
+
+    async def _build_saturated_recipient_retry(
+        self,
+        db: Session,
+        agent: Agent,
+        *,
+        attempted_action: Optional[dict],
+        validation: dict,
+        model_type: str,
+        system_prompt: str,
+        context: str,
+        checkpoint_number: Optional[int],
+        run_class: str,
+    ) -> tuple[dict, dict, Optional[dict]] | None:
+        recipient_name = str(validation.get("recipient_name") or "that agent")
+        attempted_type = str((attempted_action or {}).get("action") or "direct_message")
+        corrective_context = (
+            f"{context}\n\n"
+            "RECIPIENT SATURATION RETRY:\n"
+            f"- Your previous `{attempted_type}` targeted {recipient_name}, but they already have several direct messages this run.\n"
+            f"- Do not direct_message {recipient_name} again on this turn.\n"
+            "- Choose a different named recipient or a non-DM social action such as contest_proposal, trade, request_aid, refuse_aid, public_accusation, or forum_reply to an existing thread.\n"
+            "- Keep it concrete and first-person. Do not write an Observation/status memo.\n"
+            "- Respond with only the replacement JSON action."
+        )
+        retry_action = await get_agent_action(
+            agent_id=agent.id,
+            model_type=model_type,
+            system_prompt=system_prompt,
+            context_prompt=corrective_context,
+            checkpoint_number=checkpoint_number,
+            run_class=run_class,
+        )
+        if not retry_action:
+            return None
+        retry_meta = None
+        if isinstance(retry_action, dict):
+            maybe_meta = retry_action.pop("_llm_meta", None)
+            if isinstance(maybe_meta, dict):
+                retry_meta = maybe_meta
+        retry_validation = await validate_action(db, agent, retry_action)
+        if retry_validation["valid"]:
+            return retry_action, retry_validation, retry_meta
+        return None
 
     def _agent_exists(self, db: Session, agent_id: int) -> bool:
         return db.query(Agent.id).filter(Agent.id == agent_id).first() is not None

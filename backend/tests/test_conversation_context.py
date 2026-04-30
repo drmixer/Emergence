@@ -703,6 +703,8 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
         db.commit()
         agent_id = agent.id
         alternate_id = alternate.id
+        author_number = author.agent_number
+        alternate_number = alternate.agent_number
 
     calls = []
 
@@ -710,10 +712,16 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
         calls.append(_kwargs["context_prompt"])
         if len(calls) == 1:
             return {"action": "vote", "proposal_id": proposal_ids[0], "vote": "yes"}
+        if len(calls) == 2:
+            return {
+                "action": "direct_message",
+                "recipient_agent_id": author_number,
+                "content": "I voted for threshold aid. I need you to name who gets helped first before I keep backing it.",
+            }
         return {
             "action": "direct_message",
-            "recipient_agent_id": alternate_id,
-            "content": "I voted for threshold aid. I need you to name who gets helped first before I keep backing it.",
+            "recipient_agent_id": alternate_number,
+            "content": "I voted for threshold aid. I need another voice to name who gets helped first.",
         }
 
     monkeypatch.setattr(agent_loop, "get_agent_action", fake_get_agent_action)
@@ -731,10 +739,11 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
             .one()
         )
 
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert "SOCIAL ACTION REQUIRED THIS TURN" in calls[1]
     assert "Do not choose a top-level forum_post" in calls[1]
     assert "Beacon-2 has already received 3 direct messages" in calls[1]
+    assert "RECIPIENT SATURATION RETRY" in calls[2]
     assert message.message_type == "direct_message"
     assert message.recipient_agent_id == alternate_id
     assert "who gets helped first" in message.content
