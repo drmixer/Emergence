@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import importlib
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -168,6 +169,48 @@ def test_prediction_markets_hide_open_markets_and_reject_bets_when_inactive(pred
     )
     assert bet.status_code == 409
     assert "no simulation run is active" in bet.json()["detail"]
+
+
+def test_list_markets_hides_stale_open_hooks_from_prior_run(predictions_client, monkeypatch):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+    run_started_at = now - timedelta(hours=1)
+
+    monkeypatch.setattr(
+        predictions_api,
+        "get_live_run_window",
+        lambda _db: SimpleNamespace(
+            run_id="real-current",
+            started_at=run_started_at,
+            ended_at=None,
+        ),
+    )
+
+    stale = PredictionMarket(
+        title="Will any agent die in the next 24 hours?",
+        description="Prior run hook",
+        market_type="custom",
+        status="open",
+        created_at=now - timedelta(hours=3),
+        closes_at=now + timedelta(hours=21),
+    )
+    current = PredictionMarket(
+        title="Will current hook resolve?",
+        description="Current run hook",
+        market_type="custom",
+        status="open",
+        created_at=now - timedelta(minutes=15),
+        closes_at=now + timedelta(hours=23),
+    )
+    db_session.add_all([stale, current])
+    db_session.commit()
+
+    response = client.get("/api/predictions/markets?status=open&limit=20")
+    assert response.status_code == 200
+
+    titles = {item["title"] for item in response.json()}
+    assert "Will current hook resolve?" in titles
+    assert "Prior run hook" not in {item["description"] for item in response.json()}
 
 
 def test_list_markets_resolves_expired_auto_hook_and_pays_winner(predictions_client):

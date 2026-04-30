@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 import hmac
 import hashlib
 import uuid
@@ -19,6 +19,7 @@ from app.models.predictions import PredictionMarket, PredictionBet, UserPoints
 from app.models.models import Proposal, Agent, AgentInventory, Event, GlobalResources, Law
 from app.services.runtime_config import runtime_config_service
 from app.services.survival_config import active_energy_cost, active_food_cost, low_resource_warning_threshold
+from app.services.live_run_scope import get_live_run_window
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -199,6 +200,13 @@ def _agent_label(agent: Agent | None) -> str:
 
 def _simulation_active() -> bool:
     return bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
+
+
+def _active_run_started_at(db: Session) -> datetime | None:
+    if not _simulation_active():
+        return None
+    run_window = get_live_run_window(db)
+    return ensure_utc(run_window.started_at)
 
 
 def _agent_market_title(agent: Agent) -> str:
@@ -420,6 +428,9 @@ def _auto_market_payloads(db: Session) -> list[dict[str, Any]]:
 def _find_open_auto_market(db: Session, payload: dict[str, Any]) -> PredictionMarket | None:
     title = str(payload.get("title") or "").strip()
     query = db.query(PredictionMarket).filter(PredictionMarket.status == "open")
+    run_started_at = _active_run_started_at(db)
+    if run_started_at is not None:
+        query = query.filter(PredictionMarket.created_at >= run_started_at)
     if str(payload.get("market_type") or "") == "agent_dormant" and payload.get("related_agent_id") is not None:
         return (
             query.filter(
@@ -657,6 +668,15 @@ def list_markets(
 
     if not _simulation_active():
         query = query.filter(PredictionMarket.status != "open")
+    else:
+        run_started_at = _active_run_started_at(db)
+        if run_started_at is not None:
+            query = query.filter(
+                or_(
+                    PredictionMarket.status != "open",
+                    PredictionMarket.created_at >= run_started_at,
+                )
+            )
     
     if status:
         query = query.filter(PredictionMarket.status == status)

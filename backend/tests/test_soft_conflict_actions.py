@@ -607,7 +607,7 @@ def test_forum_post_rejects_top_level_duplicate_live_proposal_mechanism(session_
     assert validation["proposal_id"] == proposal.id
 
 
-def test_duplicate_forum_checkpoint_recovery_replies_to_existing_message(session_factory):
+def test_duplicate_forum_checkpoint_recovery_does_not_publish_duplicate_reply(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")
         poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
@@ -633,21 +633,9 @@ def test_duplicate_forum_checkpoint_recovery_replies_to_existing_message(session
         }
         validation = asyncio.run(actions.validate_action(db, poster, attempted_action))
 
-        followup = asyncio.run(
-            AgentProcessor()._build_duplicate_forum_followup(
-                db,
-                poster,
-                attempted_action=attempted_action,
-                validation=validation,
-            )
-        )
-
-    assert followup is not None
-    action, followup_validation = followup
-    assert followup_validation == {"valid": True}
-    assert action["action"] == "forum_reply"
-    assert action["parent_message_id"] == existing.id
-    assert action["content"].startswith("Adding this to the existing thread")
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_forum_message"
+    assert validation["message_id"] == existing.id
 
 
 def test_forum_post_allows_distinct_same_topic_message(session_factory):

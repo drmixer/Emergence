@@ -102,17 +102,18 @@ export default function Laws() {
                     </div>
                 ) : (
                     !loading &&
-                    displayedLaws.map((law, index) => {
+                    displayedLaws.map((law) => {
                         const clusterSize = clusterCounts.get(lawClusterKey(law)) || 1
+                        const lawLabel = law.id ? `Law #${law.id}` : 'Law'
                         return (
                         <div
                             key={law.id}
                             className={`law-card ${!law.active ? 'repealed' : ''}`}
                         >
-                            <div className="law-number">§{index + 1}</div>
+                            <div className="law-number">{lawLabel}</div>
                             <div className="law-content">
                                 <div className="law-header">
-                                    <h3>{law.title}</h3>
+                                    <h3>{lawLabel}: {law.title}</h3>
                                     <span
                                         className={`law-status ${law.active ? 'active' : 'repealed'}`}
                                     >
