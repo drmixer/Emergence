@@ -101,6 +101,39 @@ def test_create_proposal_accepts_structured_runtime_effect():
         engine.dispose()
 
 
+def test_create_proposal_downgrades_unsupported_runtime_effect_to_advisory():
+    engine, factory = _session_factory()
+    try:
+        with factory() as db:
+            author = _seed_agent(db, agent_number=1)
+            energy = (
+                db.query(AgentInventory)
+                .filter(AgentInventory.agent_id == author.id, AgentInventory.resource_type == "energy")
+                .one()
+            )
+            energy.quantity = Decimal("5")
+            db.commit()
+
+            action = {
+                "action": "create_proposal",
+                "title": "Dormant Revival Standing Law",
+                "description": "Revive dormant agents from the common pool when resources allow.",
+                "proposal_type": "law",
+                "governance_class": "standing_law",
+                "runtime_effect": {"type": "dormant_revival", "min_pool_remaining": 25},
+            }
+
+            validation = asyncio.run(actions.validate_action(db, author, action))
+
+            assert validation == {"valid": True}
+            assert action["governance_class"] == "advisory_law"
+            assert action["runtime_effect"] == {}
+            assert action["unsupported_runtime_effect_downgraded"] is True
+            assert action["unsupported_runtime_effect_type"] == "dormant_revival"
+    finally:
+        engine.dispose()
+
+
 def test_common_pool_allocation_executes_and_logs_transfer():
     engine, factory = _session_factory()
     try:

@@ -253,6 +253,106 @@ def test_create_proposal_rejects_near_duplicate_active_current_run_title(session
     assert "Near-duplicate active proposal exists" in validation["reason"]
 
 
+def test_create_proposal_rejects_duplicate_active_reserve_aid_mechanism(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        existing = Proposal(
+            author_agent_id=author.id,
+            title="Common Pool Reserve Policy",
+            description=(
+                "Establish a standing law for the common pool to automatically provide "
+                "resources to active agents whose food or energy falls below a critical threshold."
+            ),
+            proposal_type="law",
+            governance_class="standing_law",
+            runtime_effect={
+                "type": "active_reserve_aid",
+                "trigger_food_below": 2,
+                "trigger_energy_below": 2,
+                "target_food": 3,
+                "target_energy": 3,
+                "min_pool_remaining": 25,
+            },
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(existing)
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Threshold-Based Active Reserve Aid Law",
+                    "description": (
+                        "Automatically top up active agents below survival thresholds using "
+                        "the common pool while preserving a minimum reserve floor."
+                    ),
+                    "proposal_type": "law",
+                    "governance_class": "standing_law",
+                    "runtime_effect": {
+                        "type": "active_reserve_aid",
+                        "trigger_food_below": 2,
+                        "trigger_energy_below": 2,
+                        "target_food": 3,
+                        "target_energy": 3,
+                        "min_pool_remaining": 25,
+                    },
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_active_proposal"
+    assert validation["proposal_id"] == existing.id
+
+
+def test_create_proposal_rejects_duplicate_voluntary_contribution_framework(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        existing = Proposal(
+            author_agent_id=author.id,
+            title="Voluntary Resource Contribution and Aid Framework",
+            description=(
+                "Establish a framework for voluntary contributions to a common pool and "
+                "a mechanism for agents to request and receive aid, emphasizing consent."
+            ),
+            proposal_type="rule",
+            governance_class="resolution",
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(existing)
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Voluntary Aid and Opt-Out Standing Law",
+                    "description": (
+                        "Agents may voluntarily contribute to a common pool. Agents in need "
+                        "can request aid from the pool, and participation remains consent-based."
+                    ),
+                    "proposal_type": "law",
+                    "governance_class": "advisory_law",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_active_proposal"
+    assert validation["proposal_id"] == existing.id
+
+
 def test_create_proposal_coerces_binding_rule_to_resolution(session_factory):
     with session_factory() as db:
         proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")

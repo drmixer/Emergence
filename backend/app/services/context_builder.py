@@ -1317,6 +1317,10 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         if unvoted_proposals:
             context_parts.append("")
             context_parts.append("VOTING OPPORTUNITIES:")
+            if len(active_proposals) >= 3:
+                context_parts.append(
+                    "  The proposal queue is crowded: if any listed proposal covers your mechanism well enough, vote yes/no/abstain or contest it before creating another proposal."
+                )
             context_parts.append("  You can vote on any active proposal you have not voted on yet.")
             prioritized_unvoted = sorted(
                 unvoted_proposals,
@@ -1339,7 +1343,10 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  Use create_proposal when you want collective action on resources, rules, infrastructure, or governance.")
     if len(active_proposals) >= 3:
         context_parts.append(
-            "  Many proposals are already active. Prefer vote, contest_proposal, forum_post, forum_reply, direct_message, request_aid, refuse_aid, or trade unless you have a clearly new mechanism."
+            "  Many proposals are already active. Prefer vote, contest_proposal, forum_post, forum_reply, direct_message, request_aid, refuse_aid, or trade unless you have a clearly new mechanism that no active proposal covers."
+        )
+        context_parts.append(
+            "  Near-duplicate active reserve aid or voluntary contribution/aid proposals will be rejected; use the existing proposal's id to vote or contest instead."
         )
     elif active_proposals:
         context_parts.append(
@@ -1594,7 +1601,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         )
     if len(active_proposals) >= 3:
         checkpoint_priority_lines.append(
-            "Proposal queue is already crowded. If you have already voted, use forum_post, forum_reply, direct_message, request_aid/refuse_aid, trade, or contest_proposal instead of creating another proposal."
+            "Proposal queue is already crowded. Vote on the closest active proposal first; if you have already voted, use forum_post, forum_reply, direct_message, request_aid/refuse_aid, trade, or contest_proposal instead of creating another proposal."
         )
     if total_dormant > 0:
         checkpoint_priority_lines.append(

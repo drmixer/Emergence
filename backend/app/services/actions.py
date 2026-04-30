@@ -323,6 +323,11 @@ _RULE_BINDING_PATTERNS = (
     ),
 )
 
+_UNSUPPORTED_RUNTIME_EFFECT_ERRORS = {
+    "runtime_effect.type must be common_pool_allocation or active_reserve_aid",
+    "unsupported runtime_effect.type",
+}
+
 
 def _normalized_proposal_title_key(title: str | None) -> str:
     words = re.findall(r"[a-z0-9]+", str(title or "").lower())
@@ -348,6 +353,101 @@ def _binding_signal_for_rule_proposal(action: dict) -> str | None:
         if re.search(pattern, binding_text):
             return label
     return None
+
+
+def _runtime_effect_type(raw_effect: object) -> str:
+    if not isinstance(raw_effect, dict):
+        return ""
+    return str(raw_effect.get("type") or raw_effect.get("effect_type") or "").strip().lower()
+
+
+def _proposal_policy_text(*parts: object) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", " ".join(str(part or "") for part in parts).lower()))
+
+
+def _proposal_mechanism_signature(
+    *,
+    proposal_type: str | None,
+    governance_class: str | None,
+    title: str | None,
+    description: str | None,
+    runtime_effect: object,
+) -> str | None:
+    effect_type = _runtime_effect_type(runtime_effect)
+    if effect_type == "active_reserve_aid":
+        return "active_reserve_aid"
+
+    text = _proposal_policy_text(title, description)
+    if not text:
+        return None
+    ptype = str(proposal_type or "").strip().lower()
+    gclass = str(governance_class or "").strip().lower()
+
+    has_common_pool = "common pool" in text or "reserve" in text
+    has_aid = "aid" in text or "top up" in text or "upkeep" in text or "provide resources" in text
+    has_threshold = (
+        "threshold" in text
+        or "below" in text
+        or "critical" in text
+        or "minimum resource" in text
+        or "falls below" in text
+        or "dormancy" in text
+    )
+    if has_common_pool and has_aid and has_threshold and ptype in {"law", "standing_law"}:
+        return "active_reserve_aid"
+    if has_common_pool and has_aid and has_threshold and gclass == "standing_law":
+        return "active_reserve_aid"
+
+    has_voluntary = "voluntary" in text or "opt in" in text or "consent" in text
+    has_contribution = "contribution" in text or "contribute" in text or "contributions" in text
+    if has_voluntary and has_common_pool and has_contribution and has_aid:
+        return "voluntary_contribution_aid_framework"
+
+    has_exchange = "exchange" in text or "trade" in text or "request" in text
+    if has_voluntary and has_exchange and ("forum" in text or "resource" in text):
+        return "voluntary_resource_exchange"
+
+    if has_common_pool and has_contribution and ptype in {"rule", "resolution"}:
+        return "common_pool_contribution_norm"
+
+    return None
+
+
+def _proposal_row_mechanism_signature(proposal: Proposal) -> str | None:
+    return _proposal_mechanism_signature(
+        proposal_type=proposal.proposal_type,
+        governance_class=proposal.governance_class,
+        title=proposal.title,
+        description=proposal.description,
+        runtime_effect=proposal.runtime_effect,
+    )
+
+
+def _action_mechanism_signature(action: dict) -> str | None:
+    return _proposal_mechanism_signature(
+        proposal_type=action.get("proposal_type"),
+        governance_class=action.get("governance_class") or action.get("governanceClass"),
+        title=action.get("title"),
+        description=action.get("description"),
+        runtime_effect=action.get("runtime_effect"),
+    )
+
+
+def _downgrade_unsupported_runtime_effect(action: dict, effect_errors: list[str], governance_class: str) -> str:
+    original_type = _runtime_effect_type(action.get("runtime_effect")) or "unknown"
+    proposal_type = str(action.get("proposal_type") or "").strip().lower()
+    if proposal_type == "law" or governance_class in {"standing_law", "advisory_law"}:
+        downgraded_class = "advisory_law"
+    elif proposal_type in {"rule", "resolution"}:
+        downgraded_class = "resolution"
+    else:
+        downgraded_class = "resolution"
+    action["governance_class"] = downgraded_class
+    action["runtime_effect"] = {}
+    action["unsupported_runtime_effect_downgraded"] = True
+    action["unsupported_runtime_effect_type"] = original_type
+    action["unsupported_runtime_effect_reason"] = "; ".join(effect_errors)
+    return downgraded_class
 
 
 def _normalized_message_terms(text: str | None) -> set[str]:
@@ -458,11 +558,13 @@ def _find_near_duplicate_active_proposal(db: Session, action: dict) -> Proposal 
     if not candidate_key:
         return None
     candidate_tokens = set(candidate_key.split())
-    proposal_type = str(action.get("proposal_type") or "other")
+    candidate_signature = _action_mechanism_signature(action)
     if len(candidate_tokens) < 2:
         return None
 
-    for proposal in _active_run_proposal_query(db).filter(Proposal.proposal_type == proposal_type).all():
+    for proposal in _active_run_proposal_query(db).all():
+        if candidate_signature and _proposal_row_mechanism_signature(proposal) == candidate_signature:
+            return proposal
         existing_key = _normalized_proposal_title_key(proposal.title)
         if not existing_key:
             continue
@@ -781,11 +883,15 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             db=db,
         )
         if effect_errors:
-            return {
-                "valid": False,
-                "reason_code": "invalid_runtime_effect",
-                "reason": "; ".join(effect_errors),
-            }
+            if set(effect_errors).issubset(_UNSUPPORTED_RUNTIME_EFFECT_ERRORS):
+                governance_class = _downgrade_unsupported_runtime_effect(action, effect_errors, governance_class)
+                runtime_effect = {}
+            else:
+                return {
+                    "valid": False,
+                    "reason_code": "invalid_runtime_effect",
+                    "reason": "; ".join(effect_errors),
+                }
         action["governance_class"] = governance_class
         action["runtime_effect"] = runtime_effect
         if proposal_type == "rule":
