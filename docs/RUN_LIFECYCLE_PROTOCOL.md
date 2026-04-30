@@ -68,6 +68,10 @@ This cadence is intentionally conservative for budget control and reliability wh
 - Deterministic fallback is distinct from provider/model fallback:
   - provider/model fallback changes the effective brain and dilutes attribution
   - deterministic fallback preserves attribution but can still change observed behavior
+- Deterministic continuity fallback must not create public agent speech. For
+  `special_exploratory` runs, routine continuity protection may select work or
+  idle actions after unusable LLM output, but it must not emit forum posts,
+  direct messages, proposals, votes, trades, or other public/social actions.
 - Deterministic failure-policy matrix:
   - `standard_72h`: no provider/model fallback; failure policy = `idle_on_llm_failure`
   - `deep_96h`: no provider/model fallback; failure policy = `idle_on_llm_failure`

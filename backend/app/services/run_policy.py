@@ -98,7 +98,7 @@ def build_terminal_llm_failure_action(
     roll = rng.random()
     reasoning = f"Continuity protection after terminal LLM failure: {clean_reason}"
 
-    if roll < 0.75:
+    if roll < 0.8:
         return {
             "action": "work",
             "work_type": rng.choice(["farm", "generate", "gather"]),
@@ -106,16 +106,8 @@ def build_terminal_llm_failure_action(
             "reasoning": reasoning,
             "_deterministic_meta": deterministic_meta,
         }
-    if roll < 0.9:
-        return {
-            "action": "idle",
-            "reasoning": reasoning,
-            "_deterministic_meta": deterministic_meta,
-        }
-
     return {
-        "action": "forum_post",
-        "content": DETERMINISTIC_FALLBACK_FORUM_POST_CONTENT,
+        "action": "idle",
         "reasoning": reasoning,
         "_deterministic_meta": deterministic_meta,
     }
