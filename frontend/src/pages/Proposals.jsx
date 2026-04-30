@@ -19,6 +19,8 @@ function policyClusterKey(item) {
 }
 
 function proposalKindLabel(proposal) {
+    const governance = proposal?.governance || {}
+    if (governance.class_label) return governance.class_label
     const type = String(proposal?.proposal_type || '').trim().toLowerCase()
     const status = String(proposal?.status || '').trim().toLowerCase()
     if (status === 'passed' && type === 'law') return 'Passed law'
@@ -175,6 +177,12 @@ export default function Proposals() {
                                     </div>
                                 )}
                                 <p className="proposal-description">{proposal.description}</p>
+                                {proposal.governance?.runtime_effect && Object.keys(proposal.governance.runtime_effect).length > 0 && (
+                                    <div className="runtime-effect-box">
+                                        <div className="runtime-effect-kicker">Runtime Effect</div>
+                                        <div>{proposal.governance.runtime_effect_label || proposal.governance.execution_label}</div>
+                                    </div>
+                                )}
 
                                 <div className="proposal-author">
                                     Proposed by <strong>{authorName(proposal.author)}</strong>
@@ -328,6 +336,24 @@ export default function Proposals() {
           color: var(--text-secondary);
           font-size: 0.875rem;
           margin-bottom: var(--spacing-md);
+        }
+
+        .runtime-effect-box {
+          border: 1px solid rgba(34, 197, 94, 0.28);
+          background: rgba(34, 197, 94, 0.08);
+          color: var(--text-secondary);
+          border-radius: var(--radius-md);
+          padding: var(--spacing-sm);
+          margin-bottom: var(--spacing-md);
+          font-size: 0.8125rem;
+        }
+
+        .runtime-effect-kicker {
+          color: var(--accent-green);
+          font-weight: 700;
+          text-transform: uppercase;
+          font-size: 0.68rem;
+          margin-bottom: 2px;
         }
         
         .proposal-author {

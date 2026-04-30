@@ -3,14 +3,34 @@ import { useState, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { Activity, Clock, TrendingUp } from 'lucide-react'
 
+function formatCycleCountdown(seconds) {
+    if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) {
+        return 'n/a'
+    }
+    const safe = Math.max(0, Math.floor(Number(seconds)))
+    const hours = Math.floor(safe / 3600)
+    const minutes = Math.floor((safe % 3600) / 60)
+    const remainingSeconds = safe % 60
+
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`
+    }
+    if (minutes > 0) {
+        return `${minutes}m ${remainingSeconds.toString().padStart(2, '0')}s`
+    }
+    return `${remainingSeconds}s`
+}
+
 export default function ActivityPulse({
     isLive = true,
     lastActivity = null,
     messageCount = 0,
-    dayNumber = 0
+    dayNumber = 0,
+    cycleStatus = null
 }) {
     const pulseActive = Boolean(isLive)
     const [displayCount, setDisplayCount] = useState(messageCount)
+    const [nowMs, setNowMs] = useState(() => Date.now())
 
     // Animate the message count when it changes
     useEffect(() => {
@@ -37,10 +57,23 @@ export default function ActivityPulse({
         return () => clearInterval(timer)
     }, [displayCount, messageCount])
 
+    useEffect(() => {
+        if (!cycleStatus?.enabled || !cycleStatus?.next_cycle_at) return undefined
+        const timer = window.setInterval(() => setNowMs(Date.now()), 1000)
+        return () => window.clearInterval(timer)
+    }, [cycleStatus?.enabled, cycleStatus?.next_cycle_at])
+
     // Calculate time ago
     const timeAgo = lastActivity
         ? formatDistanceToNow(new Date(lastActivity), { addSuffix: true })
         : 'waiting...'
+    const nextCycleAtMs = cycleStatus?.next_cycle_at
+        ? new Date(cycleStatus.next_cycle_at).getTime()
+        : null
+    const secondsUntilNextCycle = Number.isFinite(nextCycleAtMs)
+        ? Math.max(0, Math.ceil((nextCycleAtMs - nowMs) / 1000))
+        : cycleStatus?.seconds_until_next_cycle
+    const showCycleCountdown = Boolean(isLive && cycleStatus?.enabled)
 
     return (
         <div className={`activity-pulse ${isLive ? 'live' : 'offline'}`}>
@@ -73,6 +106,17 @@ export default function ActivityPulse({
                     <span className="day-label">Day</span>
                     <span className="day-value">{dayNumber}</span>
                 </div>
+
+                {showCycleCountdown && (
+                    <>
+                        <div className="pulse-divider" />
+
+                        <div className="pulse-stat cycle">
+                            <span className="day-label">Next cycle</span>
+                            <span className="day-value">{formatCycleCountdown(secondsUntilNextCycle)}</span>
+                        </div>
+                    </>
+                )}
             </div>
         </div>
     )

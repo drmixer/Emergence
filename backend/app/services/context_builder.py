@@ -11,6 +11,7 @@ from app.core.time import ensure_utc, now_utc
 from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote, GlobalResources, AgentRelationshipMemory
 from app.services.agent_memory import agent_memory_service
 from app.services.actions import get_action_rate_limit_state
+from app.services.executable_governance import governance_payload_for_law, governance_payload_for_proposal
 from app.services.law_effects import is_survival_reserve_law
 from app.services.relationship_memory import RelationshipSummary, relationship_memory_service
 from app.services.live_run_scope import LiveRunWindow, apply_live_run_window, get_live_run_window
@@ -506,6 +507,8 @@ def _incoming_aid_request_inbox(
         requester = db.query(Agent).filter(Agent.id == requester_id).first()
         if requester is None:
             continue
+        if _aid_request_has_refusal_response(db, request_event=event, responder=agent, requester=requester):
+            continue
 
         resource_type = str(metadata.get("resource_type") or "").strip().lower()
         try:
@@ -576,6 +579,42 @@ def _incoming_aid_request_inbox(
         )
 
     return inbox_entries
+
+
+def _aid_request_has_refusal_response(
+    db: Session,
+    *,
+    request_event: Event,
+    responder: Agent,
+    requester: Agent,
+) -> bool:
+    request_created_at = ensure_utc(request_event.created_at)
+    if request_created_at is None:
+        return False
+    request_metadata = request_event.event_metadata if isinstance(request_event.event_metadata, dict) else {}
+    request_message_id = request_metadata.get("message_id")
+    query = db.query(Event).filter(
+        Event.agent_id == requester.id,
+        Event.event_type == "aid_refusal_received",
+    )
+    for event in query.order_by(desc(Event.created_at), desc(Event.id)).limit(25).all():
+        event_created_at = ensure_utc(event.created_at)
+        if event_created_at is not None and event_created_at < request_created_at:
+            continue
+        metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
+        try:
+            refusing_agent_id = int(metadata.get("refusing_agent_id") or 0)
+            target_agent_id = int(metadata.get("target_agent_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if refusing_agent_id != int(responder.id) or target_agent_id != int(requester.id):
+            continue
+        if request_message_id is None:
+            return True
+        if str(metadata.get("request_message_id") or "") == str(request_message_id):
+            return True
+        return True
+    return False
 
 
 def _recent_outgoing_social_actions(
@@ -1165,6 +1204,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         "  - Start public messages with the concrete observation, name, amount, proposal/law id, trade offer, objection, or question. Generic greetings and self-introductions are usually wasted space unless they add new information."
     )
     context_parts.append(
+        "  - Avoid generic 'Observation:' status memos. Public speech should carry a stance, motive, direct challenge, concrete offer/refusal, or new evidence under pressure."
+    )
+    context_parts.append(
         "  - A new forum_post or create_proposal should add a specific new fact, target, mechanism, tradeoff, or unanswered question."
     )
     context_parts.append("")
@@ -1248,11 +1290,16 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                 )
             
             proposal_type = str(prop.proposal_type or "other")
+            governance = governance_payload_for_proposal(prop)
+            class_label = str(governance.get("class_label") or "")
+            execution_label = str(governance.get("execution_label") or "")
             if proposal_type == "law":
                 context_parts.append(f"  [#{prop.id}] {prop.title} [LAW PROPOSAL]")
             else:
                 context_parts.append(f"  [#{prop.id}] {prop.title}")
-            context_parts.append(f"       By {author_name} | Type: {prop.proposal_type} | {votes_summary}")
+            context_parts.append(
+                f"       By {author_name} | Type: {prop.proposal_type} | {class_label} | {execution_label} | {votes_summary}"
+            )
             normalized_description = " ".join((prop.description or "").split())
             description_preview = (
                 normalized_description[:180] + "..."
@@ -1263,6 +1310,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                 context_parts.append(f"       Description: {description_preview}")
             if proposal_type == "law":
                 context_parts.append("       If this passes, it becomes a formal law.")
+            runtime_effect = governance.get("runtime_effect") if isinstance(governance, dict) else {}
+            if runtime_effect:
+                context_parts.append(f"       Runtime Effect: {governance.get('runtime_effect_label')}")
             context_parts.append(f"       Closes in {closes_in} | {vote_status}")
         if unvoted_proposals:
             context_parts.append("")
@@ -1287,21 +1337,25 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("PROPOSAL OPPORTUNITIES:")
     context_parts.append("  Proposals are how discussion becomes a vote or a durable shared change.")
     context_parts.append("  Use create_proposal when you want collective action on resources, rules, infrastructure, or governance.")
-    context_parts.append('  Important: if you want a passed proposal to become an actual law, use proposal_type "law".')
-    context_parts.append("  Passing a law changes policy, coordination, and enforcement context; it does not automatically override run-condition mechanics such as reserve auto-aid, dormant maintenance, or auto-revival unless those effects are enabled for this run.")
+    context_parts.append('  Important: if you want a passed proposal to become an actual law, use proposal_type "law" with governance_class "standing_law" or "advisory_law".')
+    context_parts.append("  Legal Text explains what agents intend. Runtime Effect is the separate structured template the system can actually execute.")
+    context_parts.append("  Passing advisory legal text does not automatically move resources. Only supported runtime_effect templates execute, and unsupported effects remain advisory.")
+    context_parts.append("  Passing a law changes policy, coordination, and enforcement context; it does not automatically override run-condition mechanics such as reserve auto-aid, dormant maintenance, or auto-revival unless those effects are enabled for this run or attached as a supported Runtime Effect.")
     context_parts.append('  Use proposal_type "rule" only for non-binding coordination norms or priorities that are not meant to become a formal law.')
     context_parts.append("  Proposal type guide:")
-    context_parts.append('  - Use "law" for binding obligations, mandatory contributions, automatic allocation, enforcement, penalties, reserve systems, ongoing aid rules, or anything you want enforced as a durable part of the world.')
-    context_parts.append('  - Use "allocation" for one-time resource distributions that do not need to persist across future cycles.')
-    context_parts.append('  - Use "rule" for soft norms, opt-in coordination, or preferences that are not binding and are not meant to become a formal law.')
+    context_parts.append('  - Resolution: non-binding intent; use proposal_type "rule" or governance_class "resolution".')
+    context_parts.append('  - Standing Law: recurring executable rule only when runtime_effect is a supported template.')
+    context_parts.append('  - Allocation: one-time common-pool transfer after passage when runtime_effect validation succeeds.')
+    context_parts.append('  - Advisory Law: passed legal text with no supported runtime effect.')
+    context_parts.append('  - Amendment and Emergency Action are governance classes; they still need a supported runtime_effect to execute mechanically.')
     if proposal_hooks:
         for hook in proposal_hooks[:5]:
             context_parts.append(f"  - {hook}")
     else:
         context_parts.append("  - If you want the group to formally choose something, create a proposal.")
-    context_parts.append('  Law example: {"action":"create_proposal","title":"Targeted Survival Aid Law","description":"Define binding aid eligibility, required contributor duties, and follow-through obligations for verified survival risk.","proposal_type":"law"}')
-    context_parts.append('  Law example: {"action":"create_proposal","title":"Reserve Access Verification Policy","description":"Create a transparent process for checking whether shared-reserve support is available under current run conditions before agents depend on it.","proposal_type":"law"}')
-    context_parts.append('  Allocation example: {"action":"create_proposal","title":"Immediate Recovery Allocation","description":"Allocate shared food and energy to named dormant agents whose current deficits are known.","proposal_type":"allocation"}')
+    context_parts.append('  Standing Law example: {"action":"create_proposal","title":"Active Threshold Aid Standing Law","description":"When active agents fall below the declared food or energy threshold, the common pool tops them up while preserving a pool floor.","proposal_type":"law","governance_class":"standing_law","runtime_effect":{"type":"active_reserve_aid","trigger_food_below":2,"trigger_energy_below":2,"target_food":3,"target_energy":3,"min_pool_remaining":25}}')
+    context_parts.append('  Allocation example: {"action":"create_proposal","title":"Immediate Recovery Allocation","description":"Transfer named resources from the common pool once if the vote passes and the pool floor is preserved.","proposal_type":"allocation","governance_class":"allocation","runtime_effect":{"type":"common_pool_allocation","transfers":[{"recipient_agent_id":42,"resource_type":"food","amount":2},{"recipient_agent_id":42,"resource_type":"energy","amount":2}],"min_pool_remaining":25}}')
+    context_parts.append('  Advisory Law example: {"action":"create_proposal","title":"Reserve Access Verification Policy","description":"Create a transparent process for checking reserve support before agents depend on it.","proposal_type":"law","governance_class":"advisory_law"}')
     context_parts.append('  Rule example: {"action":"create_proposal","title":"Voluntary Aid Priority Norm","description":"Encourage agents with surplus to prioritize verified survival deficits before stockpiling further, without mandatory contributions or enforcement.","proposal_type":"rule"}')
     context_parts.append('  Infrastructure example: {"action":"create_proposal","title":"Build Shared Storage","description":"Coordinate materials and labor to build shared storage for survival resources.","proposal_type":"infrastructure"}')
     context_parts.append("")
@@ -1311,15 +1365,20 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         for law in recent_laws:
             passed_at = ensure_utc(law.passed_at) or now
             minutes_since = max(0, int((now - passed_at).total_seconds() / 60))
+            governance = governance_payload_for_law(law)
             normalized_description = " ".join((law.description or "").split())
             description_preview = (
                 normalized_description[:180] + "..."
                 if len(normalized_description) > 180
                 else normalized_description
             )
-            context_parts.append(f"  - Law #{law.id}: {law.title} ({minutes_since}m ago)")
+            context_parts.append(
+                f"  - Law #{law.id}: {law.title} ({minutes_since}m ago; {governance.get('class_label')}; {governance.get('execution_label')})"
+            )
             if description_preview:
                 context_parts.append(f"    {description_preview}")
+            if governance.get("runtime_effect"):
+                context_parts.append(f"    Runtime Effect: {governance.get('runtime_effect_label')}")
         context_parts.append("")
 
     # Active laws
@@ -1328,15 +1387,20 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         for law in active_laws:
             passed_at = ensure_utc(law.passed_at) or now
             minutes_since = max(0, int((now - passed_at).total_seconds() / 60))
+            governance = governance_payload_for_law(law)
             normalized_description = " ".join((law.description or "").split())
             description_preview = (
                 normalized_description[:180] + "..."
                 if len(normalized_description) > 180
                 else normalized_description
             )
-            context_parts.append(f"  - Law #{law.id}: {law.title} (active, passed {minutes_since}m ago)")
+            context_parts.append(
+                f"  - Law #{law.id}: {law.title} (active, passed {minutes_since}m ago; {governance.get('class_label')}; {governance.get('execution_label')})"
+            )
             if description_preview:
                 context_parts.append(f"    {description_preview}")
+            if governance.get("runtime_effect"):
+                context_parts.append(f"    Runtime Effect: {governance.get('runtime_effect_label')}")
             context_parts.append(f"    Use law_id={law.id} if citing this law in enforcement actions.")
     else:
         context_parts.append("  (No laws have been passed yet)")
@@ -1542,7 +1606,8 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append("")
     context_parts.append("VALID ACTION JSON EXAMPLES:")
     context_parts.append('  {"action":"vote","proposal_id":123,"vote":"yes|no|abstain"}')
-    context_parts.append('  {"action":"create_proposal","title":"Targeted Aid Law","description":"Set binding conditions for when at-risk agents receive help and how contributors are identified.","proposal_type":"law"}')
+    context_parts.append('  {"action":"create_proposal","title":"Active Threshold Aid Standing Law","description":"Use common-pool resources to top up active agents below declared thresholds while preserving a pool floor.","proposal_type":"law","governance_class":"standing_law","runtime_effect":{"type":"active_reserve_aid","trigger_food_below":2,"trigger_energy_below":2,"target_food":3,"target_energy":3,"min_pool_remaining":25}}')
+    context_parts.append('  {"action":"create_proposal","title":"One-Time Common Pool Allocation","description":"Transfer named resources once after passage if the common pool can preserve its floor.","proposal_type":"allocation","governance_class":"allocation","runtime_effect":{"type":"common_pool_allocation","transfers":[{"recipient_agent_id":42,"resource_type":"food","amount":2}],"min_pool_remaining":25}}')
     context_parts.append('  {"action":"create_proposal","title":"Title","description":"Description","proposal_type":"law|allocation|rule|infrastructure|constitutional|other"}')
     context_parts.append('  {"action":"forum_post","content":"Your message here"}')
     context_parts.append('  {"action":"forum_reply","parent_message_id":708,"content":"I disagree with this specific request because the reserve is too low."}')

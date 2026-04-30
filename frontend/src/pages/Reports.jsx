@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Download,
+  ExternalLink,
   FileSearch,
-  FileText,
   RefreshCw,
   TimerReset,
 } from 'lucide-react'
@@ -52,6 +52,13 @@ function preferredFormat(artifact) {
   if (formats.includes('json')) return 'json'
   return ''
 }
+
+const ARCHIVE_REPORT_ARTIFACTS = [
+  ['approachable_report', 'Research Report'],
+  ['technical_report', 'Technical Report'],
+  ['planner_report', 'Next-Run Plan'],
+  ['run_summary', 'Run Summary'],
+]
 
 function getRunTakeaway(item) {
   const summary = item?.summary || {}
@@ -205,11 +212,12 @@ export default function Reports() {
     }
   }, [])
 
-  function openArtifact(runId, artifactType, artifact) {
+  function getArtifactUrl(runId, artifactType, artifact, action) {
     const format = preferredFormat(artifact)
-    if (!runId || !artifact?.available || !format) return
-    const href = api.getRunReportDownloadUrl(runId, artifactType, format)
-    window.open(href, '_blank', 'noopener,noreferrer')
+    if (!runId || !artifact?.available || !format) return ''
+    return action === 'download'
+      ? api.getRunReportDownloadUrl(runId, artifactType, format)
+      : api.getRunReportViewUrl(runId, artifactType, format)
   }
 
   const items = Array.isArray(archive?.items) ? archive.items : []
@@ -379,9 +387,14 @@ export default function Reports() {
                 const metrics = summary?.metrics || {}
                 const runMetadata = item?.run_metadata || {}
                 const artifacts = item?.artifacts || {}
-                const researchArtifact = artifacts.approachable_report
-                const technicalArtifact = artifacts.technical_report
                 const takeaway = getRunTakeaway(item)
+                const reportLinks = ARCHIVE_REPORT_ARTIFACTS
+                  .map(([artifactType, label]) => ({
+                    artifactType,
+                    label,
+                    artifact: artifacts[artifactType],
+                  }))
+                  .filter(({ artifact }) => artifact?.available && preferredFormat(artifact))
 
                 return (
                   <article key={runId} className="archive-run-card">
@@ -437,30 +450,34 @@ export default function Reports() {
                         <FileSearch size={14} />
                         Evidence
                       </Link>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        disabled={!researchArtifact?.available}
-                        onClick={() => openArtifact(runId, 'approachable_report', researchArtifact)}
-                      >
-                        <Download size={14} />
-                        Research Report
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        disabled={!technicalArtifact?.available}
-                        onClick={() => openArtifact(runId, 'technical_report', technicalArtifact)}
-                      >
-                        <Download size={14} />
-                        Technical Report
-                      </button>
+                      {reportLinks.map(({ artifactType, label, artifact }) => (
+                        <div key={artifactType} className="archive-report-action">
+                          <a
+                            className="btn btn-secondary"
+                            href={getArtifactUrl(runId, artifactType, artifact, 'view')}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Open ${label}`}
+                          >
+                            <ExternalLink size={14} />
+                            {label}
+                          </a>
+                          <a
+                            className="btn btn-secondary btn-icon-only"
+                            href={getArtifactUrl(runId, artifactType, artifact, 'download')}
+                            title={`Download ${label}`}
+                          >
+                            <Download size={14} />
+                            <span className="sr-only">Download {label}</span>
+                          </a>
+                        </div>
+                      ))}
                     </div>
 
                     <div className="archive-run-foot">
                       <span>Summary generated {formatDate(summary.generated_at_utc)}</span>
                       <span>
-                        Research: {preferredFormat(researchArtifact) || 'n/a'} · Technical: {preferredFormat(technicalArtifact) || 'n/a'}
+                        Reports: {reportLinks.length || 0} available
                       </span>
                     </div>
                   </article>

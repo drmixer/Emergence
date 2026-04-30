@@ -741,6 +741,14 @@ tr:last-child td {
   gap: var(--spacing-md);
 }
 
+.run-context-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
 .run-topbar-actions {
   display: flex;
   align-items: center;
@@ -759,6 +767,19 @@ tr:last-child td {
   font-size: 0.82rem;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+.run-id-pill.archived {
+  color: var(--accent-orange);
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.run-id-pill.context {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-provenance-card .card-body {
@@ -1143,6 +1164,8 @@ tr:last-child td {
 
 .reports-item-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
   justify-content: flex-end;
 }
 
@@ -1268,6 +1291,30 @@ tr:last-child td {
   display: flex;
   flex-wrap: wrap;
   gap: var(--spacing-sm);
+}
+
+.archive-report-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-icon-only {
+  width: 2.5rem;
+  min-width: 2.5rem;
+  padding-inline: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .archive-run-foot {

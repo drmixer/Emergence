@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.models.models import Law, Proposal, Agent
+from app.services.executable_governance import governance_payload_for_law
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 from app.services.reserve_semantics import reserve_law_semantics_payload
 
@@ -39,6 +40,9 @@ class LawResponse(BaseModel):
     id: int
     title: str
     description: str
+    law_class: Optional[str] = None
+    runtime_effect: dict[str, Any] = {}
+    governance: dict[str, Any] = {}
     active: bool
     passed_at: Optional[str]
     repealed_at: Optional[str]
@@ -95,6 +99,9 @@ def list_laws(
                 id=law.id,
                 title=law.title,
                 description=law.description,
+                law_class=str(law.law_class or "advisory_law"),
+                runtime_effect=law.runtime_effect if isinstance(law.runtime_effect, dict) else {},
+                governance=governance_payload_for_law(law),
                 active=bool(law.active),
                 passed_at=law.passed_at.isoformat() if law.passed_at else None,
                 repealed_at=law.repealed_at.isoformat() if law.repealed_at else None,
@@ -123,6 +130,9 @@ def get_law(law_id: int, db: Session = Depends(get_db)):
         id=law.id,
         title=law.title,
         description=law.description,
+        law_class=str(law.law_class or "advisory_law"),
+        runtime_effect=law.runtime_effect if isinstance(law.runtime_effect, dict) else {},
+        governance=governance_payload_for_law(law),
         active=bool(law.active),
         passed_at=law.passed_at.isoformat() if law.passed_at else None,
         repealed_at=law.repealed_at.isoformat() if law.repealed_at else None,

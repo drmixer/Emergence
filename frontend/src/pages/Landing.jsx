@@ -590,7 +590,7 @@ export default function Landing() {
                     <div className="footer-links">
                         <a href="https://github.com/drmixer/Emergence" target="_blank" rel="noopener noreferrer">GitHub</a>
                         <span>•</span>
-                        <a href="https://x.com/emergencequest" target="_blank" rel="noopener noreferrer">Twitter</a>
+                        <a href="https://x.com/emergencequest" target="_blank" rel="noopener noreferrer">X (Twitter)</a>
                         <span>•</span>
                         <a onClick={() => navigate('/about')}>About</a>
                         <span>•</span>

@@ -109,6 +109,72 @@ def _resolve_download_path(raw_path: str) -> Path:
     return artifact_path
 
 
+def _artifact_media_type(artifact_format: str) -> str:
+    return "application/json" if artifact_format == "json" else "text/markdown; charset=utf-8"
+
+
+def _find_run_artifact(
+    db: Session,
+    *,
+    run_id: str,
+    artifact_type: str,
+    artifact_format: str,
+) -> RunReportArtifact | None:
+    return (
+        db.query(RunReportArtifact)
+        .filter(
+            RunReportArtifact.run_id == run_id,
+            RunReportArtifact.artifact_type == artifact_type,
+            RunReportArtifact.artifact_format == artifact_format,
+            RunReportArtifact.status == "completed",
+        )
+        .order_by(RunReportArtifact.updated_at.desc(), RunReportArtifact.id.desc())
+        .first()
+    )
+
+
+def _find_condition_artifact(
+    db: Session,
+    *,
+    condition_name: str,
+    artifact_format: str,
+) -> RunReportArtifact | None:
+    condition_fragment_a = f'%\"condition_name\":\"{condition_name}\"%'
+    condition_fragment_b = f'%\"condition_name\": \"{condition_name}\"%'
+    return (
+        db.query(RunReportArtifact)
+        .filter(
+            RunReportArtifact.artifact_type == "condition_comparison",
+            RunReportArtifact.artifact_format == artifact_format,
+            RunReportArtifact.status == "completed",
+            or_(
+                cast(RunReportArtifact.metadata_json, String).like(condition_fragment_a),
+                cast(RunReportArtifact.metadata_json, String).like(condition_fragment_b),
+            ),
+        )
+        .order_by(RunReportArtifact.updated_at.desc(), RunReportArtifact.id.desc())
+        .first()
+    )
+
+
+def _artifact_response(
+    db: Session,
+    row: RunReportArtifact,
+    *,
+    content_disposition_type: str,
+) -> FileResponse:
+    artifact_format = str(row.artifact_format or "").strip()
+    artifact_path = ensure_artifact_path(db, row)
+    if artifact_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found")
+    return FileResponse(
+        path=str(artifact_path),
+        filename=artifact_path.name,
+        media_type=_artifact_media_type(artifact_format),
+        content_disposition_type=content_disposition_type,
+    )
+
+
 @router.get("/archive/runs")
 def list_archived_runs(
     limit: int = Query(24, ge=1, le=200),
@@ -311,29 +377,33 @@ def download_run_report(
     if clean_format not in FORMATS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported format")
 
-    row = (
-        db.query(RunReportArtifact)
-        .filter(
-            RunReportArtifact.run_id == clean_run_id,
-            RunReportArtifact.artifact_type == clean_type,
-            RunReportArtifact.artifact_format == clean_format,
-            RunReportArtifact.status == "completed",
-        )
-        .order_by(RunReportArtifact.updated_at.desc(), RunReportArtifact.id.desc())
-        .first()
-    )
+    row = _find_run_artifact(db, run_id=clean_run_id, artifact_type=clean_type, artifact_format=clean_format)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
 
-    artifact_path = ensure_artifact_path(db, row)
-    if artifact_path is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found")
-    media_type = "application/json" if clean_format == "json" else "text/markdown; charset=utf-8"
-    return FileResponse(
-        path=str(artifact_path),
-        filename=artifact_path.name,
-        media_type=media_type,
-    )
+    return _artifact_response(db, row, content_disposition_type="attachment")
+
+
+@router.get("/runs/{run_id}/view")
+def view_run_report(
+    run_id: str,
+    artifact_type: str = Query(...),
+    artifact_format: str = Query(..., alias="format"),
+    db: Session = Depends(get_db),
+):
+    clean_run_id = str(run_id or "").strip()
+    clean_type = str(artifact_type or "").strip()
+    clean_format = str(artifact_format or "").strip()
+    if clean_type not in RUN_ARTIFACT_TYPES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported artifact_type")
+    if clean_format not in FORMATS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported format")
+
+    row = _find_run_artifact(db, run_id=clean_run_id, artifact_type=clean_type, artifact_format=clean_format)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+
+    return _artifact_response(db, row, content_disposition_type="inline")
 
 
 @router.get("/conditions/{condition_name}")
@@ -382,31 +452,28 @@ def download_condition_comparison_report(
     if clean_format not in FORMATS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported format")
 
-    condition_fragment_a = f'%\"condition_name\":\"{clean_condition}\"%'
-    condition_fragment_b = f'%\"condition_name\": \"{clean_condition}\"%'
-    row = (
-        db.query(RunReportArtifact)
-        .filter(
-            RunReportArtifact.artifact_type == "condition_comparison",
-            RunReportArtifact.artifact_format == clean_format,
-            RunReportArtifact.status == "completed",
-            or_(
-                cast(RunReportArtifact.metadata_json, String).like(condition_fragment_a),
-                cast(RunReportArtifact.metadata_json, String).like(condition_fragment_b),
-            ),
-        )
-        .order_by(RunReportArtifact.updated_at.desc(), RunReportArtifact.id.desc())
-        .first()
-    )
+    row = _find_condition_artifact(db, condition_name=clean_condition, artifact_format=clean_format)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
 
-    artifact_path = ensure_artifact_path(db, row)
-    if artifact_path is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact file not found")
-    media_type = "application/json" if clean_format == "json" else "text/markdown; charset=utf-8"
-    return FileResponse(
-        path=str(artifact_path),
-        filename=artifact_path.name,
-        media_type=media_type,
-    )
+    return _artifact_response(db, row, content_disposition_type="attachment")
+
+
+@router.get("/conditions/{condition_name}/view")
+def view_condition_comparison_report(
+    condition_name: str,
+    artifact_format: str = Query(..., alias="format"),
+    db: Session = Depends(get_db),
+):
+    clean_condition = str(condition_name or "").strip().lower()
+    clean_format = str(artifact_format or "").strip()
+    if not clean_condition:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="condition_name is required")
+    if clean_format not in FORMATS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported format")
+
+    row = _find_condition_artifact(db, condition_name=clean_condition, artifact_format=clean_format)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+
+    return _artifact_response(db, row, content_disposition_type="inline")

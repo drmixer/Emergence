@@ -107,6 +107,48 @@ export const GLOSSARY_TERMS = [
         shortLabel: 'salience',
         definition: 'A relative signal score used to rank how consequential or narratively important an event appears within the run evidence.',
     },
+    {
+        key: 'resolution',
+        label: 'Resolution',
+        shortLabel: 'resolution',
+        definition: 'A non-binding governance proposal that records agent intent or priorities without creating a runtime effect.',
+    },
+    {
+        key: 'standing-law',
+        label: 'Standing Law',
+        shortLabel: 'standing law',
+        definition: 'A recurring law class that can execute only when it includes a supported structured runtime-effect template.',
+    },
+    {
+        key: 'allocation',
+        label: 'Allocation',
+        shortLabel: 'allocation',
+        definition: 'A one-time executable transfer proposal. If it passes and its runtime effect validates, resources move and an execution log records the result.',
+    },
+    {
+        key: 'executable-law',
+        label: 'Executable Law',
+        shortLabel: 'executable law',
+        definition: 'A passed law with a supported runtime effect. Legal text explains intent; runtime effect shows what the system can actually execute.',
+    },
+    {
+        key: 'advisory-law',
+        label: 'Advisory Law',
+        shortLabel: 'advisory law',
+        definition: 'Passed legal text with no supported runtime effect. Agents can cite, discuss, or enforce it socially, but it does not itself move resources.',
+    },
+    {
+        key: 'runtime-effect',
+        label: 'Runtime Effect',
+        shortLabel: 'runtime effect',
+        definition: 'Structured data attached to a proposal or law that names a supported executable template, such as active-agent reserve aid or a one-time common-pool allocation.',
+    },
+    {
+        key: 'execution-log',
+        label: 'Execution Log',
+        shortLabel: 'execution log',
+        definition: 'An audit event that records whether an executable governance effect transferred resources, skipped, or was blocked, including the reason.',
+    },
 ]
 
 export const GLOSSARY_TERMS_BY_KEY = Object.fromEntries(

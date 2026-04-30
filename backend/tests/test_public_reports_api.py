@@ -66,6 +66,10 @@ def test_list_and_download_run_reports(reports_client):
             "/api/reports/runs/run-1/download",
             params={"artifact_type": "run_summary", "format": "json"},
         )
+        view_response = client.get(
+            "/api/reports/runs/run-1/view",
+            params={"artifact_type": "run_summary", "format": "json"},
+        )
 
     assert list_response.status_code == 200
     body = list_response.json()
@@ -74,7 +78,13 @@ def test_list_and_download_run_reports(reports_client):
     assert body["items"][0]["artifact_type"] == "run_summary"
 
     assert download_response.status_code == 200
+    assert download_response.headers["content-disposition"].startswith("attachment;")
     assert '"ok":true' in download_response.text
+
+    assert view_response.status_code == 200
+    assert view_response.headers["content-disposition"].startswith("inline;")
+    assert view_response.headers["content-type"].startswith("application/json")
+    assert '"ok":true' in view_response.text
 
 
 def test_list_and_download_condition_comparison_reports(reports_client):
@@ -113,6 +123,10 @@ def test_list_and_download_condition_comparison_reports(reports_client):
             "/api/reports/conditions/baseline_v1/download",
             params={"format": "markdown"},
         )
+        view_response = client.get(
+            "/api/reports/conditions/baseline_v1/view",
+            params={"format": "markdown"},
+        )
 
     assert list_response.status_code == 200
     payload = list_response.json()
@@ -120,7 +134,13 @@ def test_list_and_download_condition_comparison_reports(reports_client):
     assert payload["count"] == 2
 
     assert download_response.status_code == 200
+    assert download_response.headers["content-disposition"].startswith("attachment;")
     assert "# baseline" in download_response.text
+
+    assert view_response.status_code == 200
+    assert view_response.headers["content-disposition"].startswith("inline;")
+    assert view_response.headers["content-type"].startswith("text/markdown")
+    assert "# baseline" in view_response.text
 
 
 def test_download_run_report_regenerates_missing_artifact(reports_client, monkeypatch):

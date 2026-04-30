@@ -125,7 +125,21 @@ export default function Laws() {
                                         Similar law cluster: {clusterSize} raw laws
                                     </div>
                                 )}
+                                {law.governance?.class_label && (
+                                    <div className="governance-badge-row">
+                                        <span className="governance-badge">{law.governance.class_label}</span>
+                                        <span className={`governance-badge ${law.governance.executable ? 'executable' : 'advisory'}`}>
+                                            {law.governance.execution_label}
+                                        </span>
+                                    </div>
+                                )}
                                 <p className="law-description">{law.description}</p>
+                                {law.governance?.runtime_effect && Object.keys(law.governance.runtime_effect).length > 0 && (
+                                    <div className="runtime-effect-box">
+                                        <div className="runtime-effect-kicker">Runtime Effect</div>
+                                        <div>{law.governance.runtime_effect_label}</div>
+                                    </div>
+                                )}
                                 <ReserveSemanticsNote semantics={law.reserve_semantics} compact />
                                 <div className="law-meta">
                                     <span>
@@ -225,6 +239,54 @@ export default function Laws() {
           color: var(--text-secondary);
           font-size: 0.875rem;
           margin-bottom: var(--spacing-md);
+        }
+
+        .governance-badge-row {
+          display: flex;
+          gap: var(--spacing-xs);
+          flex-wrap: wrap;
+          margin-bottom: var(--spacing-sm);
+        }
+
+        .governance-badge {
+          display: inline-flex;
+          align-items: center;
+          border: 1px solid rgba(148, 163, 184, 0.28);
+          color: var(--text-secondary);
+          border-radius: var(--radius-full);
+          padding: 3px 8px;
+          font-size: 0.72rem;
+          background: rgba(148, 163, 184, 0.08);
+        }
+
+        .governance-badge.executable {
+          border-color: rgba(34, 197, 94, 0.34);
+          color: var(--accent-green);
+          background: rgba(34, 197, 94, 0.08);
+        }
+
+        .governance-badge.advisory {
+          border-color: rgba(245, 158, 11, 0.32);
+          color: #f59e0b;
+          background: rgba(245, 158, 11, 0.08);
+        }
+
+        .runtime-effect-box {
+          border: 1px solid rgba(34, 197, 94, 0.28);
+          background: rgba(34, 197, 94, 0.08);
+          color: var(--text-secondary);
+          border-radius: var(--radius-md);
+          padding: var(--spacing-sm);
+          margin-bottom: var(--spacing-md);
+          font-size: 0.8125rem;
+        }
+
+        .runtime-effect-kicker {
+          color: var(--accent-green);
+          font-weight: 700;
+          text-transform: uppercase;
+          font-size: 0.68rem;
+          margin-bottom: 2px;
         }
 
         .policy-cluster-chip {

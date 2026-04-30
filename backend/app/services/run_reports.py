@@ -677,8 +677,16 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         verification_state = "verified"
     elif total_events > 0 and key_moments:
         verification_state = "partial"
+    elif source == "fallback_window" and calls == 0 and total_events == 0:
+        verification_state = "missing_run_data"
     else:
         verification_state = "unverified"
+    data_source_warning = None
+    if verification_state == "missing_run_data":
+        data_source_warning = (
+            "No run-scoped events or LLM usage were found for this run_id in the current database. "
+            "This is a report data-source problem, not evidence that the run had zero activity."
+        )
 
     llm_payload = {
         "calls": calls,
@@ -798,6 +806,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "season_number": (int(run_row.season_number) if run_row and run_row.season_number else None),
         "verification_state": verification_state,
         "verification_source": source,
+        "data_source_warning": data_source_warning,
         "llm": llm_payload,
         "activity": activity_payload,
         "reserve_semantics": reserve_policy_access_payload(db),
@@ -1215,6 +1224,8 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
         "",
         "## Provider Breakdown",
     ]
+    if payload.get("data_source_warning"):
+        rows[10:10] = ["## Data Source Warning", str(payload.get("data_source_warning")), ""]
     for row in llm.get("by_provider") or []:
         rows.append(
             "- "

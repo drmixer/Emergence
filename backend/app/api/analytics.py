@@ -39,7 +39,11 @@ from app.services.usage_budget import usage_budget
 from app.services.emergence_metrics import compute_emergence_metrics
 from app.services.kpi_rollups import record_kpi_event
 from app.services.report_artifacts import load_json_artifact
-from app.services.simulation_time import get_simulation_day_number, get_simulation_day_number_from_bounds
+from app.services.simulation_time import (
+    get_simulation_day_delta,
+    get_simulation_day_number,
+    get_simulation_day_number_from_bounds,
+)
 from app.services.runtime_config import runtime_config_service
 from app.services.live_run_scope import (
     LiveRunWindow,
@@ -1976,6 +1980,7 @@ def overview():
     """Key simulation stats for dashboards."""
     db = SessionLocal()
     try:
+        now = now_utc()
         run_window = get_live_run_window(db)
         configured_run_id = run_window.run_id
         simulation_active = bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
@@ -2066,6 +2071,25 @@ def overview():
         else:
             day_number = get_simulation_day_number(db)
 
+        cycle_status: dict[str, Any] = {"enabled": False}
+        run_started_at = ensure_utc(run_window.started_at)
+        if simulation_active and run_started_at is not None:
+            day_delta = get_simulation_day_delta()
+            cycle_seconds = max(60, int(day_delta.total_seconds()))
+            elapsed_seconds = max(0, int((now - run_started_at).total_seconds()))
+            completed_cycles = elapsed_seconds // cycle_seconds
+            current_cycle_started_at = run_started_at + timedelta(seconds=completed_cycles * cycle_seconds)
+            next_cycle_at = current_cycle_started_at + timedelta(seconds=cycle_seconds)
+            cycle_status = {
+                "enabled": True,
+                "run_started_at": run_started_at.isoformat(),
+                "day_length_minutes": max(1, int(cycle_seconds // 60)),
+                "current_cycle_started_at": current_cycle_started_at.isoformat(),
+                "next_cycle_at": next_cycle_at.isoformat(),
+                "seconds_until_next_cycle": max(0, int((next_cycle_at - now).total_seconds())),
+                "completed_cycles": int(completed_cycles),
+            }
+
         # Critical agents: count agents with low food/energy (thresholds match the context-builder warning).
         critical_food = (
             db.query(AgentInventory)
@@ -2122,6 +2146,7 @@ def overview():
                 "last_completed_run_id": last_completed_run_id,
                 "last_completed_run_ended_at": last_completed_run.ended_at.isoformat() if last_completed_run and last_completed_run.ended_at else None,
             },
+            "cycle_status": cycle_status,
             "agents": {
                 "total": total_agents,
                 "active": active_agents,

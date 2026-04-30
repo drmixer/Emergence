@@ -1,6 +1,6 @@
 const CHART_HEIGHT = 300
 const CHART_WIDTH = 640
-const CHART_PADDING = { top: 16, right: 18, bottom: 34, left: 42 }
+const CHART_PADDING = { top: 16, right: 18, bottom: 34, left: 78 }
 const GRID_TICKS = 4
 
 function formatNumber(n) {

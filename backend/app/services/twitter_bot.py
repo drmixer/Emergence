@@ -1,6 +1,6 @@
 """
-Twitter Bot Service for Emergence
-Auto-posts notable events, summaries, and drama to Twitter/X
+X (Twitter) Bot Service for Emergence
+Auto-posts notable events, summaries, and drama to X (Twitter)
 """
 
 import os
@@ -63,7 +63,7 @@ class TweetContent:
 
 class TwitterBot:
     """
-    Twitter/X bot for auto-posting Emergence events
+    X (Twitter) bot for auto-posting Emergence events
     """
     
     def __init__(self):
@@ -148,6 +148,9 @@ class TwitterBot:
             "quote": str(content.quote or "").strip() or None,
             "chart": str(content.chart or "").strip() or None,
             "format_version": "context-light-v1",
+            "platform_label": "X (Twitter)",
+            "text_only": bool(content.tweet_type == TweetType.NOTABLE_QUOTE),
+            "operator_review_expected": bool(content.tweet_type == TweetType.NOTABLE_QUOTE),
         }
         draft = create_social_draft(
             platform="x",
@@ -218,6 +221,16 @@ class TwitterBot:
         """Send a tweet"""
         _ = allow_requeue
         self._set_dispatch_state(status="idle")
+        if content.tweet_type == TweetType.NOTABLE_QUOTE:
+            draft = self._store_review_draft(
+                content,
+                error_message="operator_review_required",
+            )
+            logger.info(
+                "X (Twitter) notable quote drafted for operator review: draft_id=%s",
+                draft["id"],
+            )
+            return False
         if not self.enabled:
             draft = self._store_review_draft(
                 content,
@@ -572,7 +585,7 @@ class TweetFormatter:
         return TweetContent(
             tweet_type=TweetType.NOTABLE_QUOTE,
             text=text,
-            url=f"/agents/{agent_number}",
+            url=None,
             priority=6,
             stake="This quote captures a live motive or pressure point.",
             consequence=consequence,

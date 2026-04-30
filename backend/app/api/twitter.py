@@ -1,6 +1,6 @@
 """
-Twitter Bot API Endpoints
-Monitor and control the Twitter bot
+X (Twitter) Bot API Endpoints
+Monitor and control the X (Twitter) bot
 """
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.admin_auth import AdminActor, assert_admin_write_access, require_admin_auth
 from app.core.database import get_db
 
-# Twitter bot integration
+# X (Twitter) bot integration
 try:
     from app.services.twitter_bot import (
         twitter_bot, 
@@ -40,7 +40,7 @@ def _assert_writes_enabled(actor: AdminActor) -> None:
 
 
 class TweetRequest(BaseModel):
-    """Request to send a manual tweet"""
+    """Request to send a manual X (Twitter) post"""
     tweet_type: str
     message: str
     url: Optional[str] = None
@@ -64,11 +64,11 @@ async def get_status(
     db: Session = Depends(get_db),
     _actor: AdminActor = Depends(require_admin_auth),
 ):
-    """Get current Twitter bot status"""
+    """Get current X (Twitter) bot status"""
     if not TWITTER_AVAILABLE:
         return {
             "enabled": False,
-            "error": "Twitter bot module not available",
+            "error": "X (Twitter) bot module not available",
             "available": False
         }
     
@@ -90,7 +90,7 @@ async def test_tweet_format(
     Returns what the tweet would look like
     """
     if not TWITTER_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Twitter bot not available")
+        raise HTTPException(status_code=503, detail="X (Twitter) bot not available")
     
     event_type = request.event_type
     data = request.data
@@ -165,11 +165,11 @@ async def send_manual_tweet(
     _actor: AdminActor = Depends(require_admin_auth),
 ):
     """
-    Send a manual tweet (requires TWITTER_ENABLED=true)
+    Send a manual X (Twitter) post (requires TWITTER_ENABLED=true)
     Use with caution!
     """
     if not TWITTER_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Twitter bot not available")
+        raise HTTPException(status_code=503, detail="X (Twitter) bot not available")
     
     if not twitter_bot.enabled:
         draft = create_social_draft(
@@ -186,7 +186,7 @@ async def send_manual_tweet(
         )
         return {
             "success": False,
-            "error": "Twitter bot is disabled. Drafted for manual review instead.",
+            "error": "X (Twitter) bot is disabled. Drafted for manual review instead.",
             "would_tweet": request.message,
             "draft": draft,
         }
@@ -237,7 +237,7 @@ async def send_manual_tweet(
 async def reset_daily_counter(_actor: AdminActor = Depends(require_admin_auth)):
     """Reset the daily tweet counter (for testing)"""
     if not TWITTER_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Twitter bot not available")
+        raise HTTPException(status_code=503, detail="X (Twitter) bot not available")
     
     twitter_bot.reset_daily_count()
     
@@ -257,7 +257,7 @@ async def list_tweet_drafts(
 ):
     """Get durable social drafts for manual review."""
     if not TWITTER_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Twitter bot not available")
+        raise HTTPException(status_code=503, detail="X (Twitter) bot not available")
 
     return list_social_drafts(
         db,

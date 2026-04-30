@@ -36,6 +36,13 @@ function formatTimestamp(value) {
   return date.toLocaleString()
 }
 
+function formatDate(value) {
+  if (!value) return 'Unknown date'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Unknown date'
+  return date.toLocaleDateString()
+}
+
 function formatRelative(value) {
   if (!value) return ''
   const date = new Date(value)
@@ -235,6 +242,10 @@ export default function RunDetail() {
 
   const startTime = provenance?.time_window?.start_utc
   const endTime = provenance?.time_window?.end_utc
+  const runEndedAt = runMetadata?.ended_at || endTime
+  const isArchivedRun = Boolean(runEndedAt)
+  const runCondition = String(runMetadata?.condition_name || data?.condition_name || '').trim()
+  const runClass = String(runMetadata?.run_class || '').trim()
   const timeWindowSummary =
     startTime && endTime ? `${formatTimestamp(startTime)} -> ${formatTimestamp(endTime)}` : 'Unknown time window'
 
@@ -397,9 +408,26 @@ export default function RunDetail() {
       </div>
 
       <div className="run-detail-topbar">
-        <div className="run-id-pill">
-          <Hash size={15} />
-          <span>{runId || 'unknown-run'}</span>
+        <div className="run-context-pills">
+          <div className="run-id-pill">
+            <Hash size={15} />
+            <span>{runId || 'unknown-run'}</span>
+          </div>
+          {!loading && !error && data && isArchivedRun && (
+            <div className="run-id-pill archived">
+              <span>Archived · ended {formatDate(runEndedAt)}</span>
+            </div>
+          )}
+          {!loading && !error && data && runCondition && (
+            <div className="run-id-pill context">
+              <span>{runCondition.replace(/_/g, ' ')}</span>
+            </div>
+          )}
+          {!loading && !error && data && runClass && (
+            <div className="run-id-pill context">
+              <span>{runClass.replace(/_/g, ' ')}</span>
+            </div>
+          )}
         </div>
         <div className="run-topbar-actions">
           <Link className="btn btn-secondary" to={getStoryReplayHref(runId)}>
@@ -425,6 +453,11 @@ export default function RunDetail() {
       {!loading && error && <div className="feed-notice">{error}</div>}
       {shareNotice && <div className="feed-notice success">{shareNotice}</div>}
       {focusedEventError && <div className="feed-notice">{focusedEventError}</div>}
+      {!loading && !error && data && isArchivedRun && (
+        <div className="feed-notice">
+          Viewing archived evidence for {runId}; these counters are scoped to this run, not the current or latest run.
+        </div>
+      )}
       {!loading && !error && isTuningRun && (
         <div className="feed-notice">
           This run is labeled as a tuning run and is excluded from the public archived-run history by default.

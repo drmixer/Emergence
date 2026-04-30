@@ -48,7 +48,7 @@ const faqItems = [
   },
   {
     q: 'Where can I follow updates?',
-    a: 'Live state appears in the dashboard and notable moments are posted to X/Twitter.',
+    a: 'Live state appears in the dashboard and notable moments are posted to X (Twitter).',
   },
 ]
 

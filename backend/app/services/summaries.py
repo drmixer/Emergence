@@ -374,7 +374,7 @@ async def generate_highlight(event_type: str, data: dict) -> str:
             return ""
         response = await llm_client.get_completion(
             model_type=_summary_model_type(),
-            system_prompt="You write brief, punchy highlights for an AI civilization experiment. Keep responses under 280 characters for Twitter compatibility.",
+            system_prompt="You write brief, punchy highlights for an AI civilization experiment. Keep responses under 280 characters for X (Twitter) compatibility.",
             user_prompt=prompt,
             max_tokens=100,
         )

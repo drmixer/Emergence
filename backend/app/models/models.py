@@ -289,6 +289,8 @@ class Proposal(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
     proposal_type = Column(String(30), nullable=False)
+    governance_class = Column(String(30), nullable=True)
+    runtime_effect = Column(JSON, nullable=True, default=dict)
     status = Column(String(20), nullable=False, default="active")
     votes_for = Column(Integer, nullable=False, default=0)
     votes_against = Column(Integer, nullable=False, default=0)
@@ -303,8 +305,12 @@ class Proposal(Base):
     
     __table_args__ = (
         CheckConstraint(
-            "proposal_type IN ('law', 'allocation', 'rule', 'infrastructure', 'constitutional', 'other')",
+            "proposal_type IN ('law', 'allocation', 'rule', 'infrastructure', 'constitutional', 'other', 'resolution', 'standing_law', 'amendment', 'emergency_action')",
             name="valid_proposal_type"
+        ),
+        CheckConstraint(
+            "(governance_class IS NULL) OR governance_class IN ('resolution', 'standing_law', 'allocation', 'amendment', 'emergency_action', 'advisory_law')",
+            name="valid_governance_class"
         ),
         CheckConstraint("status IN ('active', 'passed', 'failed', 'expired')", name="valid_proposal_status"),
     )
@@ -339,6 +345,8 @@ class Law(Base):
     proposal_id = Column(Integer, ForeignKey("proposals.id"), nullable=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
+    law_class = Column(String(30), nullable=True)
+    runtime_effect = Column(JSON, nullable=True, default=dict)
     author_agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
     active = Column(Boolean, nullable=False, default=True)
     passed_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -348,6 +356,13 @@ class Law(Base):
     # Relationships
     author = relationship("Agent", foreign_keys=[author_agent_id])
     proposal = relationship("Proposal", foreign_keys=[proposal_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            "(law_class IS NULL) OR law_class IN ('standing_law', 'advisory_law', 'amendment', 'emergency_action')",
+            name="valid_law_class",
+        ),
+    )
 
 
 class Event(Base):

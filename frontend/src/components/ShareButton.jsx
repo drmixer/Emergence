@@ -77,7 +77,7 @@ export default function ShareButton({
 
                         <button className="share-option" onClick={shareToTwitter}>
                             <Twitter size={18} />
-                            <span>Share on Twitter</span>
+                            <span>Share on X (Twitter)</span>
                         </button>
 
                         <button className="share-option" onClick={copyToClipboard}>

@@ -207,7 +207,7 @@ export default function QuoteCardGenerator({ initialQuote = null }) {
         return `${window.location.origin}/agents/${selectedQuote.agent_number}`
     }, [selectedQuote])
 
-    // Share to Twitter
+    // Share to X (Twitter)
     const shareToTwitter = useCallback(() => {
         if (!selectedQuote) return
         const text = `"${selectedQuote.content}" — ${formatAgentDisplayLabel(selectedQuote)}`

@@ -20,7 +20,7 @@ export default function Footer() {
                         <Github size={14} /> GitHub
                     </a>
                     <a href="https://x.com/emergencequest" target="_blank" rel="noopener noreferrer">
-                        <Twitter size={14} /> Twitter
+                        <Twitter size={14} /> X (Twitter)
                     </a>
                 </div>
 

@@ -100,6 +100,7 @@ export default function Dashboard() {
                 degradedFallbackMessages: overview?.messages?.degraded_fallback_total ?? 0,
                 dayNumber: overview?.day_number ?? 0,
                 lastActivity: overview?.events?.latest ?? null,
+                cycleStatus: overview?.cycle_status ?? null,
                 criticalFoodAgents: overview?.critical?.food_agents ?? 0,
                 criticalEnergyAgents: overview?.critical?.energy_agents ?? 0,
                 totalFood: sumWorldResource(resources, 'food'),
@@ -317,6 +318,7 @@ export default function Dashboard() {
                     lastActivity={stats.lastActivity}
                     messageCount={stats.totalMessages}
                     dayNumber={stats.dayNumber}
+                    cycleStatus={stats.cycleStatus}
                 />
             )}
 

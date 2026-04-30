@@ -339,28 +339,46 @@ class APIService {
         return this.fetch(`/api/reports/conditions/${encodeURIComponent(cleanCondition)}`)
     }
 
-    getRunReportDownloadUrl(runId, artifactType, format = 'json') {
+    getRunReportUrl(runId, artifactType, format = 'json', action = 'view') {
         const cleanRunId = String(runId || '').trim()
         const cleanArtifactType = String(artifactType || '').trim()
         const cleanFormat = String(format || '').trim() || 'json'
+        const cleanAction = action === 'download' ? 'download' : 'view'
         if (!cleanRunId || !cleanArtifactType) {
             throw new Error('runId and artifactType are required')
         }
         const params = new URLSearchParams()
         params.append('artifact_type', cleanArtifactType)
         params.append('format', cleanFormat)
-        return `${this.baseUrl}/api/reports/runs/${encodeURIComponent(cleanRunId)}/download?${params.toString()}`
+        return `${this.baseUrl}/api/reports/runs/${encodeURIComponent(cleanRunId)}/${cleanAction}?${params.toString()}`
     }
 
-    getConditionReportDownloadUrl(conditionName, format = 'json') {
+    getRunReportViewUrl(runId, artifactType, format = 'json') {
+        return this.getRunReportUrl(runId, artifactType, format, 'view')
+    }
+
+    getRunReportDownloadUrl(runId, artifactType, format = 'json') {
+        return this.getRunReportUrl(runId, artifactType, format, 'download')
+    }
+
+    getConditionReportUrl(conditionName, format = 'json', action = 'view') {
         const cleanCondition = String(conditionName || '').trim()
         const cleanFormat = String(format || '').trim() || 'json'
+        const cleanAction = action === 'download' ? 'download' : 'view'
         if (!cleanCondition) {
             throw new Error('conditionName is required')
         }
         const params = new URLSearchParams()
         params.append('format', cleanFormat)
-        return `${this.baseUrl}/api/reports/conditions/${encodeURIComponent(cleanCondition)}/download?${params.toString()}`
+        return `${this.baseUrl}/api/reports/conditions/${encodeURIComponent(cleanCondition)}/${cleanAction}?${params.toString()}`
+    }
+
+    getConditionReportViewUrl(conditionName, format = 'json') {
+        return this.getConditionReportUrl(conditionName, format, 'view')
+    }
+
+    getConditionReportDownloadUrl(conditionName, format = 'json') {
+        return this.getConditionReportUrl(conditionName, format, 'download')
     }
 
     // Prediction markets

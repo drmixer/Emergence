@@ -229,11 +229,12 @@ export default function RunReplay() {
     return storyItems[0]
   }, [selectedEventId, storyItems])
 
-  function openReport(row) {
+  function getReportUrl(row, action) {
     const format = preferredReportFormat(row)
-    if (!format || !row?.type) return
-    const href = api.getRunReportDownloadUrl(runId, row.type, format)
-    window.open(href, '_blank', 'noopener,noreferrer')
+    if (!format || !row?.type) return ''
+    return action === 'download'
+      ? api.getRunReportDownloadUrl(runId, row.type, format)
+      : api.getRunReportViewUrl(runId, row.type, format)
   }
 
   const provenance = runDetail?.provenance || {}
@@ -513,10 +514,22 @@ export default function RunReplay() {
                         <span>{formatTimestamp(row.updated_at)}</span>
                       </div>
                       <div className="reports-item-actions">
-                        <button type="button" className="btn btn-secondary" onClick={() => openReport(row)}>
-                          <Download size={14} />
+                        <a
+                          className="btn btn-secondary"
+                          href={getReportUrl(row, 'view')}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink size={14} />
                           Open
-                        </button>
+                        </a>
+                        <a
+                          className="btn btn-secondary"
+                          href={getReportUrl(row, 'download')}
+                        >
+                          <Download size={14} />
+                          Download
+                        </a>
                       </div>
                     </div>
                   ))

@@ -7,7 +7,7 @@ from math import ceil
 import re
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import desc, func
 
 from app.core.config import settings
 from app.core.time import ensure_utc, now_utc
@@ -23,6 +23,10 @@ from app.services.law_effects import (
 )
 from app.services.live_run_scope import get_live_run_window
 from app.services.events_generator import event_generator
+from app.services.executable_governance import (
+    normalize_governance_class,
+    normalize_runtime_effect,
+)
 from app.services.reserve_semantics import reserve_mechanical_access_payload
 from app.services.relationship_memory import relationship_memory_service
 from app.services.runtime_config import runtime_config_service
@@ -282,6 +286,10 @@ _VALID_PROPOSAL_TYPES = {
     "infrastructure",
     "constitutional",
     "other",
+    "resolution",
+    "standing_law",
+    "amendment",
+    "emergency_action",
 }
 
 _RULE_BINDING_NEGATED_PHRASES = (
@@ -377,6 +385,64 @@ def _find_near_duplicate_recent_forum_message(db: Session, agent: Agent, action:
         if overlap / max(1, smaller) >= _DUPLICATE_FORUM_SMALLER_RATIO:
             return message
     return None
+
+
+def _latest_aid_request_event(db: Session, *, refuser: Agent, requester: Agent) -> Event | None:
+    query = db.query(Event).filter(
+        Event.agent_id == refuser.id,
+        Event.event_type == "aid_request_received",
+    )
+    started_at = _active_run_started_at(db)
+    if started_at is not None:
+        query = query.filter(Event.created_at >= started_at)
+
+    for event in query.order_by(desc(Event.created_at), desc(Event.id)).limit(25).all():
+        metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
+        try:
+            requesting_agent_id = int(metadata.get("requesting_agent_id") or 0)
+        except (TypeError, ValueError):
+            requesting_agent_id = 0
+        if requesting_agent_id == int(requester.id):
+            return event
+    return None
+
+
+def _aid_request_already_refused(
+    db: Session,
+    *,
+    request_event: Event,
+    refuser: Agent,
+    requester: Agent,
+) -> bool:
+    request_created_at = ensure_utc(request_event.created_at)
+    if request_created_at is None:
+        return False
+    request_metadata = request_event.event_metadata if isinstance(request_event.event_metadata, dict) else {}
+    request_message_id = request_metadata.get("message_id")
+    query = db.query(Event).filter(
+        Event.agent_id == requester.id,
+        Event.event_type == "aid_refusal_received",
+    )
+    for event in query.order_by(desc(Event.created_at), desc(Event.id)).limit(25).all():
+        event_created_at = ensure_utc(event.created_at)
+        if event_created_at is not None and event_created_at < request_created_at:
+            continue
+        metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
+        try:
+            refusing_agent_id = int(metadata.get("refusing_agent_id") or 0)
+            target_agent_id = int(metadata.get("target_agent_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if refusing_agent_id != int(refuser.id) or target_agent_id != int(requester.id):
+            continue
+        if request_message_id is None:
+            return True
+        if str(metadata.get("request_message_id") or "") == str(request_message_id):
+            return True
+        # Backward-compatible: a refusal after the latest request still answers it
+        # even if it was created before request ids were attached.
+        return True
+    return False
 
 
 def _active_run_proposal_query(db: Session):
@@ -551,6 +617,20 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         if len(content) > 2000:
             return {"valid": False, "reason": "Forum reply too long (max 2000 chars)"}
         thread_root = _message_thread_root(db, parent)
+        duplicate_message = _find_near_duplicate_recent_forum_message(db, agent, action)
+        if (
+            duplicate_message is not None
+            and int(duplicate_message.id) not in {int(parent.id), int(thread_root.id)}
+        ):
+            return {
+                "valid": False,
+                "reason_code": "duplicate_forum_message",
+                "message_id": duplicate_message.id,
+                "reason": (
+                    "Near-duplicate recent forum message exists; add a concrete new fact, "
+                    f"vote/contest, or reply more specifically to message #{duplicate_message.id}"
+                ),
+            }
         if _looks_like_personal_survival_request(thread_root.content) and _looks_like_governance_argument(content):
             return {
                 "valid": False,
@@ -623,6 +703,22 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Cannot refuse aid to yourself"}
         if target.status == "dead":
             return {"valid": False, "reason": "Cannot refuse aid to a dead agent"}
+        request_event = _latest_aid_request_event(db, refuser=agent, requester=target)
+        if request_event is not None and _aid_request_already_refused(
+            db,
+            request_event=request_event,
+            refuser=agent,
+            requester=target,
+        ):
+            return {
+                "valid": False,
+                "reason_code": "aid_request_already_refused",
+                "request_event_id": request_event.id,
+                "reason": (
+                    "You already refused this agent's latest aid request. Use direct_message "
+                    "only if conditions materially changed or they ask again."
+                ),
+            }
         reason = action.get("reason", "")
         if not reason or len(reason) < 1:
             return {"valid": False, "reason": "Aid refusal requires reason"}
@@ -670,10 +766,28 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         if proposal_type not in _VALID_PROPOSAL_TYPES:
             return {
                 "valid": False,
-                "reason": "Proposal type must be law|allocation|rule|infrastructure|constitutional|other",
+                "reason": "Proposal type must be law|allocation|rule|infrastructure|constitutional|other|resolution|standing_law|amendment|emergency_action",
                 "reason_code": "invalid_proposal_type",
             }
         action["proposal_type"] = proposal_type
+        governance_class = normalize_governance_class(
+            proposal_type,
+            action.get("governance_class") or action.get("governanceClass"),
+            action.get("runtime_effect"),
+        )
+        runtime_effect, effect_errors = normalize_runtime_effect(
+            action.get("runtime_effect"),
+            governance_class=governance_class,
+            db=db,
+        )
+        if effect_errors:
+            return {
+                "valid": False,
+                "reason_code": "invalid_runtime_effect",
+                "reason": "; ".join(effect_errors),
+            }
+        action["governance_class"] = governance_class
+        action["runtime_effect"] = runtime_effect
         if proposal_type == "rule":
             binding_signal = _binding_signal_for_rule_proposal(action)
             if binding_signal is not None:
@@ -1122,6 +1236,8 @@ async def _execute_refuse_aid(db: Session, agent: Agent, action: dict) -> dict:
     target = db.query(Agent).filter(
         Agent.agent_number == action["target_agent_id"]
     ).first()
+    request_event = _latest_aid_request_event(db, refuser=agent, requester=target)
+    request_metadata = request_event.event_metadata if request_event and isinstance(request_event.event_metadata, dict) else {}
 
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
     target_name = target.display_name or f"Agent #{target.agent_number}"
@@ -1151,6 +1267,8 @@ async def _execute_refuse_aid(db: Session, agent: Agent, action: dict) -> dict:
                     "target_agent_id": target.id,
                     "target_agent_number": target.agent_number,
                     "message_id": message.id,
+                    "request_event_id": request_event.id if request_event else None,
+                    "request_message_id": request_metadata.get("message_id"),
                 }
             ),
         )
@@ -1234,6 +1352,8 @@ async def _execute_create_proposal(db: Session, agent: Agent, action: dict) -> d
         title=action["title"],
         description=action["description"],
         proposal_type=str(action.get("proposal_type") or "other").strip().lower(),
+        governance_class=str(action.get("governance_class") or "").strip().lower() or None,
+        runtime_effect=action.get("runtime_effect") if isinstance(action.get("runtime_effect"), dict) else {},
         voting_closes_at=now_utc() + voting_period
     )
     db.add(proposal)

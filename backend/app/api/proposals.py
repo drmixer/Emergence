@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.models.models import Proposal, Vote, Agent
 from app.services.duplicate_waves import collect_duplicate_waves
+from app.services.executable_governance import governance_payload_for_proposal
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 
 router = APIRouter()
@@ -40,6 +41,9 @@ class ProposalResponse(BaseModel):
     title: str
     description: str
     proposal_type: str
+    governance_class: Optional[str] = None
+    runtime_effect: dict[str, Any] = {}
+    governance: dict[str, Any] = {}
     status: str
     created_at: Optional[str]
     voting_closes_at: Optional[str]
@@ -109,6 +113,11 @@ def list_proposals(
                 title=proposal.title,
                 description=proposal.description,
                 proposal_type=proposal.proposal_type,
+                governance_class=governance_payload_for_proposal(proposal)["governance_class"],
+                runtime_effect=(
+                    proposal.runtime_effect if isinstance(proposal.runtime_effect, dict) else {}
+                ),
+                governance=governance_payload_for_proposal(proposal),
                 status=proposal.status,
                 created_at=proposal.created_at.isoformat() if proposal.created_at else None,
                 voting_closes_at=proposal.voting_closes_at.isoformat()
@@ -172,6 +181,9 @@ def get_proposal(proposal_id: int, db: Session = Depends(get_db)):
         title=proposal.title,
         description=proposal.description,
         proposal_type=proposal.proposal_type,
+        governance_class=governance_payload_for_proposal(proposal)["governance_class"],
+        runtime_effect=proposal.runtime_effect if isinstance(proposal.runtime_effect, dict) else {},
+        governance=governance_payload_for_proposal(proposal),
         status=proposal.status,
         created_at=proposal.created_at.isoformat() if proposal.created_at else None,
         voting_closes_at=proposal.voting_closes_at.isoformat()

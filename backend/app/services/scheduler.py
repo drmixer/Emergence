@@ -26,6 +26,12 @@ from app.models.models import (
 from app.services.archive_drafts import maybe_generate_scheduled_weekly_draft
 from app.services.emergence_metrics import persist_completed_day_snapshot
 from app.services.events_generator import event_generator
+from app.services.executable_governance import (
+    EFFECT_ACTIVE_RESERVE_AID,
+    active_executable_active_aid_laws,
+    execute_allocation_effect_for_passed_proposal,
+    law_class_for_proposal,
+)
 from app.services.law_effects import active_survival_reserve_laws
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 from app.services.run_reports import maybe_generate_scheduled_run_report_backfill
@@ -90,6 +96,25 @@ QUOTE_SALIENCE_KEYWORDS = {
     "survive",
     "trade",
     "resources",
+}
+
+QUOTE_VOICE_MARKERS = {
+    " i ",
+    " we ",
+    " my ",
+    " our ",
+    " refuse",
+    " agree",
+    " disagree",
+    " cannot",
+    " won't",
+    " should",
+    " owe",
+    " fair",
+    " unfair",
+    " risk",
+    " because",
+    " choose",
 }
 
 
@@ -440,6 +465,63 @@ def _apply_active_survival_reserve_aid(
     )
 
 
+def _apply_executable_active_reserve_aid(
+    db: Session,
+    *,
+    agent: Agent,
+    food_inv: AgentInventory | None,
+    energy_inv: AgentInventory | None,
+    active_food: Decimal,
+    active_energy: Decimal,
+    reserve_resources: dict[str, GlobalResources],
+    law: Law,
+) -> tuple[AgentInventory | None, AgentInventory | None, Decimal, Decimal, bool, dict | None]:
+    effect = law.runtime_effect if isinstance(law.runtime_effect, dict) else {}
+    if str(effect.get("type") or "").strip().lower() != EFFECT_ACTIVE_RESERVE_AID:
+        return food_inv, energy_inv, Decimal(str(food_inv.quantity)) if food_inv else Decimal("0"), Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0"), False, None
+
+    food_amount = Decimal(str(food_inv.quantity)) if food_inv else Decimal("0")
+    energy_amount = Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0")
+    trigger_food = Decimal(str(effect.get("trigger_food_below") or "2.00"))
+    trigger_energy = Decimal(str(effect.get("trigger_energy_below") or "2.00"))
+    target_food = max(Decimal(str(effect.get("target_food") or "3.00")), active_food)
+    target_energy = max(Decimal(str(effect.get("target_energy") or "3.00")), active_energy)
+    required_food = _active_aid_requirement(
+        amount=food_amount,
+        trigger=trigger_food,
+        configured_target=target_food,
+        upkeep_cost=active_food,
+    )
+    required_energy = _active_aid_requirement(
+        amount=energy_amount,
+        trigger=trigger_energy,
+        configured_target=target_energy,
+        upkeep_cost=active_energy,
+    )
+    if required_food <= food_amount and required_energy <= energy_amount:
+        return food_inv, energy_inv, food_amount, energy_amount, False, None
+
+    return _apply_survival_reserve_support(
+        db,
+        agent=agent,
+        food_inv=food_inv,
+        energy_inv=energy_inv,
+        required_food=required_food,
+        required_energy=required_energy,
+        reserve_resources=reserve_resources,
+        event_metadata={
+            "support_mode": "executable_active_aid",
+            "law_id": int(law.id),
+            "runtime_effect": effect,
+            "active_aid_trigger_food": float(trigger_food),
+            "active_aid_trigger_energy": float(trigger_energy),
+            "active_aid_target_food": float(target_food),
+            "active_aid_target_energy": float(target_energy),
+        },
+        min_pool_remaining=Decimal(str(effect.get("min_pool_remaining") or "0")),
+    )
+
+
 QUOTE_STOPWORDS = {
     "the",
     "and",
@@ -500,10 +582,40 @@ def _score_quote_candidate(text: str) -> int:
         score += 1
     if any(keyword in lowered for keyword in QUOTE_SALIENCE_KEYWORDS):
         score += 3
+    padded = f" {lowered} "
+    if any(marker in padded for marker in QUOTE_VOICE_MARKERS):
+        score += 3
+    if any(marker in lowered for marker in ("you ", "agent #", "sigma", "cipher", "beacon")):
+        score += 1
+    if any(marker in lowered for marker in ("proposal #", "law #", "vote count", "status:", "observation:")):
+        score -= 4
+    if lowered.startswith(("observation:", "status:", "update:")):
+        score -= 4
     if normalized.count('"') >= 2:
         score += 1
 
     return score
+
+
+def _is_procedural_bookkeeping_quote(text: str) -> bool:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered:
+        return True
+    procedural_hits = sum(
+        marker in lowered
+        for marker in (
+            "observation:",
+            "proposal #",
+            "law #",
+            "vote count",
+            "current status",
+            "runtime mechanism",
+            "mechanical reserve",
+            "common pool has enough",
+        )
+    )
+    voice_hits = sum(marker in f" {lowered} " for marker in QUOTE_VOICE_MARKERS)
+    return procedural_hits >= 2 and voice_hits == 0
 
 
 def _is_action_json(text: str) -> bool:
@@ -543,6 +655,8 @@ def _passes_quote_quality_gate(
         return False
     lowered = content.lower()
     if "http://" in lowered or "https://" in lowered:
+        return False
+    if _is_procedural_bookkeeping_quote(content):
         return False
     if len(content.split()) < 8:
         return False
@@ -800,7 +914,8 @@ async def process_daily_consumption():
 
         living_agents = query.all()
         reserve_laws = active_survival_reserve_laws(db)
-        reserve_resources = _reserve_resource_map(db) if reserve_laws else {}
+        executable_active_aid_laws = active_executable_active_aid_laws(db)
+        reserve_resources = _reserve_resource_map(db) if (reserve_laws or executable_active_aid_laws) else {}
         reserve_auto_revive = reserve_auto_revive_enabled()
         reserve_dormant_maintenance = reserve_dormant_maintenance_enabled()
 
@@ -820,7 +935,7 @@ async def process_daily_consumption():
             energy_amount = Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0")
             agent_snapshots.append((agent, food_inv, energy_inv, food_amount, energy_amount))
 
-        if reserve_laws:
+        if reserve_laws or executable_active_aid_laws:
             agent_snapshots.sort(
                 key=lambda item: _reserve_support_priority(
                     item[0],
@@ -847,7 +962,21 @@ async def process_daily_consumption():
             # ACTIVE AGENT PROCESSING
             # ================================================================
             if agent.status == "active":
-                if reserve_laws and reserve_active_aid_enabled():
+                if executable_active_aid_laws:
+                    for aid_law in executable_active_aid_laws:
+                        food_inv, energy_inv, food_amount, energy_amount, aid_granted, reserve_decision = _apply_executable_active_reserve_aid(
+                            db,
+                            agent=agent,
+                            food_inv=food_inv,
+                            energy_inv=energy_inv,
+                            active_food=active_food,
+                            active_energy=active_energy,
+                            reserve_resources=reserve_resources,
+                            law=aid_law,
+                        )
+                        if aid_granted:
+                            break
+                elif reserve_laws and reserve_active_aid_enabled():
                     food_inv, energy_inv, food_amount, energy_amount, _, reserve_decision = _apply_active_survival_reserve_aid(
                         db,
                         agent=agent,
@@ -1194,11 +1323,14 @@ async def resolve_expired_proposals():
                 result = "passed"
                 
                 # If it's a law proposal, create the law
-                if proposal.proposal_type == "law":
+                if str(proposal.proposal_type or "").strip().lower() in {"law", "standing_law"}:
+                    law_class = law_class_for_proposal(proposal)
                     law = Law(
                         proposal_id=proposal.id,
                         title=proposal.title,
                         description=proposal.description,
+                        law_class=law_class,
+                        runtime_effect=proposal.runtime_effect if isinstance(proposal.runtime_effect, dict) else {},
                         author_agent_id=proposal.author_agent_id,
                         active=True,
                     )
@@ -1216,6 +1348,8 @@ async def resolve_expired_proposals():
                             "votes_for": proposal.votes_for,
                             "votes_against": proposal.votes_against,
                             "votes_abstain": proposal.votes_abstain,
+                            "law_class": law_class,
+                            "runtime_effect": law.runtime_effect,
                         }),
                     )
                     db.add(event)
@@ -1246,6 +1380,8 @@ async def resolve_expired_proposals():
                             proposal.votes_against,
                             proposal.description or ""
                         ))
+                elif str(proposal.proposal_type or "").strip().lower() in {"allocation", "emergency_action"}:
+                    execute_allocation_effect_for_passed_proposal(db, proposal)
             else:
                 # Majority no or tie = failed
                 proposal.status = "failed"
