@@ -123,6 +123,7 @@ class RoutineExecutor:
                 "reasoning": (
                     "Routine execution: hold position for social/governance follow-up between checkpoints."
                 ),
+                "_skip_routine_hold_log": True,
             }
         if strategy == "resource_exchange":
             if materials < 12.0:

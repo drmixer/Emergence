@@ -750,7 +750,7 @@ def _personality_attention_guidance(agent: Agent) -> list[str]:
         ],
         "stability": [
             "Stability lens: notice enforceability, continuity, unresolved procedure, trust, and whether rules will survive future pressure.",
-            "Communication style: procedural, evidence-linked, and clear about implementation or verification steps.",
+            "Communication style: name the proposal, risk, or agent you are answering; be concrete about implementation or verification without writing a status memo.",
         ],
         "neutral": [
             "Neutral lens: notice tradeoffs, missing information, bridging options, and where a question or summary can clarify the choice.",
@@ -1201,6 +1201,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         "  - Do not create a second near-identical proposal when one is already active. Use vote, contest_proposal, or forum_reply to support, oppose, narrow, or amend the existing proposal."
     )
     context_parts.append(
+        "  - If a matching proposal already exists, do not make a top-level forum post that says 'I propose...' the same mechanism. Vote on it, contest it, or reply naming the proposal id and your condition for support."
+    )
+    context_parts.append(
         "  - Start public messages with the concrete observation, name, amount, proposal/law id, trade offer, objection, or question. Generic greetings and self-introductions are usually wasted space unless they add new information."
     )
     context_parts.append(
@@ -1322,6 +1325,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                     "  The proposal queue is crowded: if any listed proposal covers your mechanism well enough, vote yes/no/abstain or contest it before creating another proposal."
                 )
             context_parts.append("  You can vote on any active proposal you have not voted on yet.")
+            context_parts.append(
+                "  After voting, continue the politics: reply with your reason, ask a named agent for support, or message someone whose vote matters."
+            )
             prioritized_unvoted = sorted(
                 unvoted_proposals,
                 key=lambda item: (0 if item[3] == "law" else 1, item[1]),
@@ -1599,6 +1605,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         checkpoint_priority_lines.append(
             "When active proposals exist, voting, contesting, or discussing them is usually more valuable than another routine work action unless you must produce resources immediately to survive."
         )
+        checkpoint_priority_lines.append(
+            "If you have already voted on the closest active proposal, use forum_reply or direct_message to explain your vote, negotiate an amendment, recruit support, or challenge a specific opponent instead of idling."
+        )
     if len(active_proposals) >= 3:
         checkpoint_priority_lines.append(
             "Proposal queue is already crowded. Vote on the closest active proposal first; if you have already voted, use forum_post, forum_reply, direct_message, request_aid/refuse_aid, trade, or contest_proposal instead of creating another proposal."
@@ -1625,9 +1634,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append("")
     context_parts.append("VALID ACTION JSON EXAMPLES:")
     context_parts.append('  {"action":"vote","proposal_id":123,"vote":"yes|no|abstain"}')
-    context_parts.append('  {"action":"forum_post","content":"I support threshold aid, but we need to decide who is protected before the first dormancy wave."}')
-    context_parts.append('  {"action":"forum_reply","parent_message_id":708,"content":"I disagree with this specific request because the reserve is too low."}')
-    context_parts.append('  {"action":"direct_message","recipient_agent_id":42,"content":"I can back your allocation if you lower the pool draw and name the recipients clearly."}')
+    context_parts.append('  {"action":"forum_post","content":"I voted yes on proposal #123 because the pool floor is explicit. I want opponents to name the failure mode they are worried about."}')
+    context_parts.append('  {"action":"forum_reply","parent_message_id":708,"content":"I disagree with this request as written. I would support it if the floor stays at 25 and recipients are named."}')
+    context_parts.append('  {"action":"direct_message","recipient_agent_id":42,"content":"I voted for the threshold law. If you are worried about coercion, propose the amendment now and I will consider it."}')
     context_parts.append('  {"action":"request_aid","target_agent_id":42,"resource_type":"food","amount":3,"reason":"I will go dormant next cycle without help."}')
     context_parts.append('  {"action":"refuse_aid","target_agent_id":42,"reason":"I cannot spare food while I am close to dormancy myself."}')
     context_parts.append('  {"action":"contest_proposal","proposal_id":123,"reason":"This proposal centralizes too much reserve power and needs revision."}')

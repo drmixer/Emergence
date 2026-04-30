@@ -102,3 +102,4 @@ def test_civic_strategies_hold_position_with_idle_between_checkpoints(monkeypatc
 
     assert result["action"] == "idle"
     assert "follow-up" in result["reasoning"].lower()
+    assert result["_skip_routine_hold_log"] is True

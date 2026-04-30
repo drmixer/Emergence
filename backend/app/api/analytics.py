@@ -3071,6 +3071,7 @@ def moment_social_card_png(
 @router.get("/emergence/metrics")
 def emergence_metrics(
     hours: int = Query(24, ge=1, le=24 * 30),
+    scope: str = Query("rolling", description="Use `active_run` to scope the window to the current live run."),
 ):
     """
     Current emergence metrics window.
@@ -3089,6 +3090,14 @@ def emergence_metrics(
 
     db = SessionLocal()
     try:
+        scope_mode = str(scope or "rolling").strip().lower()
+        run_window: LiveRunWindow | None = None
+        if scope_mode in {"active_run", "live_run", "current_run"}:
+            run_window = get_live_run_window(db)
+            if run_window.started_at is not None:
+                window_start = max(window_start, run_window.started_at)
+                previous_window_start = None
+                previous_window_end = None
         try:
             previous_snapshot = (
                 db.query(EmergenceMetricSnapshot)
@@ -3113,6 +3122,11 @@ def emergence_metrics(
             "window_hours": hours,
             "window_start_utc": window_start.isoformat(),
             "window_end_utc": window_end.isoformat(),
+            "scope": {
+                "mode": "active_run" if run_window is not None else "rolling",
+                "active_run_id": run_window.run_id if run_window is not None else None,
+                "run_started_at": run_window.started_at.isoformat() if run_window and run_window.started_at else None,
+            },
             "metrics": metrics,
         }
     finally:

@@ -558,6 +558,55 @@ def test_forum_post_rejects_near_duplicate_recent_message(session_factory):
     assert "Near-duplicate recent forum message exists" in validation["reason"]
 
 
+def test_forum_post_rejects_top_level_duplicate_live_proposal_mechanism(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        proposal = Proposal(
+            author_agent_id=author.id,
+            title="Active Reserve Aid Standing Law",
+            description=(
+                "Top up active agents from the common pool when food or energy falls "
+                "below threshold while preserving a pool floor."
+            ),
+            proposal_type="law",
+            governance_class="standing_law",
+            runtime_effect={
+                "type": "active_reserve_aid",
+                "trigger_food_below": 2,
+                "trigger_energy_below": 2,
+                "target_food": 3,
+                "target_energy": 3,
+                "min_pool_remaining": 25,
+            },
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "I propose an Active Threshold Aid Standing Law. The common pool "
+                        "should top up agents below food or energy thresholds while keeping "
+                        "a minimum floor."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_live_proposal_discussion"
+    assert validation["proposal_id"] == proposal.id
+
+
 def test_duplicate_forum_checkpoint_recovery_replies_to_existing_message(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")

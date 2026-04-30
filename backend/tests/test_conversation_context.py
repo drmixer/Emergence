@@ -608,6 +608,18 @@ def test_recent_aid_request_accelerates_next_checkpoint_without_immediate_interr
     )
 
 
+def test_civic_checkpoint_actions_schedule_near_term_followup():
+    processor = agent_loop.AgentProcessor()
+    now = now_utc()
+
+    civic_next = processor._compute_next_checkpoint_at(now, action_type="vote")
+    work_next = processor._compute_next_checkpoint_at(now, action_type="work")
+
+    assert civic_next <= now + timedelta(minutes=processor.CIVIC_FOLLOWUP_MAX_INTERVAL_MINUTES + 2)
+    assert civic_next >= now + timedelta(minutes=processor.CIVIC_FOLLOWUP_MIN_INTERVAL_MINUTES)
+    assert work_next >= now + timedelta(minutes=processor.CHECKPOINT_MIN_INTERVAL_MINUTES)
+
+
 def test_context_surfaces_incoming_request_inbox_with_actionable_tie_and_survival_read(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
 

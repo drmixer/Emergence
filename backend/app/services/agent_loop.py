@@ -68,6 +68,9 @@ class AgentProcessor:
     CHECKPOINT_MIN_INTERVAL_MINUTES = 45
     CHECKPOINT_MAX_INTERVAL_MINUTES = 90
     CHECKPOINT_JITTER_MINUTES = 5
+    CIVIC_FOLLOWUP_MIN_INTERVAL_MINUTES = 10
+    CIVIC_FOLLOWUP_MAX_INTERVAL_MINUTES = 18
+    CIVIC_FOLLOWUP_JITTER_MINUTES = 2
     CHECKPOINT_INTERRUPT_COOLDOWN_MINUTES = 10
     PROPOSAL_DEADLINE_INTERRUPT_MINUTES = 120
     CRISIS_EVENT_LOOKBACK_MINUTES = 60
@@ -205,6 +208,8 @@ class AgentProcessor:
                     if checkpoint_schedule_updated:
                         db.commit()
                     action_data = routine_executor.build_action(db, agent)
+                    if bool((action_data or {}).get("_skip_routine_hold_log")):
+                        return
             finally:
                 db.close()
 
@@ -297,7 +302,7 @@ class AgentProcessor:
                     if (
                         not validation["valid"]
                         and checkpoint_reason
-                        and validation.get("reason_code") == "duplicate_active_proposal"
+                        and validation.get("reason_code") in {"duplicate_active_proposal", "duplicate_live_proposal_discussion"}
                     ):
                         duplicate_followup = await self._build_duplicate_proposal_followup(
                             db,
@@ -820,9 +825,13 @@ class AgentProcessor:
 
     def _apply_checkpoint_state(self, agent: Agent, checkpoint_reason: str, action_data: dict) -> None:
         checkpoint_at = now_utc()
-        next_checkpoint_at = self._compute_next_checkpoint_at(checkpoint_at)
         previous_checkpoint_number = int((agent.current_intent or {}).get("checkpoint_number") or 0)
         checkpoint_number = previous_checkpoint_number + 1
+        action_type = str((action_data or {}).get("action") or "idle")
+        next_checkpoint_at = self._compute_next_checkpoint_at(
+            checkpoint_at,
+            action_type=action_type,
+        )
         agent.current_intent = self._derive_intent_from_action(
             action_data=action_data,
             checkpoint_reason=checkpoint_reason,
@@ -834,13 +843,24 @@ class AgentProcessor:
         agent.intent_expires_at = next_checkpoint_at
         agent.next_checkpoint_at = next_checkpoint_at
 
-    def _compute_next_checkpoint_at(self, checkpoint_at):
-        base_minutes = random.randint(
-            self.CHECKPOINT_MIN_INTERVAL_MINUTES,
-            self.CHECKPOINT_MAX_INTERVAL_MINUTES,
-        )
-        jitter = random.randint(-self.CHECKPOINT_JITTER_MINUTES, self.CHECKPOINT_JITTER_MINUTES)
-        total_minutes = max(self.CHECKPOINT_MIN_INTERVAL_MINUTES, base_minutes + jitter)
+    def _compute_next_checkpoint_at(self, checkpoint_at, *, action_type: str | None = None):
+        civic_action = str(action_type or "").strip() in {
+            "vote",
+            "create_proposal",
+            "forum_post",
+            "forum_reply",
+            "direct_message",
+            "request_aid",
+            "public_accusation",
+            "refuse_aid",
+            "contest_proposal",
+        }
+        min_minutes = self.CIVIC_FOLLOWUP_MIN_INTERVAL_MINUTES if civic_action else self.CHECKPOINT_MIN_INTERVAL_MINUTES
+        max_minutes = self.CIVIC_FOLLOWUP_MAX_INTERVAL_MINUTES if civic_action else self.CHECKPOINT_MAX_INTERVAL_MINUTES
+        jitter_bound = self.CIVIC_FOLLOWUP_JITTER_MINUTES if civic_action else self.CHECKPOINT_JITTER_MINUTES
+        base_minutes = random.randint(min_minutes, max_minutes)
+        jitter = random.randint(-jitter_bound, jitter_bound)
+        total_minutes = max(min_minutes, base_minutes + jitter)
         return checkpoint_at + timedelta(minutes=total_minutes)
 
     @staticmethod

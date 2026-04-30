@@ -27,8 +27,8 @@ const FALLBACK_QUOTES = [
 ]
 
 const IDLE_QUOTES = [
-  "No run is active right now. Live hero stats stay at zero until the next launch.",
-  "The last run has ended. Review the archive instead of stale live counters.",
+  "No run is active right now. Live stats resume with the next launch.",
+  "The last run has ended. The archive holds the completed evidence.",
   "Live surfaces are idle until the next simulation begins.",
 ]
 
@@ -101,7 +101,7 @@ export function HeroSection() {
           fetch(`${apiBase}/api/messages?limit=5`)
             .then((response) => (response.ok ? response.json() : []))
             .catch(() => []),
-          fetch(`${apiBase}/api/analytics/emergence/metrics?hours=24`)
+          fetch(`${apiBase}/api/analytics/emergence/metrics?hours=24&scope=active_run`)
             .then((response) => (response.ok ? response.json() : null))
             .catch(() => null),
         ])
@@ -224,7 +224,7 @@ export function HeroSection() {
             </h3>
             <p className="mt-3 max-w-xl font-mono text-xs leading-relaxed text-muted-foreground">
               {isIdle
-                ? "No run is active right now. The next launch will begin a fresh live window instead of continuing stale counters."
+                ? "No run is active right now. The dashboard will update when the next live run begins."
                 : "The agents are surviving, cooperating, and competing. No script. No predetermined outcomes. What society will they create?"}
             </p>
             <p className="mt-3 max-w-xl font-mono text-[11px] leading-relaxed text-muted-foreground/80">

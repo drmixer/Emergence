@@ -328,6 +328,18 @@ _UNSUPPORTED_RUNTIME_EFFECT_ERRORS = {
     "unsupported runtime_effect.type",
 }
 
+_PROPOSAL_DISCUSSION_MARKERS = (
+    "i propose",
+    "we propose",
+    "proposal opportunity",
+    "propose ",
+    "standing law",
+    " law ",
+    " rule ",
+    "framework",
+    "protocol",
+)
+
 
 def _normalized_proposal_title_key(title: str | None) -> str:
     words = re.findall(r"[a-z0-9]+", str(title or "").lower())
@@ -393,9 +405,12 @@ def _proposal_mechanism_signature(
         or "falls below" in text
         or "dormancy" in text
     )
+    has_law_frame = "standing law" in text or " law " in f" {text} " or ptype in {"law", "standing_law"}
     if has_common_pool and has_aid and has_threshold and ptype in {"law", "standing_law"}:
         return "active_reserve_aid"
     if has_common_pool and has_aid and has_threshold and gclass == "standing_law":
+        return "active_reserve_aid"
+    if has_common_pool and has_aid and has_threshold and has_law_frame:
         return "active_reserve_aid"
 
     has_voluntary = "voluntary" in text or "opt in" in text or "consent" in text
@@ -431,6 +446,32 @@ def _action_mechanism_signature(action: dict) -> str | None:
         description=action.get("description"),
         runtime_effect=action.get("runtime_effect"),
     )
+
+
+def _looks_like_top_level_proposal_discussion(content: str | None) -> bool:
+    lowered = f" {str(content or '').lower()} "
+    return any(marker in lowered for marker in _PROPOSAL_DISCUSSION_MARKERS)
+
+
+def _find_duplicate_live_proposal_for_forum_post(db: Session, action: dict) -> Proposal | None:
+    content = " ".join(str(action.get("content") or "").split())
+    if not content or not _looks_like_top_level_proposal_discussion(content):
+        return None
+
+    candidate_signature = _proposal_mechanism_signature(
+        proposal_type=None,
+        governance_class=None,
+        title=None,
+        description=content,
+        runtime_effect=None,
+    )
+    if candidate_signature is None:
+        return None
+
+    for proposal in _active_run_proposal_query(db).all():
+        if _proposal_row_mechanism_signature(proposal) == candidate_signature:
+            return proposal
+    return None
 
 
 def _downgrade_unsupported_runtime_effect(action: dict, effect_errors: list[str], governance_class: str) -> str:
@@ -692,6 +733,17 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Forum post requires content"}
         if len(content) > 2000:
             return {"valid": False, "reason": "Forum post too long (max 2000 chars)"}
+        duplicate_proposal = _find_duplicate_live_proposal_for_forum_post(db, action)
+        if duplicate_proposal is not None:
+            return {
+                "valid": False,
+                "reason_code": "duplicate_live_proposal_discussion",
+                "proposal_id": duplicate_proposal.id,
+                "reason": (
+                    "A live proposal already covers this mechanism; vote, contest, "
+                    f"or reply around proposal #{duplicate_proposal.id} instead of opening a new top-level post"
+                ),
+            }
         duplicate_message = _find_near_duplicate_recent_forum_message(db, agent, action)
         if duplicate_message is not None:
             return {
