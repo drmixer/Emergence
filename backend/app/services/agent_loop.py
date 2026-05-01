@@ -679,36 +679,10 @@ class AgentProcessor:
         if vote_validation["valid"]:
             return vote_action, vote_validation
 
-        attempted_title = str((attempted_action or {}).get("title") or "a similar policy").strip()
-        discussion_content = (
-            f"I support focusing on \"{proposal.title}\" (#{proposal.id}) instead of splitting support "
-            f"across another version of \"{attempted_title}\"."
-        )
-        parent_message = self._find_proposal_discussion_message(db, proposal)
-        if parent_message is not None:
-            reply_action = {
-                "action": "forum_reply",
-                "parent_message_id": parent_message.id,
-                "content": discussion_content,
-                "reasoning": (
-                    "Checkpoint recovery: discuss the existing proposal rather than creating a duplicate."
-                ),
-            }
-            reply_validation = await validate_action(db, agent, reply_action)
-            if reply_validation["valid"]:
-                return reply_action, reply_validation
-
-        post_action = {
-            "action": "forum_post",
-            "content": discussion_content,
-            "reasoning": (
-                "Checkpoint recovery: discuss the existing proposal rather than creating a duplicate."
-            ),
-        }
-        post_validation = await validate_action(db, agent, post_action)
-        if post_validation["valid"]:
-            return post_action, post_validation
-
+        # If the agent has already voted or cannot vote, suppress the duplicate
+        # instead of manufacturing another generic "support the existing
+        # proposal" reply. K5 showed those recovery replies can saturate a
+        # single thread without adding new information.
         return None
 
     @staticmethod

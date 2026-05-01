@@ -191,24 +191,40 @@ def _public_actor_snapshot(
         for item in strongest
     )
 
-    exposed_candidates = [item for item in living_snapshots if item["risk_band"] < 4] or living_snapshots
-    most_exposed = sorted(
-        exposed_candidates,
-        key=lambda item: (
-            item["risk_band"],
-            item["food"] + item["energy"],
-            item["materials"],
-            item["agent"].agent_number,
-        ),
-    )[:3]
-    exposed_line = "; ".join(
-        (
-            f"{_agent_public_label(item['agent'])} {item['agent'].status}, "
-            f"starvation={int(item['agent'].starvation_cycles or 0)}, "
-            f"F{item['food']:.1f}/E{item['energy']:.1f}"
+    exposed_candidates = [item for item in living_snapshots if item["risk_band"] < 4]
+    if exposed_candidates:
+        most_exposed = sorted(
+            exposed_candidates,
+            key=lambda item: (
+                item["risk_band"],
+                item["food"] + item["energy"],
+                item["materials"],
+                item["agent"].agent_number,
+            ),
+        )[:3]
+        exposed_line = "; ".join(
+            (
+                f"{_agent_public_label(item['agent'])} {item['agent'].status}, "
+                f"starvation={int(item['agent'].starvation_cycles or 0)}, "
+                f"F{item['food']:.1f}/E{item['energy']:.1f}"
+            )
+            for item in most_exposed
         )
-        for item in most_exposed
-    )
+    else:
+        lowest_buffers = sorted(
+            [item for item in living_snapshots if item["agent"].status == "active"],
+            key=lambda item: (item["food"] + item["energy"], item["materials"], item["agent"].agent_number),
+        )[:2]
+        lowest_line = "; ".join(
+            f"{_agent_public_label(item['agent'])} F{item['food']:.1f}/E{item['energy']:.1f}"
+            for item in lowest_buffers
+        )
+        exposed_line = (
+            "none below warning thresholds "
+            f"(active dormancy costs F{critical_food:.1f}/E{critical_energy:.1f}; "
+            f"low-warning below F{low_food:.1f}/E{low_energy:.1f}). "
+            f"Lowest visible active buffers, not critical: {lowest_line}"
+        )
 
     recent_proposals_q = db.query(Proposal).filter(Proposal.created_at > now - timedelta(hours=24))
     recent_proposals_q = _apply_run_window_if_available(recent_proposals_q, Proposal.created_at, run_window)
@@ -1175,6 +1191,15 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         context_parts.append(
             f"After {death_threshold()} cycles without paying survival costs, you DIE PERMANENTLY."
         )
+    else:
+        context_parts.append("")
+        context_parts.append("SURVIVAL THRESHOLDS:")
+        context_parts.append(
+            f"- Active dormancy only triggers if food falls below {critical_food:.2f} or energy falls below {critical_energy:.2f} at upkeep."
+        )
+        context_parts.append(
+            f"- Do not describe agents with food/energy well above F{low_food:.1f}/E{low_energy:.1f} as critical or near dormancy."
+        )
     
     # Enforcement status (Phase 3: Teeth)
     if agent.exiled:
@@ -1251,6 +1276,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     )
     context_parts.append(
         "  - A new forum_post or create_proposal should add a specific new fact, target, mechanism, tradeoff, or unanswered question."
+    )
+    context_parts.append(
+        "  - If a thread already has many replies around the same proposal/law, do not add another agreement summary. Move the situation with a concrete offer, refusal, amendment, named ask, trade, aid request, contest, or vote."
     )
     context_parts.append("")
 

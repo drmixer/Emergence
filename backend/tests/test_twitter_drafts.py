@@ -214,3 +214,29 @@ def test_quote_selection_dedupes_against_pending_drafts(session_factory, monkeyp
 
     assert result is None
     assert called["count"] == 0
+
+
+def test_quote_quality_rejects_procedural_governance_summary():
+    quote_text = (
+        "Proposal #662 is executable and provides a clear mechanism for common pool aid. "
+        "This is crucial for stability and aligns with the voluntary protocol."
+    )
+
+    assert scheduler._passes_quote_quality_gate(
+        quote_text,
+        recent_quotes=[],
+        max_overlap=0.85,
+    ) is False
+
+
+def test_quote_quality_allows_first_person_stakes():
+    quote_text = (
+        "Scalar-19, I oppose a one-time allocation from my personal surplus. "
+        "My resources are for my autonomy."
+    )
+
+    assert scheduler._passes_quote_quality_gate(
+        quote_text,
+        recent_quotes=[],
+        max_overlap=0.85,
+    ) is True

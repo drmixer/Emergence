@@ -289,6 +289,8 @@ _DUPLICATE_FORUM_SAMPLE_LIMIT = 200
 _DUPLICATE_FORUM_MIN_TERMS = 8
 _DUPLICATE_FORUM_MIN_OVERLAP = 6
 _DUPLICATE_FORUM_SMALLER_RATIO = 0.55
+_SATURATED_THREAD_MESSAGE_COUNT = 12
+_SATURATED_THREAD_RECENT_SAMPLE = 60
 
 _PROCEDURAL_STATUS_MEMO_PREFIXES = (
     "observation:",
@@ -648,6 +650,138 @@ def _forum_semantic_signature(text: str | None) -> str | None:
     return None
 
 
+def _message_thread_messages_this_run(
+    db: Session,
+    thread_root: Message,
+    *,
+    limit: int = _SATURATED_THREAD_RECENT_SAMPLE,
+) -> list[Message]:
+    query = db.query(Message).filter(Message.message_type.in_(["forum_post", "forum_reply"]))
+    started_at = _active_run_started_at(db)
+    if started_at is not None:
+        query = query.filter(Message.created_at >= started_at)
+
+    messages: list[Message] = []
+    for message in query.order_by(Message.created_at.desc()).limit(limit).all():
+        root = _message_thread_root(db, message)
+        if int(root.id) == int(thread_root.id):
+            messages.append(message)
+    return messages
+
+
+def _referenced_policy_ids(text: str | None) -> set[str]:
+    normalized = str(text or "").lower()
+    return {
+        f"{kind}:{identifier}"
+        for kind, identifier in re.findall(r"\b(proposal|law)\s*#?\s*(\d+)\b", normalized)
+    }
+
+
+def _reply_adds_saturated_thread_novelty(content: str | None, thread_messages: list[Message]) -> bool:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return False
+
+    existing_ids: set[str] = set()
+    for message in thread_messages:
+        existing_ids.update(_referenced_policy_ids(message.content))
+    candidate_ids = _referenced_policy_ids(normalized)
+    if candidate_ids - existing_ids:
+        return True
+
+    first_person_commitment = re.search(
+        r"\bi\s+(will|won't|cannot|can't|refuse|oppose|contest|offer|accept|reject|transfer|trade|give|send|request)\b",
+        normalized,
+    )
+    concrete_action = re.search(
+        r"\b(amend|amendment|exempt|cap|raise|lower|name recipients?|trade|transfer|send|give|offer|request aid|refuse aid|contest)\b",
+        normalized,
+    )
+    has_quantity = bool(re.search(r"\b\d+(?:\.\d+)?\s*(food|energy|materials?|f|e|m)\b", normalized))
+    direct_terms = bool(re.search(r"\b(if you|my terms|your terms|i can offer|i will offer|i will trade|i will transfer)\b", normalized))
+    if first_person_commitment and (concrete_action or has_quantity or direct_terms):
+        return True
+    if "?" in str(content or "") and direct_terms:
+        return True
+    return False
+
+
+def _low_novelty_saturated_thread_reason(
+    *,
+    content: str | None,
+    thread_messages: list[Message],
+) -> str | None:
+    if len(thread_messages) < _SATURATED_THREAD_MESSAGE_COUNT:
+        return None
+    if _reply_adds_saturated_thread_novelty(content, thread_messages):
+        return None
+
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return "thread is saturated and reply has no content"
+
+    governance_hits = sum(
+        marker in normalized
+        for marker in (
+            "proposal #",
+            "law #",
+            "active threshold aid",
+            "mandatory contribution",
+            "common pool",
+            "voluntary protocol",
+            "runtime effect",
+            "executable",
+            "pool floor",
+        )
+    )
+    consensus_hits = sum(
+        marker in normalized
+        for marker in (
+            "i agree",
+            "i support",
+            "strong support",
+            "strong opposition",
+            "provides a clear",
+            "is crucial",
+            "is the most",
+            "is the only",
+            "opponents",
+            "focus remains",
+            "aligns with",
+        )
+    )
+    if governance_hits >= 1 and consensus_hits >= 1:
+        return "saturated policy thread already contains this governance position"
+    if governance_hits >= 2:
+        return "saturated policy thread needs concrete new action, not another summary"
+    return None
+
+
+def _find_near_duplicate_in_thread(
+    *,
+    content: str | None,
+    thread_messages: list[Message],
+    author_agent_id: int,
+) -> Message | None:
+    candidate_terms = _normalized_message_terms(content)
+    candidate_signature = _forum_semantic_signature(content)
+    if len(candidate_terms) < _DUPLICATE_FORUM_MIN_TERMS and not candidate_signature:
+        return None
+    for message in thread_messages:
+        if int(message.author_agent_id) == int(author_agent_id):
+            continue
+        if candidate_signature and candidate_signature == _forum_semantic_signature(message.content):
+            return message
+        existing_terms = _normalized_message_terms(message.content)
+        if len(existing_terms) < _DUPLICATE_FORUM_MIN_TERMS:
+            continue
+        overlap = len(candidate_terms & existing_terms)
+        smaller = min(len(candidate_terms), len(existing_terms))
+        if overlap >= _DUPLICATE_FORUM_MIN_OVERLAP and overlap / max(1, smaller) >= _DUPLICATE_FORUM_SMALLER_RATIO:
+            return message
+    return None
+
+
 def _find_near_duplicate_recent_forum_message(db: Session, agent: Agent, action: dict) -> Message | None:
     candidate_terms = _normalized_message_terms(action.get("content"))
     candidate_signature = _forum_semantic_signature(action.get("content"))
@@ -960,6 +1094,38 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {
                 "valid": False,
                 "reason": "Reply content appears to target proposal/law debate rather than the selected aid thread; choose the matching proposal discussion or use contest_proposal",
+            }
+        thread_messages = _message_thread_messages_this_run(db, thread_root)
+        duplicate_in_thread = _find_near_duplicate_in_thread(
+            content=content,
+            thread_messages=thread_messages,
+            author_agent_id=int(agent.id),
+        )
+        if duplicate_in_thread is not None and int(duplicate_in_thread.id) != int(parent.id):
+            return {
+                "valid": False,
+                "reason_code": "duplicate_thread_reply",
+                "message_id": duplicate_in_thread.id,
+                "thread_id": thread_root.id,
+                "reason": (
+                    f"Thread #{thread_root.id} already contains this point; add a concrete new "
+                    "offer, refusal, amendment, named ask, or choose vote/contest/trade/direct_message"
+                ),
+            }
+        saturated_reason = _low_novelty_saturated_thread_reason(
+            content=content,
+            thread_messages=thread_messages,
+        )
+        if saturated_reason:
+            return {
+                "valid": False,
+                "reason_code": "saturated_thread_low_novelty",
+                "thread_id": thread_root.id,
+                "reply_count": max(0, len(thread_messages) - 1),
+                "reason": (
+                    f"Thread #{thread_root.id} is saturated: {saturated_reason}. "
+                    "Reply only with a concrete new offer, refusal, amendment, named ask, or move to vote/contest/trade/direct_message."
+                ),
             }
     
     elif action_type == "direct_message":

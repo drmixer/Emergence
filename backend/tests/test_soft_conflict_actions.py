@@ -462,7 +462,7 @@ def test_duplicate_proposal_checkpoint_recovery_votes_on_existing_proposal(sessi
     assert action["vote"] == "yes"
 
 
-def test_duplicate_proposal_checkpoint_recovery_discusses_when_already_voted(session_factory):
+def test_duplicate_proposal_checkpoint_recovery_suppresses_generic_reply_when_already_voted(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")
         proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
@@ -512,11 +512,7 @@ def test_duplicate_proposal_checkpoint_recovery_discusses_when_already_voted(ses
             )
         )
 
-    assert followup is not None
-    action, followup_validation = followup
-    assert followup_validation == {"valid": True}
-    assert action["action"] == "forum_reply"
-    assert action["parent_message_id"] == discussion.id
+    assert followup is None
 
 
 def test_forum_post_rejects_near_duplicate_recent_message(session_factory):
@@ -664,6 +660,96 @@ def test_forum_post_allows_distinct_same_topic_message(session_factory):
                     "content": (
                         "I oppose making the next reserve rule mandatory unless agents can opt out "
                         "when their own food margin is below one cycle."
+                    ),
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
+def test_forum_reply_rejects_low_novelty_saturated_policy_thread(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #662 asks whether active threshold aid should preserve a pool floor.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index in range(12):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Thread-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=f"Reply {index}: I am tracking a separate concern about timing window {index}.",
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=40 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "Proposal #662 is executable and provides a clear mechanism for the common pool. "
+                        "I support it because active threshold aid is crucial for stability."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "saturated_thread_low_novelty"
+    assert validation["thread_id"] == root.id
+
+
+def test_forum_reply_allows_concrete_action_in_saturated_thread(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #662 asks whether active threshold aid should preserve a pool floor.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index in range(12):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Thread-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=f"Reply {index}: I am tracking a separate concern about timing window {index}.",
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=40 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "I will propose an amendment to proposal #662 that exempts agents below "
+                        "6 energy and caps contribution at 1 energy."
                     ),
                 },
             )

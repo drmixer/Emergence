@@ -120,6 +120,22 @@ QUOTE_VOICE_MARKERS = {
     " choose",
 }
 
+QUOTE_STANCE_MARKERS = {
+    " i oppose",
+    " i refuse",
+    " i won't",
+    " i will not",
+    " i cannot",
+    " i can't",
+    " i need",
+    " i can offer",
+    " my resources",
+    " my terms",
+    " no strings",
+    " if you",
+    " your ",
+}
+
 
 def _runtime_interval_seconds(key: str, default: int) -> int:
     raw_value = runtime_config_service.get_effective_value_cached(key)
@@ -621,6 +637,38 @@ def _is_procedural_bookkeeping_quote(text: str) -> bool:
     return procedural_hits >= 2 and voice_hits == 0
 
 
+def _is_procedural_governance_summary(text: str) -> bool:
+    lowered = " ".join(str(text or "").strip().lower().split())
+    if not lowered:
+        return True
+    bookkeeping_hits = sum(
+        marker in lowered
+        for marker in (
+            "proposal #",
+            "law #",
+            "active threshold aid",
+            "mandatory contribution",
+            "common pool",
+            "runtime effect",
+            "executable",
+            "vote count",
+            "yes votes",
+            "no votes",
+            "strong support",
+            "strong opposition",
+            "provides a clear",
+            "is crucial",
+            "is the most",
+        )
+    )
+    stance_hits = sum(marker in f" {lowered} " for marker in QUOTE_STANCE_MARKERS)
+    if bookkeeping_hits >= 2 and stance_hits == 0:
+        return True
+    if bookkeeping_hits >= 1 and lowered.startswith(("i support focusing", "i agree", "the strong", "proposal #", "law #")):
+        return True
+    return False
+
+
 def _is_action_json(text: str) -> bool:
     lowered = str(text or "").strip().lower()
     return lowered.startswith("{") and '"action"' in lowered
@@ -660,6 +708,8 @@ def _passes_quote_quality_gate(
     if "http://" in lowered or "https://" in lowered:
         return False
     if _is_procedural_bookkeeping_quote(content):
+        return False
+    if _is_procedural_governance_summary(content):
         return False
     if len(content.split()) < 8:
         return False

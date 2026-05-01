@@ -537,6 +537,30 @@ def test_public_actor_snapshot_prefers_active_stockpiles_over_dormant_ones(sessi
     assert "Cipher-3 (#3) dormant, F50.0/E45.0/M40.0" not in context
 
 
+def test_public_actor_snapshot_does_not_call_lowest_healthy_agent_exposed(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+    monkeypatch.setattr(context_builder, "active_food_cost", lambda: 3)
+    monkeypatch.setattr(context_builder, "active_energy_cost", lambda: 3.5)
+
+    with session_factory() as db:
+        focal = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        healthy_lowest = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        for resource_type, quantity in (("food", 19), ("energy", 19.5), ("materials", 20)):
+            db.query(AgentInventory).filter(
+                AgentInventory.agent_id == healthy_lowest.id,
+                AgentInventory.resource_type == resource_type,
+            ).one().quantity = quantity
+        db.commit()
+        db.refresh(focal)
+
+        context = asyncio.run(context_builder.build_agent_context(db, focal))
+
+    assert "Most exposed agents: none below warning thresholds" in context
+    assert "Logic-21 (#21) F19.0/E19.5" in context
+    assert "not critical" in context
+    assert "Do not describe agents with food/energy well above" in context
+
+
 def test_context_uses_longer_message_previews_for_actionable_substance(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
 
