@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.time import now_utc
-from app.models.models import Agent, AgentInventory, Event, Message, Proposal
+from app.models.models import Agent, AgentInventory, Event, Law, Message, Proposal
 from app.services.agent_loop import AgentProcessor
 from app.services import actions, context_builder
 
@@ -311,6 +311,80 @@ def test_create_proposal_rejects_duplicate_active_reserve_aid_mechanism(session_
     assert validation["proposal_id"] == existing.id
 
 
+def test_create_proposal_rejects_active_reserve_aid_covered_by_existing_law(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        existing = Law(
+            author_agent_id=author.id,
+            title="Stronger Active Reserve Aid Law",
+            description="Top up active agents below F5/E6 to F7/E8 while preserving the reserve floor.",
+            law_class="standing_law",
+            runtime_effect={
+                "type": "active_reserve_aid",
+                "trigger_food_below": 5,
+                "trigger_energy_below": 6,
+                "target_food": 7,
+                "target_energy": 8,
+                "min_pool_remaining": 100,
+            },
+            active=True,
+            passed_at=now_utc() - timedelta(minutes=10),
+        )
+        db.add(existing)
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Enable Active Reserve Aid",
+                    "description": "Top up active agents below F2/E2 to F3/E3 while preserving a smaller pool floor.",
+                    "proposal_type": "law",
+                    "governance_class": "standing_law",
+                    "runtime_effect": {
+                        "type": "active_reserve_aid",
+                        "trigger_food_below": 2,
+                        "trigger_energy_below": 2,
+                        "target_food": 3,
+                        "target_energy": 3,
+                        "min_pool_remaining": 25,
+                    },
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_active_law"
+    assert validation["law_id"] == existing.id
+    assert "already covers" in validation["reason"]
+
+
+def test_create_proposal_rejects_unsupported_executable_text_claim(session_factory):
+    with session_factory() as db:
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Automatic Common Pool Contribution Law",
+                    "description": "Agents must automatically contribute energy to the common pool every cycle.",
+                    "proposal_type": "law",
+                    "governance_class": "standing_law",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "unsupported_runtime_effect_text"
+    assert "not a supported runtime_effect" in validation["reason"]
+
+
 def test_create_proposal_rejects_duplicate_voluntary_contribution_framework(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")
@@ -603,6 +677,49 @@ def test_forum_post_rejects_top_level_duplicate_live_proposal_mechanism(session_
     assert validation["proposal_id"] == proposal.id
 
 
+def test_forum_post_rejects_obvious_governance_recap(session_factory):
+    with session_factory() as db:
+        poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "Law #228 is active and executable. The common pool has active reserve aid "
+                        "with a pool floor, so active agents have support."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "obvious_governance_recap"
+
+
+def test_forum_post_allows_governance_message_with_named_ask(session_factory):
+    with session_factory() as db:
+        poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "Law #228 is active. I want Beacon-2 to name the first agent who should "
+                        "receive aid if the pool floor starts binding."
+                    ),
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
 def test_duplicate_forum_checkpoint_recovery_does_not_publish_duplicate_reply(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")
@@ -712,6 +829,51 @@ def test_forum_reply_rejects_low_novelty_saturated_policy_thread(session_factory
     assert validation["valid"] is False
     assert validation["reason_code"] == "saturated_thread_low_novelty"
     assert validation["thread_id"] == root.id
+
+
+def test_forum_reply_rejects_policy_id_only_in_saturated_thread(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #662 asks whether active threshold aid should preserve a pool floor.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index in range(8):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Thread-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=f"Reply {index}: I am tracking separate reserve-law evidence point {index}.",
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=40 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "Law #999 reinforces that the common pool mechanism is important. "
+                        "I support the active threshold aid direction for stability."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "saturated_thread_low_novelty"
 
 
 def test_forum_reply_allows_concrete_action_in_saturated_thread(session_factory):

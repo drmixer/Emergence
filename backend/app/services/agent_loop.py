@@ -767,7 +767,7 @@ class AgentProcessor:
             f"{context}\n\n"
             "SOCIAL ACTION REQUIRED THIS TURN:\n"
             f"- Your previous candidate action was `{attempted_action}`, but this run is producing governance without conversation.\n"
-            "- Choose one targeted social action now: direct_message, contest_proposal, request_aid, refuse_aid, trade, public_accusation, or forum_reply to an existing thread.\n"
+            "- Choose one targeted non-broadcast move now: direct_message, contest_proposal, request_aid, refuse_aid, trade, public_accusation, or forum_reply to an existing thread.\n"
             "- Do not choose a top-level forum_post on this retry. If a live proposal is visible, message its author, contest it, ask a named agent for support, or make a concrete trade/aid move.\n"
             "- Do not return vote, create_proposal, work, or idle on this retry unless you are below 2 food or 2 energy.\n"
             "- Refer to a specific proposal id or named agent. Use first-person stance and concrete terms.\n"

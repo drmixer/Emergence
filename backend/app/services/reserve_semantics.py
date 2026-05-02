@@ -6,7 +6,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.time import ensure_utc
 from app.models.models import Law
+from app.services.live_run_scope import LiveRunWindow, get_live_run_window
 from app.services.law_effects import active_survival_reserve_laws, is_survival_reserve_law
 from app.services.survival_config import (
     active_energy_cost,
@@ -29,6 +31,45 @@ RESERVE_GATE_LABELS = {
     "dormant_maintenance": "Dormant maintenance",
     "auto_revive": "Auto revive",
 }
+
+EFFECT_ACTIVE_RESERVE_AID = "active_reserve_aid"
+
+
+def _effect_type(runtime_effect: Any) -> str:
+    if not isinstance(runtime_effect, dict):
+        return ""
+    return str(runtime_effect.get("type") or runtime_effect.get("effect_type") or "").strip().lower()
+
+
+def _run_window_reserve_laws(db: Session, run_window: LiveRunWindow) -> list[Law]:
+    started_at = ensure_utc(run_window.started_at)
+    ended_at = ensure_utc(run_window.ended_at)
+    laws: list[Law] = []
+    for law in db.query(Law).order_by(Law.passed_at.asc(), Law.id.asc()).all():
+        passed_at = ensure_utc(law.passed_at)
+        if started_at is not None and passed_at is not None and passed_at < started_at:
+            continue
+        if ended_at is not None and passed_at is not None and passed_at > ended_at:
+            continue
+        if is_survival_reserve_law(law) or _effect_type(law.runtime_effect) == EFFECT_ACTIVE_RESERVE_AID:
+            laws.append(law)
+    return laws
+
+
+def _current_reserve_laws(db: Session) -> list[Law]:
+    run_window = get_live_run_window(db)
+    if run_window.run_id is None:
+        return []
+    by_id = {int(law.id): law for law in active_survival_reserve_laws(db)}
+    query = db.query(Law).filter(Law.active.is_(True), Law.runtime_effect.isnot(None))
+    if run_window.started_at is not None:
+        query = query.filter(Law.passed_at >= run_window.started_at)
+    if run_window.ended_at is not None:
+        query = query.filter(Law.passed_at <= run_window.ended_at)
+    for law in query.all():
+        if _effect_type(law.runtime_effect) == EFFECT_ACTIVE_RESERVE_AID:
+            by_id[int(law.id)] = law
+    return sorted(by_id.values(), key=lambda law: (str(law.passed_at or ""), int(law.id or 0)))
 
 
 def reserve_mechanical_access_payload() -> dict[str, Any]:
@@ -65,17 +106,24 @@ def reserve_mechanical_access_payload() -> dict[str, Any]:
     }
 
 
-def reserve_policy_access_payload(db: Session) -> dict[str, Any]:
+def reserve_policy_access_payload(db: Session, *, run_window: LiveRunWindow | None = None) -> dict[str, Any]:
     """Return active reserve policy state alongside separate mechanical access gates."""
-    active_laws = active_survival_reserve_laws(db)
+    historical_scope = run_window is not None and run_window.run_id is not None
+    active_laws = _run_window_reserve_laws(db, run_window) if historical_scope else _current_reserve_laws(db)
     mechanics = reserve_mechanical_access_payload()
     policy_active = bool(active_laws)
     any_gate_enabled = bool(mechanics.get("enabled_modes"))
-    automatic_mechanics_available = policy_active and any_gate_enabled
+    executable_active_aid_law_ids = [
+        int(law.id)
+        for law in active_laws
+        if _effect_type(law.runtime_effect) == EFFECT_ACTIVE_RESERVE_AID
+    ]
+    automatic_mechanics_available = policy_active and (any_gate_enabled or bool(executable_active_aid_law_ids))
     automatic_support_available = policy_active and any(
         bool(mechanics.get(f"{mode}_enabled"))
         for mode in ("active_aid", "dormant_maintenance", "auto_revive")
     )
+    automatic_support_available = automatic_support_available or bool(executable_active_aid_law_ids)
     if automatic_mechanics_available:
         status = "policy_and_mechanical_access"
         access_label = "Reserve policy has at least one automatic runtime path."
@@ -95,7 +143,14 @@ def reserve_policy_access_payload(db: Session) -> dict[str, Any]:
             "reserve_law_active": policy_active,
             "reserve_law_count": len(active_laws),
             "active_law_ids": [int(law.id) for law in active_laws],
-            "label": "Active reserve policy intent" if policy_active else "No active reserve policy intent",
+            "executable_active_aid_law_ids": executable_active_aid_law_ids,
+            "scope": "historical_run" if historical_scope else "current_active",
+            "scope_label": "reserve laws in run window" if historical_scope else "active reserve laws",
+            "label": (
+                "Reserve policy intent present during run"
+                if historical_scope and policy_active
+                else ("Active reserve policy intent" if policy_active else "No active reserve policy intent")
+            ),
             "description": (
                 "Reserve laws express agent-approved policy intent; they do not by themselves prove "
                 "automatic reserve access is mechanically available."
@@ -105,6 +160,7 @@ def reserve_policy_access_payload(db: Session) -> dict[str, Any]:
             **mechanics,
             "automatic_mechanics_available": automatic_mechanics_available,
             "automatic_support_available": automatic_support_available,
+            "executable_active_aid_law_ids": executable_active_aid_law_ids,
             "label": access_label,
         },
     }

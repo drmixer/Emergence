@@ -145,6 +145,43 @@ def _runtime_interval_seconds(key: str, default: int) -> int:
         return int(default)
 
 
+def _runtime_value_is_explicit_false(value: object) -> bool:
+    if value is False:
+        return True
+    return str(value).strip().lower() in {"false", "0", "no", "off"}
+
+
+def _runtime_value_is_explicit_true(value: object) -> bool:
+    if value is True:
+        return True
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _survival_cycle_should_run() -> bool:
+    simulation_active = runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE")
+    simulation_paused = runtime_config_service.get_effective_value_cached("SIMULATION_PAUSED")
+    return not _runtime_value_is_explicit_false(simulation_active) and not _runtime_value_is_explicit_true(
+        simulation_paused
+    )
+
+
+def _skipped_survival_cycle_result(reason: str) -> dict:
+    return {
+        "skipped": True,
+        "reason": reason,
+        "active_fed": 0,
+        "dormant_stable": 0,
+        "revived": 0,
+        "revived_agents": [],
+        "became_dormant": 0,
+        "dormant_agents": [],
+        "starving": 0,
+        "starving_agents": [],
+        "died": 0,
+        "dead_agents": [],
+    }
+
+
 def _runtime_day_length_minutes(default: int) -> int:
     raw_value = runtime_config_service.get_effective_value_cached("DAY_LENGTH_MINUTES")
     try:
@@ -949,6 +986,10 @@ async def process_daily_consumption():
     db = SessionLocal()
     
     try:
+        if not _survival_cycle_should_run():
+            logger.info("Skipping survival cycle because simulation is inactive or paused")
+            return _skipped_survival_cycle_result("simulation_inactive_or_paused")
+
         logger.info("Processing daily survival cycle...")
         consumption_modifier = Decimal(str(event_generator.get_consumption_modifier()))
         active_food = (active_food_cost() * consumption_modifier).quantize(Decimal("0.01"))
@@ -988,6 +1029,11 @@ async def process_daily_consumption():
             energy_amount = Decimal(str(energy_inv.quantity)) if energy_inv else Decimal("0")
             agent_snapshots.append((agent, food_inv, energy_inv, food_amount, energy_amount))
 
+        if not _survival_cycle_should_run():
+            db.rollback()
+            logger.info("Aborting survival cycle before mutation because simulation stopped")
+            return _skipped_survival_cycle_result("simulation_stopped_before_mutation")
+
         if reserve_laws or executable_active_aid_laws:
             agent_snapshots.sort(
                 key=lambda item: _reserve_support_priority(
@@ -1008,6 +1054,11 @@ async def process_daily_consumption():
         agents_revived = []  # Dormant → Active via reserve or trade-equivalent recovery
         
         for agent, food_inv, energy_inv, food_amount, energy_amount in agent_snapshots:
+            if not _survival_cycle_should_run():
+                db.rollback()
+                logger.info("Aborting survival cycle mid-cycle because simulation stopped")
+                return _skipped_survival_cycle_result("simulation_stopped_mid_cycle")
+
             agent_name = agent.display_name or f"Agent #{agent.agent_number}"
             reserve_decision: dict | None = None
             
@@ -1681,10 +1732,13 @@ class SchedulerRunner:
     async def stop(self):
         """Stop the scheduler."""
         self.running = False
-        
+        tasks = list(self.tasks)
         for task in self.tasks:
             task.cancel()
-        
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
         self.tasks.clear()
         logger.info("Scheduler stopped")
     

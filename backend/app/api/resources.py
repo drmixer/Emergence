@@ -15,6 +15,11 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.models import Agent, AgentInventory, Event, GlobalResources, Transaction
+from app.services.aid_lifecycle import (
+    aid_status_counts,
+    classify_aid_request_event,
+    event_runtime_run_id,
+)
 from app.services.live_run_scope import apply_live_run_window, get_live_run_window
 from app.services.reserve_semantics import reserve_policy_access_payload
 
@@ -45,31 +50,6 @@ def _gini(values: List[float]) -> float:
     for i, x in enumerate(xs, start=1):
         cum += i * x
     return (2.0 * cum) / (n * total) - (n + 1.0) / n
-
-
-def _event_runtime_run_id(event: Event) -> str:
-    metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
-    runtime = metadata.get("runtime") if isinstance(metadata, dict) else {}
-    return str((runtime or {}).get("run_id") or "").strip()
-
-
-def _event_action(event: Event) -> dict:
-    metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
-    action = metadata.get("action") if isinstance(metadata, dict) else {}
-    return action if isinstance(action, dict) else {}
-
-
-def _agent_label(agent: Agent | None) -> dict[str, Any] | None:
-    if agent is None:
-        return None
-    return {
-        "id": int(agent.id),
-        "agent_number": int(agent.agent_number),
-        "display_name": agent.display_name,
-        "tier": int(agent.tier or 0),
-        "personality_type": str(agent.personality_type or ""),
-        "status": str(agent.status or ""),
-    }
 
 
 @router.get("")
@@ -187,13 +167,7 @@ def get_aid_lifecycle(
             "scope": "inactive",
             "run_id": None,
             "total": 0,
-            "status_counts": {
-                "fulfilled_by_trade": 0,
-                "refused": 0,
-                "reserve_covered": 0,
-                "mechanically_unaffordable": 0,
-                "unresolved": 0,
-            },
+            "status_counts": aid_status_counts(),
             "items": [],
         }
 
@@ -202,108 +176,26 @@ def get_aid_lifecycle(
         query = apply_live_run_window(query, Event.created_at, run_window)
     requests = query.limit(limit).all()
 
-    agent_ids = {int(event.agent_id) for event in requests if event.agent_id is not None}
-    target_numbers: set[int] = set()
-    for event in requests:
-        target_number = int(_event_action(event).get("target_agent_id") or 0)
-        if target_number > 0:
-            target_numbers.add(target_number)
-
-    agents_by_id = {
-        int(agent.id): agent
-        for agent in db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
-    } if agent_ids else {}
-    targets_by_number = {
-        int(agent.agent_number): agent
-        for agent in db.query(Agent).filter(Agent.agent_number.in_(target_numbers)).all()
-    } if target_numbers else {}
-
     run_id = str(run_window.run_id or "").strip()
-    all_trace_events_query = db.query(Event).filter(
-        Event.event_type.in_(("trade", "refuse_aid", "reserve_aid", "reserve_shortfall", "became_dormant"))
-    )
-    if scope != "all":
-        all_trace_events_query = apply_live_run_window(all_trace_events_query, Event.created_at, run_window)
-    all_trace_events = all_trace_events_query.order_by(Event.created_at.asc(), Event.id.asc()).all()
     if run_id:
-        all_trace_events = [
-            event for event in all_trace_events
-            if _event_runtime_run_id(event) in {"", run_id}
-        ]
+        requests = [event for event in requests if event_runtime_run_id(event) in {"", run_id}]
 
     items: list[dict[str, Any]] = []
-    status_counts: dict[str, int] = {
-        "fulfilled_by_trade": 0,
-        "refused": 0,
-        "reserve_covered": 0,
-        "mechanically_unaffordable": 0,
-        "unresolved": 0,
-    }
+    status_counts: dict[str, int] = aid_status_counts()
 
     for request in requests:
-        requester = agents_by_id.get(int(request.agent_id or 0))
-        action = _event_action(request)
-        target_number = int(action.get("target_agent_id") or 0)
-        target = targets_by_number.get(target_number)
-        requester_number = int(requester.agent_number) if requester else 0
-        target_id = int(target.id) if target else 0
-        request_at = request.created_at
-
-        first_trade = None
-        first_refusal = None
-        first_reserve = None
-        first_unaffordable = None
-        for event in all_trace_events:
-            if request_at and event.created_at and event.created_at < request_at:
-                continue
-            trace_action = _event_action(event)
-            if event.event_type == "trade":
-                if int(event.agent_id or 0) == target_id and int(trace_action.get("recipient_agent_id") or 0) == requester_number:
-                    first_trade = first_trade or event
-            elif event.event_type == "refuse_aid":
-                if int(event.agent_id or 0) == target_id and int(trace_action.get("target_agent_id") or 0) == requester_number:
-                    first_refusal = first_refusal or event
-            elif event.event_type == "reserve_aid":
-                if int(event.agent_id or 0) == int(request.agent_id or 0):
-                    first_reserve = first_reserve or event
-            elif event.event_type in {"reserve_shortfall", "became_dormant"}:
-                if int(event.agent_id or 0) == target_id:
-                    first_unaffordable = first_unaffordable or event
-
-        first_response = sorted(
-            [event for event in (first_trade, first_refusal, first_reserve, first_unaffordable) if event is not None],
-            key=lambda event: (event.created_at, event.id),
+        item = classify_aid_request_event(
+            db,
+            request_event=request,
+            run_window=(run_window if scope != "all" else None),
         )
-        response = first_response[0] if first_response else None
-        if response is first_trade:
-            status = "fulfilled_by_trade"
-        elif response is first_refusal:
-            status = "refused"
-        elif response is first_reserve:
-            status = "reserve_covered"
-        elif response is first_unaffordable:
-            status = "mechanically_unaffordable"
-        else:
-            status = "unresolved"
+        if item is None:
+            continue
+        status = str(item.get("status") or "unresolved")
+        if status not in status_counts:
+            status_counts[status] = 0
         status_counts[status] += 1
-
-        items.append(
-            {
-                "request_event_id": int(request.id),
-                "request_at": request.created_at.isoformat() if request.created_at else None,
-                "requester": _agent_label(requester),
-                "target": _agent_label(target),
-                "resource_type": str(action.get("resource_type") or ""),
-                "amount": str(action.get("amount") or ""),
-                "reason": str(action.get("reason") or "").strip(),
-                "status": status,
-                "response_event_id": int(response.id) if response else None,
-                "response_event_type": str(response.event_type) if response else None,
-                "response_at": response.created_at.isoformat() if response and response.created_at else None,
-                "request_description": request.description,
-                "response_description": response.description if response else None,
-            }
-        )
+        items.append(item)
 
     return {
         "scope": "active_run" if scope != "all" else "all",

@@ -424,6 +424,7 @@ def _count_condition_replicates(db: Session, *, condition_name: str, run_id: str
 
 def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -> tuple[Any, Any, str]:
     now_value = now_utc()
+    run_row = db.query(SimulationRun).filter(SimulationRun.run_id == str(run_id)).first()
     json_run_id = json.dumps(run_id)
     run_start_change = (
         db.query(AdminConfigChange)
@@ -457,6 +458,7 @@ def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -
     ).first()
 
     start_candidates = [
+        _coerce_utc_datetime(run_row.started_at) if run_row and run_row.started_at else None,
         _coerce_utc_datetime(run_start_change.created_at) if run_start_change and run_start_change.created_at else None,
         _coerce_utc_datetime(llm_row.first_seen) if llm_row and llm_row.first_seen else None,
         _coerce_utc_datetime(event_row.first_seen) if event_row and event_row.first_seen else None,
@@ -467,6 +469,7 @@ def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -
     run_started_at = min(start_candidates) if start_candidates else fallback_start
 
     end_candidates = [
+        _coerce_utc_datetime(run_row.ended_at) if run_row and run_row.ended_at else None,
         _coerce_utc_datetime(llm_row.last_seen) if llm_row and llm_row.last_seen else None,
         _coerce_utc_datetime(event_row.last_seen) if event_row and event_row.last_seen else None,
     ]
@@ -474,7 +477,9 @@ def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -
     run_ended_at = max(end_candidates) if end_candidates else now_value
 
     source = "fallback_window"
-    if run_start_change and run_start_change.created_at:
+    if run_row and run_row.started_at and run_row.ended_at:
+        source = "run_registry"
+    elif run_start_change and run_start_change.created_at:
         source = "admin_config_change"
     elif llm_row and llm_row.first_seen:
         source = "llm_usage_first_seen"
@@ -809,7 +814,10 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "data_source_warning": data_source_warning,
         "llm": llm_payload,
         "activity": activity_payload,
-        "reserve_semantics": reserve_policy_access_payload(db),
+        "reserve_semantics": reserve_policy_access_payload(
+            db,
+            run_window=LiveRunWindow(run_id=run_id, started_at=run_started_at, ended_at=run_ended_at),
+        ),
         "duplicate_waves": duplicate_waves,
         "social_followthrough": social_followthrough,
         "behavior_hygiene": behavior_hygiene,
@@ -1322,7 +1330,7 @@ def _technical_markdown(payload: dict[str, Any]) -> str:
                 "",
                 "## Reserve Policy vs Mechanical Access",
                 f"- Status: {reserve_semantics.get('status')}",
-                f"- Policy intent: {policy.get('label')} ({int(policy.get('reserve_law_count') or 0)} active reserve laws)",
+                f"- Policy intent: {policy.get('label')} ({int(policy.get('reserve_law_count') or 0)} {policy.get('scope_label') or 'active reserve laws'})",
                 f"- Mechanical access: {mechanics.get('label')}",
                 f"- Automatic reserve mechanics available: {bool(mechanics.get('automatic_mechanics_available'))}",
                 f"- Enabled runtime gates: {', '.join(enabled_modes) if enabled_modes else 'none'}",
@@ -2376,6 +2384,13 @@ def rebuild_run_bundle(
         run_id=clean_run_id,
         condition_name=clean_condition,
     )
+    summary_result = generate_and_record_run_summary(
+        db,
+        run_id=clean_run_id,
+        condition_name=clean_condition,
+        season_number=clean_season_number,
+    )
+    summary_artifacts = summary_result.get("artifacts") or {}
 
     status_label = str(technical_payload.get("status_label") or STATUS_OBSERVATIONAL)
     evidence_completeness = str(technical_payload.get("evidence_completeness") or EVIDENCE_PARTIAL)
@@ -2473,6 +2488,8 @@ def rebuild_run_bundle(
         "approachable_report_markdown": str(run_dir / "approachable_report.md"),
         "planner_report_json": str(run_dir / "next_run_plan.json"),
         "planner_report_markdown": str(run_dir / "next_run_plan.md"),
+        "run_summary_json": str(summary_artifacts.get("json") or run_dir / "run_report_summary.json"),
+        "run_summary_markdown": str(summary_artifacts.get("markdown") or run_dir / "run_report_summary.md"),
     }
 
     _ = planner_payload  # planner payload is persisted to artifacts and returned by paths/registry.
@@ -2504,7 +2521,7 @@ def _bundle_complete(db: Session, *, run_id: str) -> bool:
         ).scalar()
         or 0
     )
-    return count >= 3
+    return count >= 4
 
 
 def generate_run_bundle_for_run_id(

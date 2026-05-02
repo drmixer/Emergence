@@ -150,6 +150,34 @@ def test_reserve_prioritizes_active_agents_before_dormant_maintenance(session_fa
     assert aid_meta["reserve_pool_energy_after"] == pytest.approx(1.80)
 
 
+def test_survival_cycle_skips_when_simulation_inactive(session_factory, monkeypatch):
+    _configure_no_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={"SIMULATION_ACTIVE": False, "SIMULATION_PAUSED": True},
+    )
+
+    with session_factory() as db:
+        active_agent = _seed_agent(
+            db,
+            agent_number=3,
+            status="active",
+            food="0.00",
+            energy="0.00",
+        )
+        active_agent_id = active_agent.id
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+
+    assert result["skipped"] is True
+    assert result["reason"] == "simulation_inactive_or_paused"
+
+    with session_factory() as db:
+        refreshed_active = db.query(Agent).filter(Agent.id == active_agent_id).one()
+
+    assert refreshed_active.status == "active"
+
+
 def test_reserve_can_support_active_agents_when_runtime_override_enabled(session_factory, monkeypatch):
     _configure_reserve(
         monkeypatch,

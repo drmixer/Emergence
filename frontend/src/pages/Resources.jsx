@@ -89,6 +89,7 @@ export default function Resources() {
 
     const totals = resources?.totals || {}
     const reserveSemantics = resources?.reserve_semantics || null
+    const reserveSupportAvailable = Boolean(reserveSemantics?.mechanical_access?.automatic_support_available)
     const focus = String(searchParams.get('focus') || '').trim()
     const inactiveRun = !loading && scope?.simulation_active === false
     const lastCompletedRunId = String(scope?.last_completed_run_id || '').trim()
@@ -306,7 +307,7 @@ export default function Resources() {
             <div className="content-grid" style={{ marginTop: 'var(--spacing-lg)' }}>
                 <div className="card">
                     <div className="card-header">
-                        <h3>Critical Agent Evidence</h3>
+                        <h3>{reserveSupportAvailable ? 'Covered Aid-Trigger Pressure' : 'Critical Agent Evidence'}</h3>
                         <span className="strip-meta">{criticalAgents.length} shown</span>
                     </div>
                     <div className="card-body">
@@ -473,6 +474,11 @@ export default function Resources() {
 
         .aid-lifecycle-row.status-reserve_covered {
           border-left: 3px solid var(--accent-blue);
+        }
+
+        .aid-lifecycle-row.status-answered_directly,
+        .aid-lifecycle-row.status-stale_resource_changed {
+          border-left: 3px solid var(--accent-purple);
         }
 
         .reserve-overview-card {

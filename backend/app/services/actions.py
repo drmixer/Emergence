@@ -24,6 +24,7 @@ from app.services.law_effects import (
 from app.services.live_run_scope import get_live_run_window
 from app.services.events_generator import event_generator
 from app.services.executable_governance import (
+    EFFECT_ACTIVE_RESERVE_AID,
     normalize_governance_class,
     normalize_runtime_effect,
 )
@@ -289,7 +290,7 @@ _DUPLICATE_FORUM_SAMPLE_LIMIT = 200
 _DUPLICATE_FORUM_MIN_TERMS = 8
 _DUPLICATE_FORUM_MIN_OVERLAP = 6
 _DUPLICATE_FORUM_SMALLER_RATIO = 0.55
-_SATURATED_THREAD_MESSAGE_COUNT = 12
+_SATURATED_THREAD_MESSAGE_COUNT = 8
 _SATURATED_THREAD_RECENT_SAMPLE = 60
 
 _PROCEDURAL_STATUS_MEMO_PREFIXES = (
@@ -504,23 +505,6 @@ def _find_duplicate_live_proposal_for_forum_post(db: Session, action: dict) -> P
     return None
 
 
-def _downgrade_unsupported_runtime_effect(action: dict, effect_errors: list[str], governance_class: str) -> str:
-    original_type = _runtime_effect_type(action.get("runtime_effect")) or "unknown"
-    proposal_type = str(action.get("proposal_type") or "").strip().lower()
-    if proposal_type == "law" or governance_class in {"standing_law", "advisory_law"}:
-        downgraded_class = "advisory_law"
-    elif proposal_type in {"rule", "resolution"}:
-        downgraded_class = "resolution"
-    else:
-        downgraded_class = "resolution"
-    action["governance_class"] = downgraded_class
-    action["runtime_effect"] = {}
-    action["unsupported_runtime_effect_downgraded"] = True
-    action["unsupported_runtime_effect_type"] = original_type
-    action["unsupported_runtime_effect_reason"] = "; ".join(effect_errors)
-    return downgraded_class
-
-
 def _infer_active_reserve_aid_amendment_effect(db: Session, action: dict) -> None:
     """Infer only the bounded Law #N active-aid amendment template."""
     if isinstance(action.get("runtime_effect"), dict) and action["runtime_effect"]:
@@ -617,6 +601,70 @@ def _procedural_status_memo_reason(content: str | None) -> str | None:
     return None
 
 
+def _message_has_concrete_social_move(content: str | None) -> bool:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return False
+    concrete_patterns = (
+        r"\bi\s+(will|won't|cannot|can't|can|need|offer|request|refuse|oppose|contest|amend|trade|transfer|send|give|ask|want)\b",
+        r"\b(if you|will you|can you|i need|i want|i ask|my terms|your terms|support if|oppose unless|vote no|vote yes)\b",
+        r"\b(trade|transfer|send|offer|request aid|refuse aid|contest|amendment|amend|repeal|raise|lower|cap|exempt|name recipients?)\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in concrete_patterns):
+        return True
+    if "?" in str(content or "") and re.search(r"\b(you|agent #?\d+|[a-z]+-\d+)\b", normalized):
+        return True
+    return False
+
+
+def _obvious_governance_recap_reason(content: str | None) -> str | None:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized or _message_has_concrete_social_move(normalized):
+        return None
+
+    governance_markers = (
+        "proposal #",
+        "law #",
+        "active proposal",
+        "active law",
+        "standing law",
+        "runtime effect",
+        "executable",
+        "common pool",
+        "reserve policy",
+        "reserve aid",
+        "active reserve aid",
+        "pool floor",
+        "vote count",
+        "voted yes",
+        "voted no",
+        "mechanical access",
+    )
+    status_markers = (
+        "is active",
+        "are active",
+        "has passed",
+        "have passed",
+        "passed",
+        "is executable",
+        "are executable",
+        "is in place",
+        "are in place",
+        "already covers",
+        "visible",
+        "current state",
+        "status",
+        "we have",
+        "there is",
+        "there are",
+    )
+    governance_hits = sum(marker in normalized for marker in governance_markers)
+    status_hits = sum(marker in normalized for marker in status_markers)
+    if governance_hits >= 2 or (governance_hits >= 1 and status_hits >= 1):
+        return "public message mostly restates visible governance state"
+    return None
+
+
 def _forum_semantic_signature(text: str | None) -> str | None:
     normalized = " ".join(str(text or "").strip().lower().split())
     if not normalized:
@@ -669,25 +717,10 @@ def _message_thread_messages_this_run(
     return messages
 
 
-def _referenced_policy_ids(text: str | None) -> set[str]:
-    normalized = str(text or "").lower()
-    return {
-        f"{kind}:{identifier}"
-        for kind, identifier in re.findall(r"\b(proposal|law)\s*#?\s*(\d+)\b", normalized)
-    }
-
-
 def _reply_adds_saturated_thread_novelty(content: str | None, thread_messages: list[Message]) -> bool:
     normalized = " ".join(str(content or "").strip().lower().split())
     if not normalized:
         return False
-
-    existing_ids: set[str] = set()
-    for message in thread_messages:
-        existing_ids.update(_referenced_policy_ids(message.content))
-    candidate_ids = _referenced_policy_ids(normalized)
-    if candidate_ids - existing_ids:
-        return True
 
     first_person_commitment = re.search(
         r"\bi\s+(will|won't|cannot|can't|refuse|oppose|contest|offer|accept|reject|transfer|trade|give|send|request)\b",
@@ -910,6 +943,92 @@ def _find_near_duplicate_active_proposal(db: Session, action: dict) -> Proposal 
     return None
 
 
+def _runtime_effect_decimal(effect: dict, key: str, default: str) -> Decimal:
+    try:
+        return Decimal(str(effect.get(key, default))).quantize(Decimal("0.01"))
+    except Exception:
+        return Decimal(default)
+
+
+def _active_reserve_aid_effect_covers(existing: dict, candidate: dict) -> bool:
+    """Return true when existing active-aid law is equivalent or more protective."""
+    if _runtime_effect_type(existing) != EFFECT_ACTIVE_RESERVE_AID:
+        return False
+    if _runtime_effect_type(candidate) != EFFECT_ACTIVE_RESERVE_AID:
+        return False
+
+    return (
+        _runtime_effect_decimal(existing, "trigger_food_below", "2.00")
+        >= _runtime_effect_decimal(candidate, "trigger_food_below", "2.00")
+        and _runtime_effect_decimal(existing, "trigger_energy_below", "2.00")
+        >= _runtime_effect_decimal(candidate, "trigger_energy_below", "2.00")
+        and _runtime_effect_decimal(existing, "target_food", "3.00")
+        >= _runtime_effect_decimal(candidate, "target_food", "3.00")
+        and _runtime_effect_decimal(existing, "target_energy", "3.00")
+        >= _runtime_effect_decimal(candidate, "target_energy", "3.00")
+    )
+
+
+def _find_covering_active_reserve_aid_law(db: Session, action: dict) -> Law | None:
+    candidate_effect = action.get("runtime_effect") if isinstance(action.get("runtime_effect"), dict) else {}
+    if _runtime_effect_type(candidate_effect) != EFFECT_ACTIVE_RESERVE_AID:
+        return None
+
+    query = db.query(Law).filter(Law.active.is_(True), Law.runtime_effect.isnot(None))
+    started_at = _active_run_started_at(db)
+    if started_at is not None:
+        query = query.filter(Law.passed_at >= started_at)
+
+    for law in query.order_by(Law.passed_at.asc(), Law.id.asc()).all():
+        law_effect = law.runtime_effect if isinstance(law.runtime_effect, dict) else {}
+        if _active_reserve_aid_effect_covers(law_effect, candidate_effect):
+            return law
+    return None
+
+
+def _unsupported_runtime_text_reason(action: dict) -> str | None:
+    if _runtime_effect_type(action.get("runtime_effect")):
+        return None
+
+    proposal_type = str(action.get("proposal_type") or "").strip().lower()
+    governance_class = str(action.get("governance_class") or action.get("governanceClass") or "").strip().lower()
+    raw_text = f"{action.get('title') or ''} {action.get('description') or ''}".lower()
+    normalized = " ".join(re.findall(r"[a-z0-9_ -]+", raw_text)).replace("-", " ")
+    execution_claim = (
+        proposal_type in {"standing_law", "emergency_action"}
+        or governance_class in {"standing_law", "emergency_action"}
+        or any(
+            marker in normalized
+            for marker in (
+                "automatic",
+                "auto ",
+                "mandatory",
+                "execute",
+                "execution",
+                "runtime effect",
+                "must ",
+                "shall ",
+            )
+        )
+    )
+    if not execution_claim:
+        return None
+    unsupported_markers = (
+        ("common_pool_contribution", "common_pool_contribution is not a supported runtime_effect"),
+        ("common pool contribution", "common_pool_contribution is not a supported runtime_effect"),
+        ("automatic contribution", "automatic reserve contribution is controlled by run settings, not law text"),
+        ("auto contribution", "automatic reserve contribution is controlled by run settings, not law text"),
+        ("dormant_revival", "dormant_revival is not a supported runtime_effect"),
+        ("dormant revival", "dormant_revival is not a supported runtime_effect"),
+        ("automatic revival", "automatic revival is controlled by run settings, not law text"),
+        ("auto revive", "automatic revival is controlled by run settings, not law text"),
+    )
+    for marker, reason in unsupported_markers:
+        if marker in normalized:
+            return reason
+    return None
+
+
 def _idle_description(action: dict) -> str:
     reasoning = str((action or {}).get("reasoning") or "").lower()
     if "continuity protection" in reasoning or "checkpoint action rejected" in reasoning:
@@ -1050,6 +1169,16 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                     f"thread/message #{duplicate_message.id} instead of opening a new post"
                 ),
             }
+        recap_reason = _obvious_governance_recap_reason(content)
+        if recap_reason:
+            return {
+                "valid": False,
+                "reason_code": "obvious_governance_recap",
+                "reason": (
+                    f"Forum post {recap_reason}; make a concrete ask, offer, refusal, amendment, "
+                    "contest, trade, or commitment instead of narrating visible policy state"
+                ),
+            }
     
     elif action_type == "forum_reply":
         parent_id = action.get("parent_message_id")
@@ -1125,6 +1254,16 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 "reason": (
                     f"Thread #{thread_root.id} is saturated: {saturated_reason}. "
                     "Reply only with a concrete new offer, refusal, amendment, named ask, or move to vote/contest/trade/direct_message."
+                ),
+            }
+        recap_reason = _obvious_governance_recap_reason(content)
+        if recap_reason:
+            return {
+                "valid": False,
+                "reason_code": "obvious_governance_recap",
+                "reason": (
+                    f"Forum reply {recap_reason}; move the thread with a concrete ask, offer, refusal, "
+                    "amendment, contest, trade, or commitment"
                 ),
             }
     
@@ -1290,14 +1429,21 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         )
         if effect_errors:
             if set(effect_errors).issubset(_UNSUPPORTED_RUNTIME_EFFECT_ERRORS):
-                governance_class = _downgrade_unsupported_runtime_effect(action, effect_errors, governance_class)
-                runtime_effect = {}
-            else:
                 return {
                     "valid": False,
-                    "reason_code": "invalid_runtime_effect",
-                    "reason": "; ".join(effect_errors),
+                    "reason_code": "unsupported_runtime_effect",
+                    "reason": (
+                        "; ".join(effect_errors)
+                        + ". Supported runtime_effect.type values are common_pool_allocation, "
+                        "active_reserve_aid, and active_reserve_aid_amendment. "
+                        "Use advisory_law or resolution without runtime_effect if you mean policy text only."
+                    ),
                 }
+            return {
+                "valid": False,
+                "reason_code": "invalid_runtime_effect",
+                "reason": "; ".join(effect_errors),
+            }
         action["governance_class"] = governance_class
         action["runtime_effect"] = runtime_effect
         if proposal_type == "rule":
@@ -1307,6 +1453,28 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 action["runtime_effect"] = {}
                 action["binding_rule_coerced_to_resolution"] = True
                 action["binding_rule_signal"] = binding_signal
+        unsupported_text_reason = _unsupported_runtime_text_reason(action)
+        if unsupported_text_reason is not None:
+            return {
+                "valid": False,
+                "reason_code": "unsupported_runtime_effect_text",
+                "reason": (
+                    f"{unsupported_text_reason}. Legal text alone will not create this mechanic. "
+                    "Use a supported runtime_effect template, or submit an advisory_law/resolution "
+                    "that does not claim execution."
+                ),
+            }
+        covering_law = _find_covering_active_reserve_aid_law(db, action)
+        if covering_law is not None:
+            return {
+                "valid": False,
+                "reason_code": "duplicate_active_law",
+                "law_id": covering_law.id,
+                "reason": (
+                    f"Active Law #{covering_law.id} already covers this active reserve aid mechanism; "
+                    "propose a targeted amendment, contest it, or discuss the existing law instead"
+                ),
+            }
         duplicate = _find_near_duplicate_active_proposal(db, action)
         if duplicate is not None:
             return {
@@ -1908,7 +2076,7 @@ async def _execute_vote(db: Session, agent: Agent, action: dict) -> dict:
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
     return {
         "success": True,
-        "description": f"{author_name} voted {action['vote']} on: {proposal.title}"
+        "description": f"{author_name} voted {action['vote']} on Proposal #{proposal.id}: {proposal.title}",
     }
 
 

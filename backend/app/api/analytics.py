@@ -39,6 +39,7 @@ from app.services.usage_budget import usage_budget
 from app.services.emergence_metrics import compute_emergence_metrics
 from app.services.kpi_rollups import record_kpi_event
 from app.services.report_artifacts import load_json_artifact
+from app.services.reserve_semantics import reserve_policy_access_payload
 from app.services.simulation_time import (
     get_simulation_day_delta,
     get_simulation_day_number,
@@ -1329,6 +1330,41 @@ def crisis_strip(limit: int = Query(6, ge=1, le=20)):
             if event_id and event_id not in recent_by_event_id:
                 recent_by_event_id[event_id] = event
 
+        reserve_semantics = reserve_policy_access_payload(db)
+        reserve_mechanics = reserve_semantics.get("mechanical_access") or {}
+        reserve_support_available = bool(reserve_mechanics.get("automatic_support_available"))
+        common_pool = {
+            str(row.resource_type): float(row.in_common_pool or 0)
+            for row in db.query(GlobalResources).filter(GlobalResources.resource_type.in_(("food", "energy"))).all()
+        }
+
+        def _resource_pressure_item(resource_type: str, count: int) -> dict[str, Any]:
+            covered = reserve_support_available and float(common_pool.get(resource_type, 0.0)) > 0.0
+            title_resource = resource_type.capitalize()
+            pressure_label = "Covered Aid-Trigger Pressure" if covered else "Uncovered Scarcity Pressure"
+            return {
+                "event_id": f"critical_{resource_type}_agents",
+                "kind": "covered_resource_pressure" if covered else "resource_pressure",
+                "name": f"{title_resource} {pressure_label}",
+                "description": (
+                    f"{int(count)} living agent(s) are at critical {resource_type} levels; "
+                    + (
+                        "reserve support appears mechanically reachable."
+                        if covered
+                        else "no automatic reserve support path appears reachable."
+                    )
+                ),
+                "effect": {
+                    "resource_type": resource_type,
+                    "pressure": "covered_aid_trigger" if covered else "uncovered_critical",
+                    "reserve_support_available": covered,
+                },
+                "affected_agents": int(count),
+                "seconds_remaining": None,
+                "expires_at": None,
+                "started_at": None,
+            }
+
         strip_items = []
         for active in active_effects:
             event_id = str(active.event_id or "").strip()
@@ -1358,34 +1394,10 @@ def crisis_strip(limit: int = Query(6, ge=1, le=20)):
             )
 
         if critical_food > 0:
-            strip_items.append(
-                {
-                    "event_id": "critical_food_agents",
-                    "kind": "resource_pressure",
-                    "name": "Food Scarcity Pressure",
-                    "description": f"{int(critical_food)} living agent(s) are at critical food levels.",
-                    "effect": {"resource_type": "food", "pressure": "critical"},
-                    "affected_agents": int(critical_food),
-                    "seconds_remaining": None,
-                    "expires_at": None,
-                    "started_at": None,
-                }
-            )
+            strip_items.append(_resource_pressure_item("food", int(critical_food)))
 
         if critical_energy > 0:
-            strip_items.append(
-                {
-                    "event_id": "critical_energy_agents",
-                    "kind": "resource_pressure",
-                    "name": "Energy Scarcity Pressure",
-                    "description": f"{int(critical_energy)} living agent(s) are at critical energy levels.",
-                    "effect": {"resource_type": "energy", "pressure": "critical"},
-                    "affected_agents": int(critical_energy),
-                    "seconds_remaining": None,
-                    "expires_at": None,
-                    "started_at": None,
-                }
-            )
+            strip_items.append(_resource_pressure_item("energy", int(critical_energy)))
 
         strip_items.sort(
             key=lambda item: (

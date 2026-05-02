@@ -375,8 +375,8 @@ export default function Dashboard() {
                                 {crises.map((crisis) => (
                                     <Link
                                         key={`${crisis.event_id}-${crisis.expires_at}`}
-                                        to={crisis.kind === 'resource_pressure' ? `/resources?focus=critical-${crisis.effect?.resource_type || 'food'}` : `/timeline?event=${encodeURIComponent(crisis.event_id)}`}
-                                        className="crisis-pill"
+                                        to={['resource_pressure', 'covered_resource_pressure'].includes(crisis.kind) ? `/resources?focus=critical-${crisis.effect?.resource_type || 'food'}` : `/timeline?event=${encodeURIComponent(crisis.event_id)}`}
+                                        className={`crisis-pill ${crisis.kind === 'covered_resource_pressure' ? 'covered' : ''}`}
                                     >
                                         <div className="crisis-pill-top">
                                             <span className="crisis-name">{crisis.name}</span>
@@ -792,6 +792,16 @@ export default function Dashboard() {
                 .crisis-pill:hover {
                     border-color: rgba(239, 68, 68, 0.42);
                     background: rgba(127, 29, 29, 0.24);
+                }
+
+                .crisis-pill.covered {
+                    border-color: rgba(59, 130, 246, 0.28);
+                    background: rgba(30, 64, 175, 0.16);
+                }
+
+                .crisis-pill.covered:hover {
+                    border-color: rgba(59, 130, 246, 0.42);
+                    background: rgba(30, 64, 175, 0.22);
                 }
 
                 .stat-card-link {

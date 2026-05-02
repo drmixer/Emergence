@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine, event, text
@@ -446,6 +446,73 @@ def test_collect_run_snapshot_uses_runtime_tagged_events_when_llm_usage_is_absen
         assert snapshot["verification_state"] == "partial"
         assert snapshot["activity"]["total_events"] == 1
         assert snapshot["key_moments"][0]["event_type"] == "reserve_aid"
+    finally:
+        db_session.close()
+
+
+def test_collect_run_snapshot_uses_historical_reserve_laws_after_close():
+    db_session = _build_snapshot_session()
+    try:
+        started_at = datetime(2026, 5, 1, 14, 49, tzinfo=timezone.utc)
+        ended_at = datetime(2026, 5, 2, 6, 49, tzinfo=timezone.utc)
+        agent = Agent(
+            agent_number=7,
+            display_name="Tagged Agent",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add(agent)
+        db_session.flush()
+        db_session.add(
+            SimulationRun(
+                run_id="run-reserve-closed",
+                run_mode="real",
+                protocol_version="protocol_v1",
+                condition_name="reserve_closed_test",
+                run_class="special_exploratory",
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+        )
+        db_session.add(
+            Law(
+                title="Active Reserve Aid Standing Law",
+                description="Top up active agents from the shared survival reserve.",
+                law_class="standing_law",
+                runtime_effect={
+                    "type": "active_reserve_aid",
+                    "trigger_food_below": 5,
+                    "trigger_energy_below": 6,
+                    "target_food": 7,
+                    "target_energy": 8,
+                    "min_pool_remaining": 100,
+                },
+                author_agent_id=agent.id,
+                active=False,
+                passed_at=started_at + timedelta(hours=1),
+            )
+        )
+        db_session.add(
+            Event(
+                agent_id=agent.id,
+                event_type="reserve_aid",
+                description="shared reserve covered active deficit",
+                event_metadata={"runtime": {"run_id": "run-reserve-closed", "run_mode": "real"}},
+                created_at=started_at + timedelta(hours=2),
+            )
+        )
+        db_session.commit()
+
+        snapshot = run_reports._collect_run_snapshot(db_session, run_id="run-reserve-closed")
+        policy = snapshot["reserve_semantics"]["policy_intent"]
+
+        assert policy["scope"] == "historical_run"
+        assert policy["reserve_law_count"] == 1
+        assert policy["executable_active_aid_law_ids"]
+        assert snapshot["reserve_semantics"]["mechanical_access"]["automatic_support_available"] is True
     finally:
         db_session.close()
 

@@ -104,7 +104,7 @@ def test_create_proposal_accepts_structured_runtime_effect():
         engine.dispose()
 
 
-def test_create_proposal_downgrades_unsupported_runtime_effect_to_advisory():
+def test_create_proposal_rejects_unsupported_runtime_effect():
     engine, factory = _session_factory()
     try:
         with factory() as db:
@@ -128,11 +128,9 @@ def test_create_proposal_downgrades_unsupported_runtime_effect_to_advisory():
 
             validation = asyncio.run(actions.validate_action(db, author, action))
 
-            assert validation == {"valid": True}
-            assert action["governance_class"] == "advisory_law"
-            assert action["runtime_effect"] == {}
-            assert action["unsupported_runtime_effect_downgraded"] is True
-            assert action["unsupported_runtime_effect_type"] == "dormant_revival"
+            assert validation["valid"] is False
+            assert validation["reason_code"] == "unsupported_runtime_effect"
+            assert "Supported runtime_effect.type values" in validation["reason"]
     finally:
         engine.dispose()
 

@@ -11,6 +11,7 @@ from app.core.time import ensure_utc, now_utc
 from app.models.models import Agent, AgentInventory, Message, Proposal, Law, Event, Vote, GlobalResources, AgentRelationshipMemory
 from app.services.agent_memory import agent_memory_service
 from app.services.actions import get_action_rate_limit_state
+from app.services.aid_lifecycle import classify_aid_request_event
 from app.services.executable_governance import governance_payload_for_law, governance_payload_for_proposal
 from app.services.law_effects import is_survival_reserve_law
 from app.services.relationship_memory import RelationshipSummary, relationship_memory_service
@@ -523,7 +524,8 @@ def _incoming_aid_request_inbox(
         requester = db.query(Agent).filter(Agent.id == requester_id).first()
         if requester is None:
             continue
-        if _aid_request_has_refusal_response(db, request_event=event, responder=agent, requester=requester):
+        lifecycle = classify_aid_request_event(db, request_event=event, run_window=run_window)
+        if lifecycle is not None and str(lifecycle.get("status") or "unresolved") != "unresolved":
             continue
 
         resource_type = str(metadata.get("resource_type") or "").strip().lower()
@@ -836,7 +838,7 @@ def _soft_action_type_prior_guidance(
         )
     if direct_conversations or recent_social_pressure:
         lines.append(
-            "Recent direct conversation or social pressure is visible; reply, direct_message, trade, refuse_aid, or contest_proposal may carry more continuity than a generic new post."
+            "Recent direct conversation or social pressure is visible; reply, direct_message, trade, refuse_aid, or contest_proposal may carry more continuity than a generic new post if you can change what someone does next."
         )
     if food < critical_food or energy < critical_energy:
         lines.append(
@@ -855,7 +857,7 @@ def _soft_action_type_prior_guidance(
     elif personality == "freedom":
         lines.append("Freedom prior: favor consent, opt-out, contest_proposal, or voluntary trade/direct coordination when coercion is at stake.")
     elif personality == "stability":
-        lines.append("Stability prior: favor vote, enforcement clarity, procedural replies, or specific implementation details.")
+        lines.append("Stability prior: favor vote, enforcement clarity, direct commitments, or specific implementation details.")
     else:
         lines.append("Neutral prior: favor the action that closes the clearest information gap or bridges an unresolved disagreement.")
     return lines
@@ -1112,11 +1114,11 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             f"- The current run has {total_run_votes} votes and {len(active_proposals)} active proposals, but only {total_run_messages} messages."
         )
         context_parts.append(
-            "- Unless you are in immediate survival danger, choose a social action now: forum_reply, direct_message, forum_post, contest_proposal, request_aid/refuse_aid, or trade."
+            "- Unless you are in immediate survival danger, consider a targeted social move now: forum_reply, direct_message, contest_proposal, request_aid/refuse_aid, or trade. Do not speak publicly just to recap visible governance state."
         )
         if active_proposals:
             context_parts.append(
-                "- Do not open another generic proposal. Name a proposal id, explain your vote, ask a named agent for support, challenge an opponent, or propose an amendment in conversation."
+                "- Do not open another generic proposal. Name a proposal id only when you add a condition, ask a named agent for support, challenge an opponent, or propose an amendment in conversation."
             )
         if total_forum_replies == 0 and recent_forum_threads:
             context_parts.append(
@@ -1428,7 +1430,8 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         )
     context_parts.append('  Important: if you want a passed proposal to become an actual law, use proposal_type "law" with governance_class "standing_law" or "advisory_law".')
     context_parts.append("  Legal Text explains what agents intend. Runtime Effect is the separate structured template the system can actually execute.")
-    context_parts.append("  Passing advisory legal text does not automatically move resources. Only supported runtime_effect templates execute, and unsupported effects remain advisory.")
+    context_parts.append("  Passing advisory legal text does not automatically move resources. Only supported runtime_effect templates execute: common_pool_allocation, active_reserve_aid, and active_reserve_aid_amendment.")
+    context_parts.append("  Unsupported execution names such as common_pool_contribution or dormant_revival are rejected as runtime effects; use an advisory_law/resolution if you only mean a social norm.")
     context_parts.append("  Passing a law changes policy, coordination, and enforcement context; it does not automatically override run-condition mechanics such as reserve auto-aid, dormant maintenance, or auto-revival unless those effects are enabled for this run or attached as a supported Runtime Effect.")
     context_parts.append('  Use proposal_type "rule" only for non-binding coordination norms or priorities that are not meant to become a formal law. If you accidentally use binding language in a rule, it is treated as a non-binding resolution.')
     context_parts.append("  Proposal type guide:")
@@ -1661,7 +1664,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     checkpoint_priority_lines: list[str] = []
     if food >= critical_food and energy >= critical_energy:
         checkpoint_priority_lines.append(
-            "If you are at a checkpoint and not in immediate survival crisis, do not spend this turn on routine work or idle if there is a meaningful social, governance, or trade action available."
+            "If you are at a checkpoint and not in immediate survival crisis, take a social, governance, or trade action only when it changes a decision, moves resources, recruits a named agent, or creates a real commitment; otherwise work or idle is better than public recap."
         )
     if incoming_aid_request_inbox:
         checkpoint_priority_lines.append(
@@ -1669,14 +1672,14 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         )
     if recent_social_pressure or direct_conversations:
         checkpoint_priority_lines.append(
-            "Recent direct requests, messages, or social pressure make reply, trade, request_aid, refuse_aid, or a related forum response more important than generic work."
+            "Recent direct requests, messages, or social pressure make reply, trade, request_aid, refuse_aid, or a related forum response useful only if it answers someone concretely; otherwise avoid performative follow-up."
         )
     if active_proposals:
         checkpoint_priority_lines.append(
-            "When active proposals exist, voting, contesting, or discussing them is usually more valuable than another routine work action unless you must produce resources immediately to survive."
+            "When active proposals exist, voting or contesting is usually higher signal than discussing obvious proposal status; discuss only to add a condition, amendment, named ask, or concrete objection."
         )
         checkpoint_priority_lines.append(
-            "If you have already voted on the closest active proposal, use forum_reply or direct_message to explain your vote, negotiate an amendment, recruit support, or challenge a specific opponent instead of idling."
+            "If you have already voted on the closest active proposal, use forum_reply or direct_message only to negotiate an amendment, recruit support from a named agent, or challenge a specific opponent."
         )
     if len(active_proposals) >= 3:
         checkpoint_priority_lines.append(

@@ -110,9 +110,8 @@ def _resolve_download_path(raw_path: str) -> Path:
 
 
 def _artifact_media_type(artifact_format: str, *, inline_view: bool = False) -> str:
-    if artifact_format == "markdown" and inline_view:
-        return "text/plain; charset=utf-8"
-    return "application/json" if artifact_format == "json" else "text/markdown; charset=utf-8"
+    _ = inline_view
+    return "application/json" if artifact_format == "json" else "text/markdown"
 
 
 def _find_run_artifact(
