@@ -230,6 +230,21 @@ def test_internal_canary_k3_paired_active_aid_enables_only_threshold_support():
     assert preset.common_pool_targets == {"food": 450.0, "energy": 300.0, "materials": 500.0}
 
 
+def test_internal_canary_k6_pressure_restoration_only_disables_auto_contribution():
+    k3 = get_scarcity_preset("internal_canary_k3_paired_active_aid_v1")
+    preset = get_scarcity_preset("internal_canary_k6_pressure_restoration_v1")
+
+    assert preset.recommended_run_class == "special_exploratory"
+    assert preset.agent_resource_targets == k3.agent_resource_targets
+    assert preset.common_pool_targets == k3.common_pool_targets
+
+    k3_overrides = dict(k3.runtime_overrides)
+    k6_overrides = dict(preset.runtime_overrides)
+    assert k3_overrides.pop("SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED") is True
+    assert k6_overrides.pop("SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED") is False
+    assert k6_overrides == k3_overrides
+
+
 def test_standard_reset_preset_restores_named_baseline():
     preset = get_scarcity_preset("standard_reset_v2")
 
@@ -260,6 +275,7 @@ def test_list_scarcity_presets_is_sorted_and_complete():
         "internal_canary_d_revival_window_v1",
         "internal_canary_e_response_loop_v1",
         "internal_canary_k3_paired_active_aid_v1",
+        "internal_canary_k6_pressure_restoration_v1",
         "internal_canary_k_bounded_contribution_v1",
         "internal_scarcity_tight_v1",
         "internal_scarcity_tight_v2",
