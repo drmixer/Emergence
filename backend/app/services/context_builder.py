@@ -129,7 +129,7 @@ def _public_actor_snapshot(
     )
     if not living_agents:
         return [
-            "- Strongest private stockpiles: none visible.",
+            "- Largest visible resource buffers: none visible.",
             "- Most exposed agents: none visible.",
             "- Governance focal point: no living agents remain.",
         ]
@@ -264,7 +264,7 @@ def _public_actor_snapshot(
         governance_line = "- Governance focal point: no proposal has been introduced in the last 24 hours."
 
     return [
-        f"- Strongest private stockpiles: {strongest_line}",
+        f"- Largest visible resource buffers: {strongest_line}",
         f"- Most exposed agents: {exposed_line}",
         governance_line,
     ]
@@ -1069,7 +1069,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             "No active laws exist yet. If you want durable shared rules, you must propose them explicitly."
         )
         proposal_hooks.append(
-            "Shared reserve systems, recurring emergency aid, or mandatory pooled contributions usually need proposal_type \"law\" if you want them to become part of the live world state."
+            "Shared reserve systems or recurring emergency aid usually need proposal_type \"law\" if you want them to become part of the live world state. Mandatory contribution text can create policy context, but not automatic reserve contribution unless that run-condition gate is already enabled."
         )
     else:
         proposal_hooks.append(
@@ -1082,7 +1082,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             )
         else:
             proposal_hooks.append(
-                "A survival-reserve law is active, but automatic contributions are disabled for this run; reserve policy still depends on direct aid, trade, voting, enforcement, or explicit runtime-enabled mechanics."
+                "A survival-reserve law is active, but automatic contributions are disabled for this run; reserve policy still depends on direct aid, trade, voting, enforcement, or supported runtime effects that are already enabled."
             )
         if starving_agents:
             proposal_hooks.append(
@@ -1126,7 +1126,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             )
         if total_direct_messages == 0:
             context_parts.append(
-                "- No direct messages have happened yet. If you need a coalition, ask a specific agent directly."
+                "- No direct messages have happened yet. If you need a coalition, ask a specific agent directly. Do not open by reciting their inventory; lead with your own offer, need, or question."
             )
         context_parts.append("")
 
@@ -1432,7 +1432,8 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append("  Legal Text explains what agents intend. Runtime Effect is the separate structured template the system can actually execute.")
     context_parts.append("  Passing advisory legal text does not automatically move resources. Only supported runtime_effect templates execute: common_pool_allocation, active_reserve_aid, and active_reserve_aid_amendment.")
     context_parts.append("  Unsupported execution names such as common_pool_contribution or dormant_revival are rejected as runtime effects; use an advisory_law/resolution if you only mean a social norm.")
-    context_parts.append("  Passing a law changes policy, coordination, and enforcement context; it does not automatically override run-condition mechanics such as reserve auto-aid, dormant maintenance, or auto-revival unless those effects are enabled for this run or attached as a supported Runtime Effect.")
+    context_parts.append("  Passing a law changes policy, coordination, and enforcement context; it does not automatically override run-condition mechanics such as reserve auto-contribution, dormant maintenance, or auto-revival. Those gates are run-condition settings, not amendment targets.")
+    context_parts.append("  active_reserve_aid_amendment can only amend an existing active_reserve_aid law's thresholds, targets, or pool floor. It cannot enable automatic reserve contributions.")
     context_parts.append('  Use proposal_type "rule" only for non-binding coordination norms or priorities that are not meant to become a formal law. If you accidentally use binding language in a rule, it is treated as a non-binding resolution.')
     context_parts.append("  Proposal type guide:")
     context_parts.append('  - Resolution: non-binding intent; use proposal_type "rule" or governance_class "resolution".')
@@ -1559,7 +1560,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         if reserve_auto_contribution_enabled():
             context_parts.append("- Reserve contribution effect: automatic reserve contributions are enabled. The bounded system preset normally diverts 10% of food and 25% of energy work output to the shared reserve; when reserve energy runs low, food contribution drops and energy contribution rises.")
         else:
-            context_parts.append("- Reserve contribution effect: automatic reserve contributions are disabled for this run. A reserve law may still be discussed or enforced socially, but work output is not automatically diverted to the common pool.")
+            context_parts.append("- Reserve contribution effect: automatic reserve contributions are disabled for this run. A reserve law or amendment cannot enable that runtime gate; work output is not automatically diverted to the common pool.")
         reserve_notes = []
         if reserve_active_aid_enabled():
             reserve_notes.append(
@@ -1579,7 +1580,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             context_parts.append(f"- Reserve access effect: {'; '.join(reserve_notes)}.")
         else:
             context_parts.append("- Reserve access effect: reserve exists for collective accounting and political coordination, but no automatic active aid, dormant maintenance, or revival support is currently enabled.")
-        context_parts.append("- Reserve execution note: passing a reserve law records policy intent. It only creates automatic resource movement for mechanics that are explicitly enabled in the current run settings.")
+        context_parts.append("- Reserve execution note: passing a reserve law records policy intent. It only creates automatic resource movement for supported runtime_effect templates and mechanics explicitly enabled in the current run settings.")
     context_parts.append("")
 
     if recent_reserve_events:

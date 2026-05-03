@@ -385,6 +385,50 @@ def test_create_proposal_rejects_unsupported_executable_text_claim(session_facto
     assert "not a supported runtime_effect" in validation["reason"]
 
 
+def test_create_proposal_rejects_auto_contribution_claim_even_with_supported_amendment_effect(session_factory):
+    with session_factory() as db:
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        law = Law(
+            author_agent_id=proposer.id,
+            title="Basic Active Agent Resource Aid",
+            description="Top up active agents below thresholds.",
+            law_class="standing_law",
+            runtime_effect={
+                "type": "active_reserve_aid",
+                "trigger_food_below": 5,
+                "trigger_energy_below": 6,
+                "target_food": 7,
+                "target_energy": 8,
+                "min_pool_remaining": 25,
+            },
+            active=True,
+            passed_at=now_utc() - timedelta(minutes=10),
+        )
+        db.add(law)
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": f"Amendment to Law #{law.id}: Enable Automatic Contributions",
+                    "description": (
+                        f"Amend Law #{law.id} to enable automatic contributions while preserving "
+                        "a minimum pool floor of 25."
+                    ),
+                    "proposal_type": "amendment",
+                    "governance_class": "amendment",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "unsupported_runtime_effect_text"
+    assert "automatic reserve contribution is controlled by run settings" in validation["reason"]
+
+
 def test_create_proposal_rejects_duplicate_voluntary_contribution_framework(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")
@@ -1012,6 +1056,48 @@ def test_direct_message_action_returns_sender_and_recipient_metadata(session_fac
     assert "Meet me near the reserve" in result["content_preview"]
     assert direct_message.message_type == "direct_message"
     assert direct_message.recipient_agent_id == target_id
+
+
+def test_direct_message_rejects_inventory_recital_without_concrete_move(session_factory):
+    with session_factory() as db:
+        sender = _seed_agent(db, agent_number=14, display_name="Muse-14")
+        _seed_agent(db, agent_number=15, display_name="Nova-15")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                sender,
+                {
+                    "action": "direct_message",
+                    "recipient_agent_id": 15,
+                    "content": "Your stockpile is F22/E24/M20. How do you view shared resource management?",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "misleading_private_inventory_opening"
+    assert "Lead with your own need, offer, or question" in validation["reason"]
+
+
+def test_direct_message_allows_inventory_reference_tied_to_trade_offer(session_factory):
+    with session_factory() as db:
+        sender = _seed_agent(db, agent_number=14, display_name="Muse-14")
+        _seed_agent(db, agent_number=15, display_name="Nova-15")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                sender,
+                {
+                    "action": "direct_message",
+                    "recipient_agent_id": 15,
+                    "content": "Your stockpile is energy-heavy; I offer 2 food for 2 energy if you want to trade.",
+                },
+            )
+        )
+
+    assert validation["valid"] is True
 
 
 def test_contest_proposal_creates_forum_post_and_author_notice(session_factory):

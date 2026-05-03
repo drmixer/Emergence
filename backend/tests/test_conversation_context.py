@@ -493,7 +493,7 @@ def test_context_includes_canary_b_shared_problem_and_public_actor_snapshot(sess
 
     assert "Shared problem - Visible upkeep gap:" in context
     assert "PUBLIC ACTOR SNAPSHOT:" in context
-    assert "Strongest private stockpiles:" in context
+    assert "Largest visible resource buffers:" in context
     assert "Beacon-2 (#2) active, F20.0/E15.0/M12.0" in context
     assert "Most exposed agents:" in context
     assert "Drift-4 (#4) dormant, starvation=2, F0.0/E0.0" in context
@@ -508,7 +508,7 @@ def test_context_includes_canary_b_shared_problem_and_public_actor_snapshot(sess
     assert "do not create a second near-identical allocation" in context
 
 
-def test_public_actor_snapshot_prefers_active_stockpiles_over_dormant_ones(session_factory, monkeypatch):
+def test_public_actor_snapshot_prefers_active_buffers_over_dormant_ones(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
 
     with session_factory() as db:
@@ -533,7 +533,7 @@ def test_public_actor_snapshot_prefers_active_stockpiles_over_dormant_ones(sessi
 
         context = asyncio.run(context_builder.build_agent_context(db, focal))
 
-    assert "Strongest private stockpiles: Beacon-2 (#2) active, F14.0/E13.0/M12.0" in context
+    assert "Largest visible resource buffers: Beacon-2 (#2) active, F14.0/E13.0/M12.0" in context
     assert "Cipher-3 (#3) dormant, F50.0/E45.0/M40.0" not in context
 
 

@@ -29,8 +29,8 @@ function formatRecipient(recipient) {
 
 function sortMessagesNewestFirst(messages) {
   return [...(Array.isArray(messages) ? messages : [])].sort((a, b) => {
-    const aTs = new Date(a?.created_at || 0).getTime()
-    const bTs = new Date(b?.created_at || 0).getTime()
+    const aTs = new Date(a?.latest_activity_at || a?.created_at || 0).getTime()
+    const bTs = new Date(b?.latest_activity_at || b?.created_at || 0).getTime()
     if (aTs !== bTs) return bTs - aTs
     return Number(b?.id || 0) - Number(a?.id || 0)
   })
@@ -69,6 +69,7 @@ function buildThreadLabel(threadData) {
 function MessageRow({ message, onOpenThread }) {
   const agentNumber = Number(message?.author?.agent_number || 0)
   const isDirectMessage = String(message?.message_type || '') === 'direct_message'
+  const replyCount = Number(message?.reply_count || 0)
   const typeLabel = isDirectMessage ? 'Direct Message' : 'Forum Thread'
   return (
     <div className="message-row">
@@ -86,6 +87,11 @@ function MessageRow({ message, onOpenThread }) {
           {isDirectMessage && (
             <span className="message-direction-chip">
               to {formatRecipient(message.recipient)}
+            </span>
+          )}
+          {!isDirectMessage && replyCount > 0 && (
+            <span className="message-direction-chip">
+              {replyCount} {replyCount === 1 ? 'reply' : 'replies'} · latest {formatTimestamp(message.latest_reply_at)}
             </span>
           )}
         </div>

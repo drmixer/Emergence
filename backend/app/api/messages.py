@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -42,6 +42,9 @@ class MessageResponse(BaseModel):
     author: AgentInfo
     recipient: Optional[AgentInfo] = None
     is_degraded_fallback: bool = False
+    reply_count: int = 0
+    latest_reply_at: Optional[str] = None
+    latest_activity_at: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -61,7 +64,10 @@ def _agent_info(agent: Agent) -> AgentInfo:
     )
 
 
-def _message_response(message: Message) -> MessageResponse:
+def _message_response(message: Message, *, thread_activity: Optional[dict[str, Any]] = None) -> MessageResponse:
+    activity = thread_activity or {}
+    latest_reply_at = activity.get("latest_reply_at")
+    latest_activity_at = activity.get("latest_activity_at") or message.created_at
     return MessageResponse(
         id=message.id,
         content=message.content,
@@ -75,6 +81,9 @@ def _message_response(message: Message) -> MessageResponse:
             str(message.message_type or "").strip() == "forum_post"
             and is_deterministic_fallback_forum_post_content(message.content)
         ),
+        reply_count=int(activity.get("reply_count") or 0),
+        latest_reply_at=latest_reply_at.isoformat() if latest_reply_at else None,
+        latest_activity_at=latest_activity_at.isoformat() if latest_activity_at else None,
     )
 
 
@@ -83,6 +92,47 @@ def _base_message_query(db: Session):
         joinedload(Message.author),
         joinedload(Message.recipient),
     )
+
+
+def _thread_activity_for_roots(
+    db: Session,
+    root_messages: list[Message],
+    *,
+    scope: str,
+) -> dict[int, dict[str, Any]]:
+    root_ids = [
+        int(message.id)
+        for message in root_messages
+        if str(message.message_type or "") == "forum_post" and message.parent_message_id is None
+    ]
+    if not root_ids:
+        return {}
+
+    run_window = get_live_run_window(db)
+    reply_query = db.query(
+        Message.parent_message_id.label("root_id"),
+        func.count(Message.id).label("reply_count"),
+        func.max(Message.created_at).label("latest_reply_at"),
+    ).filter(Message.parent_message_id.in_(root_ids))
+    if scope != "all":
+        reply_query = apply_live_run_window(reply_query, Message.created_at, run_window)
+    rows = reply_query.group_by(Message.parent_message_id).all()
+    by_root = {
+        int(row.root_id): {
+            "reply_count": int(row.reply_count or 0),
+            "latest_reply_at": row.latest_reply_at,
+            "latest_activity_at": row.latest_reply_at,
+        }
+        for row in rows
+    }
+    for message in root_messages:
+        if int(message.id) in root_ids and int(message.id) not in by_root:
+            by_root[int(message.id)] = {
+                "reply_count": 0,
+                "latest_reply_at": None,
+                "latest_activity_at": message.created_at,
+            }
+    return by_root
 
 
 @router.get("", response_model=List[MessageResponse])
@@ -116,7 +166,8 @@ def list_messages(
         )
 
     messages = query.offset(offset).limit(limit).all()
-    return [_message_response(m) for m in messages]
+    thread_activity = _thread_activity_for_roots(db, messages, scope=scope)
+    return [_message_response(m, thread_activity=thread_activity.get(int(m.id))) for m in messages]
 
 
 @router.get("/duplicate-waves")

@@ -62,10 +62,12 @@ def test_parse_action_response_rejects_truncated_json_like_payload():
 
 def test_throttle_gemini_honors_runtime_rpm_limit(monkeypatch):
     client = llm_client.LLMClient()
-    client._gemini_window_s = 0.001
-    client._gemini_calls.append(llm_client.time.monotonic())
+    now = {"value": 100.0}
+    client._gemini_window_s = 1.0
+    client._gemini_calls.append(now["value"])
     sleeps: list[float] = []
 
+    monkeypatch.setattr(llm_client.time, "monotonic", lambda: now["value"])
     monkeypatch.setattr(
         llm_client.runtime_config_service,
         "get_effective_value_cached",
@@ -73,18 +75,16 @@ def test_throttle_gemini_honors_runtime_rpm_limit(monkeypatch):
     )
     monkeypatch.setattr(llm_client.random, "random", lambda: 0.0)
 
-    real_sleep = asyncio.sleep
-
     async def _fake_sleep(delay: float):
         sleeps.append(delay)
-        await real_sleep(delay + 0.001)
+        now["value"] += delay + 0.001
 
     monkeypatch.setattr(llm_client.asyncio, "sleep", _fake_sleep)
 
     asyncio.run(client._throttle_gemini())
 
     assert len(sleeps) == 1
-    assert 0.0 < sleeps[0] <= 0.001
+    assert 0.0 < sleeps[0] <= 1.0
     assert len(client._gemini_calls) == 1
 
 

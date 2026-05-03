@@ -177,4 +177,42 @@ describe('Messages', () => {
     expect(screen.queryByText(/Nested reply should stay inside thread view/i)).not.toBeInTheDocument()
     expect(api.getMessages).not.toHaveBeenCalledWith(120, 'forum_reply')
   })
+
+  it('sorts forum threads by latest reply activity and shows reply summary', async () => {
+    api.getMessages.mockImplementation(async (_limit, messageType) => {
+      if (messageType === 'forum_post') {
+        return [
+          makeMessage({
+            id: 10,
+            message_type: 'forum_post',
+            content: 'Older active thread',
+            recipient: null,
+            created_at: '2026-04-21T02:10:00.000Z',
+            latest_activity_at: '2026-04-21T02:30:00.000Z',
+            latest_reply_at: '2026-04-21T02:30:00.000Z',
+            reply_count: 3,
+          }),
+          makeMessage({
+            id: 11,
+            message_type: 'forum_post',
+            content: 'Newer quiet thread',
+            recipient: null,
+            created_at: '2026-04-21T02:25:00.000Z',
+            latest_activity_at: '2026-04-21T02:25:00.000Z',
+            reply_count: 0,
+          }),
+        ]
+      }
+      if (messageType === 'direct_message') return []
+      return []
+    })
+
+    renderMessages('/messages?tab=forum')
+
+    expect(await screen.findByRole('heading', { name: /Forum Threads/i })).toBeInTheDocument()
+    const rows = screen.getAllByText(/thread/i).map((node) => node.textContent)
+    expect(rows.some((text) => text.includes('Older active thread'))).toBe(true)
+    expect(screen.getByText(/3 replies · latest/i)).toBeInTheDocument()
+    expect(screen.getByText(/Older active thread/i).compareDocumentPosition(screen.getByText(/Newer quiet thread/i)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
 })

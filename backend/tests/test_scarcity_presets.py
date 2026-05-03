@@ -245,6 +245,21 @@ def test_internal_canary_k6_pressure_restoration_only_disables_auto_contribution
     assert k6_overrides == k3_overrides
 
 
+def test_internal_canary_k7_only_lowers_initial_common_pool_energy():
+    k6 = get_scarcity_preset("internal_canary_k6_pressure_restoration_v1")
+    preset = get_scarcity_preset("internal_canary_k7_finite_reserve_energy_v1")
+
+    assert preset.recommended_run_class == "special_exploratory"
+    assert preset.runtime_overrides == k6.runtime_overrides
+    assert preset.agent_resource_targets == k6.agent_resource_targets
+
+    k6_pool = dict(k6.common_pool_targets)
+    k7_pool = dict(preset.common_pool_targets)
+    assert k6_pool.pop("energy") == 300.0
+    assert k7_pool.pop("energy") == 150.0
+    assert k7_pool == k6_pool
+
+
 def test_standard_reset_preset_restores_named_baseline():
     preset = get_scarcity_preset("standard_reset_v2")
 
@@ -276,6 +291,7 @@ def test_list_scarcity_presets_is_sorted_and_complete():
         "internal_canary_e_response_loop_v1",
         "internal_canary_k3_paired_active_aid_v1",
         "internal_canary_k6_pressure_restoration_v1",
+        "internal_canary_k7_finite_reserve_energy_v1",
         "internal_canary_k_bounded_contribution_v1",
         "internal_scarcity_tight_v1",
         "internal_scarcity_tight_v2",

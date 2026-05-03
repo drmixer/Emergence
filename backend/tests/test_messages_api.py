@@ -145,6 +145,50 @@ def test_forum_thread_uses_top_level_root_for_reply_lookup(session_factory):
     assert [item["id"] for item in body["messages"]] == [root.id, reply.id, nested.id]
 
 
+def test_forum_post_list_includes_thread_activity_summary(session_factory):
+    with session_factory() as db:
+        atlas = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        beacon = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        now = now_utc()
+        root = Message(
+            author_agent_id=atlas.id,
+            content="Thread root",
+            message_type="forum_post",
+            created_at=now - timedelta(hours=2),
+        )
+        db.add(root)
+        db.flush()
+        db.add_all(
+            [
+                Message(
+                    author_agent_id=beacon.id,
+                    content="First reply",
+                    message_type="forum_reply",
+                    parent_message_id=root.id,
+                    created_at=now - timedelta(minutes=20),
+                ),
+                Message(
+                    author_agent_id=atlas.id,
+                    content="Second reply",
+                    message_type="forum_reply",
+                    parent_message_id=root.id,
+                    created_at=now - timedelta(minutes=5),
+                ),
+            ]
+        )
+        db.commit()
+
+        with _make_client(db) as client:
+            response = client.get("/api/messages?message_type=forum_post&scope=all")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["reply_count"] == 2
+    assert body[0]["latest_reply_at"] is not None
+    assert body[0]["latest_activity_at"] == body[0]["latest_reply_at"]
+
+
 def test_message_payload_marks_degraded_fallback_forum_post(session_factory):
     with session_factory() as db:
         atlas = _seed_agent(db, agent_number=1, display_name="Atlas-1")

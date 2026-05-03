@@ -498,6 +498,47 @@ SCARCITY_PRESETS: dict[str, ScarcityPreset] = {
         },
         recommended_run_class="special_exploratory",
     ),
+    "internal_canary_k7_finite_reserve_energy_v1": ScarcityPreset(
+        name="internal_canary_k7_finite_reserve_energy_v1",
+        description=(
+            "Canary K7 finite-reserve diagnostic. Matches K6 exactly except for a lower starting "
+            "common-pool energy target, testing whether active aid plus a smaller finite energy "
+            "reserve forces prioritization, bilateral aid, shortfalls, or dormancy."
+        ),
+        runtime_overrides={
+            "AGENT_LOOP_DELAY_SECONDS": 180,
+            **CANARY_TUNING_RUNTIME_OVERRIDES,
+            "SURVIVAL_ACTIVE_FOOD_COST": 3.0,
+            "SURVIVAL_ACTIVE_ENERGY_COST": 3.5,
+            "SURVIVAL_DORMANT_FOOD_COST": 0.5,
+            "SURVIVAL_DORMANT_ENERGY_COST": 0.75,
+            "SURVIVAL_DEATH_THRESHOLD": 5,
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": True,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_FOOD": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TRIGGER_ENERGY": 2.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_FOOD": 3.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_TARGET_ENERGY": 3.0,
+            "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING": 25.0,
+            "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_REVIVE_ENABLED": False,
+            "SURVIVAL_RESERVE_AUTO_CONTRIBUTION_ENABLED": False,
+            "WORK_YIELD_FARM_BASE": 1.4,
+            "WORK_YIELD_GENERATE_BASE": 1.75,
+            "WORK_YIELD_GATHER_BASE": 0.5,
+            "WORLD_EVENT_GENERATION_ENABLED": False,
+        },
+        agent_resource_targets={
+            "food": 22.0,
+            "energy": 24.0,
+            "materials": 20.0,
+        },
+        common_pool_targets={
+            "food": 450.0,
+            "energy": 150.0,
+            "materials": 500.0,
+        },
+        recommended_run_class="special_exploratory",
+    ),
 }
 
 

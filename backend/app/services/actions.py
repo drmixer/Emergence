@@ -987,16 +987,15 @@ def _find_covering_active_reserve_aid_law(db: Session, action: dict) -> Law | No
 
 
 def _unsupported_runtime_text_reason(action: dict) -> str | None:
-    if _runtime_effect_type(action.get("runtime_effect")):
-        return None
-
     proposal_type = str(action.get("proposal_type") or "").strip().lower()
     governance_class = str(action.get("governance_class") or action.get("governanceClass") or "").strip().lower()
     raw_text = f"{action.get('title') or ''} {action.get('description') or ''}".lower()
     normalized = " ".join(re.findall(r"[a-z0-9_ -]+", raw_text)).replace("-", " ")
+    effect_type = _runtime_effect_type(action.get("runtime_effect"))
     execution_claim = (
         proposal_type in {"standing_law", "emergency_action"}
         or governance_class in {"standing_law", "emergency_action"}
+        or bool(effect_type)
         or any(
             marker in normalized
             for marker in (
@@ -1026,7 +1025,52 @@ def _unsupported_runtime_text_reason(action: dict) -> str | None:
     for marker, reason in unsupported_markers:
         if marker in normalized:
             return reason
+    if effect_type:
+        return None
     return None
+
+
+def _misleading_private_inventory_opening_reason(action: dict) -> str | None:
+    content = str(action.get("content") or "")
+    normalized = " ".join(content.lower().split())
+    if not normalized:
+        return None
+    first_clause = re.split(r"[.!?\n]", normalized, maxsplit=1)[0]
+    surveillance_markers = (
+        "your stockpile",
+        "your visible stockpile",
+        "your private reserve",
+        "your visible private reserve",
+        "you hold significant surplus",
+        "you have significant surplus",
+        "i see your stockpile",
+        "i see you hold",
+        "i see your resources",
+        "your resources are",
+    )
+    if not any(marker in first_clause for marker in surveillance_markers):
+        return None
+    concrete_terms = (
+        "trade",
+        "offer",
+        "request",
+        "send",
+        "transfer",
+        "spare",
+        "aid",
+        "need",
+        "terms",
+        "commit",
+        "co-sponsor",
+        "support proposal",
+        "vote",
+    )
+    if any(term in normalized for term in concrete_terms):
+        return None
+    return (
+        "Direct messages should not open by reciting another agent's visible inventory. "
+        "Lead with your own need, offer, or question; mention their resources only when tied to a concrete trade or aid request."
+    )
 
 
 def _idle_description(action: dict) -> str:
@@ -1274,6 +1318,18 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
         recipient = db.query(Agent).filter(Agent.agent_number == recipient_id).first()
         if not recipient:
             return {"valid": False, "reason": "Recipient agent not found"}
+        content = action.get("content", "")
+        if not content or len(content) < 1:
+            return {"valid": False, "reason": "Direct message requires content"}
+        if len(content) > 2000:
+            return {"valid": False, "reason": "Direct message too long (max 2000 chars)"}
+        inventory_opening_reason = _misleading_private_inventory_opening_reason(action)
+        if inventory_opening_reason:
+            return {
+                "valid": False,
+                "reason_code": "misleading_private_inventory_opening",
+                "reason": inventory_opening_reason,
+            }
         recipient_message_count = _direct_message_recipient_count_this_run(db, recipient)
         if recipient_message_count >= 3 and recipient.id != agent.id:
             recipient_name = recipient.display_name or f"Agent #{recipient.agent_number}"
