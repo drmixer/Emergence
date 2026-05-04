@@ -369,9 +369,19 @@ def _derive_archetype(agent: Agent, metrics: dict, danger_level: str) -> dict:
         "stability": "Order Keeper",
         "neutral": "Generalist",
     }
+    fallback_summaries = {
+        "efficiency": "No strong specialization has emerged yet; the public read currently leans on an efficiency-oriented starting lens.",
+        "equality": "No strong specialization has emerged yet; the public read currently leans on a mutual-aid starting lens.",
+        "freedom": "No strong specialization has emerged yet; the public read currently leans on an autonomy-oriented starting lens.",
+        "stability": "No strong specialization has emerged yet; the public read currently leans on a stability-oriented starting lens.",
+        "neutral": "No strong specialization has emerged yet; recent behavior still reads as broadly mixed.",
+    }
     return {
         "title": fallback_titles.get(personality, "Generalist"),
-        "summary": "Observed behavior is still mixed, so the public read is provisional rather than strongly specialized.",
+        "summary": fallback_summaries.get(
+            personality,
+            "No strong specialization has emerged yet; recent behavior still reads as broadly mixed.",
+        ),
     }
 
 

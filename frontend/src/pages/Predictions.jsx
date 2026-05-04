@@ -18,7 +18,7 @@ import {
     Sparkles
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import { resolveApiBase } from '../services/api'
+import { api, resolveApiBase } from '../services/api'
 import GlossaryTooltip from '../components/GlossaryTooltip'
 import NoActiveRunNotice from '../components/NoActiveRunNotice'
 
@@ -87,15 +87,19 @@ export default function Predictions() {
     const loadData = async () => {
         setLoading(true)
         try {
-            const [overview, marketsData, leaderboardData, me] = await Promise.all([
+            const [overview, openMarketsData, resolvedMarketsData, leaderboardData, me] = await Promise.all([
                 fetchJson('/api/analytics/overview').catch(() => null),
-                fetchJson('/api/predictions/markets'),
+                api.getPredictionMarkets('open', 50),
+                api.getPredictionMarkets('resolved', 50),
                 fetchJson('/api/predictions/leaderboard'),
                 fetchJson('/api/predictions/me', { credentials: 'include' }).catch(() => null),
             ])
 
             setScope(overview?.scope || null)
-            setMarkets(Array.isArray(marketsData) ? marketsData : [])
+            setMarkets([
+                ...(Array.isArray(openMarketsData) ? openMarketsData : []),
+                ...(Array.isArray(resolvedMarketsData) ? resolvedMarketsData : []),
+            ])
             setLeaderboard(Array.isArray(leaderboardData) ? leaderboardData : [])
             if (me) setUserStats(me)
         } catch (_error) {

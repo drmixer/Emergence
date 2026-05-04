@@ -96,6 +96,16 @@ function getRunSeason(item) {
   return String(item?.summary?.season_number || item?.run_metadata?.season_number || '').trim()
 }
 
+function getRunClass(item) {
+  return String(item?.summary?.run_class || item?.run_metadata?.run_class || '').trim()
+}
+
+function isEarlyStandardRun(item) {
+  const runClass = getRunClass(item)
+  const duration = Number(item?.summary?.duration_hours || 0)
+  return runClass === 'standard_72h' && Number.isFinite(duration) && duration > 0 && duration < 60
+}
+
 function getRunEndedMs(item) {
   const value = item?.summary?.run_ended_at || item?.summary?.generated_at_utc || item?.run_metadata?.ended_at
   const date = new Date(value)
@@ -180,6 +190,7 @@ function buildComparisonGroups(items) {
 export default function Reports() {
   const location = useLocation()
   const [archive, setArchive] = useState(null)
+  const [includeTuning, setIncludeTuning] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -190,7 +201,7 @@ export default function Reports() {
       setLoading(true)
       setError('')
       try {
-        const payload = await api.getRunsArchive(60)
+        const payload = await api.getRunsArchive(60, includeTuning)
         if (!cancelled) {
           setArchive(payload && typeof payload === 'object' ? payload : null)
         }
@@ -210,7 +221,7 @@ export default function Reports() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [includeTuning])
 
   function getArtifactUrl(runId, artifactType, artifact, action) {
     const format = preferredFormat(artifact)
@@ -222,10 +233,10 @@ export default function Reports() {
 
   const items = Array.isArray(archive?.items) ? archive.items : []
   const stats = archive?.stats || {}
-  const activeRunId = String(archive?.active_run_id || '').trim()
   const hiddenTuningCount = Number(archive?.hidden_tuning_count || 0)
   const legacyReportsRoute = String(location.pathname || '').trim() === '/reports'
   const comparisonGroups = buildComparisonGroups(items)
+  const archiveModeLabel = includeTuning ? 'All Archived Runs' : 'Public Archive'
 
   return (
     <div className="reports-page archive-page">
@@ -250,45 +261,37 @@ export default function Reports() {
           {hiddenTuningCount} tuning run{hiddenTuningCount === 1 ? '' : 's'} hidden from the public archive.
         </div>
       )}
-
-      {activeRunId && (
-        <div className="card archive-current-run-card">
-          <div className="card-body archive-current-run-body">
-            <div>
-              <strong>Current live run</strong>
-              <p>{activeRunId} stays on the live tabs. Completed runs move here after closeout.</p>
-            </div>
-            <div className="archive-current-run-actions">
-              <Link to="/dashboard" className="btn btn-primary">
-                Current Run
-              </Link>
-              <Link to={getStoryReplayHref(activeRunId)} className="btn btn-secondary">
-                Live Replay
-              </Link>
-              <Link to={`/runs/${encodeURIComponent(activeRunId)}`} className="btn btn-secondary">
-                Live Evidence
-              </Link>
-            </div>
-          </div>
+      {!error && includeTuning && (
+        <div className="feed-notice">
+          Tuning and exploratory closeouts are included in this operator view.
         </div>
       )}
+
+      <div className="message-tabs archive-mode-tabs">
+        <button type="button" className={`tab-btn ${!includeTuning ? 'active' : ''}`} onClick={() => setIncludeTuning(false)}>
+          Public Archive
+        </button>
+        <button type="button" className={`tab-btn ${includeTuning ? 'active' : ''}`} onClick={() => setIncludeTuning(true)}>
+          Include Tuning Runs
+        </button>
+      </div>
 
       <div className="stats-grid archive-stats-grid">
         <div className="stat-card">
           <div className="stat-header">
-            <span className="stat-label">Completed Runs</span>
+            <span className="stat-label">{includeTuning ? 'All Runs' : 'Public Runs'}</span>
             <div className="stat-icon blue">
               <FileSearch size={18} />
             </div>
           </div>
           <div className="stat-value">{Number(stats.completed_runs || 0).toLocaleString()}</div>
           <div className="stat-change">
-            <span>Runs with archived closeout bundles</span>
+            <span>{archiveModeLabel} with archived closeout bundles</span>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-header">
-            <span className="stat-label">Total Events</span>
+            <span className="stat-label">Visible Events</span>
             <div className="stat-icon orange">
               <TimerReset size={18} />
             </div>
@@ -300,7 +303,7 @@ export default function Reports() {
         </div>
         <div className="stat-card">
           <div className="stat-header">
-            <span className="stat-label">LLM Calls</span>
+            <span className="stat-label">Visible LLM Calls</span>
             <div className="stat-icon green">
               <RefreshCw size={18} />
             </div>
@@ -312,7 +315,7 @@ export default function Reports() {
         </div>
         <div className="stat-card">
           <div className="stat-header">
-            <span className="stat-label">Estimated Cost</span>
+            <span className="stat-label">Visible Cost</span>
             <div className="stat-icon purple">
               <Download size={18} />
             </div>
@@ -419,8 +422,9 @@ export default function Reports() {
                       <span>{formatLabel(runMetadata.run_mode || 'archived')}</span>
                       <span>{formatLabel(summary.condition_name || runMetadata.condition_name || 'unknown condition')}</span>
                       <span>Season {summary.season_number || runMetadata.season_number || 'n/a'}</span>
-                      <span>{formatLabel(summary.run_class || runMetadata.run_class || 'unspecified')}</span>
+                      <span>{formatLabel(getRunClass(item) || 'unspecified')}</span>
                       <span>{Number(summary.replicate_count || 1)} replicate(s)</span>
+                      {isEarlyStandardRun(item) && <span>Ended Early</span>}
                     </div>
 
                     <div className="archive-run-stats">

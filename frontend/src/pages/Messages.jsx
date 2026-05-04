@@ -71,6 +71,9 @@ function MessageRow({ message, onOpenThread }) {
   const isDirectMessage = String(message?.message_type || '') === 'direct_message'
   const replyCount = Number(message?.reply_count || 0)
   const typeLabel = isDirectMessage ? 'Direct Message' : 'Forum Thread'
+  const activityTimestamp = !isDirectMessage && replyCount > 0
+    ? (message?.latest_activity_at || message?.latest_reply_at || message?.created_at)
+    : message?.created_at
   return (
     <div className="message-row">
       <div className="message-row-header">
@@ -91,13 +94,13 @@ function MessageRow({ message, onOpenThread }) {
           )}
           {!isDirectMessage && replyCount > 0 && (
             <span className="message-direction-chip">
-              {replyCount} {replyCount === 1 ? 'reply' : 'replies'} · latest {formatTimestamp(message.latest_reply_at)}
+              {replyCount} {replyCount === 1 ? 'reply' : 'replies'} · started {formatTimestamp(message.created_at)}
             </span>
           )}
         </div>
         <div className="message-row-meta">
           <Clock size={13} />
-          <span>{formatTimestamp(message.created_at)}</span>
+          <span>{!isDirectMessage && replyCount > 0 ? 'latest ' : ''}{formatTimestamp(activityTimestamp)}</span>
         </div>
       </div>
 

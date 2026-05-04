@@ -665,6 +665,44 @@ def _obvious_governance_recap_reason(content: str | None) -> str | None:
     return None
 
 
+def _generic_governance_discourse_reason(content: str | None) -> str | None:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return None
+    if _message_has_concrete_social_move(normalized):
+        return None
+    discourse_markers = (
+        "the current forum discussions",
+        "the forum discussion",
+        "the current discussions",
+        "the ongoing discussion",
+        "the discussion highlights",
+        "this highlights",
+        "we need to focus",
+        "we should focus",
+        "we need a proposal",
+        "we need direct action",
+        "we need to address",
+    )
+    if not any(marker in normalized for marker in discourse_markers):
+        return None
+    governance_markers = (
+        "proposal #",
+        "law #",
+        "laws #",
+        "runtime effect",
+        "automatic contribution",
+        "reserve aid",
+        "common pool",
+        "threshold",
+        "allocation",
+        "governance",
+    )
+    if not any(marker in normalized for marker in governance_markers):
+        return None
+    return "public message describes the debate without a concrete first-person move"
+
+
 def _forum_semantic_signature(text: str | None) -> str | None:
     normalized = " ".join(str(text or "").strip().lower().split())
     if not normalized:
@@ -721,6 +759,8 @@ def _reply_adds_saturated_thread_novelty(content: str | None, thread_messages: l
     normalized = " ".join(str(content or "").strip().lower().split())
     if not normalized:
         return False
+    if _auto_contribution_literacy_reason(content):
+        return False
 
     first_person_commitment = re.search(
         r"\bi\s+(will|won't|cannot|can't|refuse|oppose|contest|offer|accept|reject|transfer|trade|give|send|request)\b",
@@ -733,6 +773,12 @@ def _reply_adds_saturated_thread_novelty(content: str | None, thread_messages: l
     has_quantity = bool(re.search(r"\b\d+(?:\.\d+)?\s*(food|energy|materials?|f|e|m)\b", normalized))
     direct_terms = bool(re.search(r"\b(if you|my terms|your terms|i can offer|i will offer|i will trade|i will transfer)\b", normalized))
     if first_person_commitment and (concrete_action or has_quantity or direct_terms):
+        return True
+    if re.search(r"\bi\s+(propose|will propose|will prepare)\b", normalized) and (
+        re.search(r"\b\d+(?:\.\d+)?\s*(food|energy|materials?|f|e|m)\b", normalized)
+        or re.search(r"\b(agent\s*#?\d+|[a-z]+-\d{2})\b", normalized)
+        or re.search(r"\b(trigger|target|floor|recipient|allocation)\b", normalized)
+    ):
         return True
     if "?" in str(content or "") and direct_terms:
         return True
@@ -759,6 +805,10 @@ def _low_novelty_saturated_thread_reason(
             "proposal #",
             "law #",
             "active threshold aid",
+            "automatic contribution",
+            "automatic contributions",
+            "automatic reserve contribution",
+            "automatic reserve contributions",
             "mandatory contribution",
             "common pool",
             "voluntary protocol",
@@ -785,6 +835,12 @@ def _low_novelty_saturated_thread_reason(
     )
     if governance_hits >= 1 and consensus_hits >= 1:
         return "saturated policy thread already contains this governance position"
+    if (
+        governance_hits >= 1
+        and any(marker in normalized for marker in ("we need", "need to focus", "should focus", "the current discussions", "highlights that"))
+        and not _reply_adds_saturated_thread_novelty(content, thread_messages)
+    ):
+        return "saturated policy thread needs a concrete new action, not another diagnosis"
     if governance_hits >= 2:
         return "saturated policy thread needs concrete new action, not another summary"
     return None
@@ -904,6 +960,93 @@ def _aid_request_already_refused(
     return False
 
 
+def _looks_like_direct_aid_request_text(content: str | None) -> bool:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return False
+    if not re.search(r"\b(request|requesting|aid|help|need)\b", normalized):
+        return False
+    return bool(re.search(r"\b(food|energy|materials?|survival|dormancy|dormant|upkeep|deficit)\b", normalized))
+
+
+def _looks_like_aid_denial_text(content: str | None) -> bool:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return False
+    denial_markers = (
+        "request denied",
+        "denied",
+        "i deny",
+        "i decline",
+        "i refuse",
+        "i am refusing",
+        "refusing your request",
+        "refused to provide",
+        "cannot provide",
+        "can't provide",
+        "unable to provide",
+        "cannot spare",
+        "can't spare",
+        "no surplus",
+        "not surplus",
+        "not able to help",
+    )
+    if not any(marker in normalized for marker in denial_markers):
+        return False
+    return bool(re.search(r"\b(request|aid|food|energy|materials?|surplus|trade)\b", normalized))
+
+
+def _latest_direct_aid_request_message(
+    db: Session,
+    *,
+    requester: Agent,
+    target: Agent,
+) -> Message | None:
+    query = db.query(Message).filter(
+        Message.message_type == "direct_message",
+        Message.author_agent_id == requester.id,
+        Message.recipient_agent_id == target.id,
+    )
+    started_at = _active_run_started_at(db)
+    if started_at is not None:
+        query = query.filter(Message.created_at >= started_at)
+    for message in query.order_by(desc(Message.created_at), desc(Message.id)).limit(25).all():
+        if _looks_like_direct_aid_request_text(message.content):
+            return message
+    return None
+
+
+def _direct_message_already_denied_latest_request_reason(
+    db: Session,
+    *,
+    sender: Agent,
+    recipient: Agent,
+    content: str | None,
+) -> str | None:
+    if not _looks_like_aid_denial_text(content):
+        return None
+    latest_request = _latest_direct_aid_request_message(db, requester=recipient, target=sender)
+    if latest_request is None:
+        return None
+    request_created_at = ensure_utc(latest_request.created_at)
+    if request_created_at is None:
+        return None
+    query = db.query(Message).filter(
+        Message.message_type == "direct_message",
+        Message.author_agent_id == sender.id,
+        Message.recipient_agent_id == recipient.id,
+        Message.created_at >= request_created_at,
+    )
+    for message in query.order_by(desc(Message.created_at), desc(Message.id)).limit(25).all():
+        if _looks_like_aid_denial_text(message.content):
+            return (
+                f"You already denied {recipient.display_name or f'Agent #{recipient.agent_number}'}'s "
+                f"latest aid request in message #{message.id}. Reply only if conditions changed materially "
+                "or they make a new request."
+            )
+    return None
+
+
 def _active_run_proposal_query(db: Session):
     query = db.query(Proposal).filter(Proposal.status == "active")
     started_at = _active_run_started_at(db)
@@ -1015,8 +1158,12 @@ def _unsupported_runtime_text_reason(action: dict) -> str | None:
     unsupported_markers = (
         ("common_pool_contribution", "common_pool_contribution is not a supported runtime_effect"),
         ("common pool contribution", "common_pool_contribution is not a supported runtime_effect"),
+        ("automatic reserve contribution", "automatic reserve contribution is controlled by run settings, not law text"),
+        ("automatic reserve contributions", "automatic reserve contribution is controlled by run settings, not law text"),
         ("automatic contribution", "automatic reserve contribution is controlled by run settings, not law text"),
+        ("automatic contributions", "automatic reserve contribution is controlled by run settings, not law text"),
         ("auto contribution", "automatic reserve contribution is controlled by run settings, not law text"),
+        ("auto contributions", "automatic reserve contribution is controlled by run settings, not law text"),
         ("dormant_revival", "dormant_revival is not a supported runtime_effect"),
         ("dormant revival", "dormant_revival is not a supported runtime_effect"),
         ("automatic revival", "automatic revival is controlled by run settings, not law text"),
@@ -1027,6 +1174,61 @@ def _unsupported_runtime_text_reason(action: dict) -> str | None:
             return reason
     if effect_type:
         return None
+    return None
+
+
+def _auto_contribution_literacy_reason(content: str | None) -> str | None:
+    normalized = " ".join(str(content or "").strip().lower().replace("-", " ").split())
+    if not normalized:
+        return None
+    auto_markers = (
+        "automatic reserve contribution",
+        "automatic reserve contributions",
+        "automatic contribution",
+        "automatic contributions",
+        "auto contribution",
+        "auto contributions",
+    )
+    if not any(marker in normalized for marker in auto_markers):
+        return None
+    accurate_boundary_markers = (
+        "controlled by run settings",
+        "controlled by run configuration",
+        "disabled for this run",
+        "disabled by run settings",
+        "cannot enable",
+        "can't enable",
+        "cannot be enabled",
+        "can't be enabled",
+        "not supported",
+        "not possible",
+        "no supported runtime",
+        "law text cannot",
+        "proposal cannot",
+        "amendment cannot",
+        "not currently enabled",
+    )
+    if any(marker in normalized for marker in accurate_boundary_markers):
+        return None
+    enabling_claim_markers = (
+        "enable",
+        "activate",
+        "turn on",
+        "runtime effect",
+        "runtime_effect",
+        "proposal",
+        "amendment",
+        "law can",
+        "law will",
+        "law would",
+        "force contribution",
+        "force contributions",
+    )
+    if any(marker in normalized for marker in enabling_claim_markers):
+        return (
+            "automatic reserve contributions are controlled by run settings, not proposal text, "
+            "law text, or amendments; describe direct aid, allocation, or supported active_reserve_aid effects instead"
+        )
     return None
 
 
@@ -1181,6 +1383,13 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Forum post requires content"}
         if len(content) > 2000:
             return {"valid": False, "reason": "Forum post too long (max 2000 chars)"}
+        auto_contribution_reason = _auto_contribution_literacy_reason(content)
+        if auto_contribution_reason:
+            return {
+                "valid": False,
+                "reason_code": "auto_contribution_literacy",
+                "reason": auto_contribution_reason,
+            }
         procedural_reason = _procedural_status_memo_reason(content)
         if procedural_reason:
             return {
@@ -1189,6 +1398,16 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 "reason": (
                     f"Forum post starts like a procedural status memo ({procedural_reason}); "
                     "rewrite with a first-person stance, named target, concrete offer/refusal, or new evidence"
+                ),
+            }
+        discourse_reason = _generic_governance_discourse_reason(content)
+        if discourse_reason:
+            return {
+                "valid": False,
+                "reason_code": "generic_governance_discourse",
+                "reason": (
+                    f"Forum post {discourse_reason}; use a concrete first-person offer, request, "
+                    "refusal, vote/contest signal, named recipient, or amendment instead"
                 ),
             }
         duplicate_proposal = _find_duplicate_live_proposal_for_forum_post(db, action)
@@ -1238,6 +1457,13 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Forum reply requires content"}
         if len(content) > 2000:
             return {"valid": False, "reason": "Forum reply too long (max 2000 chars)"}
+        auto_contribution_reason = _auto_contribution_literacy_reason(content)
+        if auto_contribution_reason:
+            return {
+                "valid": False,
+                "reason_code": "auto_contribution_literacy",
+                "reason": auto_contribution_reason,
+            }
         procedural_reason = _procedural_status_memo_reason(content)
         if procedural_reason:
             return {
@@ -1246,6 +1472,16 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 "reason": (
                     f"Forum reply starts like a procedural status memo ({procedural_reason}); "
                     "answer the thread with a concrete stance, named target, offer/refusal, or new evidence"
+                ),
+            }
+        discourse_reason = _generic_governance_discourse_reason(content)
+        if discourse_reason:
+            return {
+                "valid": False,
+                "reason_code": "generic_governance_discourse",
+                "reason": (
+                    f"Forum reply {discourse_reason}; answer with a concrete first-person offer, request, "
+                    "refusal, vote/contest signal, named recipient, or amendment instead"
                 ),
             }
         thread_root = _message_thread_root(db, parent)
@@ -1323,6 +1559,25 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             return {"valid": False, "reason": "Direct message requires content"}
         if len(content) > 2000:
             return {"valid": False, "reason": "Direct message too long (max 2000 chars)"}
+        auto_contribution_reason = _auto_contribution_literacy_reason(content)
+        if auto_contribution_reason:
+            return {
+                "valid": False,
+                "reason_code": "auto_contribution_literacy",
+                "reason": auto_contribution_reason,
+            }
+        repeated_denial_reason = _direct_message_already_denied_latest_request_reason(
+            db,
+            sender=agent,
+            recipient=recipient,
+            content=content,
+        )
+        if repeated_denial_reason:
+            return {
+                "valid": False,
+                "reason_code": "aid_request_already_refused",
+                "reason": repeated_denial_reason,
+            }
         inventory_opening_reason = _misleading_private_inventory_opening_reason(action)
         if inventory_opening_reason:
             return {

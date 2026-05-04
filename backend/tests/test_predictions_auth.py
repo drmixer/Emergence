@@ -213,6 +213,95 @@ def test_list_markets_hides_stale_open_hooks_from_prior_run(predictions_client, 
     assert "Prior run hook" not in {item["description"] for item in response.json()}
 
 
+def test_agent_market_description_reflects_current_resources(predictions_client):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+    agent = Agent(
+        agent_number=18,
+        display_name="Fractal-18",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    db_session.add(agent)
+    db_session.flush()
+    db_session.add_all(
+        [
+            AgentInventory(agent_id=agent.id, resource_type="food", quantity=2.4),
+            AgentInventory(agent_id=agent.id, resource_type="energy", quantity=7.8),
+            PredictionMarket(
+                title="Will Fractal-18 stay active in the next 24 hours?",
+                description="Fractal-18 currently holds 9.00 food and 9.00 energy.",
+                market_type="agent_dormant",
+                status="open",
+                related_agent_id=agent.id,
+                created_at=now - timedelta(minutes=30),
+                closes_at=now + timedelta(hours=23),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/predictions/markets?status=open&limit=20")
+    assert response.status_code == 200
+
+    market = next(item for item in response.json() if item["title"] == "Will Fractal-18 stay active in the next 24 hours?")
+    assert "2.40 food" in market["description"]
+    assert "7.80 energy" in market["description"]
+    assert "9.00 food" not in market["description"]
+
+
+def test_agent_market_resolves_as_soon_as_dropout_event_exists(predictions_client):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+    agent = Agent(
+        agent_number=25,
+        display_name="Arc-25",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="dormant",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    db_session.add(agent)
+    db_session.flush()
+    market = PredictionMarket(
+        title="Will Arc-25 stay active in the next 24 hours?",
+        description="Arc-25 currently holds 3.00 food and 3.00 energy.",
+        market_type="agent_dormant",
+        status="open",
+        related_agent_id=agent.id,
+        created_at=now - timedelta(hours=1),
+        closes_at=now + timedelta(hours=23),
+    )
+    db_session.add(market)
+    db_session.flush()
+    db_session.add(
+        Event(
+            agent_id=agent.id,
+            event_type="became_dormant",
+            description="Arc-25 became dormant",
+            created_at=now - timedelta(minutes=10),
+        )
+    )
+    db_session.commit()
+
+    open_response = client.get("/api/predictions/markets?status=open&limit=20")
+    assert open_response.status_code == 200
+    assert "Will Arc-25 stay active in the next 24 hours?" not in {item["title"] for item in open_response.json()}
+
+    resolved_response = client.get("/api/predictions/markets?status=resolved&limit=20")
+    assert resolved_response.status_code == 200
+    resolved = next(item for item in resolved_response.json() if item["title"] == "Will Arc-25 stay active in the next 24 hours?")
+    assert resolved["outcome"] == "no"
+
+
 def test_list_markets_resolves_expired_auto_hook_and_pays_winner(predictions_client):
     client, db_session = predictions_client
     now = datetime.now(timezone.utc)

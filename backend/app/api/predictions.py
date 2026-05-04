@@ -560,6 +560,63 @@ def _resolve_auto_market_outcome(db: Session, market: PredictionMarket) -> str |
     return None
 
 
+def _resolve_auto_market_early_outcome(db: Session, market: PredictionMarket) -> str | None:
+    window_start = ensure_utc(market.created_at) or now_utc()
+    window_end = ensure_utc(market.closes_at) or now_utc()
+    title = str(market.title or "").strip()
+
+    if title == AUTO_MARKET_LAW_TITLE:
+        law_count = (
+            db.query(func.count(Law.id))
+            .filter(Law.passed_at >= window_start, Law.passed_at <= window_end)
+            .scalar()
+        ) or 0
+        return "yes" if int(law_count) > 0 else None
+
+    if title == AUTO_MARKET_DEATH_TITLE:
+        deaths = (
+            db.query(func.count(Event.id))
+            .filter(
+                Event.event_type == "agent_died",
+                Event.created_at >= window_start,
+                Event.created_at <= window_end,
+            )
+            .scalar()
+        ) or 0
+        return "yes" if int(deaths) > 0 else None
+
+    if title == AUTO_MARKET_RESERVE_TITLE:
+        shortfalls = (
+            db.query(func.count(Event.id))
+            .filter(
+                Event.event_type == "reserve_shortfall",
+                Event.created_at >= window_start,
+                Event.created_at <= window_end,
+            )
+            .scalar()
+        ) or 0
+        return "no" if int(shortfalls) > 0 else None
+
+    if market.market_type == "agent_dormant" and market.related_agent_id is not None:
+        dropout_events = (
+            db.query(func.count(Event.id))
+            .filter(
+                Event.agent_id == int(market.related_agent_id),
+                Event.event_type.in_(("became_dormant", "agent_died")),
+                Event.created_at >= window_start,
+                Event.created_at <= window_end,
+            )
+            .scalar()
+        ) or 0
+        if int(dropout_events) > 0:
+            return "no"
+        agent = db.query(Agent).filter(Agent.id == int(market.related_agent_id)).first()
+        if agent is not None and str(agent.status or "") != "active":
+            return "no"
+
+    return None
+
+
 def _sync_auto_prediction_markets(db: Session) -> None:
     now_value = now_utc()
     changed = False
@@ -569,9 +626,12 @@ def _sync_auto_prediction_markets(db: Session) -> None:
         if not _is_auto_market(market):
             continue
         closes_at = ensure_utc(market.closes_at)
-        if closes_at is None or closes_at > now_value:
+        if closes_at is None:
             continue
-        outcome = _resolve_auto_market_outcome(db, market)
+        if closes_at > now_value:
+            outcome = _resolve_auto_market_early_outcome(db, market)
+        else:
+            outcome = _resolve_auto_market_outcome(db, market)
         if outcome not in {"yes", "no"}:
             continue
         _resolve_market_bets(db, market=market, outcome=outcome, resolved_at=now_value)
@@ -618,6 +678,23 @@ def _market_context(db: Session, market: PredictionMarket) -> dict[str, Any]:
                 f"{float(related_resources.get('energy', 0.0)):.2f} energy."
             )
             return payload
+    if related_agent is not None and market.market_type == "agent_dormant":
+        status = str(related_agent.status or "unknown").strip() or "unknown"
+        return {
+            "title": title,
+            "description": (
+                f"{_agent_label(related_agent)} is {status} and currently holds "
+                f"{float(related_resources.get('food', 0.0)):.2f} food and "
+                f"{float(related_resources.get('energy', 0.0)):.2f} energy."
+            ),
+            "stake": "This is a single-agent survival watch based on the current public state.",
+            "why_this_matters": "If this agent drops into dormancy or dies, the turn is directly visible on the public record.",
+            "resolution_basis": "Settles YES if the agent remains active and no dormancy/death event is recorded before close.",
+            "evidence_links": _prediction_evidence_links(
+                ("Agent Detail", f"/agents/{int(related_agent.agent_number)}"),
+                ("All Agents", "/agents"),
+            ),
+        }
     return {
         "title": title,
         "description": str(market.description or "").strip() or None,

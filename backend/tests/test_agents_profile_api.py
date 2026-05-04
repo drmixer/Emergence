@@ -336,6 +336,7 @@ def test_list_agents_hides_weak_relationships_and_avoids_defaulting_everyone_to_
 
     assert agent_1_payload["legibility"]["relationships"]["allies"] == []
     assert agent_1_payload["legibility"]["archetype"]["title"] == "Efficiency Strategist"
+    assert "efficiency-oriented starting lens" in agent_1_payload["legibility"]["archetype"]["summary"]
 
     db.close()
 

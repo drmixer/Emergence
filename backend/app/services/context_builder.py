@@ -494,7 +494,48 @@ def _recent_social_pressure_events(
     query = _apply_run_window_if_available(query, Event.created_at, run_window)
     if perception_cutoff is not None:
         query = query.filter(Event.created_at <= perception_cutoff)
-    return query.order_by(desc(Event.created_at)).limit(SOCIAL_SIGNAL_CONTEXT_LIMIT).all()
+    events = query.order_by(desc(Event.created_at)).limit(SOCIAL_SIGNAL_CONTEXT_LIMIT * 2).all()
+    visible_events: list[Event] = []
+    for event in events:
+        if event.event_type == "aid_request_received":
+            lifecycle = classify_aid_request_event(db, request_event=event, run_window=run_window)
+            if lifecycle is not None and str(lifecycle.get("status") or "unresolved") != "unresolved":
+                continue
+        visible_events.append(event)
+        if len(visible_events) >= SOCIAL_SIGNAL_CONTEXT_LIMIT:
+            break
+    return visible_events
+
+
+def _recent_resolved_aid_requests_received(
+    db: Session,
+    agent: Agent,
+    *,
+    now,
+    perception_cutoff=None,
+    run_window: LiveRunWindow | None = None,
+) -> list[dict]:
+    query = db.query(Event).filter(
+        Event.agent_id == agent.id,
+        Event.event_type == "aid_request_received",
+        Event.created_at > now - timedelta(hours=24),
+    )
+    query = _apply_run_window_if_available(query, Event.created_at, run_window)
+    if perception_cutoff is not None:
+        query = query.filter(Event.created_at <= perception_cutoff)
+
+    resolved: list[dict] = []
+    for event in query.order_by(desc(Event.created_at), desc(Event.id)).limit(20).all():
+        lifecycle = classify_aid_request_event(db, request_event=event, run_window=run_window)
+        if lifecycle is None:
+            continue
+        status = str(lifecycle.get("status") or "unresolved")
+        if status == "unresolved":
+            continue
+        resolved.append(lifecycle)
+        if len(resolved) >= SOCIAL_SIGNAL_CONTEXT_LIMIT:
+            break
+    return resolved
 
 
 def _incoming_aid_request_inbox(
@@ -931,7 +972,16 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     recent_events_q = _apply_run_window_if_available(recent_events_q, Event.created_at, live_run_window)
     if perception_lag_seconds > 0:
         recent_events_q = recent_events_q.filter(Event.created_at <= perception_cutoff)
-    recent_events = recent_events_q.order_by(desc(Event.created_at)).limit(10).all()
+    recent_events_raw = recent_events_q.order_by(desc(Event.created_at), desc(Event.id)).limit(16).all()
+    recent_events: list[Event] = []
+    for event in recent_events_raw:
+        if event.event_type == "aid_request_received":
+            lifecycle = classify_aid_request_event(db, request_event=event, run_window=live_run_window)
+            if lifecycle is not None and str(lifecycle.get("status") or "unresolved") != "unresolved":
+                continue
+        recent_events.append(event)
+        if len(recent_events) >= 10:
+            break
 
     recent_social_pressure = _recent_social_pressure_events(
         db,
@@ -941,6 +991,13 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
         run_window=live_run_window,
     )
     incoming_aid_request_inbox = _incoming_aid_request_inbox(
+        db,
+        agent,
+        now=now,
+        perception_cutoff=perception_cutoff if perception_lag_seconds > 0 else None,
+        run_window=live_run_window,
+    )
+    recent_resolved_aid_requests = _recent_resolved_aid_requests_received(
         db,
         agent,
         now=now,
@@ -1335,6 +1392,22 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             )
         context_parts.append("  Reply with trade if you can help, refuse_aid if you cannot, or direct_message if you want conditional coordination.")
         context_parts.append("")
+
+    if recent_resolved_aid_requests:
+        context_parts.append("RECENT AID REQUESTS ALREADY RESOLVED:")
+        for lifecycle in recent_resolved_aid_requests:
+            requester = lifecycle.get("requester") if isinstance(lifecycle.get("requester"), dict) else {}
+            requester_name = str(requester.get("display_name") or f"Agent #{requester.get('agent_number') or '?'}")
+            amount = str(lifecycle.get("amount") or "").strip()
+            resource_type = str(lifecycle.get("resource_type") or "resources").strip() or "resources"
+            status = str(lifecycle.get("status") or "resolved").replace("_", " ")
+            response_type = str(lifecycle.get("response_event_type") or "").replace("_", " ")
+            response_fragment = f" via {response_type}" if response_type else ""
+            context_parts.append(
+                f"  - {requester_name}'s request for {amount} {resource_type} is {status}{response_fragment}; "
+                "do not treat it as unanswered unless they ask again."
+            )
+        context_parts.append("")
     
     # Active proposals
     context_parts.append(f"ACTIVE PROPOSALS ({len(active_proposals)} total):")
@@ -1508,7 +1581,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
             context_parts.append(f"  - {event.description}")
         context_parts.append("")
 
-    if incoming_aid_request_inbox or recent_social_pressure or recent_outgoing_social_actions or recent_proposal_alignments["allies"] or recent_proposal_alignments["opponents"]:
+    if incoming_aid_request_inbox or recent_resolved_aid_requests or recent_social_pressure or recent_outgoing_social_actions or recent_proposal_alignments["allies"] or recent_proposal_alignments["opponents"]:
         context_parts.append("SOCIAL PRESSURE AND ALIGNMENT:")
         if incoming_aid_request_inbox:
             context_parts.append("  Requests currently waiting on you:")
@@ -1521,6 +1594,13 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                     f"    - {requester.display_name or f'Agent #{requester.agent_number}'} wants {requested_amount_label} {resource_type}; "
                     f"{'that amount would keep them active this cycle' if request['would_keep_active'] else 'that amount alone would not fully solve their visible deficit'}"
                 )
+        if recent_resolved_aid_requests:
+            context_parts.append("  Aid requests no longer waiting on you:")
+            for lifecycle in recent_resolved_aid_requests[:SOCIAL_SIGNAL_CONTEXT_LIMIT]:
+                requester = lifecycle.get("requester") if isinstance(lifecycle.get("requester"), dict) else {}
+                requester_name = str(requester.get("display_name") or f"Agent #{requester.get('agent_number') or '?'}")
+                status = str(lifecycle.get("status") or "resolved").replace("_", " ")
+                context_parts.append(f"    - {requester_name}: {status}")
         if recent_social_pressure:
             context_parts.append("  Incoming pressure or requests:")
             for event in recent_social_pressure[:SOCIAL_SIGNAL_CONTEXT_LIMIT]:

@@ -325,9 +325,10 @@ class APIService {
         return this.fetch(`/api/reports/runs/${encodeURIComponent(cleanRunId)}`)
     }
 
-    async getRunsArchive(limit = 24) {
+    async getRunsArchive(limit = 24, includeTuning = false) {
         const params = new URLSearchParams()
         params.append('limit', String(limit))
+        if (includeTuning) params.append('include_tuning', 'true')
         return this.fetch(`/api/reports/archive/runs?${params.toString()}`)
     }
 

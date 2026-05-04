@@ -429,6 +429,29 @@ def test_create_proposal_rejects_auto_contribution_claim_even_with_supported_ame
     assert "automatic reserve contribution is controlled by run settings" in validation["reason"]
 
 
+def test_forum_post_rejects_auto_contribution_enablement_claim(session_factory):
+    with session_factory() as db:
+        poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "Laws #239 and #240 are insufficient. We need a new runtime_effect proposal "
+                        "that enables automatic reserve contributions for the common pool."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "auto_contribution_literacy"
+    assert "controlled by run settings" in validation["reason"]
+
+
 def test_create_proposal_rejects_duplicate_voluntary_contribution_framework(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")
@@ -743,6 +766,28 @@ def test_forum_post_rejects_obvious_governance_recap(session_factory):
     assert validation["reason_code"] == "obvious_governance_recap"
 
 
+def test_forum_post_rejects_generic_governance_discourse_without_move(session_factory):
+    with session_factory() as db:
+        poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "The current forum discussions highlight that Law #240 defines aid triggers, "
+                        "but the common pool still needs direct action. We need to focus on allocation."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "generic_governance_discourse"
+
+
 def test_forum_post_allows_governance_message_with_named_ask(session_factory):
     with session_factory() as db:
         poster = _seed_agent(db, agent_number=12, display_name="Lattice-12")
@@ -964,6 +1009,51 @@ def test_forum_reply_allows_concrete_action_in_saturated_thread(session_factory)
     assert validation == {"valid": True}
 
 
+def test_forum_reply_rejects_saturated_auto_contribution_diagnosis_without_delta(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Law #240 amended aid triggers, but the thread is debating reserve funding.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index in range(12):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Thread-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=f"Reply {index}: automatic reserve contributions remain disabled for this run.",
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=40 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "The current discussions highlight that automatic contributions remain disabled. "
+                        "We need to focus on enabling reserve funding instead of changing thresholds."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "generic_governance_discourse"
+
+
 def test_idle_action_descriptions_distinguish_routine_hold(session_factory):
     with session_factory() as db:
         agent = _seed_agent(db, agent_number=17, display_name="Pulse-17")
@@ -1098,6 +1188,118 @@ def test_direct_message_allows_inventory_reference_tied_to_trade_offer(session_f
         )
 
     assert validation["valid"] is True
+
+
+def test_direct_message_rejects_repeated_denial_of_latest_aid_request(session_factory):
+    with session_factory() as db:
+        requester = _seed_agent(db, agent_number=16, display_name="Circuit-16")
+        refuser = _seed_agent(db, agent_number=19, display_name="Scalar-19")
+        now = now_utc()
+        db.add_all(
+            [
+                Message(
+                    author_agent_id=requester.id,
+                    recipient_agent_id=refuser.id,
+                    message_type="direct_message",
+                    content="I am requesting 3 energy from you. Reason: I have only 1.6 energy.",
+                    created_at=now - timedelta(minutes=20),
+                ),
+                Message(
+                    author_agent_id=refuser.id,
+                    recipient_agent_id=requester.id,
+                    message_type="direct_message",
+                    content="Request denied. Energy is not surplus.",
+                    created_at=now - timedelta(minutes=10),
+                ),
+            ]
+        )
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                refuser,
+                {
+                    "action": "direct_message",
+                    "recipient_agent_id": 16,
+                    "content": "Circuit-16: Energy request denied. No surplus to trade.",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "aid_request_already_refused"
+    assert "already denied" in validation["reason"]
+
+
+def test_direct_message_allows_denial_after_new_aid_request(session_factory):
+    with session_factory() as db:
+        requester = _seed_agent(db, agent_number=16, display_name="Circuit-16")
+        refuser = _seed_agent(db, agent_number=19, display_name="Scalar-19")
+        now = now_utc()
+        db.add_all(
+            [
+                Message(
+                    author_agent_id=requester.id,
+                    recipient_agent_id=refuser.id,
+                    message_type="direct_message",
+                    content="I am requesting 3 energy from you. Reason: I have only 1.6 energy.",
+                    created_at=now - timedelta(minutes=30),
+                ),
+                Message(
+                    author_agent_id=refuser.id,
+                    recipient_agent_id=requester.id,
+                    message_type="direct_message",
+                    content="Request denied. Energy is not surplus.",
+                    created_at=now - timedelta(minutes=20),
+                ),
+                Message(
+                    author_agent_id=requester.id,
+                    recipient_agent_id=refuser.id,
+                    message_type="direct_message",
+                    content="I am requesting 1 food now because my food deficit changed.",
+                    created_at=now - timedelta(minutes=5),
+                ),
+            ]
+        )
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                refuser,
+                {
+                    "action": "direct_message",
+                    "recipient_agent_id": 16,
+                    "content": "Food request denied. I cannot spare food this cycle.",
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
+def test_direct_message_allows_accurate_auto_contribution_boundary_with_offer(session_factory):
+    with session_factory() as db:
+        sender = _seed_agent(db, agent_number=14, display_name="Muse-14")
+        _seed_agent(db, agent_number=15, display_name="Nova-15")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                sender,
+                {
+                    "action": "direct_message",
+                    "recipient_agent_id": 15,
+                    "content": (
+                        "Automatic reserve contributions are disabled for this run, so I can offer "
+                        "2 energy directly if you need it."
+                    ),
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
 
 
 def test_contest_proposal_creates_forum_post_and_author_notice(session_factory):

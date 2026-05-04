@@ -874,6 +874,52 @@ def test_context_does_not_keep_fulfilled_aid_request_pending(session_factory, mo
 
     assert "INCOMING REQUESTS NEED RESPONSE" not in context
     assert "Requests currently waiting on you" not in context
+    assert "RECENT AID REQUESTS ALREADY RESOLVED:" in context
+    assert "Beacon-2's request for 1 energy is fulfilled by trade via trade" in context
+    assert "Aid requests no longer waiting on you:" in context
+
+
+def test_context_marks_request_resolved_by_reserve_aid_not_pending(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        requester = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        request_time = now_utc() - timedelta(minutes=10)
+
+        db.add(
+            Event(
+                agent_id=agent.id,
+                event_type="aid_request_received",
+                description="🆘 Beacon-2 requested 1 energy from you: I am at risk of dormancy.",
+                event_metadata={
+                    "requesting_agent_id": requester.id,
+                    "requesting_agent_number": requester.agent_number,
+                    "target_agent_id": agent.id,
+                    "target_agent_number": agent.agent_number,
+                    "resource_type": "energy",
+                    "amount": "1",
+                    "message_id": 999,
+                },
+                created_at=request_time,
+            )
+        )
+        db.add(
+            Event(
+                agent_id=requester.id,
+                event_type="reserve_aid",
+                description="Reserve aid topped up Beacon-2",
+                created_at=request_time + timedelta(minutes=2),
+            )
+        )
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "INCOMING REQUESTS NEED RESPONSE" not in context
+    assert "Requests currently waiting on you" not in context
+    assert "Beacon-2's request for 1 energy is reserve covered via reserve aid" in context
 
 
 def test_checkpoint_interrupts_on_recent_targeted_social_pressure(session_factory):
