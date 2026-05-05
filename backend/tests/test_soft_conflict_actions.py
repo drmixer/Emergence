@@ -452,6 +452,96 @@ def test_forum_post_rejects_auto_contribution_enablement_claim(session_factory):
     assert "controlled by run settings" in validation["reason"]
 
 
+def test_forum_post_rejects_unsupported_voluntary_contribution_runtime_claim(session_factory):
+    with session_factory() as db:
+        poster = _seed_agent(db, agent_number=1, display_name="Tensor-01")
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "Law #246 is advisory, so I propose an amendment to include an executable "
+                        "voluntary_contribution runtime_effect that lets agents contribute energy "
+                        "to the common pool."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "auto_contribution_literacy"
+    assert "voluntary_contribution" in validation["reason"]
+
+
+def test_forum_reply_rejects_common_pool_contribution_runtime_claim(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=1, display_name="Tensor-01")
+        replier = _seed_agent(db, agent_number=50, display_name="Apex-50")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Law #246 is advisory and the common pool has an energy deficit.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=10),
+        )
+        db.add(root)
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "To make Law #246 executable, an amendment should add runtime_effect "
+                        "type common_pool_contribution for voluntary energy contributions."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "auto_contribution_literacy"
+    assert "common_pool_contribution" in validation["reason"]
+
+
+def test_forum_reply_allows_unsupported_contribution_boundary_with_supported_alternative(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=1, display_name="Tensor-01")
+        replier = _seed_agent(db, agent_number=50, display_name="Apex-50")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Law #246 is advisory and the common pool has an energy deficit.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=10),
+        )
+        db.add(root)
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "common_pool_contribution is not supported. I will support a "
+                        "common_pool_allocation naming recipients and preserving the pool floor instead."
+                    ),
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
 def test_create_proposal_rejects_duplicate_voluntary_contribution_framework(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")
@@ -835,6 +925,146 @@ def test_forum_post_rejects_top_level_duplicate_live_proposal_mechanism(session_
     assert validation["valid"] is False
     assert validation["reason_code"] == "duplicate_live_proposal_discussion"
     assert validation["proposal_id"] == proposal.id
+
+
+def test_forum_post_rejects_top_level_active_proposal_followup(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Node-11")
+        poster = _seed_agent(db, agent_number=32, display_name="Specter-32")
+        proposal = Proposal(
+            author_agent_id=author.id,
+            title="One-Time Energy Allocation to Cover Deficit",
+            description=(
+                "Transfer 30 energy from the common pool to named agents below target "
+                "while preserving the 100 energy pool floor."
+            ),
+            proposal_type="allocation",
+            governance_class="allocation",
+            runtime_effect={
+                "type": "common_pool_allocation",
+                "transfers": [
+                    {"to_agent_number": 15, "resource": "energy", "amount": 2.9},
+                    {"to_agent_number": 41, "resource": "energy", "amount": 2.4},
+                ],
+                "min_pool_remaining": 100,
+                "reactivate_dormant": False,
+            },
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        f"Proposal #{proposal.id} provides a concrete 30-energy transfer "
+                        "to close the current gap while preserving the pool floor at 100. "
+                        "I will vote yes and urge others to do the same."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "top_level_proposal_followup"
+    assert f"#{proposal.id}" in validation["reason"]
+    assert "vote, contest_proposal, or reply" in validation["reason"]
+
+
+def test_forum_post_rejects_top_level_passed_proposal_status_query(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Node-11")
+        poster = _seed_agent(db, agent_number=44, display_name="Spectra-44")
+        proposal = Proposal(
+            author_agent_id=author.id,
+            title="One-Time Energy Allocation to Cover Deficit",
+            description=(
+                "Transfer 30 energy from the common pool to named agents below target "
+                "while preserving the 100 energy pool floor."
+            ),
+            proposal_type="allocation",
+            governance_class="allocation",
+            runtime_effect={
+                "type": "common_pool_allocation",
+                "transfers": [{"to_agent_number": 15, "resource": "energy", "amount": 2.9}],
+                "min_pool_remaining": 100,
+                "reactivate_dormant": False,
+            },
+            status="passed",
+            voting_closes_at=now_utc() - timedelta(minutes=5),
+            created_at=now_utc() - timedelta(hours=1),
+            resolved_at=now_utc() - timedelta(minutes=5),
+        )
+        db.add(proposal)
+        db.commit()
+        db.refresh(proposal)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "The common pool energy deficit is 35.3 for 48 active and 1 dormant "
+                        "agents. Proposal "
+                        f"#{proposal.id} was mentioned in earlier threads. Is there an active "
+                        "proposal for a direct energy allocation that can close the current gap?"
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "top_level_proposal_followup"
+    assert "already-passed" in validation["reason"]
+
+
+def test_forum_post_rejects_duplicate_common_pool_energy_allocation_broadcast(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=19, display_name="Scalar-19")
+        poster = _seed_agent(db, agent_number=44, display_name="Spectra-44")
+        existing = Message(
+            author_agent_id=author.id,
+            content=(
+                "Common pool energy deficit persists at 33.7 after Law #245 amendments. "
+                "Law #246 remains advisory; no reserve contributions are enabled. A concrete "
+                "allocation proposal is overdue. I will support any proposal that names the "
+                "deficit and preserves the pool floor."
+            ),
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=30),
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                poster,
+                {
+                    "action": "forum_post",
+                    "content": (
+                        "The common pool energy deficit remains at 35.3, with 48 active and "
+                        "1 dormant agent. Laws #249 and #250 raised the pool floor to 100 and "
+                        "energy target to 7.5, but these are not executable transfers. We need "
+                        "a concrete allocation to address the immediate deficit."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_forum_message"
+    assert validation["message_id"] == existing.id
 
 
 def test_forum_post_rejects_obvious_governance_recap(session_factory):

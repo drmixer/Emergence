@@ -499,6 +499,57 @@ def _looks_like_top_level_proposal_discussion(content: str | None) -> bool:
     return any(marker in lowered for marker in _PROPOSAL_DISCUSSION_MARKERS)
 
 
+def _proposal_ids_in_text(content: str | None) -> list[int]:
+    ids: list[int] = []
+    for raw_id in re.findall(r"\bproposal\s*#?\s*(\d+)\b", str(content or "").lower()):
+        try:
+            proposal_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if proposal_id not in ids:
+            ids.append(proposal_id)
+    return ids
+
+
+def _top_level_proposal_followup_reason(db: Session, content: str | None) -> str | None:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return None
+    proposal_ids = _proposal_ids_in_text(content)
+    if not proposal_ids:
+        return None
+
+    followup_markers = (
+        "vote yes",
+        "vote no",
+        "will vote",
+        "i support",
+        "support proposal",
+        "oppose proposal",
+        "urge others",
+        "provides a concrete",
+        "is active",
+        "is there an active proposal",
+        "mentioned in earlier threads",
+        "close the current gap",
+        "current deficit",
+    )
+    if not any(marker in normalized for marker in followup_markers):
+        return None
+
+    proposals = db.query(Proposal).filter(Proposal.id.in_(proposal_ids)).all()
+    if not proposals:
+        return None
+    known_ids = ", ".join(f"#{int(proposal.id)}" for proposal in proposals)
+    active_ids = [proposal for proposal in proposals if str(proposal.status or "").lower() == "active"]
+    passed_ids = [proposal for proposal in proposals if str(proposal.status or "").lower() == "passed"]
+    if active_ids:
+        return f"top-level post recaps active proposal(s) {known_ids}; use vote, contest_proposal, or reply in the proposal thread"
+    if passed_ids:
+        return f"top-level post recaps already-passed proposal(s) {known_ids}; use direct aid, trade, or new evidence instead of another broadcast"
+    return f"top-level post recaps proposal(s) {known_ids}; use the existing thread, vote/contest, or a concrete action"
+
+
 def _find_duplicate_live_proposal_for_forum_post(db: Session, action: dict) -> Proposal | None:
     content = " ".join(str(action.get("content") or "").split())
     if not content or not _looks_like_top_level_proposal_discussion(content):
@@ -785,6 +836,14 @@ def _forum_semantic_signature(text: str | None) -> str | None:
         and ("revive" in normalized or "recovery gap" in normalized or "already dormant" in normalized)
     ):
         return f"dormant-recovery-allocation:{id_part}"
+    if (
+        "common pool" in normalized
+        and "energy" in normalized
+        and "deficit" in normalized
+        and ("allocation" in normalized or "transfer" in normalized)
+        and ("pool floor" in normalized or "energy target" in normalized or "active" in normalized)
+    ):
+        return "common-pool-energy-allocation"
     if (
         ("trigger" in normalized or "threshold" in normalized)
         and ("proactive" in normalized or "reactive" in normalized)
@@ -1349,6 +1408,56 @@ def _auto_contribution_literacy_reason(content: str | None) -> str | None:
     normalized = " ".join(str(content or "").strip().lower().replace("-", " ").split())
     if not normalized:
         return None
+    unsupported_contribution_markers = (
+        "common_pool_contribution",
+        "common pool contribution",
+        "voluntary_contribution",
+        "voluntary contribution",
+        "runtime effect for contributions",
+        "runtime_effect for contributions",
+        "runtime effect support for contributions",
+        "runtime_effect support for contributions",
+        "executable contribution",
+        "executable contributions",
+        "executable mechanism for contributions",
+        "named contribution mechanism",
+    )
+    if any(marker in normalized for marker in unsupported_contribution_markers):
+        accurate_boundary_markers = (
+            "not supported",
+            "unsupported runtime",
+            "unsupported runtime_effect",
+            "no supported runtime",
+            "cannot enable",
+            "can't enable",
+            "cannot be enabled",
+            "can't be enabled",
+            "cannot add",
+            "can't add",
+            "law text cannot",
+            "proposal cannot",
+            "amendment cannot",
+        )
+        supported_alternative_markers = (
+            "common_pool_allocation",
+            "common pool allocation",
+            "active_reserve_aid",
+            "active reserve aid",
+            "trade",
+            "direct aid",
+            "request_aid",
+            "request aid",
+        )
+        if any(marker in normalized for marker in accurate_boundary_markers) and any(
+            marker in normalized for marker in supported_alternative_markers
+        ):
+            return None
+        return (
+            "common_pool_contribution and voluntary_contribution are not supported runtime effects. "
+            "Do not propose or debate them as executable mechanisms; use trade, direct aid, "
+            "common_pool_allocation, or supported active_reserve_aid amendments instead."
+        )
+
     auto_markers = (
         "automatic reserve contribution",
         "automatic reserve contributions",
@@ -1588,6 +1697,13 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                     "A live proposal already covers this mechanism; vote, contest, "
                     f"or reply around proposal #{duplicate_proposal.id} instead of opening a new top-level post"
                 ),
+            }
+        proposal_followup_reason = _top_level_proposal_followup_reason(db, content)
+        if proposal_followup_reason is not None:
+            return {
+                "valid": False,
+                "reason_code": "top_level_proposal_followup",
+                "reason": proposal_followup_reason,
             }
         duplicate_message = _find_near_duplicate_recent_forum_message(db, agent, action)
         if duplicate_message is not None:

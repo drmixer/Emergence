@@ -275,6 +275,21 @@ def test_internal_canary_k9_only_raises_active_aid_pool_floor():
     assert k9_overrides == k7_overrides
 
 
+def test_internal_canary_k10_only_raises_active_aid_pool_floor():
+    k9 = get_scarcity_preset("internal_canary_k9_pool_floor_pressure_v1")
+    preset = get_scarcity_preset("internal_canary_k10_high_floor_pressure_v1")
+
+    assert preset.recommended_run_class == "special_exploratory"
+    assert preset.agent_resource_targets == k9.agent_resource_targets
+    assert preset.common_pool_targets == k9.common_pool_targets
+
+    k9_overrides = dict(k9.runtime_overrides)
+    k10_overrides = dict(preset.runtime_overrides)
+    assert k9_overrides.pop("SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING") == 75.0
+    assert k10_overrides.pop("SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING") == 130.0
+    assert k10_overrides == k9_overrides
+
+
 def test_standard_reset_preset_restores_named_baseline():
     preset = get_scarcity_preset("standard_reset_v2")
 
@@ -304,6 +319,7 @@ def test_list_scarcity_presets_is_sorted_and_complete():
         "internal_canary_c_survival_window_v1",
         "internal_canary_d_revival_window_v1",
         "internal_canary_e_response_loop_v1",
+        "internal_canary_k10_high_floor_pressure_v1",
         "internal_canary_k3_paired_active_aid_v1",
         "internal_canary_k6_pressure_restoration_v1",
         "internal_canary_k7_finite_reserve_energy_v1",
