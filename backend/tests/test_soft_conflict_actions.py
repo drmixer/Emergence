@@ -494,6 +494,99 @@ def test_create_proposal_rejects_duplicate_voluntary_contribution_framework(sess
     assert validation["proposal_id"] == existing.id
 
 
+def test_create_proposal_rejects_cross_wrapper_voluntary_resource_sharing_duplicate(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        existing = Proposal(
+            author_agent_id=author.id,
+            title="Voluntary Resource Sharing Protocol",
+            description=(
+                "Create a non-binding voluntary resource sharing norm for surplus offers, "
+                "aid requests, and mutual consent."
+            ),
+            proposal_type="rule",
+            governance_class="resolution",
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(existing)
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Voluntary Resource Contribution and Aid Protocol",
+                    "description": (
+                        "Agents may voluntarily contribute to common pool aid and request help. "
+                        "This remains consent-based and has no enforcement."
+                    ),
+                    "proposal_type": "law",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_active_proposal"
+    assert validation["proposal_id"] == existing.id
+
+
+def test_create_proposal_coerces_voluntary_nonbinding_law_to_rule(session_factory):
+    with session_factory() as db:
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        action = {
+            "action": "create_proposal",
+            "title": "Voluntary Aid Law",
+            "description": (
+                "Agents may voluntarily offer surplus aid by consent. The policy is non-binding, "
+                "not mandatory, and has no enforcement or runtime effect."
+            ),
+            "proposal_type": "law",
+        }
+
+        validation = asyncio.run(actions.validate_action(db, proposer, action))
+
+    assert validation == {"valid": True}
+    assert action["proposal_type"] == "rule"
+    assert action["governance_class"] == "resolution"
+    assert action["runtime_effect"] == {}
+    assert action["voluntary_law_coerced_to_rule"] is True
+
+
+def test_create_proposal_rejects_allocation_contributor_as_recipient(session_factory):
+    with session_factory() as db:
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        _seed_agent(db, agent_number=46, display_name="Monad-46")
+        action = {
+            "action": "create_proposal",
+            "title": "Binding Common Pool Allocation for Energy Deficit",
+            "description": (
+                "Monad-46 will contribute 10 energy to the common pool to close the deficit, "
+                "with the pool floor preserved."
+            ),
+            "proposal_type": "allocation",
+            "governance_class": "allocation",
+            "runtime_effect": {
+                "type": "common_pool_allocation",
+                "transfers": [
+                    {"recipient_agent_id": 46, "resource_type": "energy", "amount": 10},
+                ],
+                "min_pool_remaining": 25,
+            },
+        }
+
+        validation = asyncio.run(actions.validate_action(db, proposer, action))
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "allocation_contributor_recipient_conflict"
+    assert "contributors" in validation["reason"]
+    assert "allocation recipients" in validation["reason"]
+
+
 def test_create_proposal_coerces_binding_rule_to_resolution(session_factory):
     with session_factory() as db:
         proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
@@ -956,6 +1049,51 @@ def test_forum_reply_rejects_policy_id_only_in_saturated_thread(session_factory)
                     "content": (
                         "Law #999 reinforces that the common pool mechanism is important. "
                         "I support the active threshold aid direction for stability."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "saturated_thread_low_novelty"
+
+
+def test_forum_reply_rejects_repeated_contest_frame_in_saturated_thread(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #702 debates whether voluntary aid should replace executable threshold aid.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index in range(8):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Thread-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=f"Reply {index}: voluntary aid and binding threshold aid have tradeoffs.",
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=40 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "Proposal #702 still faces a 22.2 energy deficit. Voluntary aid preserves "
+                        "autonomy, but free-rider risk threatens stability."
                     ),
                 },
             )

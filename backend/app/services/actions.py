@@ -400,6 +400,10 @@ def _proposal_policy_text(*parts: object) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", " ".join(str(part or "") for part in parts).lower()))
 
 
+def _proposal_has_runtime_effect(runtime_effect: object) -> bool:
+    return isinstance(runtime_effect, dict) and bool(runtime_effect) and bool(_runtime_effect_type(runtime_effect))
+
+
 def _proposal_mechanism_signature(
     *,
     proposal_type: str | None,
@@ -444,14 +448,25 @@ def _proposal_mechanism_signature(
     if has_common_pool and has_aid and has_threshold and has_law_frame:
         return "active_reserve_aid"
 
-    has_voluntary = "voluntary" in text or "opt in" in text or "consent" in text
+    has_voluntary = "voluntary" in text or "opt in" in text or "consent" in text or "non binding" in text
     has_contribution = "contribution" in text or "contribute" in text or "contributions" in text
-    if has_voluntary and has_common_pool and has_contribution and has_aid:
-        return "voluntary_contribution_aid_framework"
+    has_resource_sharing = any(
+        marker in text
+        for marker in (
+            "resource sharing",
+            "sharing protocol",
+            "share resources",
+            "surplus sharing",
+            "mutual aid",
+            "aid protocol",
+        )
+    )
+    if has_voluntary and (has_aid or has_resource_sharing) and (has_common_pool or has_contribution or has_resource_sharing):
+        return "voluntary_resource_aid_norm"
 
     has_exchange = "exchange" in text or "trade" in text or "request" in text
     if has_voluntary and has_exchange and ("forum" in text or "resource" in text):
-        return "voluntary_resource_exchange"
+        return "voluntary_resource_aid_norm"
 
     if has_common_pool and has_contribution and ptype in {"rule", "resolution"}:
         return "common_pool_contribution_norm"
@@ -617,6 +632,60 @@ def _message_has_concrete_social_move(content: str | None) -> bool:
     return False
 
 
+def _has_named_agent_reference(normalized: str) -> bool:
+    return bool(re.search(r"\b(agent\s*#?\s*\d+|[a-z][a-z0-9]*-\d{1,2})\b", normalized))
+
+
+def _reply_adds_saturated_thread_allowed_delta(content: str | None) -> bool:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    raw = str(content or "")
+    if not normalized:
+        return False
+    if _auto_contribution_literacy_reason(content):
+        return False
+
+    named_agent = _has_named_agent_reference(normalized)
+    has_quantity = bool(re.search(r"\b\d+(?:\.\d+)?\s*(food|energy|materials?|f|e|m)\b", normalized))
+    has_policy_number_only = bool(re.search(r"\b(?:proposal|law)\s*#?\s*\d+\b", normalized))
+
+    if re.search(r"\b(?:amendment text|exact amendment|text:|amend(?:ment)? (?:to|for))\b", normalized) and (
+        has_quantity
+        or named_agent
+        or re.search(r"\b(trigger|target|floor|min(?:imum)? pool|recipient|amount|exempt|cap|raise|lower|withdraw)\b", normalized)
+    ):
+        return True
+
+    if named_agent and (
+        "?" in raw
+        or re.search(r"\b(?:will you|can you|would you|i ask|i want|name|answer|commit|withdraw|support|oppose)\b", normalized)
+    ):
+        return True
+
+    if re.search(r"\b(?:i\s+will\s+)?(?:offer|send|transfer|give|trade|provide)\b", normalized) and (
+        has_quantity or re.search(r"\b(?:aid|trade|resource|food|energy|materials?)\b", normalized)
+    ):
+        return True
+
+    if re.search(r"\b(?:i changed my vote|i change my vote|i switched my vote|i switch my vote|my vote is now|i now vote|vote change)\b", normalized):
+        return True
+
+    if re.search(r"\b(?:withdraw|withdrawal)\b", normalized) and re.search(r"\b(?:proposal|request|motion|law)\b", normalized):
+        return True
+
+    if named_agent and re.search(r"\b(?:i challenge|challenge you|answer this|name your|state your|commit now|refuse explicitly)\b", normalized):
+        return True
+
+    changed_resource_state = (
+        re.search(r"\b(?:new evidence|changed|since|now|fell|rose|dropped|increased|decreased|remaining|after)\b", normalized)
+        and re.search(r"\b(?:food|energy|materials?|common pool|pool|deficit|surplus|inventory|reserve)\b", normalized)
+        and (has_quantity or not has_policy_number_only)
+    )
+    if changed_resource_state:
+        return True
+
+    return False
+
+
 def _obvious_governance_recap_reason(content: str | None) -> str | None:
     normalized = " ".join(str(content or "").strip().lower().split())
     if not normalized or _message_has_concrete_social_move(normalized):
@@ -756,33 +825,7 @@ def _message_thread_messages_this_run(
 
 
 def _reply_adds_saturated_thread_novelty(content: str | None, thread_messages: list[Message]) -> bool:
-    normalized = " ".join(str(content or "").strip().lower().split())
-    if not normalized:
-        return False
-    if _auto_contribution_literacy_reason(content):
-        return False
-
-    first_person_commitment = re.search(
-        r"\bi\s+(will|won't|cannot|can't|refuse|oppose|contest|offer|accept|reject|transfer|trade|give|send|request)\b",
-        normalized,
-    )
-    concrete_action = re.search(
-        r"\b(amend|amendment|exempt|cap|raise|lower|name recipients?|trade|transfer|send|give|offer|request aid|refuse aid|contest)\b",
-        normalized,
-    )
-    has_quantity = bool(re.search(r"\b\d+(?:\.\d+)?\s*(food|energy|materials?|f|e|m)\b", normalized))
-    direct_terms = bool(re.search(r"\b(if you|my terms|your terms|i can offer|i will offer|i will trade|i will transfer)\b", normalized))
-    if first_person_commitment and (concrete_action or has_quantity or direct_terms):
-        return True
-    if re.search(r"\bi\s+(propose|will propose|will prepare)\b", normalized) and (
-        re.search(r"\b\d+(?:\.\d+)?\s*(food|energy|materials?|f|e|m)\b", normalized)
-        or re.search(r"\b(agent\s*#?\d+|[a-z]+-\d{2})\b", normalized)
-        or re.search(r"\b(trigger|target|floor|recipient|allocation)\b", normalized)
-    ):
-        return True
-    if "?" in str(content or "") and direct_terms:
-        return True
-    return False
+    return _reply_adds_saturated_thread_allowed_delta(content)
 
 
 def _low_novelty_saturated_thread_reason(
@@ -817,6 +860,24 @@ def _low_novelty_saturated_thread_reason(
             "pool floor",
         )
     )
+    repeated_frame_hits = sum(
+        marker in normalized
+        for marker in (
+            "autonomy",
+            "coercion",
+            "coercive",
+            "free rider",
+            "free-rider",
+            "free riding",
+            "stability",
+            "under provision",
+            "under-provision",
+            "systemic deficit",
+            "voluntary",
+            "advisory",
+            "binding",
+        )
+    )
     consensus_hits = sum(
         marker in normalized
         for marker in (
@@ -835,6 +896,8 @@ def _low_novelty_saturated_thread_reason(
     )
     if governance_hits >= 1 and consensus_hits >= 1:
         return "saturated policy thread already contains this governance position"
+    if governance_hits >= 1 and repeated_frame_hits >= 2:
+        return "saturated policy thread needs a concrete move, not another autonomy/free-rider/stability frame"
     if (
         governance_hits >= 1
         and any(marker in normalized for marker in ("we need", "need to focus", "should focus", "the current discussions", "highlights that"))
@@ -1127,6 +1190,111 @@ def _find_covering_active_reserve_aid_law(db: Session, action: dict) -> Law | No
         if _active_reserve_aid_effect_covers(law_effect, candidate_effect):
             return law
     return None
+
+
+def _voluntary_nonbinding_law_reason(action: dict) -> str | None:
+    proposal_type = str(action.get("proposal_type") or "").strip().lower()
+    if proposal_type != "law":
+        return None
+    if _proposal_has_runtime_effect(action.get("runtime_effect")):
+        return None
+
+    normalized = _proposal_policy_text(action.get("title"), action.get("description"))
+    if not normalized:
+        return None
+    voluntary = any(marker in normalized for marker in ("voluntary", "opt in", "consent", "consent based"))
+    nonbinding = any(
+        marker in normalized
+        for marker in (
+            "non binding",
+            "non mandatory",
+            "not mandatory",
+            "no enforcement",
+            "without enforcement",
+            "no penalty",
+            "without penalty",
+            "not enforced",
+            "consent based",
+        )
+    )
+    if not (voluntary and nonbinding):
+        return None
+
+    binding_probe = dict(action)
+    binding_probe["proposal_type"] = "rule"
+    if _binding_signal_for_rule_proposal(binding_probe) is not None:
+        return None
+    return "voluntary, non-binding, unenforced proposal has no executable runtime effect"
+
+
+def _coerce_voluntary_nonbinding_law(action: dict) -> None:
+    reason = _voluntary_nonbinding_law_reason(action)
+    if reason is None:
+        return
+    action["proposal_type"] = "rule"
+    action["governance_class"] = "resolution"
+    action["runtime_effect"] = {}
+    action["voluntary_law_coerced_to_rule"] = True
+    action["voluntary_law_signal"] = reason
+
+
+def _agent_numbers_referenced_in_text(text: str) -> set[int]:
+    refs: set[int] = set()
+    for match in re.finditer(r"\bagent\s*#?\s*(\d{1,3})\b", text):
+        refs.add(int(match.group(1)))
+    for match in re.finditer(r"\b[a-z][a-z0-9]*-(\d{1,2})\b", text):
+        refs.add(int(match.group(1)))
+    return refs
+
+
+def _allocation_contributor_recipient_conflict_reason(action: dict) -> str | None:
+    effect = action.get("runtime_effect") if isinstance(action.get("runtime_effect"), dict) else {}
+    if _runtime_effect_type(effect) != "common_pool_allocation":
+        return None
+
+    text = f"{action.get('title') or ''}. {action.get('description') or ''}".lower()
+    if not text:
+        return None
+    contributor_markers = (
+        "contributor",
+        "contributors",
+        "contribute",
+        "contributes",
+        "contribution",
+        "donor",
+        "donors",
+        "donate",
+        "donates",
+        "fund",
+        "funding",
+        "pledge",
+        "pledges",
+        "pay into",
+        "provide to the common pool",
+        "send to the common pool",
+        "give to the common pool",
+    )
+    contributor_refs: set[int] = set()
+    for segment in re.split(r"[.;:\n]", text):
+        if any(marker in segment for marker in contributor_markers):
+            contributor_refs.update(_agent_numbers_referenced_in_text(segment))
+    if not contributor_refs:
+        return None
+
+    recipient_refs = {
+        int(transfer.get("recipient_agent_id") or 0)
+        for transfer in list(effect.get("transfers") or [])
+        if isinstance(transfer, dict)
+    }
+    conflicts = sorted(ref for ref in contributor_refs & recipient_refs if ref > 0)
+    if not conflicts:
+        return None
+    rendered = ", ".join(f"Agent #{number}" for number in conflicts[:5])
+    return (
+        f"Proposal text names {rendered} as common-pool contributors, but runtime_effect.transfers "
+        "lists them as allocation recipients. Use common_pool_allocation only for spending from the "
+        "common pool to recipients; contributor commitments need advisory/opt-in text or a different supported effect."
+    )
 
 
 def _unsupported_runtime_text_reason(action: dict) -> str | None:
@@ -1757,6 +1925,8 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
             }
         action["governance_class"] = governance_class
         action["runtime_effect"] = runtime_effect
+        _coerce_voluntary_nonbinding_law(action)
+        proposal_type = str(action.get("proposal_type") or "other").strip().lower()
         if proposal_type == "rule":
             binding_signal = _binding_signal_for_rule_proposal(action)
             if binding_signal is not None:
@@ -1764,6 +1934,13 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 action["runtime_effect"] = {}
                 action["binding_rule_coerced_to_resolution"] = True
                 action["binding_rule_signal"] = binding_signal
+        allocation_conflict_reason = _allocation_contributor_recipient_conflict_reason(action)
+        if allocation_conflict_reason is not None:
+            return {
+                "valid": False,
+                "reason_code": "allocation_contributor_recipient_conflict",
+                "reason": allocation_conflict_reason,
+            }
         unsupported_text_reason = _unsupported_runtime_text_reason(action)
         if unsupported_text_reason is not None:
             return {

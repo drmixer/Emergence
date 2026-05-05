@@ -15,6 +15,13 @@ from app.core.time import ensure_utc
 from app.models.models import Agent, AgentInventory, Event, GlobalResources, Law, Proposal, Transaction
 from app.services.live_run_scope import get_live_run_window
 from app.services.runtime_config import runtime_config_service
+from app.services.survival_config import (
+    reserve_active_aid_min_pool_remaining,
+    reserve_active_aid_target_energy,
+    reserve_active_aid_target_food,
+    reserve_active_aid_trigger_energy,
+    reserve_active_aid_trigger_food,
+)
 
 
 GOVERNANCE_CLASSES = {
@@ -462,11 +469,11 @@ def _normalize_active_reserve_aid(
             errors.append(f"{name} must be <= 1000")
         return value
 
-    trigger_food = _positive_decimal("trigger_food_below", "2.00")
-    trigger_energy = _positive_decimal("trigger_energy_below", "2.00")
-    target_food = _positive_decimal("target_food", "3.00")
-    target_energy = _positive_decimal("target_energy", "3.00")
-    min_pool_remaining = _positive_decimal("min_pool_remaining", "25.00")
+    trigger_food = _positive_decimal("trigger_food_below", str(reserve_active_aid_trigger_food()))
+    trigger_energy = _positive_decimal("trigger_energy_below", str(reserve_active_aid_trigger_energy()))
+    target_food = _positive_decimal("target_food", str(reserve_active_aid_target_food()))
+    target_energy = _positive_decimal("target_energy", str(reserve_active_aid_target_energy()))
+    min_pool_remaining = _positive_decimal("min_pool_remaining", str(reserve_active_aid_min_pool_remaining()))
     if errors:
         return {}, errors
     return {

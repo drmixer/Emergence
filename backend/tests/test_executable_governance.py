@@ -12,9 +12,11 @@ from app.core.database import Base
 from app.core.time import now_utc
 from app.models.models import Agent, AgentInventory, Event, GlobalResources, Law, Message, Proposal
 from app.services import actions
+from app.services import executable_governance
 from app.services.executable_governance import (
     execute_active_reserve_aid_amendment_for_passed_proposal,
     execute_allocation_effect_for_passed_proposal,
+    normalize_runtime_effect,
 )
 
 
@@ -133,6 +135,22 @@ def test_create_proposal_rejects_unsupported_runtime_effect():
             assert "Supported runtime_effect.type values" in validation["reason"]
     finally:
         engine.dispose()
+
+
+def test_active_reserve_aid_default_floor_uses_runtime_setting(monkeypatch):
+    monkeypatch.setattr(executable_governance, "reserve_active_aid_trigger_food", lambda: Decimal("2.0"))
+    monkeypatch.setattr(executable_governance, "reserve_active_aid_trigger_energy", lambda: Decimal("2.0"))
+    monkeypatch.setattr(executable_governance, "reserve_active_aid_target_food", lambda: Decimal("3.0"))
+    monkeypatch.setattr(executable_governance, "reserve_active_aid_target_energy", lambda: Decimal("3.0"))
+    monkeypatch.setattr(executable_governance, "reserve_active_aid_min_pool_remaining", lambda: Decimal("75.0"))
+
+    effect, errors = normalize_runtime_effect(
+        {"type": "active_reserve_aid"},
+        governance_class="standing_law",
+    )
+
+    assert errors == []
+    assert effect["min_pool_remaining"] == 75.0
 
 
 def test_common_pool_allocation_executes_and_logs_transfer():
