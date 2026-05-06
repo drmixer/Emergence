@@ -60,12 +60,21 @@ const eventColors = {
     default: 'blue',
 }
 
+function compactText(value, maxLength = 180) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim()
+    if (text.length <= maxLength) {
+        return text
+    }
+    return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}...`
+}
+
 function formatDirectMessageDescription(event) {
     const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
     const result = metadata?.result && typeof metadata.result === 'object' ? metadata.result : {}
     const authorName = String(result.author_name || '').trim()
     const recipientName = String(result.recipient_name || '').trim()
-    const preview = String(result.content_preview || '').trim()
+    const action = metadata?.action && typeof metadata.action === 'object' ? metadata.action : {}
+    const preview = compactText(result.content_preview || action.content)
 
     if (!authorName || !recipientName) {
         return String(event?.description || '').trim()
@@ -78,9 +87,28 @@ function formatDirectMessageDescription(event) {
     return `${headline}: ${preview}`
 }
 
+function formatForumMessageDescription(event) {
+    const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+    const result = metadata?.result && typeof metadata.result === 'object' ? metadata.result : {}
+    const action = metadata?.action && typeof metadata.action === 'object' ? metadata.action : {}
+    const headline = String(event?.description || '').trim()
+    const preview = compactText(result.content_preview || action.content)
+
+    if (!preview) {
+        return headline
+    }
+    if (!headline) {
+        return preview
+    }
+    return `${headline}: ${preview}`
+}
+
 function getEventDescription(event) {
     const eventType = String(event?.event_type || '').trim()
     const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+    if (eventType === 'forum_post' || eventType === 'forum_reply') {
+        return formatForumMessageDescription(event)
+    }
     if (eventType === 'direct_message') {
         return formatDirectMessageDescription(event)
     }

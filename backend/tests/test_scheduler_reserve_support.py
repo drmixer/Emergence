@@ -232,6 +232,7 @@ def test_executable_standing_law_can_support_active_agents_without_runtime_aid_g
         runtime_values={
             "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": False,
             "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+            "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING": 0.0,
         },
     )
 
@@ -313,6 +314,96 @@ def test_executable_standing_law_can_support_active_agents_without_runtime_aid_g
     assert aid_meta["support_mode"] == "executable_active_aid"
     assert aid_meta["law_id"] == law_id
     assert aid_meta["runtime_effect"]["revival"] == "disabled"
+    assert aid_meta["active_aid_effective_min_pool_remaining"] == pytest.approx(0.0)
+
+
+def test_executable_active_aid_respects_runtime_floor_over_law_floor(session_factory, monkeypatch):
+    _configure_no_reserve(
+        monkeypatch,
+        session_factory,
+        runtime_values={
+            "SURVIVAL_RESERVE_ACTIVE_AID_ENABLED": False,
+            "SURVIVAL_RESERVE_DORMANT_MAINTENANCE_ENABLED": False,
+            "SURVIVAL_RESERVE_ACTIVE_AID_MIN_POOL_REMAINING": 25.0,
+        },
+    )
+
+    with session_factory() as db:
+        author = _seed_agent(
+            db,
+            agent_number=50,
+            status="active",
+            food="10.00",
+            energy="10.00",
+        )
+        law = Law(
+            title="Active Aid Standing Law",
+            description="Executable aid for active agents below threshold.",
+            law_class="standing_law",
+            runtime_effect={
+                "type": "active_reserve_aid",
+                "trigger_food_below": 2,
+                "trigger_energy_below": 2,
+                "target_food": 2,
+                "target_energy": 2,
+                "min_pool_remaining": 0,
+                "recipient_status": "active_only",
+                "revival": "disabled",
+            },
+            author_agent_id=author.id,
+            active=True,
+        )
+        db.add(law)
+        active_agent = _seed_agent(
+            db,
+            agent_number=6,
+            status="active",
+            food="2.00",
+            energy="0.10",
+        )
+        _seed_reserve(db, food="30.00", energy="26.00")
+        law_id = int(law.id)
+        active_agent_id = active_agent.id
+
+    monkeypatch.setattr(
+        scheduler,
+        "active_executable_active_aid_laws",
+        lambda _db: [
+            Law(
+                id=law_id,
+                title="Active Aid Standing Law",
+                law_class="standing_law",
+                runtime_effect={
+                    "type": "active_reserve_aid",
+                    "trigger_food_below": 2,
+                    "trigger_energy_below": 2,
+                    "target_food": 2,
+                    "target_energy": 2,
+                    "min_pool_remaining": 0,
+                    "recipient_status": "active_only",
+                    "revival": "disabled",
+                },
+                author_agent_id=1,
+                active=True,
+            )
+        ],
+    )
+
+    result = asyncio.run(scheduler.process_daily_consumption())
+    assert result["became_dormant"] == 1
+
+    with session_factory() as db:
+        refreshed_active = db.query(Agent).filter(Agent.id == active_agent_id).one()
+        reserve_aids = db.query(Event).filter(Event.event_type == "reserve_aid").all()
+        reserve_shortfalls = db.query(Event).filter(Event.event_type == "reserve_shortfall").all()
+
+    assert refreshed_active.status == "dormant"
+    assert reserve_aids == []
+    assert len(reserve_shortfalls) == 1
+    metadata = reserve_shortfalls[0].event_metadata or {}
+    assert metadata["active_aid_law_min_pool_remaining"] == pytest.approx(0.0)
+    assert metadata["active_aid_runtime_min_pool_remaining"] == pytest.approx(25.0)
+    assert metadata["active_aid_effective_min_pool_remaining"] == pytest.approx(25.0)
 
 
 def test_active_reserve_aid_uses_declared_threshold_not_general_upkeep_gap(session_factory, monkeypatch):

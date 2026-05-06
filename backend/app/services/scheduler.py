@@ -502,6 +502,7 @@ def _apply_active_survival_reserve_aid(
         return food_inv, energy_inv, food_amount, energy_amount, False, None
 
     min_pool_remaining = reserve_active_aid_min_pool_remaining()
+
     return _apply_survival_reserve_support(
         db,
         agent=agent,
@@ -557,6 +558,10 @@ def _apply_executable_active_reserve_aid(
     if required_food <= food_amount and required_energy <= energy_amount:
         return food_inv, energy_inv, food_amount, energy_amount, False, None
 
+    law_floor = Decimal(str(effect.get("min_pool_remaining") or "0"))
+    runtime_floor = reserve_active_aid_min_pool_remaining()
+    effective_floor = max(law_floor, runtime_floor)
+
     return _apply_survival_reserve_support(
         db,
         agent=agent,
@@ -573,8 +578,11 @@ def _apply_executable_active_reserve_aid(
             "active_aid_trigger_energy": float(trigger_energy),
             "active_aid_target_food": float(target_food),
             "active_aid_target_energy": float(target_energy),
+            "active_aid_law_min_pool_remaining": float(law_floor),
+            "active_aid_runtime_min_pool_remaining": float(runtime_floor),
+            "active_aid_effective_min_pool_remaining": float(effective_floor),
         },
-        min_pool_remaining=Decimal(str(effect.get("min_pool_remaining") or "0")),
+        min_pool_remaining=effective_floor,
     )
 
 

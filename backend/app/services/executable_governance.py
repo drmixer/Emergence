@@ -53,6 +53,17 @@ ACTIVE_RESERVE_AID_AMENDABLE_FIELDS = {
 }
 
 
+def _format_decimal(value: Decimal) -> str:
+    text = format(value.normalize(), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _runtime_active_aid_floor() -> Decimal:
+    return Decimal(str(reserve_active_aid_min_pool_remaining())).quantize(Decimal("0.01"))
+
+
 def normalize_governance_class(proposal_type: str | None, governance_class: str | None, runtime_effect: Any = None) -> str:
     supplied = str(governance_class or "").strip().lower()
     if supplied in GOVERNANCE_CLASSES:
@@ -473,7 +484,13 @@ def _normalize_active_reserve_aid(
     trigger_energy = _positive_decimal("trigger_energy_below", str(reserve_active_aid_trigger_energy()))
     target_food = _positive_decimal("target_food", str(reserve_active_aid_target_food()))
     target_energy = _positive_decimal("target_energy", str(reserve_active_aid_target_energy()))
-    min_pool_remaining = _positive_decimal("min_pool_remaining", str(reserve_active_aid_min_pool_remaining()))
+    runtime_floor = _runtime_active_aid_floor()
+    min_pool_remaining = _positive_decimal("min_pool_remaining", str(runtime_floor))
+    if min_pool_remaining < runtime_floor:
+        errors.append(
+            "min_pool_remaining must be >= runtime active-aid floor "
+            f"{_format_decimal(runtime_floor)}"
+        )
     if errors:
         return {}, errors
     return {
@@ -499,6 +516,7 @@ def _normalize_active_reserve_aid_amendment(
         return {}, ["active_reserve_aid_amendment requires governance_class amendment or emergency_action"]
 
     errors: list[str] = []
+    target_law: Law | None = None
     try:
         target_law_id = int(raw_effect.get("target_law_id") or raw_effect.get("targetLawId") or 0)
     except (TypeError, ValueError):
@@ -517,6 +535,14 @@ def _normalize_active_reserve_aid_amendment(
         "description": "One-time bounded amendment to an existing active reserve aid law runtime effect.",
         "target_law_id": target_law_id,
     }
+    runtime_floor = _runtime_active_aid_floor()
+    target_floor: Decimal | None = None
+    if target_law is not None and isinstance(target_law.runtime_effect, dict):
+        try:
+            target_floor = Decimal(str(target_law.runtime_effect.get("min_pool_remaining") or "0")).quantize(Decimal("0.01"))
+        except Exception:
+            target_floor = None
+
     for field in ACTIVE_RESERVE_AID_AMENDABLE_FIELDS:
         if field not in raw_effect:
             continue
@@ -529,6 +555,17 @@ def _normalize_active_reserve_aid_amendment(
             errors.append(f"{field} must be >= 0")
         if value > Decimal("1000"):
             errors.append(f"{field} must be <= 1000")
+        if field == "min_pool_remaining":
+            if value < runtime_floor:
+                errors.append(
+                    "min_pool_remaining must be >= runtime active-aid floor "
+                    f"{_format_decimal(runtime_floor)}"
+                )
+            if target_floor is not None and value < target_floor:
+                errors.append(
+                    "min_pool_remaining cannot lower target "
+                    f"Law #{target_law_id} floor below current floor {_format_decimal(target_floor)}"
+                )
         effect[field] = float(value)
 
     if not any(field in effect for field in ACTIVE_RESERVE_AID_AMENDABLE_FIELDS):

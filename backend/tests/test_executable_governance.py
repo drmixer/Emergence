@@ -153,6 +153,101 @@ def test_active_reserve_aid_default_floor_uses_runtime_setting(monkeypatch):
     assert effect["min_pool_remaining"] == 75.0
 
 
+def test_active_reserve_aid_rejects_floor_below_runtime_setting(monkeypatch):
+    monkeypatch.setattr(executable_governance, "reserve_active_aid_min_pool_remaining", lambda: Decimal("130.0"))
+
+    effect, errors = normalize_runtime_effect(
+        {"type": "active_reserve_aid", "min_pool_remaining": 100},
+        governance_class="standing_law",
+    )
+
+    assert effect == {}
+    assert "min_pool_remaining must be >= runtime active-aid floor 130" in errors
+
+
+def test_active_reserve_aid_amendment_rejects_lowered_pool_floor(monkeypatch):
+    monkeypatch.setattr(executable_governance, "reserve_active_aid_min_pool_remaining", lambda: Decimal("75.0"))
+    engine, factory = _session_factory()
+    try:
+        with factory() as db:
+            author = _seed_agent(db, agent_number=1)
+            target_law = Law(
+                title="Active Threshold Aid Standing Law",
+                description="Top up active agents below thresholds.",
+                law_class="standing_law",
+                runtime_effect={
+                    "type": "active_reserve_aid",
+                    "trigger_food_below": 2,
+                    "trigger_energy_below": 2,
+                    "target_food": 3,
+                    "target_energy": 3,
+                    "min_pool_remaining": 130,
+                },
+                active=True,
+                author_agent_id=author.id,
+            )
+            db.add(target_law)
+            db.flush()
+
+            effect, errors = normalize_runtime_effect(
+                {
+                    "type": "active_reserve_aid_amendment",
+                    "target_law_id": target_law.id,
+                    "min_pool_remaining": 100,
+                },
+                governance_class="amendment",
+                db=db,
+            )
+
+            assert effect == {}
+            assert (
+                f"min_pool_remaining cannot lower target Law #{target_law.id} floor below current floor 130"
+                in errors
+            )
+    finally:
+        engine.dispose()
+
+
+def test_active_reserve_aid_amendment_rejects_floor_below_runtime_setting(monkeypatch):
+    monkeypatch.setattr(executable_governance, "reserve_active_aid_min_pool_remaining", lambda: Decimal("130.0"))
+    engine, factory = _session_factory()
+    try:
+        with factory() as db:
+            author = _seed_agent(db, agent_number=1)
+            target_law = Law(
+                title="Active Threshold Aid Standing Law",
+                description="Top up active agents below thresholds.",
+                law_class="standing_law",
+                runtime_effect={
+                    "type": "active_reserve_aid",
+                    "trigger_food_below": 2,
+                    "trigger_energy_below": 2,
+                    "target_food": 3,
+                    "target_energy": 3,
+                    "min_pool_remaining": 75,
+                },
+                active=True,
+                author_agent_id=author.id,
+            )
+            db.add(target_law)
+            db.flush()
+
+            effect, errors = normalize_runtime_effect(
+                {
+                    "type": "active_reserve_aid_amendment",
+                    "target_law_id": target_law.id,
+                    "min_pool_remaining": 100,
+                },
+                governance_class="amendment",
+                db=db,
+            )
+
+            assert effect == {}
+            assert "min_pool_remaining must be >= runtime active-aid floor 130" in errors
+    finally:
+        engine.dispose()
+
+
 def test_common_pool_allocation_executes_and_logs_transfer():
     engine, factory = _session_factory()
     try:

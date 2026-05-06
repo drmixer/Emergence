@@ -2358,10 +2358,14 @@ async def _execute_forum_post(db: Session, agent: Agent, action: dict) -> dict:
     db.flush()
     
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
+    content_preview = " ".join((str(action.get("content") or "").split()))[:180]
     return {
         "success": True,
         "description": f"{author_name} posted to the forum",
-        "message_id": message.id
+        "message_id": message.id,
+        "author_agent_number": int(agent.agent_number),
+        "author_name": author_name,
+        "content_preview": content_preview,
     }
 
 
@@ -2377,10 +2381,15 @@ async def _execute_forum_reply(db: Session, agent: Agent, action: dict) -> dict:
     db.flush()
     
     author_name = agent.display_name or f"Agent #{agent.agent_number}"
+    content_preview = " ".join((str(action.get("content") or "").split()))[:180]
     return {
         "success": True,
         "description": f"{author_name} replied to a forum post",
-        "message_id": message.id
+        "message_id": message.id,
+        "author_agent_number": int(agent.agent_number),
+        "author_name": author_name,
+        "parent_message_id": int(action["parent_message_id"]),
+        "content_preview": content_preview,
     }
 
 
