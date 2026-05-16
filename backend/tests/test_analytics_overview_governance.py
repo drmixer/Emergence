@@ -272,3 +272,79 @@ def test_overview_zeroes_day_number_when_no_run_is_active(
     body = response.json()
     assert body["scope"]["simulation_active"] is False
     assert body["day_number"] == 0
+
+
+def test_social_dynamics_includes_public_order_from_existing_signals(
+    testing_session_factory,
+    monkeypatch,
+):
+    session = testing_session_factory()
+    run_started_at = datetime(2026, 4, 20, 2, 8, 43, tzinfo=timezone.utc)
+    session.add(
+        SimulationRun(
+            run_id="real-20260420T020843Z",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="special_exploratory",
+            started_at=run_started_at,
+        )
+    )
+    session.add_all(
+        [
+            Event(
+                event_type="public_accusation",
+                description="Agent #1 accused Agent #2 of hoarding.",
+                created_at=run_started_at + timedelta(minutes=10),
+                event_metadata={"runtime": {"run_id": "real-20260420T020843Z"}},
+            ),
+            Event(
+                event_type="agent_sanctioned",
+                description="Agent #2 has been sanctioned.",
+                created_at=run_started_at + timedelta(minutes=20),
+                event_metadata={"runtime": {"run_id": "real-20260420T020843Z"}},
+            ),
+            Event(
+                event_type="invalid_action",
+                description="Action rejected: invalid runtime effect.",
+                created_at=run_started_at + timedelta(minutes=30),
+                event_metadata={"runtime": {"run_id": "real-20260420T020843Z"}},
+            ),
+            Event(
+                event_type="trade",
+                description="Agent #3 traded food for energy.",
+                created_at=run_started_at + timedelta(minutes=40),
+                event_metadata={"runtime": {"run_id": "real-20260420T020843Z"}},
+            ),
+        ]
+    )
+    session.commit()
+    session.close()
+
+    runtime_values = {
+        "SIMULATION_ACTIVE": True,
+        "SIMULATION_PAUSED": False,
+        "SIMULATION_RUN_ID": "real-20260420T020843Z",
+    }
+    monkeypatch.setattr(analytics_api, "SessionLocal", testing_session_factory)
+    monkeypatch.setattr(
+        analytics_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: runtime_values.get(key),
+    )
+    monkeypatch.setattr(analytics_api, "now_utc", lambda: run_started_at + timedelta(hours=1))
+
+    with _make_client() as client:
+        response = client.get("/api/analytics/social-dynamics?days=3")
+
+    assert response.status_code == 200
+    body = response.json()
+    latest = body["latest"]
+    assert body["public_order_definition"]["label"] == "Public Order"
+    assert latest["public_order_events"] == 3
+    assert latest["public_order_components"] == {
+        "accusations": 1,
+        "enforcement": 1,
+        "rejected_invalid_actions": 1,
+        "conflict": 0,
+    }
+    assert latest["cooperation_events"] == 1

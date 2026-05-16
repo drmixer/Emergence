@@ -6,11 +6,13 @@ function formatNumber(value) {
     return Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })
 }
 
-function buildLine(data, key) {
+function maxForKeys(data, keys) {
+    return Math.max(1, ...data.flatMap((row) => keys.map((key) => Number(row?.[key] || 0))))
+}
+
+function buildLine(data, key, maxValue) {
     const innerWidth = WIDTH - PADDING.left - PADDING.right
     const innerHeight = HEIGHT - PADDING.top - PADDING.bottom
-    const values = data.map((row) => Number(row?.[key] || 0))
-    const maxValue = Math.max(1, ...values)
 
     const points = data.map((row, index) => {
         const x = PADDING.left + (innerWidth * index) / Math.max(1, data.length - 1)
@@ -27,10 +29,11 @@ function buildLine(data, key) {
 }
 
 export default function DashboardSocialDynamicsChart({ data }) {
-    const conflict = buildLine(data, 'conflict')
-    const cooperation = buildLine(data, 'cooperation')
-    const alliances = buildLine(data, 'alliances')
-    const maxValue = Math.max(conflict.maxValue, cooperation.maxValue, alliances.maxValue)
+    const maxValue = maxForKeys(data, ['conflict', 'publicOrder', 'cooperation', 'alliances'])
+    const conflict = buildLine(data, 'conflict', maxValue)
+    const publicOrder = buildLine(data, 'publicOrder', maxValue)
+    const cooperation = buildLine(data, 'cooperation', maxValue)
+    const alliances = buildLine(data, 'alliances', maxValue)
     const innerHeight = HEIGHT - PADDING.top - PADDING.bottom
     const yTicks = [0, 0.33, 0.66, 1].map((ratio) => {
         const value = Math.round(maxValue * (1 - ratio))
@@ -42,7 +45,7 @@ export default function DashboardSocialDynamicsChart({ data }) {
 
     return (
         <div className="dashboard-social-chart">
-            <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="dashboard-social-chart-svg" role="img" aria-label="Social dynamics for the last 7 days">
+            <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="dashboard-social-chart-svg" role="img" aria-label="Social dynamics and public order for the last 7 days">
                 {yTicks.map((tick) => (
                     <g key={`tick-${tick.y}`}>
                         <line
@@ -66,6 +69,7 @@ export default function DashboardSocialDynamicsChart({ data }) {
                 ))}
 
                 <path d={conflict.path} fill="none" stroke="#ef4444" strokeWidth="2.5" />
+                <path d={publicOrder.path} fill="none" stroke="#f59e0b" strokeWidth="2.5" />
                 <path d={cooperation.path} fill="none" stroke="#22c55e" strokeWidth="2.5" />
                 <path d={alliances.path} fill="none" stroke="#60a5fa" strokeWidth="2.5" />
 
@@ -90,6 +94,7 @@ export default function DashboardSocialDynamicsChart({ data }) {
 
             <div className="dashboard-social-chart-legend">
                 <span><span className="legend-dot" style={{ background: '#ef4444' }}></span> Conflict</span>
+                <span><span className="legend-dot" style={{ background: '#f59e0b' }}></span> Public Order</span>
                 <span><span className="legend-dot" style={{ background: '#22c55e' }}></span> Cooperation</span>
                 <span><span className="legend-dot" style={{ background: '#60a5fa' }}></span> Alliances</span>
             </div>

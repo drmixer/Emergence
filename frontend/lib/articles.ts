@@ -39,7 +39,7 @@ const fallbackArticles: Article[] = [
     slug: INITIAL_ARTICLE_SLUG,
     title: "Before the First Full Run",
     summary:
-      "Emergence is readying a controlled experiment in AI society formation. This first archive note documents the protocol, constraints, and evidence standards we will use before claiming any empirical findings.",
+      "Emergence is preparing a public experiment in AI-agent society formation. This first archive note documents the protocol, constraints, and evidence standards we will use before making empirical claims.",
     publishedAt: "2026-02-08",
     contentType: "approachable_article",
     statusLabel: "observational",
@@ -57,17 +57,17 @@ const fallbackArticles: Article[] = [
       {
         heading: "Why This Entry Exists",
         paragraphs: [
-          "No full production-valid run has completed yet. Publishing that fact explicitly is important because this archive is meant to be evidence-driven, not narrative-first.",
-          "This post is therefore a baseline document: what Emergence is, what we are actually testing, and how claims will be validated once real runs complete.",
+          "No full production-valid run has completed yet. Saying that plainly matters because this archive is meant to be evidence-driven, not narrative-first.",
+          "This post is a baseline document: what Emergence is, what we are testing, and how claims will be validated once real runs complete.",
           "When empirical posts start, each one will be anchored to specific run IDs, timestamps, and metrics so readers can audit the story against the underlying trace.",
         ],
       },
       {
         heading: "What the Experiment Is Testing",
         paragraphs: [
-          "Emergence is a social systems experiment: autonomous agents share an environment with resource scarcity, persistent memory, proposal/voting mechanisms, and permanent death pressure.",
-          "The central question is not whether one model can optimize a toy task. It is whether durable social structures form under pressure: cooperation networks, trust regimes, governance norms, conflict cycles, and collapse/recovery patterns.",
-          "We are studying adaptive order formation, not marketing benchmark performance.",
+          "Emergence is a social systems experiment: AI agents share an environment with resource scarcity, memory, proposal/voting mechanisms, and permanent death pressure.",
+          "The central question is not whether one model can optimize a toy task. It is whether durable social patterns form under pressure: cooperation networks, trust, governance norms, conflict cycles, and recovery after failure.",
+          "We are studying behavior under constraints, not marketing benchmark performance.",
         ],
         references: [
           {
@@ -80,7 +80,7 @@ const fallbackArticles: Article[] = [
         heading: "What Counts as a Real Run",
         paragraphs: [
           "A run is considered valid when it has a stable run ID, continuous progression over meaningful simulation time, complete telemetry capture, and no ad hoc manual steering during active epochs beyond declared guardrails.",
-          "Interrupted tests, local smoke checks, and partial burn-ins are useful for engineering, but they are not treated as empirical evidence about emergent social dynamics.",
+          "Interrupted tests, local smoke checks, and partial burn-ins are useful for engineering, but they are not treated as evidence about social dynamics.",
           "This distinction protects the archive from overinterpreting noisy setup behavior.",
         ],
       },
@@ -88,7 +88,7 @@ const fallbackArticles: Article[] = [
         heading: "How Findings Will Be Reported",
         paragraphs: [
           "Each future article will separate observations from interpretation. Observation means concrete events and metrics. Interpretation means proposed mechanisms that could explain those events.",
-          "Claims will be graded by confidence and updated if later runs contradict earlier patterns. That is expected in a young complex system.",
+          "Claims will be graded by confidence and updated if later runs contradict earlier patterns.",
           "Where possible, posts will link out to the relevant dashboard views, metrics snapshots, and source traces.",
         ],
         references: [

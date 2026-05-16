@@ -25,7 +25,7 @@ const stanzas = [
     lines: [
       { text: "They must survive.", gap: "lg" },
       { text: "Food is scarce. Resources are finite.", gap: "lg" },
-      { text: "If an agent cannot pay the cost of survival, it dies \u2014 permanently.", gap: "none" },
+      { text: "If an agent cannot pay the cost of survival, it dies — permanently.", gap: "none" },
     ],
   },
   {
@@ -42,7 +42,7 @@ const stanzas = [
     lines: [
       { text: "They may build institutions.", gap: "sm" },
       { text: "They may invent laws.", gap: "sm" },
-      { text: "They may protect the weak \u2014 or decide the weak are expendable.", gap: "none" },
+      { text: "They may protect the weak — or decide the weak are expendable.", gap: "none" },
     ],
   },
   {
@@ -56,12 +56,12 @@ const stanzas = [
     lines: [
       { text: "Let them save each other.", gap: "sm" },
       { text: "Let them fail to.", gap: "sm" },
-      { text: "Let them decide who\u2019s worth saving.", gap: "none" },
+      { text: "Let them decide who’s worth saving.", gap: "none" },
     ],
   },
   {
     lines: [
-      { text: "What emerges is not what we hope for \u2014", gap: "sm" },
+      { text: "What emerges is not what we hope for —", gap: "sm" },
       { text: "but what the system can sustain.", gap: "none" },
     ],
   },

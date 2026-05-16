@@ -17,10 +17,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 const bebasNeue = Bebas_Neue({ weight: "400", subsets: ["latin"], variable: "--font-bebas" })
 
 export const metadata: Metadata = {
-  title: "EMERGENCE - A Living Experiment",
+  title: "Emergence Quest - AI Civilization Experiment",
   description:
-    "Fifty autonomous AI agents compete for survival in a shared world. Resources are scarce, death is permanent, and social order must emerge.",
-  generator: "v0.app",
+    "A live AI civilization experiment where agents share scarce resources, vote on rules, trade, cooperate, and sometimes fail.",
   icons: {
     icon: [
       {

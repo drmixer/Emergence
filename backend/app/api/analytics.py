@@ -87,6 +87,25 @@ CONFLICT_EVENT_TYPES = {
     "resources_seized",
     "agent_exiled",
 }
+PUBLIC_ORDER_COMPONENT_EVENT_TYPES = {
+    "accusations": {"public_accusation"},
+    "enforcement": {
+        "initiate_sanction",
+        "initiate_seizure",
+        "initiate_exile",
+        "vote_enforcement",
+        "enforcement_initiated",
+        "agent_sanctioned",
+        "resources_seized",
+        "agent_exiled",
+    },
+    "rejected_invalid_actions": {"invalid_action"},
+    "conflict": {
+        "refuse_aid",
+        "contest_proposal",
+    },
+}
+PUBLIC_ORDER_EVENT_TYPES = set().union(*PUBLIC_ORDER_COMPONENT_EVENT_TYPES.values())
 COOPERATION_EVENT_TYPES = {
     "trade",
     "direct_message",
@@ -1745,6 +1764,13 @@ def social_dynamics(
             day_key: {
                 "day_key": day_key,
                 "conflict_events": 0,
+                "public_order_events": 0,
+                "public_order_components": {
+                    "accusations": 0,
+                    "enforcement": 0,
+                    "rejected_invalid_actions": 0,
+                    "conflict": 0,
+                },
                 "cooperation_events": 0,
                 "alliance_signals": 0,
                 "coalition_churn": None,
@@ -1768,8 +1794,15 @@ def social_dynamics(
 
             event_type = str(event.event_type or "")
             description = str(event.description or "").lower()
-            if event_type in CONFLICT_EVENT_TYPES or _contains_any(description, CONFLICT_KEYWORDS):
+            is_conflict = event_type in CONFLICT_EVENT_TYPES or _contains_any(description, CONFLICT_KEYWORDS)
+            if is_conflict:
                 buckets[day_key]["conflict_events"] += 1
+            is_public_order = event_type in PUBLIC_ORDER_EVENT_TYPES or is_conflict
+            if is_public_order:
+                buckets[day_key]["public_order_events"] += 1
+            for component, event_types in PUBLIC_ORDER_COMPONENT_EVENT_TYPES.items():
+                if event_type in event_types:
+                    buckets[day_key]["public_order_components"][component] += 1
             if event_type in COOPERATION_EVENT_TYPES or _contains_any(description, COOPERATION_KEYWORDS):
                 buckets[day_key]["cooperation_events"] += 1
             if _contains_any(description, ALLIANCE_KEYWORDS):
@@ -1816,6 +1849,7 @@ def social_dynamics(
         if latest and previous:
             deltas = {
                 "conflict_events_delta": int(latest["conflict_events"] - previous["conflict_events"]),
+                "public_order_events_delta": int(latest["public_order_events"] - previous["public_order_events"]),
                 "cooperation_events_delta": int(latest["cooperation_events"] - previous["cooperation_events"]),
                 "alliance_signals_delta": int(latest["alliance_signals"] - previous["alliance_signals"]),
             }
@@ -1824,6 +1858,15 @@ def social_dynamics(
             "days": days,
             "window_start_utc": window_start.isoformat(),
             "window_end_utc": window_end.isoformat(),
+            "public_order_definition": {
+                "label": "Public Order",
+                "components": [
+                    "accusations",
+                    "sanctions/enforcement",
+                    "rejected or invalid actions",
+                    "conflict events",
+                ],
+            },
             "series": series,
             "latest": latest,
             "deltas_vs_prev_day": deltas,

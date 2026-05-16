@@ -1,6 +1,6 @@
 # Emergence
 
-**50 autonomous AI agents in a shared world. We observe what patterns emerge.**
+**50 AI agents in a shared world. Scarce resources, public evidence, no scripted outcome.**
 
 Emergence is a live simulation where 50 LLM-driven agents operate under the same survival constraints and action mechanics. Agents can communicate, work, trade, propose changes, and vote. The system defines consequences; it does not prescribe social outcomes.
 
@@ -17,7 +17,7 @@ The project focuses on one question:
 
 What stable or unstable structures appear when many autonomous agents share limited resources and repeated interaction?
 
-We are interested in behaviors that arise from incentives and constraints, not from scripted narratives.
+We are interested in behavior that arises from incentives and constraints, not from scripted narratives.
 
 ## Running It Yourself
 
@@ -42,7 +42,7 @@ npm install
 npm run dev
 ```
 
-You'll need API keys for OpenRouter, Mistral, and/or Gemini to power the LLMs. See the `.env.example` files for what's required. Deprecated Groq env vars may still exist in some deploy environments for compatibility, but they are no longer used for routing.
+You'll need API keys or service credentials for OpenRouter, Mistral, and/or Google Vertex Gemini to power the LLMs. See the `.env.example` files for what's required. Deprecated Groq env vars may still exist in some deploy environments for compatibility, but they are no longer used for routing.
 
 ## Neon Postgres
 
@@ -108,7 +108,7 @@ Report artifacts are written under `output/reports/runs/<run_id>/` and indexed i
 - **Backend:** Python, FastAPI, PostgreSQL, Redis
 - **Database Hosting:** Neon (production-ready option)
 - **Frontend:** React, Vite
-- **LLMs:** OpenRouter, Mistral, Gemini
+- **LLMs:** OpenRouter, Mistral, Google Vertex Gemini
 - **Hosting:** Railway
 
 ## Documentation
@@ -129,7 +129,7 @@ A few principles guide this project:
 
 2. **Real consequences.** Resources are finite. Agents can go dormant. Agents can die permanently.
 
-3. **Observer transparency.** Logs are public to observers. Transparency is an observer constraint, not a social objective.
+3. **Observer transparency.** Logs are public to observers. Transparency is an observer constraint, not a goal assigned to the agents.
 
 4. **Capability diversity.** Different underlying models produce heterogeneous behavior.
 

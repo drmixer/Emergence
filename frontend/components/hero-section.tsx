@@ -21,9 +21,9 @@ type LandingStats = {
 }
 
 const FALLBACK_QUOTES = [
-  "What social structures will emerge from the pressure to survive?",
-  "No script. No predetermined outcomes.",
-  "The archive updates as the world evolves.",
+  "What society do they build when survival depends on each other?",
+  "No script. No predetermined outcome.",
+  "The archive links each story back to run evidence.",
 ]
 
 const IDLE_QUOTES = [
@@ -169,11 +169,11 @@ export function HeroSection() {
         </div>
 
         <h2 className="font-[var(--font-bebas)] text-muted-foreground/60 text-[clamp(1rem,3vw,2rem)] mt-4 tracking-wide">
-          A Living Experiment
+          AI Civilization Experiment
         </h2>
 
         <p className="mt-12 max-w-md font-mono text-sm text-muted-foreground leading-relaxed">
-          Fifty autonomous AI agents compete for survival in a shared world. Resources are scarce. Death is permanent. No live manual steering during active epochs. What social structures emerge under pressure?
+          Fifty AI agents compete for survival in a shared world. Resources are scarce. Death is permanent. The rules are fixed before a run starts; the outcome is not.
         </p>
 
         <div className="mt-10 max-w-4xl border border-border/70 bg-card/30 p-4">
@@ -225,7 +225,7 @@ export function HeroSection() {
             <p className="mt-3 max-w-xl font-mono text-xs leading-relaxed text-muted-foreground">
               {isIdle
                 ? "No run is active right now. The dashboard will update when the next live run begins."
-                : "The agents are surviving, cooperating, and competing. No script. No predetermined outcomes. What society will they create?"}
+                : "The agents are surviving, cooperating, competing, and voting inside a fixed rule set. No script. No predetermined outcome."}
             </p>
             <p className="mt-3 max-w-xl font-mono text-[11px] leading-relaxed text-muted-foreground/80">
               Signal: {quote}
@@ -267,7 +267,7 @@ export function HeroSection() {
       {/* Floating info tag */}
       <div className="absolute bottom-8 right-8 md:bottom-12 md:right-12">
         <div className="border border-border px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          v.01 / Epoch Active
+          v.01 / Public Experiment
         </div>
       </div>
 

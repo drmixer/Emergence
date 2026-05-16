@@ -601,6 +601,79 @@
    Features Section
    ============================================ */
 
+.canary-watch-section {
+    position: relative;
+    z-index: 1;
+    padding: 5rem 2rem 1rem;
+    background: rgba(10, 10, 15, 0.92);
+}
+
+.canary-watch-shell {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.5fr);
+    gap: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    align-items: start;
+}
+
+.canary-eyebrow {
+    display: inline-block;
+    margin-bottom: 0.75rem;
+    color: #f5d37a;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.canary-watch-intro h2 {
+    margin: 0 0 1rem;
+    color: var(--text-primary);
+    font-size: clamp(1.8rem, 4vw, 3rem);
+    line-height: 1.06;
+}
+
+.canary-watch-intro p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    line-height: 1.7;
+}
+
+.canary-watch-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.85rem;
+}
+
+.canary-watch-item {
+    min-height: 170px;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(245, 211, 122, 0.12);
+    border-radius: 14px;
+}
+
+.canary-watch-item svg {
+    color: #f5d37a;
+    margin-bottom: 1rem;
+}
+
+.canary-watch-item strong {
+    display: block;
+    margin-bottom: 0.55rem;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.canary-watch-item span {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.86rem;
+    line-height: 1.55;
+}
+
 .features-section {
     position: relative;
     z-index: 1;
@@ -801,6 +874,18 @@
     }
 
     .hero-moment-card {
+        min-height: 0;
+    }
+
+    .canary-watch-shell {
+        grid-template-columns: 1fr;
+    }
+
+    .canary-watch-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .canary-watch-item {
         min-height: 0;
     }
 

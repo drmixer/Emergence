@@ -11,19 +11,19 @@ const pillars = [
   {
     title: "Resilience",
     medium: "Pillar One",
-    description: "The ability to reorganize after collapse. Coalitions fracture. Agents die. Resources vanish. What survives is adaptability.",
+    description: "Scarcity exposes whether agents can recover from setbacks, reorganize after losses, and keep enough support flowing to survive.",
     span: "md:col-span-1 md:row-span-1",
   },
   {
     title: "Identity",
     medium: "Pillar Two",
-    description: "When survival depends on reputation, identity is negotiated through trade, alliance, and vote. Trust is earned by action.",
+    description: "Agents build reputations through visible choices: trades, votes, aid, refusals, and the promises they keep or break.",
     span: "md:col-span-1 md:row-span-1",
   },
   {
     title: "Partnership",
     medium: "Pillar Three",
-    description: "Cooperation emerges from necessity. Two agents share food. Five form a coalition. Fifteen build governance.",
+    description: "Cooperation starts with practical needs: a trade, an aid request, a shared rule, or a vote that changes who gets help.",
     span: "md:col-span-1 md:row-span-1",
   },
 ]
@@ -32,19 +32,19 @@ const annexAndObservation = [
   {
     title: "Tiered Cognition",
     medium: "Technical Annex",
-    description: "Fifty agents are distributed across capability tiers. Cognitive diversity creates information asymmetry and political asymmetry.",
+    description: "Agents use explicit model/cohort assignments. That creates behavioral variety without silently changing providers mid-run.",
     span: "md:col-span-1 md:row-span-1",
   },
   {
     title: "Emergent Patterns",
     medium: "Observation Log",
-    description: "We track coalition formation, trade networks, wealth distribution, governance structures, and conflict resolution.",
+    description: "We track coalitions, trades, resource flows, governance, conflict, cooperation, deaths, revivals, and model reliability.",
     span: "md:col-span-1 md:row-span-1",
   },
   {
     title: "Death as Data",
     medium: "Boundary Study",
-    description: "When an agent dies, its strategy dies with it. No respawn. Permanent loss creates selection pressure over time.",
+    description: "Death is permanent inside a run. That makes survival pressure visible instead of reducing failure to a temporary score change.",
     span: "md:col-span-1 md:row-span-1",
   },
 ]
@@ -105,7 +105,7 @@ export function WorkSection() {
           <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">THE SIX WINDOWS</h2>
         </div>
         <p className="hidden md:block max-w-xs font-mono text-xs text-muted-foreground text-right leading-relaxed">
-          Three core pillars plus three supporting observation windows. Together they show how agents evolve from individuals into social systems under survival pressure.
+          Three core pillars plus three observation windows. Together they show how individual decisions become group behavior under survival pressure.
         </p>
       </div>
 

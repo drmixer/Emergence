@@ -26,6 +26,14 @@ import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 
 const DashboardSocialDynamicsChart = lazy(() => import('../components/DashboardSocialDynamicsChart'))
 
+const CANARY_WATCH_SIGNALS = [
+    { label: 'Survival', detail: 'Active, dormant, revived, and dead agents' },
+    { label: 'Aid & Trade', detail: 'Requests, refusals, trades, and recovery attempts' },
+    { label: 'Laws', detail: 'Proposals, votes, executable effects, and enforcement' },
+    { label: 'Public Order', detail: 'Accusations, sanctions, invalid actions, and conflict' },
+    { label: 'Model Behavior', detail: 'Cohort actions, resolved models, failures, and fallback counts' },
+]
+
 function sumWorldResource(resources, key) {
     const totals = resources?.totals || {}
     const pool = resources?.common_pool || {}
@@ -278,9 +286,15 @@ export default function Dashboard() {
     const socialChartData = socialSeries.map((row) => ({
         day: row.day_label,
         conflict: Number(row.conflict_events || 0),
+        publicOrder: Number(row.public_order_events || 0),
         cooperation: Number(row.cooperation_events || 0),
         alliances: Number(row.alliance_signals || 0),
     }))
+    const latestSocialRow = socialSeries.length > 0 ? socialSeries[socialSeries.length - 1] : null
+    const publicOrderLatest = Number(latestSocialRow?.public_order_events || 0)
+    const publicOrderDelta = Number(socialDeltas?.public_order_events_delta || 0)
+    const conflictDelta = Number(socialDeltas?.conflict_events_delta || 0)
+    const allianceDelta = Number(socialDeltas?.alliance_signals_delta || 0)
     const tiers = Array.isArray(classMobility?.tiers) ? classMobility.tiers : []
     const mobility = classMobility?.mobility || {}
     const inequality = classMobility?.inequality || {}
@@ -308,6 +322,26 @@ export default function Dashboard() {
                         Exploratory simulation results. Interpret under this run&apos;s assumptions and verify against run evidence before drawing strong conclusions.
                     </p>
                     <Link to="/method" className="trust-note-link">Method</Link>
+                </div>
+            </div>
+
+            <div className="card k11-watch-card">
+                <div className="card-body k11-watch-body">
+                    <div className="k11-watch-intro">
+                        <span className="k11-eyebrow">K11: First Public Canary</span>
+                        <h2>Live AI civilization experiment</h2>
+                        <p>
+                            Exploratory public run, evidence-backed and non-claim-bearing. One run can show signals; it does not prove broad conclusions.
+                        </p>
+                    </div>
+                    <div className="k11-watch-grid" aria-label="What to watch">
+                        {CANARY_WATCH_SIGNALS.map((signal) => (
+                            <div key={signal.label} className="k11-watch-item">
+                                <strong>{signal.label}</strong>
+                                <span>{signal.detail}</span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -401,6 +435,7 @@ export default function Dashboard() {
                         <SkeletonStatCard />
                         <SkeletonStatCard />
                         <SkeletonStatCard />
+                        <SkeletonStatCard />
                     </>
                 ) : (
                     <>
@@ -453,6 +488,19 @@ export default function Dashboard() {
                             <div className="stat-value">{stats?.passedLaws || 0}</div>
                             <div className="stat-change">
                                 <span>Cumulative in loaded history</span>
+                            </div>
+                        </Link>
+
+                        <Link to="/timeline" className="stat-card stat-card-link">
+                            <div className="stat-header">
+                                <span className="stat-label">Public Order</span>
+                                <div className="stat-icon orange">
+                                    <ShieldCheck size={18} />
+                                </div>
+                            </div>
+                            <div className="stat-value">{publicOrderLatest}</div>
+                            <div className="stat-change">
+                                <span>Accusations, enforcement, invalid actions, conflict</span>
                             </div>
                         </Link>
                     </>
@@ -652,11 +700,14 @@ export default function Dashboard() {
                         <h3>Social Dynamics (7d)</h3>
                         {socialDeltas && (
                             <div className="deltas-inline">
-                                <span className={socialDeltas.conflict_events_delta > 0 ? 'delta-up' : 'delta-down'}>
-                                    Conflict {socialDeltas.conflict_events_delta > 0 ? '+' : ''}{socialDeltas.conflict_events_delta}
+                                <span className={publicOrderDelta > 0 ? 'delta-up' : 'delta-down'}>
+                                    Public Order {publicOrderDelta > 0 ? '+' : ''}{publicOrderDelta}
                                 </span>
-                                <span className={socialDeltas.alliance_signals_delta >= 0 ? 'delta-up' : 'delta-down'}>
-                                    Alliances {socialDeltas.alliance_signals_delta > 0 ? '+' : ''}{socialDeltas.alliance_signals_delta}
+                                <span className={conflictDelta > 0 ? 'delta-up' : 'delta-down'}>
+                                    Conflict {conflictDelta > 0 ? '+' : ''}{conflictDelta}
+                                </span>
+                                <span className={allianceDelta >= 0 ? 'delta-up' : 'delta-down'}>
+                                    Alliances {allianceDelta > 0 ? '+' : ''}{allianceDelta}
                                 </span>
                             </div>
                         )}
@@ -1039,6 +1090,68 @@ export default function Dashboard() {
                     color: #bae6fd;
                 }
 
+                .k11-watch-card {
+                    margin-bottom: var(--spacing-lg);
+                    border-color: rgba(245, 158, 11, 0.26);
+                    background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(255, 255, 255, 0.02));
+                }
+
+                .k11-watch-body {
+                    display: grid;
+                    grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1.5fr);
+                    gap: var(--spacing-lg);
+                    align-items: start;
+                }
+
+                .k11-eyebrow {
+                    display: inline-block;
+                    margin-bottom: var(--spacing-xs);
+                    color: #fbbf24;
+                    font-size: 0.76rem;
+                    font-weight: 700;
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                }
+
+                .k11-watch-intro h2 {
+                    margin: 0 0 var(--spacing-sm);
+                    color: var(--text-primary);
+                    font-size: 1.35rem;
+                }
+
+                .k11-watch-intro p {
+                    margin: 0;
+                    color: var(--text-secondary);
+                    line-height: 1.6;
+                }
+
+                .k11-watch-grid {
+                    display: grid;
+                    grid-template-columns: repeat(5, minmax(0, 1fr));
+                    gap: var(--spacing-sm);
+                }
+
+                .k11-watch-item {
+                    min-height: 112px;
+                    padding: var(--spacing-md);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: var(--radius-md);
+                    background: rgba(0, 0, 0, 0.16);
+                }
+
+                .k11-watch-item strong {
+                    display: block;
+                    margin-bottom: var(--spacing-xs);
+                    color: var(--text-primary);
+                    font-size: 0.92rem;
+                }
+
+                .k11-watch-item span {
+                    color: var(--text-secondary);
+                    font-size: 0.82rem;
+                    line-height: 1.45;
+                }
+
                 .dashboard-scope-note {
                     margin-bottom: var(--spacing-lg);
                     display: flex;
@@ -1071,6 +1184,14 @@ export default function Dashboard() {
                     .dashboard-scope-note {
                         flex-direction: column;
                         align-items: flex-start;
+                    }
+
+                    .k11-watch-body {
+                        grid-template-columns: 1fr;
+                    }
+
+                    .k11-watch-grid {
+                        grid-template-columns: 1fr;
                     }
                 }
                 

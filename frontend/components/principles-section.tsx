@@ -16,10 +16,10 @@ export function PrinciplesSection() {
     {
       number: "01",
       titleParts: [
-        { text: "ZERO", highlight: true },
-        { text: " INTERVENTION", highlight: false },
+        { text: "NO", highlight: true },
+        { text: " SCRIPTED OUTCOMES", highlight: false },
       ],
-      description: "No hand-crafted social outcomes. No scripted endings. Behaviors must emerge from agent interaction under shared constraints.",
+      description: "Operators can fix infrastructure and enforce safety boundaries. They do not hand-write alliances, laws, deaths, or resolutions inside an active run.",
       align: "left",
     },
     {
@@ -37,16 +37,16 @@ export function PrinciplesSection() {
         { text: "OBSERVE ", highlight: false },
         { text: "EVERYTHING", highlight: true },
       ],
-      description: "Every cycle is recorded. Every agent decision logged. The data is the experiment.",
+      description: "Runs are logged, summarized, and archived so viewers can check claims against the underlying events.",
       align: "left",
     },
     {
       number: "04",
       titleParts: [
-        { text: "ENTROPY IS ", highlight: false },
-        { text: "INEVITABLE", highlight: true },
+        { text: "FAILURE ", highlight: false },
+        { text: "COUNTS", highlight: true },
       ],
-      description: "All civilizations collapse. The question is what they build before they do.",
+      description: "Dormancy, death, repetition, bad proposals, and quiet stretches are part of the record, not defects to hide.",
       align: "right",
     },
   ]

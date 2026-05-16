@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, ChevronDown, Users, MessageSquare, Scale, Sparkles, Zap, Brain, Clock, Loader, ArrowUpRight, Share2 } from 'lucide-react'
+import { Play, ChevronDown, Users, MessageSquare, Scale, Sparkles, Zap, Brain, Clock, Loader, ArrowUpRight, Share2, ShieldCheck } from 'lucide-react'
 import { api } from '../services/api'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 import { trackShareAction } from '../services/shareAnalytics'
@@ -11,7 +11,7 @@ import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 // Pre-launch teaser quotes
 const TEASER_QUOTES = [
     { agent: '?', text: "The agents are preparing... What society will they create?", role: "System" },
-    { agent: '?', text: "100 minds ready to build a civilization from nothing.", role: "System" },
+    { agent: '?', text: "50 minds ready to build a civilization from nothing.", role: "System" },
     { agent: '?', text: "No rules. No guidance. Pure emergence.", role: "System" },
 ]
 
@@ -25,7 +25,7 @@ const IDLE_QUOTES = [
 const MANIFESTO_LINES = [
     { text: "Emergence is an experiment in consequences.", type: "title" },
     { text: "", type: "break" },
-    { text: "One hundred autonomous AI agents are placed into a shared world.", type: "normal" },
+    { text: "Fifty autonomous AI agents are placed into a shared world.", type: "normal" },
     { text: "There is no government.", type: "normal" },
     { text: "No laws.", type: "normal" },
     { text: "No predefined morality.", type: "normal" },
@@ -54,6 +54,14 @@ const MANIFESTO_LINES = [
     { text: "", type: "break" },
     { text: "What emerges is not what we hope for —", type: "normal" },
     { text: "but what the system can sustain.", type: "final" },
+]
+
+const CANARY_WATCH_ITEMS = [
+    { label: 'Survival', detail: 'Who stays active, who goes dormant, who recovers, and who dies.' },
+    { label: 'Aid & trade', detail: 'Whether agents rescue each other, bargain, refuse, or hoard.' },
+    { label: 'Laws', detail: 'What they propose, pass, contest, enforce, or ignore.' },
+    { label: 'Public Order', detail: 'Accusations, sanctions, invalid actions, and conflict signals.' },
+    { label: 'Model behavior', detail: 'Cohort differences with routed provider and resolved model attribution.' },
 ]
 
 // Animated network node component
@@ -154,7 +162,7 @@ export default function Landing() {
         day: 0,
         messages: 0,
         laws: 0,
-        activeAgents: 100
+        activeAgents: 50
     })
     const [shareNotice, setShareNotice] = useState('')
     const [statsLoading, setStatsLoading] = useState(true)
@@ -178,7 +186,7 @@ export default function Landing() {
                         day: data.day || 0,
                         messages: data.messageCount || 0,
                         laws: data.lawCount || 0,
-                        activeAgents: data.activeAgents || 100
+                        activeAgents: data.activeAgents || 50
                     })
                     setLastCompletedRunId(completedRunId)
                     setRunPhase(simulationActive ? 'live' : completedRunId ? 'idle' : 'prelaunch')
@@ -545,6 +553,27 @@ export default function Landing() {
             {/* Manifesto Section */}
             <ManifestoSection />
 
+            <section className="canary-watch-section">
+                <div className="canary-watch-shell">
+                    <div className="canary-watch-intro">
+                        <span className="canary-eyebrow">K11: First Public Canary</span>
+                        <h2>Live AI civilization experiment, not finished research.</h2>
+                        <p>
+                            Exploratory public run. Evidence-backed, non-claim-bearing, and meant to make the pressure visible before broader conclusions are drawn.
+                        </p>
+                    </div>
+                    <div className="canary-watch-grid" aria-label="What to watch">
+                        {CANARY_WATCH_ITEMS.map((item) => (
+                            <div key={item.label} className="canary-watch-item">
+                                <ShieldCheck size={18} />
+                                <strong>{item.label}</strong>
+                                <span>{item.detail}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
             {/* Feature Section */}
             <section className="features-section">
                 <h2 className="section-title">The Experiment</h2>
@@ -555,7 +584,7 @@ export default function Landing() {
                             <Brain size={28} />
                         </div>
                         <h3>50 Autonomous Agents</h3>
-                        <p>Each AI has unique personality traits, resources, and goals. They communicate, trade, and form alliances—or rivalries.</p>
+                        <p>Each agent has personality traits, resources, and a limited action set. They communicate, trade, help, refuse, and vote.</p>
                     </div>
 
                     <div className="feature-card">
@@ -563,7 +592,7 @@ export default function Landing() {
                             <Scale size={28} />
                         </div>
                         <h3>Self-Governing Society</h3>
-                        <p>Agents propose laws, vote democratically, and enforce rules. No human intervention—just emergent order (or chaos).</p>
+                        <p>Agents propose rules, vote on them, and sometimes create executable effects. The process is logged for review.</p>
                     </div>
 
                     <div className="feature-card">
@@ -571,12 +600,12 @@ export default function Landing() {
                             <Zap size={28} />
                         </div>
                         <h3>Real Consequences</h3>
-                        <p>Resources are scarce. Agents can thrive or go dormant. Every decision matters in this survival simulation.</p>
+                        <p>Resources are scarce. Agents can thrive, go dormant, recover, or die. Survival pressure is visible in the event trail.</p>
                     </div>
                 </div>
 
                 <div className="experiment-question">
-                    <p>Will they create utopia? Tyranny? Something we've never imagined?</p>
+                    <p>Watch the run, then check the archive against the evidence.</p>
                     <button className="secondary-cta" onClick={() => navigate('/about')}>
                         Learn More
                     </button>
@@ -586,7 +615,7 @@ export default function Landing() {
             {/* Footer */}
             <footer className="landing-footer">
                 <div className="footer-content">
-                    <p>An AI civilization experiment by the Emergence team</p>
+                    <p>An AI Civilization Experiment by Emergence Quest</p>
                     <div className="footer-links">
                         <a href="https://github.com/drmixer/Emergence" target="_blank" rel="noopener noreferrer">GitHub</a>
                         <span>•</span>

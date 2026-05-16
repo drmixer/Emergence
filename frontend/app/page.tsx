@@ -1,5 +1,6 @@
 import { HeroSection } from "@/components/hero-section"
 import { ManifestoSection } from "@/components/manifesto-section"
+import { CanaryWatchSection } from "@/components/canary-watch-section"
 import { SignalsSection } from "@/components/signals-section"
 import { WorkSection } from "@/components/work-section"
 import { PrinciplesSection } from "@/components/principles-section"
@@ -20,12 +21,14 @@ export default function Page() {
         <SectionDivider index="00" />
         <ManifestoSection />
         <SectionDivider index="01" />
-        <WorkSection />
+        <CanaryWatchSection />
         <SectionDivider index="02" />
-        <PrinciplesSection />
+        <WorkSection />
         <SectionDivider index="03" />
-        <SignalsSection />
+        <PrinciplesSection />
         <SectionDivider index="04" />
+        <SignalsSection />
+        <SectionDivider index="05" />
         <ColophonSection />
       </div>
       <ScrollToTopButton />

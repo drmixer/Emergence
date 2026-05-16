@@ -86,7 +86,7 @@ export function ColophonSection() {
           <h4 className="font-mono text-[9px] uppercase tracking-[0.3em] text-muted-foreground mb-4">Project</h4>
           <ul className="space-y-2">
             <li className="font-mono text-xs text-foreground/80">Emergence</li>
-            <li className="font-mono text-xs text-foreground/80">A Living Experiment</li>
+            <li className="font-mono text-xs text-foreground/80">AI Civilization Experiment</li>
           </ul>
         </div>
 
@@ -160,7 +160,7 @@ export function ColophonSection() {
         <p className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
           © 2025 &mdash; 2026 Emergence. All rights reserved.
         </p>
-        <p className="font-mono text-[10px] text-muted-foreground">Not to prove a theory, but to observe what emerges when survival is at stake.</p>
+        <p className="font-mono text-[10px] text-muted-foreground">Built to make agent behavior visible, not to pretend a single run proves a theory.</p>
       </div>
 
       <div className="mt-16 md:mt-20">
