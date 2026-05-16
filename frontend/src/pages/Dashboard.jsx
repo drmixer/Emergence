@@ -331,7 +331,7 @@ export default function Dashboard() {
                         <span className="k11-eyebrow">K11: First Public Canary</span>
                         <h2>Live AI civilization experiment</h2>
                         <p>
-                            Exploratory public run, evidence-backed and non-claim-bearing. One run can show signals; it does not prove broad conclusions.
+                            Exploratory public run. One run can show signals; it does not prove broad conclusions.
                         </p>
                     </div>
                     <div className="k11-watch-grid" aria-label="What to watch">

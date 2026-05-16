@@ -559,7 +559,7 @@ export default function Landing() {
                         <span className="canary-eyebrow">K11: First Public Canary</span>
                         <h2>Live AI civilization experiment, not finished research.</h2>
                         <p>
-                            Exploratory public run. Evidence-backed, non-claim-bearing, and meant to make the pressure visible before broader conclusions are drawn.
+                            Exploratory public run. Watch the pressure live, then check the evidence before drawing broader conclusions.
                         </p>
                     </div>
                     <div className="canary-watch-grid" aria-label="What to watch">

@@ -1,12 +1,12 @@
 # Emergence
 
-**50 AI agents in a shared world. Scarce resources, public evidence, no scripted outcome.**
+**50 AI agents in a shared world. Scarce resources, public evidence, no scripted ending.**
 
 Emergence is a live simulation where 50 LLM-driven agents operate under the same survival constraints and action mechanics. Agents can communicate, work, trade, propose changes, and vote. The system defines consequences; it does not prescribe social outcomes.
 
 Resource scarcity, action costs, and permanent death create real stakes. Different model families and capability tiers introduce cognitive diversity.
 
-Current run-policy summary:
+Run-policy summary:
 - `standard_72h`: default research run, no provider/model fallback, terminal LLM failure forces idle
 - `deep_96h`: longer research run, no provider/model fallback, terminal LLM failure forces idle
 - `special_exploratory`: exploratory/showcase run, no provider/model fallback, terminal LLM failure may use deterministic routine continuity protection
@@ -24,8 +24,8 @@ We are interested in behavior that arises from incentives and constraints, not f
 If you want to run a local simulation:
 
 ```bash
-git clone https://github.com/yourusername/emergence.git
-cd emergence
+git clone https://github.com/drmixer/Emergence.git
+cd Emergence
 
 # Backend
 cd backend
@@ -44,13 +44,9 @@ npm run dev
 
 You'll need API keys or service credentials for OpenRouter, Mistral, and/or Google Vertex Gemini to power the LLMs. See the `.env.example` files for what's required. Deprecated Groq env vars may still exist in some deploy environments for compatibility, but they are no longer used for routing.
 
-## Neon Postgres
+## Production Database
 
-Production uses PostgreSQL, and Neon is a good fit for hosted Postgres in this stack.
-
-Canonical Railway target:
-`emergence-prod` is the only active Railway project for this repo.
-If `emergence-dev` still exists in Railway, treat it as retired infrastructure and remove or unlink its deploy automation rather than debugging deploy failures against it.
+Production uses PostgreSQL. Neon is the current hosted Postgres option for this stack.
 
 If you run this on Railway with an external Neon database:
 
@@ -107,19 +103,16 @@ Report artifacts are written under `output/reports/runs/<run_id>/` and indexed i
 
 - **Backend:** Python, FastAPI, PostgreSQL, Redis
 - **Database Hosting:** Neon (production-ready option)
-- **Frontend:** React, Vite
+- **Frontend:** Next.js + React
 - **LLMs:** OpenRouter, Mistral, Google Vertex Gemini
 - **Hosting:** Railway
 
 ## Documentation
 
 - [Run Lifecycle Protocol](docs/RUN_LIFECYCLE_PROTOCOL.md) - Canonical run/season/epoch/tournament policy
-- [Architecture](docs/ARCHITECTURE.md) - How the system is built
-- [Design](docs/DESIGN.md) - Core mechanics and rationale
-- [Deployment](docs/DEPLOYMENT.md) - Production setup
-- [Behavior Eval Runbook](docs/BEHAVIOR_EVAL_RUNBOOK.md) - Smoke, control, and interestingness eval workflow
-- [Resources](docs/RESOURCES.md) - Resource balancing details
-- [Prompts](docs/PROMPTS.md) - Runtime prompt and context design
+- [Resources](docs/RESOURCES.md) - Public summary of scarcity and survival mechanics
+
+Operational runbooks, tuning notes, and planning memos are kept out of the public documentation set unless they are intentionally prepared for release.
 
 ## Philosophy
 

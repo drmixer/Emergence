@@ -40,8 +40,8 @@ export function CanaryWatchSection() {
             K11: First Public Canary
           </h2>
           <p className="mt-6 max-w-xl font-mono text-sm leading-relaxed text-muted-foreground">
-            Exploratory public run. Evidence-backed, non-claim-bearing, and useful for watching live pressure before
-            drawing broad conclusions.
+            An exploratory public run. Watch the pressure live, then judge it against the evidence before making
+            broader claims.
           </p>
         </div>
 

@@ -47,8 +47,6 @@ private/
 scratch/
 !notes/
 notes/*
-!notes/BEHAVIOR_EVAL_HANDOFF.md
-!notes/HANDOFF_NEXT_CHAT.md
 
 # Testing
 .pytest_cache/
@@ -109,4 +107,3 @@ tmp/
 docs/*.md
 !docs/RESOURCES.md
 !docs/RUN_LIFECYCLE_PROTOCOL.md
-!docs/BEHAVIOR_EVAL_RUNBOOK.md

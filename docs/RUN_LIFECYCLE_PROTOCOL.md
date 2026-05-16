@@ -208,9 +208,7 @@ This cadence is intentionally conservative for budget control and reliability wh
 - Epoch tournament selection:
   - `backend/app/services/epoch_tournament.py`
   - `backend/scripts/select_epoch_tournament_candidates.py`
-- Run/report operations:
-  - `docs/OPS_RUNBOOK.md`
-  - `docs/RESEARCH_AUTOMATION_BLUEPRINT.md`
+- Run/report operations are implemented in `Makefile` targets and backend scripts. Internal operating runbooks are not part of the public documentation set unless prepared for release.
 
 ## Quick Operations Commands
 From repo root:
