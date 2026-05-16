@@ -56,6 +56,27 @@ const APP_ICON_LINKS = [
   { rel: 'apple-touch-icon', href: '/logo.png' },
 ]
 
+function opsUiEnabled() {
+  const envValue = String(
+    import.meta.env?.VITE_ENABLE_OPS_UI || import.meta.env?.NEXT_PUBLIC_ENABLE_OPS_UI || ''
+  ).toLowerCase()
+  if (envValue === 'true') return true
+  if (envValue === 'false') return false
+  if (typeof window === 'undefined') return false
+  return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+}
+
+function NotFound() {
+  return (
+    <div className="page-container">
+      <div className="error-state">
+        <h1>Not found</h1>
+        <p>This page is not available.</p>
+      </div>
+    </div>
+  )
+}
+
 function syncAppIcons() {
   if (typeof document === 'undefined') return
 
@@ -258,7 +279,7 @@ function App() {
                 <Route path="/glossary" element={<Glossary />} />
                 <Route path="/privacy" element={<Privacy />} />
                 <Route path="/terms" element={<Terms />} />
-                <Route path="/ops" element={<Ops />} />
+                <Route path="/ops" element={opsUiEnabled() ? <Ops /> : <NotFound />} />
                 <Route path="/runs/:runId/replay" element={<RunReplay />} />
                 <Route path="/runs/:runId" element={<RunDetail />} />
               </Routes>

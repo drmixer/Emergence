@@ -4,6 +4,10 @@ import { NextResponse } from "next/server"
 const APEX_DOMAIN = "emergence.quest"
 const WWW_DOMAIN = `www.${APEX_DOMAIN}`
 
+function opsUiEnabled() {
+  return String(process.env.ENABLE_OPS_UI || process.env.NEXT_PUBLIC_ENABLE_OPS_UI || "").toLowerCase() === "true"
+}
+
 export function proxy(request: NextRequest) {
   const forwardedHost = request.headers.get("x-forwarded-host")
   const host = (forwardedHost || request.headers.get("host") || request.nextUrl.host).split(":")[0].toLowerCase()
@@ -11,6 +15,18 @@ export function proxy(request: NextRequest) {
 
   const isProductionHost = host === APEX_DOMAIN || host === WWW_DOMAIN
   if (!isProductionHost) return NextResponse.next()
+
+  if (request.nextUrl.pathname === "/ops" || request.nextUrl.pathname.startsWith("/ops/")) {
+    if (!opsUiEnabled()) {
+      return new NextResponse("Not found", {
+        status: 404,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "X-Content-Type-Options": "nosniff",
+        },
+      })
+    }
+  }
 
   const shouldRedirectToWww = host === APEX_DOMAIN
   const shouldRedirectToHttps = proto !== "https"

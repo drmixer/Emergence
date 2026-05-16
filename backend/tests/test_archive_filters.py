@@ -77,6 +77,49 @@ class _FakeGuardrailDB:
         raise AssertionError(f"Unexpected query: {query} params={params}")
 
 
+class _FakeArchiveDeleteQuery:
+    def __init__(self, article):
+        self.article = article
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return self.article
+
+
+class _FakeArchiveDeleteDB:
+    def __init__(self, article):
+        self.article = article
+        self.deleted_article = None
+        self.committed = False
+
+    def query(self, _model):
+        return _FakeArchiveDeleteQuery(self.article)
+
+    def delete(self, article):
+        self.deleted_article = article
+
+    def commit(self):
+        self.committed = True
+
+
+def test_admin_archive_delete_uses_authenticated_actor(monkeypatch):
+    article = SimpleNamespace(id=7)
+    db = _FakeArchiveDeleteDB(article)
+    monkeypatch.setattr(admin_archive, "assert_admin_write_access", lambda **_kwargs: None)
+
+    response = admin_archive.delete_admin_archive_article(
+        article_id=7,
+        db=db,
+        actor=admin_archive.AdminActor(actor_id="ops", client_ip="127.0.0.1"),
+    )
+
+    assert response == {"ok": True}
+    assert db.deleted_article is article
+    assert db.committed is True
+
+
 def test_admin_archive_publish_guardrail_blocks_replicated_without_threshold(monkeypatch):
     db = _FakeGuardrailDB()
     monkeypatch.setattr(

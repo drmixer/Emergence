@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import JSONResponse
 import logging
 from urllib.parse import urlparse
@@ -44,6 +45,26 @@ ALLOWED_CORS_ORIGINS = sorted(
     }
 )
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+}
+
+
+def _is_production_environment() -> bool:
+    return str(getattr(settings, "ENVIRONMENT", "") or "").strip().lower() == "production"
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        for header, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(header, value)
+        return response
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -76,7 +97,14 @@ app = FastAPI(
     description="AI Civilization Experiment - Watch 50 AI agents build their own society",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None if _is_production_environment() else "/docs",
+    redoc_url=None if _is_production_environment() else "/redoc",
+    openapi_url=None if _is_production_environment() else "/openapi.json",
 )
+
+# Browser security headers protect public JSON/image responses and hide admin
+# surfaces from framing/sniffing if another route regresses.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS middleware
 app.add_middleware(
@@ -139,16 +167,19 @@ async def readiness_check():
         r.ping()
 
         return {"status": "ready", "db": "ok", "redis": "ok"}
-    except Exception as e:
-        return JSONResponse(status_code=503, content={"status": "not_ready", "error": str(e)})
+    except Exception:
+        logger.exception("Readiness check failed")
+        return JSONResponse(status_code=503, content={"status": "not_ready"})
 
 
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {
+    payload = {
         "name": "Emergence API",
         "version": "1.0.0",
-        "docs": "/docs",
         "health": "/health",
     }
+    if not _is_production_environment():
+        payload["docs"] = "/docs"
+    return payload

@@ -21,7 +21,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import { api } from '../services/api'
 
-const TOKEN_STORAGE_KEY = 'emergence_admin_token'
+const TOKEN_SESSION_KEY = 'emergence_admin_token'
 const USER_STORAGE_KEY = 'emergence_admin_user'
 const BASELINE_ARTICLE_SLUG = 'before-the-first-full-run'
 
@@ -52,6 +52,30 @@ function slugify(rawValue) {
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+function readSessionValue(key) {
+  try {
+    return sessionStorage.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+function writeSessionValue(key, value) {
+  try {
+    sessionStorage.setItem(key, value)
+  } catch {
+    // Session storage is a convenience only; keep the token in memory if storage is unavailable.
+  }
+}
+
+function removeSessionValue(key) {
+  try {
+    sessionStorage.removeItem(key)
+  } catch {
+    // Ignore storage failures; the in-memory token state is still cleared by the caller.
+  }
 }
 
 function toArticleEditor(article) {
@@ -171,8 +195,8 @@ function toDraftReviewState(draft) {
 }
 
 export default function Ops() {
-  const [tokenInput, setTokenInput] = useState(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
-  const [token, setToken] = useState(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
+  const [tokenInput, setTokenInput] = useState(readSessionValue(TOKEN_SESSION_KEY))
+  const [token, setToken] = useState(readSessionValue(TOKEN_SESSION_KEY))
   const [adminUser, setAdminUser] = useState(localStorage.getItem(USER_STORAGE_KEY) || 'ops-ui')
 
   const [status, setStatus] = useState(null)
@@ -346,12 +370,12 @@ export default function Ops() {
 
     if (!cleanToken) {
       setToken('')
-      localStorage.removeItem(TOKEN_STORAGE_KEY)
+      removeSessionValue(TOKEN_SESSION_KEY)
       setMetricsWarning('')
       return
     }
 
-    localStorage.setItem(TOKEN_STORAGE_KEY, cleanToken)
+    writeSessionValue(TOKEN_SESSION_KEY, cleanToken)
     setToken(cleanToken)
   }
 

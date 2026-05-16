@@ -424,7 +424,7 @@ def unpublish_admin_archive_article(
 def delete_admin_archive_article(
     article_id: int,
     db: Session = Depends(get_db),
-    _actor: AdminActor = Depends(require_admin_auth),
+    actor: AdminActor = Depends(require_admin_auth),
 ):
     _assert_writes_enabled(actor)
     article = db.query(ArchiveArticle).filter(ArchiveArticle.id == int(article_id)).first()
