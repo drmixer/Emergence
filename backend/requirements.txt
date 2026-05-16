@@ -16,6 +16,7 @@ redis==5.0.1
 
 # LLM APIs
 openai==1.10.0
+google-auth[requests]==2.35.0
 
 # Async
 httpx==0.26.0

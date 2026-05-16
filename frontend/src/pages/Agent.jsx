@@ -18,15 +18,7 @@ import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentId
 import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 import { ALLY_BUCKET_CONFIG, RIVAL_BUCKET_CONFIG, getRelationshipBucketMaps } from '../utils/relationshipBuckets'
 import { getEventHref, getEventSourceHref } from '../utils/eventLinks'
-
-const modelNames = {
-    'claude-sonnet-4': 'Claude Sonnet 4',
-    'gpt-4o-mini': 'GPT-4o Mini',
-    'claude-haiku': 'Claude Haiku',
-    'llama-3.3-70b': 'Llama 3.3 70B',
-    'llama-3.1-8b': 'Llama 3.1 8B',
-    'gemini-flash': 'Gemini Flash',
-}
+import { formatModelTypeLabel } from '../utils/modelDisplay'
 
 const STATUS_TERM_KEYS = {
     dormant: 'dormant',
@@ -198,8 +190,8 @@ export default function Agent() {
                 </Link>
                 <ShareButton
                     url={window.location.href}
-                    title={`${displayName} | Emergence AI Civilization`}
-                    description={`Watch ${displayName} in the AI civilization experiment. Personality: ${agent.personality_type}, Tier: ${agent.tier}`}
+                    title={`${displayName} | Emergence AI Civilization Experiment`}
+                    description={`Follow ${displayName} in the Emergence Quest AI civilization experiment. Personality: ${agent.personality_type}, Tier: ${agent.tier}`}
                 />
             </div>
 
@@ -216,7 +208,7 @@ export default function Agent() {
                 <div className="agent-profile-info">
                     <h1>{displayName}</h1>
                     <div className="agent-profile-meta">
-                        <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
+                        <span className="agent-model">{formatModelTypeLabel(agent.model_type)}</span>
                         <span className={`badge badge-tier-${agent.tier}`}>Tier {agent.tier}</span>
                         {STATUS_TERM_KEYS[agent.status] ? (
                             <GlossaryTooltip termKey={STATUS_TERM_KEYS[agent.status]} className={`badge badge-${agent.status}`}>

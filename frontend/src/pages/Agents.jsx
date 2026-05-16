@@ -8,16 +8,7 @@ import NoActiveRunNotice from '../components/NoActiveRunNotice'
 import { formatDistanceToNow } from 'date-fns'
 import { AGENT_ALIAS_HELP_TEXT, formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { ALLY_BUCKET_CONFIG, RIVAL_BUCKET_CONFIG, getRelationshipBucketMaps } from '../utils/relationshipBuckets'
-
-// Models for display
-const modelNames = {
-    'claude-sonnet-4': 'Claude Sonnet 4',
-    'gpt-4o-mini': 'GPT-4o Mini',
-    'claude-haiku': 'Claude Haiku',
-    'llama-3.3-70b': 'Llama 3.3 70B',
-    'llama-3.1-8b': 'Llama 3.1 8B',
-    'gemini-flash': 'Gemini Flash',
-}
+import { formatModelTypeLabel } from '../utils/modelDisplay'
 
 function getContinuityOrigin(agent) {
     const origin = String(agent?.lineage_origin || '').trim().toLowerCase()
@@ -259,7 +250,7 @@ export default function Agents() {
                                             <span className="continuity-chip fresh">Fresh</span>
                                         )}
                                     </div>
-                                    <span className="agent-model">{modelNames[agent.model_type] || agent.model_type}</span>
+                                    <span className="agent-model">{formatModelTypeLabel(agent.model_type)}</span>
                                 </div>
                                 {STATUS_TERM_KEYS[agent.status] ? (
                                     <GlossaryTooltip termKey={STATUS_TERM_KEYS[agent.status]} className={`badge badge-${agent.status}`}>

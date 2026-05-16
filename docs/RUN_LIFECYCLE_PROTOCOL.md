@@ -65,6 +65,11 @@ This cadence is intentionally conservative for budget control and reliability wh
   documented with the run setup when they materially affect provider behavior, but
   they are not provider/model fallback when the assigned provider and resolved model
   remain unchanged.
+- Google Gemini cohorts may route through either the Gemini Developer API or Google
+  Vertex AI only as an explicit run setup choice. Switching between those Google
+  routes is not provider/model fallback if the assigned cohort and resolved Gemini
+  model stay fixed, but the effective provider route must remain visible in
+  telemetry and run notes.
 - Deterministic fallback is distinct from provider/model fallback:
   - provider/model fallback changes the effective brain and dilutes attribution
   - deterministic fallback preserves attribution but can still change observed behavior

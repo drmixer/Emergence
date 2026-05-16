@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     MISTRAL_BASE_URL: str = "https://api.mistral.ai/v1"
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    VERTEX_GEMINI_ENABLED: bool = False
+    VERTEX_GEMINI_SERVICE_ACCOUNT_JSON: str = ""
+    VERTEX_GEMINI_PROJECT_ID: str = ""
+    VERTEX_GEMINI_LOCATION: str = "global"
+    VERTEX_GEMINI_BASE_URL: str = "https://aiplatform.googleapis.com"
     MISTRAL_SMALL_MODEL: str = "mistral-small-latest"
     LLM_PROVIDER: str = "auto"
     GROQ_DEFAULT_MODEL: str = "llama-3.1-8b"

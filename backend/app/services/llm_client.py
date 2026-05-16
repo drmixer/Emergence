@@ -2,6 +2,7 @@
 LLM Client with retry logic and multi-provider support.
 """
 import asyncio
+import base64
 import json
 import logging
 import random
@@ -9,6 +10,11 @@ import re
 import time
 from collections import deque
 from typing import Optional, Any
+from types import SimpleNamespace
+
+import httpx
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import service_account
 from openai import AsyncOpenAI
 from openai import RateLimitError, APIError
 
@@ -71,6 +77,11 @@ GEMINI_CONFIG = {
     },
 }
 
+VERTEX_GEMINI_CONFIG = {
+    "provider": "google_vertex",
+    "scopes": ("https://www.googleapis.com/auth/cloud-platform",),
+}
+
 _ACTION_FORMAT_RETRY_SUFFIX = (
     "\n\nFORMAT RETRY:\n"
     "- Your previous output could not be parsed.\n"
@@ -93,6 +104,10 @@ class LLMConfigurationError(RuntimeError):
     """Raised when model/provider routing is invalid for the current config."""
 
 
+class VertexGeminiRoute:
+    """Sentinel route for Gemini calls made through Google Vertex AI."""
+
+
 class LLMClient:
     """Unified LLM client supporting multiple providers."""
     
@@ -109,6 +124,9 @@ class LLMClient:
             base_url=(getattr(settings, "GEMINI_BASE_URL", "") or GEMINI_CONFIG["base_url"]),
             api_key=settings.GEMINI_API_KEY,
         )
+        self.vertex_gemini_client = VertexGeminiRoute()
+        self._vertex_credentials = None
+        self._vertex_auth_lock = asyncio.Lock()
 
         # Concurrency guards to reduce provider rate limits.
         self._openrouter_sem = asyncio.Semaphore(max(1, int(getattr(settings, "OPENROUTER_MAX_CONCURRENCY", 6) or 6)))
@@ -128,6 +146,109 @@ class LLMClient:
 
         configured_run_id = str(getattr(settings, "SIMULATION_RUN_ID", "") or "").strip()
         self._default_run_id = configured_run_id or now_utc().strftime("run-%Y%m%dT%H%M%SZ")
+
+    @staticmethod
+    def _vertex_gemini_enabled() -> bool:
+        return bool(getattr(settings, "VERTEX_GEMINI_ENABLED", False))
+
+    @staticmethod
+    def _vertex_service_account_info() -> dict[str, Any]:
+        raw = str(getattr(settings, "VERTEX_GEMINI_SERVICE_ACCOUNT_JSON", "") or "").strip()
+        if not raw:
+            raise LLMConfigurationError("Vertex Gemini service account JSON is not configured")
+        if raw.startswith("@"):
+            with open(raw[1:], "r", encoding="utf-8") as f:
+                return json.load(f)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            try:
+                decoded = base64.b64decode(raw).decode("utf-8")
+                return json.loads(decoded)
+            except Exception as exc:
+                raise LLMConfigurationError("Vertex Gemini service account JSON is invalid") from exc
+
+    def _vertex_project_id(self) -> str:
+        configured = str(getattr(settings, "VERTEX_GEMINI_PROJECT_ID", "") or "").strip()
+        if configured:
+            return configured
+        info = self._vertex_service_account_info()
+        project_id = str(info.get("project_id") or "").strip()
+        if not project_id:
+            raise LLMConfigurationError("Vertex Gemini project id is not configured")
+        return project_id
+
+    async def _vertex_access_token(self) -> str:
+        async with self._vertex_auth_lock:
+            if self._vertex_credentials is None:
+                self._vertex_credentials = service_account.Credentials.from_service_account_info(
+                    self._vertex_service_account_info(),
+                    scopes=list(VERTEX_GEMINI_CONFIG["scopes"]),
+                )
+            if not self._vertex_credentials.valid:
+                await asyncio.to_thread(self._vertex_credentials.refresh, GoogleAuthRequest())
+            token = str(self._vertex_credentials.token or "")
+            if not token:
+                raise LLMConfigurationError("Vertex Gemini service account did not return an access token")
+            return token
+
+    async def _create_vertex_gemini_completion(
+        self,
+        *,
+        model_name: str,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> Any:
+        project_id = self._vertex_project_id()
+        location = str(getattr(settings, "VERTEX_GEMINI_LOCATION", "") or "global").strip()
+        base_url = str(getattr(settings, "VERTEX_GEMINI_BASE_URL", "") or "https://aiplatform.googleapis.com").rstrip("/")
+        token = await self._vertex_access_token()
+        url = (
+            f"{base_url}/v1/projects/{project_id}/locations/{location}"
+            f"/publishers/google/models/{model_name}:generateContent"
+        )
+        generation_config: dict[str, Any] = {
+            "maxOutputTokens": max_tokens,
+            "temperature": temperature,
+        }
+        if model_name.strip().lower().startswith("gemini-2.5-flash"):
+            generation_config["thinkingConfig"] = {"thinkingBudget": 0}
+        payload = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+            "generationConfig": generation_config,
+        }
+        async with httpx.AsyncClient(timeout=75.0) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        response.raise_for_status()
+        body = response.json()
+        candidates = body.get("candidates") or []
+        first = candidates[0] if candidates else {}
+        parts = ((first.get("content") or {}).get("parts") or [])
+        text_parts = [part.get("text", "") for part in parts if isinstance(part, dict) and part.get("text")]
+        usage = body.get("usageMetadata") or {}
+        return SimpleNamespace(
+            usage=SimpleNamespace(
+                prompt_tokens=int(usage.get("promptTokenCount") or 0),
+                completion_tokens=int(usage.get("candidatesTokenCount") or 0),
+                total_tokens=int(usage.get("totalTokenCount") or 0),
+            ),
+            choices=[
+                SimpleNamespace(
+                    finish_reason=first.get("finishReason"),
+                    message=SimpleNamespace(content="\n".join(text_parts).strip()),
+                )
+            ],
+        )
 
     def _current_run_id(self) -> str:
         configured_run_id = str(runtime_config_service.get_effective_value_cached("SIMULATION_RUN_ID") or "").strip()
@@ -284,6 +405,8 @@ class LLMClient:
             return "openrouter"
         if client is self.gemini_client:
             return "gemini"
+        if client is self.vertex_gemini_client:
+            return VERTEX_GEMINI_CONFIG["provider"]
         return "mistral"
 
     @staticmethod
@@ -349,7 +472,7 @@ class LLMClient:
 
         if client is self.openrouter_client:
             sem = self._openrouter_sem
-        elif client is self.gemini_client:
+        elif client is self.gemini_client or client is self.vertex_gemini_client:
             sem = self._gemini_sem
         else:
             sem = self._mistral_sem
@@ -358,27 +481,36 @@ class LLMClient:
             async with sem:
                 if client is self.openrouter_client:
                     await self._throttle_openrouter()
-                elif client is self.gemini_client:
+                elif client is self.gemini_client or client is self.vertex_gemini_client:
                     await self._throttle_gemini()
-                extra_body = (
-                    self._gemini_completion_extra_body(used_model_name)
-                    if client is self.gemini_client
-                    else None
-                )
-                request_kwargs = {
-                    "model": used_model_name,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "max_tokens": used_max_tokens,
-                    "temperature": used_temperature,
-                }
-                if extra_body:
-                    request_kwargs["extra_body"] = extra_body
-                response = await client.chat.completions.create(
-                    **request_kwargs,
-                )
+                if client is self.vertex_gemini_client:
+                    response = await self._create_vertex_gemini_completion(
+                        model_name=used_model_name,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        max_tokens=used_max_tokens,
+                        temperature=used_temperature,
+                    )
+                else:
+                    extra_body = (
+                        self._gemini_completion_extra_body(used_model_name)
+                        if client is self.gemini_client
+                        else None
+                    )
+                    request_kwargs = {
+                        "model": used_model_name,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "max_tokens": used_max_tokens,
+                        "temperature": used_temperature,
+                    }
+                    if extra_body:
+                        request_kwargs["extra_body"] = extra_body
+                    response = await client.chat.completions.create(
+                        **request_kwargs,
+                    )
         except Exception as e:
             latency_ms = int((time.monotonic() - started) * 1000)
             usage_budget.record_call(
@@ -437,6 +569,8 @@ class LLMClient:
             return self.mistral_client, mistral_default_model
         # Direct Gemini cohort mapping.
         if model_type in GEMINI_CONFIG["models"]:
+            if self._vertex_gemini_enabled():
+                return self.vertex_gemini_client, GEMINI_CONFIG["models"][model_type]
             return self.gemini_client, GEMINI_CONFIG["models"][model_type]
 
         # Explicit mappings always take precedence for clean attribution.
@@ -459,9 +593,13 @@ class LLMClient:
     ) -> Optional[str]:
         """Get a completion with retry logic."""
 
-        if not settings.OPENROUTER_API_KEY and not settings.MISTRAL_API_KEY and not settings.GEMINI_API_KEY:
+        has_vertex_gemini = bool(
+            self._vertex_gemini_enabled()
+            and str(getattr(settings, "VERTEX_GEMINI_SERVICE_ACCOUNT_JSON", "") or "").strip()
+        )
+        if not settings.OPENROUTER_API_KEY and not settings.MISTRAL_API_KEY and not settings.GEMINI_API_KEY and not has_vertex_gemini:
             logger.error(
-                "No provider API keys are set (OPENROUTER_API_KEY/MISTRAL_API_KEY/GEMINI_API_KEY)."
+                "No provider credentials are set (OPENROUTER_API_KEY/MISTRAL_API_KEY/GEMINI_API_KEY/VERTEX_GEMINI_SERVICE_ACCOUNT_JSON)."
             )
             raise LLMConfigurationError("No configured LLM providers are available")
 
@@ -475,6 +613,12 @@ class LLMClient:
         if client is self.gemini_client and not settings.GEMINI_API_KEY:
             logger.error("Selected Gemini route for model_type=%s but GEMINI_API_KEY is not set.", model_type)
             raise LLMConfigurationError("Gemini API key is not configured")
+        if client is self.vertex_gemini_client and not has_vertex_gemini:
+            logger.error(
+                "Selected Vertex Gemini route for model_type=%s but VERTEX_GEMINI_SERVICE_ACCOUNT_JSON is not set.",
+                model_type,
+            )
+            raise LLMConfigurationError("Vertex Gemini service account is not configured")
         
         attempt_max_tokens = max(64, int(max_tokens or 64))
         max_retry_tokens = 900

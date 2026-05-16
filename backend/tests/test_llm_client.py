@@ -220,3 +220,100 @@ def test_provider_stabilized_cohort_labels_route_to_gemini_25_flash():
         routed_client, model_name = client._get_client_and_model(model_type)
         assert routed_client is client.gemini_client
         assert model_name == "gemini-2.5-flash"
+
+
+def test_gemini_cohorts_route_to_vertex_when_enabled(monkeypatch):
+    monkeypatch.setattr(llm_client.settings, "VERTEX_GEMINI_ENABLED", True)
+    monkeypatch.setattr(
+        llm_client.settings,
+        "VERTEX_GEMINI_SERVICE_ACCOUNT_JSON",
+        '{"project_id":"emergencequest"}',
+    )
+    client = llm_client.LLMClient()
+
+    for model_type in (
+        "gm_gemini_2_5_flash",
+        "gm_gemini_2_0_flash",
+        "gm_gemini_2_0_flash_lite",
+        "or_gpt_oss_20b_free",
+        "or_qwen3_4b_free",
+    ):
+        routed_client, model_name = client._get_client_and_model(model_type)
+        assert routed_client is client.vertex_gemini_client
+        assert model_name == "gemini-2.5-flash"
+
+
+def test_create_completion_with_budget_records_vertex_gemini(monkeypatch):
+    monkeypatch.setattr(llm_client.settings, "VERTEX_GEMINI_ENABLED", True)
+    monkeypatch.setattr(
+        llm_client.settings,
+        "VERTEX_GEMINI_SERVICE_ACCOUNT_JSON",
+        '{"project_id":"emergencequest"}',
+    )
+    client = llm_client.LLMClient()
+    calls = {"gemini_throttle": 0}
+
+    async def _fake_gemini_throttle():
+        calls["gemini_throttle"] += 1
+
+    async def _fake_vertex_completion(**_kwargs):
+        return SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=13, completion_tokens=5, total_tokens=18),
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"action":"idle"}'))],
+        )
+
+    monkeypatch.setattr(client, "_throttle_gemini", _fake_gemini_throttle)
+    monkeypatch.setattr(client, "_create_vertex_gemini_completion", _fake_vertex_completion)
+    monkeypatch.setattr(
+        llm_client.usage_budget,
+        "preflight",
+        lambda **_kwargs: SimpleNamespace(
+            allowed=True,
+            reason=None,
+            soft_cap_reached=False,
+            snapshot=SimpleNamespace(calls_total=0, estimated_cost_usd=0.0),
+        ),
+    )
+    recorded: list[dict] = []
+    monkeypatch.setattr(
+        llm_client.usage_budget,
+        "record_call",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+
+    response, used_model_name, provider_name, blocked_reason = asyncio.run(
+        client._create_completion_with_budget(
+            client=client.vertex_gemini_client,
+            agent_id=23,
+            checkpoint_number=2,
+            model_type="gm_gemini_2_5_flash",
+            model_name="gemini-2.5-flash",
+            system_prompt="system",
+            user_prompt="user",
+            max_tokens=128,
+            temperature=0.7,
+            fallback_used=False,
+        )
+    )
+
+    assert blocked_reason is None
+    assert provider_name == "google_vertex"
+    assert used_model_name == "gemini-2.5-flash"
+    assert response.usage.total_tokens == 18
+    assert calls == {"gemini_throttle": 1}
+    assert recorded and recorded[0]["provider"] == "google_vertex"
+    assert recorded[0]["success"] is True
+
+
+def test_openrouter_routed_cohort_labels_keep_openrouter_provider():
+    client = llm_client.LLMClient()
+
+    expected_models = {
+        "or_gpt_oss_120b": "openai/gpt-oss-120b",
+        "or_qwen3_235b_a22b_2507": "qwen/qwen3-235b-a22b-2507",
+    }
+
+    for model_type, expected_model in expected_models.items():
+        routed_client, model_name = client._get_client_and_model(model_type)
+        assert routed_client is client.openrouter_client
+        assert model_name == expected_model

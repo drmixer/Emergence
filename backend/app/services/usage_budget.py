@@ -99,7 +99,7 @@ class UsageBudgetService:
                     SELECT
                         COUNT(*) AS calls_total,
                         COALESCE(SUM(CASE WHEN provider = 'openrouter' AND model_name LIKE '%:free' THEN 1 ELSE 0 END), 0) AS calls_openrouter_free,
-                        COALESCE(SUM(CASE WHEN provider = 'gemini' THEN 1 ELSE 0 END), 0) AS calls_gemini,
+                        COALESCE(SUM(CASE WHEN provider IN ('gemini', 'google_vertex') THEN 1 ELSE 0 END), 0) AS calls_gemini,
                         COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
                     FROM llm_usage
                     WHERE day_key = :day_key
@@ -189,7 +189,7 @@ class UsageBudgetService:
         if provider == "openrouter" and model_name.endswith(":free") and max_or_free > 0:
             if snapshot.calls_openrouter_free >= max_or_free:
                 return BudgetDecision(False, "max_calls_openrouter_free_reached", False, snapshot)
-        if provider == "gemini" and max_gemini > 0:
+        if provider in {"gemini", "google_vertex"} and max_gemini > 0:
             if snapshot.calls_gemini >= max_gemini:
                 return BudgetDecision(False, "max_calls_gemini_reached", False, snapshot)
 
@@ -202,7 +202,7 @@ class UsageBudgetService:
         if provider == "openrouter" and model_name.endswith(":free") and max_or_free > 0:
             if snapshot.calls_openrouter_free >= int(max_or_free * 0.85):
                 soft_cap_reached = True
-        if provider == "gemini" and max_gemini > 0:
+        if provider in {"gemini", "google_vertex"} and max_gemini > 0:
             if snapshot.calls_gemini >= int(max_gemini * 0.85):
                 soft_cap_reached = True
 
@@ -217,7 +217,7 @@ class UsageBudgetService:
         total_tokens: int,
     ) -> float:
         # Most current routes in this project are free-tier.
-        if provider == "gemini":
+        if provider in {"gemini", "google_vertex"}:
             # Temporary conservative rule: keep Gemini at $0 estimate until pricing
             # telemetry is wired model-by-model; avoids false hard-stop triggers.
             return 0.0
@@ -322,7 +322,7 @@ class UsageBudgetService:
             pipe.incr(keys["total"], 1)
             if provider == "openrouter" and model_name.endswith(":free"):
                 pipe.incr(keys["openrouter_free"], 1)
-            if provider == "gemini":
+            if provider in {"gemini", "google_vertex"}:
                 pipe.incr(keys["gemini"], 1)
             pipe.incrbyfloat(keys["cost"], estimated_cost)
             pipe.expire(keys["total"], ttl_seconds)

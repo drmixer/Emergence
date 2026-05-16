@@ -56,10 +56,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.info("Config: env=%s", settings.ENVIRONMENT)
     logger.info(
-        "LLM config: openrouter=%s mistral=%s gemini=%s mistral_model=%s run_class=%s",
+        "LLM config: openrouter=%s mistral=%s gemini=%s vertex_gemini=%s mistral_model=%s run_class=%s",
         bool(getattr(settings, "OPENROUTER_API_KEY", "")),
         bool(getattr(settings, "MISTRAL_API_KEY", "")),
         bool(getattr(settings, "GEMINI_API_KEY", "")),
+        bool(getattr(settings, "VERTEX_GEMINI_ENABLED", False))
+        and bool(getattr(settings, "VERTEX_GEMINI_SERVICE_ACCOUNT_JSON", "")),
         getattr(settings, "MISTRAL_SMALL_MODEL", ""),
         getattr(settings, "SIMULATION_RUN_CLASS", ""),
     )
