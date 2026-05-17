@@ -23,16 +23,9 @@ import { ResourceBar, CriticalAgentsBanner } from '../components/ResourceBar'
 import { SkeletonEventCard, SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
 import NoActiveRunNotice from '../components/NoActiveRunNotice'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
+import { getPublicRunFraming } from '../../lib/public-run-framing'
 
 const DashboardSocialDynamicsChart = lazy(() => import('../components/DashboardSocialDynamicsChart'))
-
-const CANARY_WATCH_SIGNALS = [
-    { label: 'Survival', detail: 'Active, dormant, revived, and dead agents' },
-    { label: 'Aid & Trade', detail: 'Requests, refusals, trades, and recovery attempts' },
-    { label: 'Laws', detail: 'Proposals, votes, executable effects, and enforcement' },
-    { label: 'Public Order', detail: 'Accusations, sanctions, invalid actions, and conflict' },
-    { label: 'Model Behavior', detail: 'Cohort actions, resolved models, failures, and fallback counts' },
-]
 
 function sumWorldResource(resources, key) {
     const totals = resources?.totals || {}
@@ -70,6 +63,7 @@ export default function Dashboard() {
     const [socialSeries, setSocialSeries] = useState([])
     const [socialDeltas, setSocialDeltas] = useState(null)
     const [classMobility, setClassMobility] = useState(null)
+    const [runMetadata, setRunMetadata] = useState(null)
     const [loading, setLoading] = useState(true)
     const [secondaryLoading, setSecondaryLoading] = useState(true)
     const [isLive, setIsLive] = useState(true)
@@ -119,6 +113,7 @@ export default function Dashboard() {
                 maxMaterials: materialsMax,
             })
             setScope(overview?.scope && typeof overview.scope === 'object' ? overview.scope : null)
+            setRunMetadata(overview?.run_metadata && typeof overview.run_metadata === 'object' ? overview.run_metadata : null)
         }
 
         const fetchPrimary = async ({ showLoading = false } = {}) => {
@@ -139,6 +134,7 @@ export default function Dashboard() {
                     setError('Failed to load live data.')
                     setStats(null)
                     setScope(null)
+                    setRunMetadata(null)
                     resetSecondaryState()
                 }
             } finally {
@@ -298,6 +294,7 @@ export default function Dashboard() {
     const tiers = Array.isArray(classMobility?.tiers) ? classMobility.tiers : []
     const mobility = classMobility?.mobility || {}
     const inequality = classMobility?.inequality || {}
+    const publicRunFraming = getPublicRunFraming(runMetadata)
 
     return (
         <div className="dashboard">
@@ -328,14 +325,14 @@ export default function Dashboard() {
             <div className="card k11-watch-card">
                 <div className="card-body k11-watch-body">
                     <div className="k11-watch-intro">
-                        <span className="k11-eyebrow">K11: First Public Canary</span>
-                        <h2>Live AI civilization experiment</h2>
+                        <span className="k11-eyebrow">{publicRunFraming.label}</span>
+                        <h2>{publicRunFraming.heading}</h2>
                         <p>
-                            Exploratory public run. One run can show signals; it does not prove broad conclusions.
+                            {publicRunFraming.caveat}
                         </p>
                     </div>
                     <div className="k11-watch-grid" aria-label="What to watch">
-                        {CANARY_WATCH_SIGNALS.map((signal) => (
+                        {publicRunFraming.watchItems.map((signal) => (
                             <div key={signal.label} className="k11-watch-item">
                                 <strong>{signal.label}</strong>
                                 <span>{signal.detail}</span>

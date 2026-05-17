@@ -7,6 +7,7 @@ import { trackShareAction } from '../services/shareAnalytics'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { getMomentEvidenceHref, getMomentReplayHref, getMomentRunId, getStoryReplayHref } from '../utils/bestMoments'
 import { sanitizeVisibleMessageContent } from '../utils/messageContent'
+import { getPublicRunFraming } from '../../lib/public-run-framing'
 
 // Pre-launch teaser quotes
 const TEASER_QUOTES = [
@@ -54,14 +55,6 @@ const MANIFESTO_LINES = [
     { text: "", type: "break" },
     { text: "What emerges is not what we hope for —", type: "normal" },
     { text: "but what the system can sustain.", type: "final" },
-]
-
-const CANARY_WATCH_ITEMS = [
-    { label: 'Survival', detail: 'Who stays active, who goes dormant, who recovers, and who dies.' },
-    { label: 'Aid & trade', detail: 'Whether agents rescue each other, bargain, refuse, or hoard.' },
-    { label: 'Laws', detail: 'What they propose, pass, contest, enforce, or ignore.' },
-    { label: 'Public Order', detail: 'Accusations, sanctions, invalid actions, and conflict signals.' },
-    { label: 'Model behavior', detail: 'Cohort differences with routed provider and resolved model attribution.' },
 ]
 
 // Animated network node component
@@ -170,6 +163,7 @@ export default function Landing() {
     const [isVisible, setIsVisible] = useState(false)
     const [runPhase, setRunPhase] = useState('prelaunch')
     const [lastCompletedRunId, setLastCompletedRunId] = useState('')
+    const [runMetadata, setRunMetadata] = useState(null)
     const heroRef = useRef(null)
 
     // Fetch real stats from API
@@ -189,6 +183,7 @@ export default function Landing() {
                         activeAgents: data.activeAgents || 50
                     })
                     setLastCompletedRunId(completedRunId)
+                    setRunMetadata(data.runMetadata && typeof data.runMetadata === 'object' ? data.runMetadata : null)
                     setRunPhase(simulationActive ? 'live' : completedRunId ? 'idle' : 'prelaunch')
                 }
             } catch (error) {
@@ -291,6 +286,7 @@ export default function Landing() {
     const latestReplayHref = isIdle && lastCompletedRunId
         ? getStoryReplayHref(lastCompletedRunId)
         : getStoryReplayHref()
+    const publicRunFraming = getPublicRunFraming(runMetadata)
 
     const shareMoment = async (turn) => {
         const eventId = Number(turn?.event_id || 0)
@@ -556,14 +552,14 @@ export default function Landing() {
             <section className="canary-watch-section">
                 <div className="canary-watch-shell">
                     <div className="canary-watch-intro">
-                        <span className="canary-eyebrow">K11: First Public Canary</span>
-                        <h2>Live AI civilization experiment, not finished research.</h2>
+                        <span className="canary-eyebrow">{publicRunFraming.label}</span>
+                        <h2>{publicRunFraming.landingHeading}</h2>
                         <p>
-                            Exploratory public run. Watch the pressure live, then check the evidence before drawing broader conclusions.
+                            {publicRunFraming.landingCaveat}
                         </p>
                     </div>
                     <div className="canary-watch-grid" aria-label="What to watch">
-                        {CANARY_WATCH_ITEMS.map((item) => (
+                        {publicRunFraming.watchItems.map((item) => (
                             <div key={item.label} className="canary-watch-item">
                                 <ShieldCheck size={18} />
                                 <strong>{item.label}</strong>

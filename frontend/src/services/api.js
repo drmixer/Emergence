@@ -685,6 +685,7 @@ class APIService {
                 simulationActive: overview?.scope?.simulation_active === true,
                 activeRunId: overview?.scope?.active_run_id || '',
                 lastCompletedRunId: overview?.scope?.last_completed_run_id || '',
+                runMetadata: overview?.run_metadata && typeof overview.run_metadata === 'object' ? overview.run_metadata : null,
             }
         } catch (error) {
             console.error('Failed to get landing stats:', error)
