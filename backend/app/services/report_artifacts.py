@@ -16,6 +16,7 @@ from app.services.condition_reports import (
     generate_and_record_run_summary,
 )
 from app.services.run_reports import rebuild_run_bundle
+from app.services.run_reports import REPORT_GENERATOR_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,13 @@ def _regenerate_artifact(db: Session, row: RunReportArtifact) -> RunReportArtifa
 
 
 def ensure_artifact_path(db: Session, row: RunReportArtifact) -> Path | None:
+    metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+    artifact_type = str(row.artifact_type or "").strip()
+    if artifact_type == "approachable_report" and metadata.get("generator_version") != REPORT_GENERATOR_VERSION:
+        refreshed = _regenerate_artifact(db, row)
+        if refreshed is not None:
+            row = refreshed
+
     try:
         artifact_path = resolve_registered_artifact_path(str(row.artifact_path or ""))
     except ValueError:

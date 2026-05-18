@@ -2394,6 +2394,7 @@ def generate_run_technical_artifact(
             "status_label": status_label,
             "evidence_completeness": evidence_completeness,
             "claim_gate": claim_gate,
+            "generator_version": REPORT_GENERATOR_VERSION,
         },
     )
     _record_artifact(
@@ -2471,7 +2472,7 @@ def generate_run_story_artifact(
         artifact_type="approachable_report",
         artifact_format="markdown",
         artifact_path=markdown_path,
-        metadata_json={"run_id": clean_run_id},
+        metadata_json={"run_id": clean_run_id, "generator_version": REPORT_GENERATOR_VERSION},
     )
     return payload
 
