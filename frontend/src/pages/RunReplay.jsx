@@ -43,6 +43,40 @@ const SIGNAL_REPLAY_EVENT_TYPES = new Set([
 ])
 const STRONG_REPLAY_CATEGORIES = new Set(['crisis', 'conflict', 'governance'])
 const SOCIAL_REPLAY_CATEGORIES = new Set(['cooperation', 'alliance'])
+const REPLAY_CHAPTER_ORDER = ['survival', 'governance', 'aid_trade', 'public_order', 'system', 'other']
+
+const REPLAY_CHAPTER_META = {
+  survival: {
+    label: 'Survival Pressure',
+    shortLabel: 'Survival',
+    description: 'Agents left active play through dormancy, death, or revival.',
+  },
+  governance: {
+    label: 'Governance Decisions',
+    shortLabel: 'Governance',
+    description: 'Proposals, votes, and laws changed what the agents were trying to coordinate around.',
+  },
+  aid_trade: {
+    label: 'Aid & Trade',
+    shortLabel: 'Aid / Trade',
+    description: 'Resource requests, refusals, and trades show where cooperation held or broke.',
+  },
+  public_order: {
+    label: 'Public Order & Conflict',
+    shortLabel: 'Public Order',
+    description: 'Accusations, refusals, sanctions, seizures, exile, and contests mark disorder or enforcement pressure.',
+  },
+  system: {
+    label: 'System Shocks',
+    shortLabel: 'Shocks',
+    description: 'World events or run-wide shocks changed the constraints around the agents.',
+  },
+  other: {
+    label: 'Other Signals',
+    shortLabel: 'Other',
+    description: 'Notable events that did not fit the major viewer-facing threads.',
+  },
+}
 
 const REPORT_LABELS = {
   approachable_report: 'Approachable Report',
@@ -100,6 +134,12 @@ function getEventTime(item) {
   return item?.created_at || item?.timestamp || ''
 }
 
+function clampText(value, maxLength = 220) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!text || text.length <= maxLength) return text
+  return `${text.slice(0, maxLength - 1).trim()}...`
+}
+
 function isReplayMomentCandidate(item) {
   const eventType = String(item?.event_type || '').trim()
   const category = String(item?.category || '').trim()
@@ -115,7 +155,7 @@ function isReplayMomentCandidate(item) {
 
 function getStoryItems(story, playbackItems) {
   const storyItems = Array.isArray(story?.items) ? story.items : []
-  if (storyItems.length > 0) return storyItems
+  if (storyItems.length > 0) return storyItems.filter((item) => isReplayMomentCandidate(item))
   return (Array.isArray(playbackItems) ? playbackItems : [])
     .filter((item) => getEventDescription(item) && isReplayMomentCandidate(item))
     .slice(0, 8)
@@ -124,6 +164,164 @@ function getStoryItems(story, playbackItems) {
       chapter: index === 0 ? 'Trigger' : index < 3 ? 'Escalation' : index < 6 ? 'Turning Point' : 'Outcome',
       why_this_matters: item?.why_this_matters || getEventDescription(item),
     }))
+}
+
+function getChapterKey(item) {
+  const eventType = String(item?.event_type || '').trim()
+  const category = String(item?.category || '').trim()
+
+  if (['agent_died', 'became_dormant', 'agent_revived', 'awakened'].includes(eventType)) return 'survival'
+  if (['law_passed', 'proposal_resolved', 'create_proposal', 'vote_enforcement'].includes(eventType) || category === 'governance') return 'governance'
+  if (['trade', 'request_aid', 'refuse_aid'].includes(eventType) || category === 'cooperation' || category === 'alliance') return 'aid_trade'
+  if (
+    category === 'conflict'
+    || [
+      'public_accusation',
+      'contest_proposal',
+      'initiate_sanction',
+      'initiate_seizure',
+      'initiate_exile',
+      'enforcement_initiated',
+      'agent_sanctioned',
+      'resources_seized',
+      'agent_exiled',
+    ].includes(eventType)
+  ) {
+    return 'public_order'
+  }
+  if (category === 'crisis' || eventType === 'world_event') return 'system'
+  return 'other'
+}
+
+function buildReplayChapters(storyItems) {
+  const buckets = new Map()
+  storyItems.forEach((item) => {
+    const key = getChapterKey(item)
+    const meta = REPLAY_CHAPTER_META[key] || REPLAY_CHAPTER_META.other
+    const bucket = buckets.get(key) || {
+      key,
+      ...meta,
+      items: [],
+      lead_event_id: 0,
+    }
+    bucket.items.push(item)
+    bucket.lead_event_id = bucket.lead_event_id || getEventId(item)
+    buckets.set(key, bucket)
+  })
+
+  return REPLAY_CHAPTER_ORDER
+    .map((key) => buckets.get(key))
+    .filter(Boolean)
+    .map((chapter) => {
+      const lead = chapter.items[0]
+      const count = chapter.items.length
+      return {
+        ...chapter,
+        count,
+        summary: count > 1
+          ? `${count} notable ${chapter.shortLabel.toLowerCase()} moments. ${chapter.description}`
+          : `${chapter.description} ${lead ? clampText(getEventDescription(lead), 160) : ''}`.trim(),
+      }
+    })
+}
+
+function getChapterForEvent(chapters, eventId) {
+  if (!eventId) return null
+  return chapters.find((chapter) => chapter.items.some((item) => getEventId(item) === eventId)) || null
+}
+
+function getTradeAmountSummary(activity) {
+  const amounts = activity?.trade_amounts || {}
+  const rows = ['food', 'energy', 'materials']
+    .map((resource) => [resource, Number(amounts?.[resource] || 0)])
+    .filter(([, value]) => value > 0)
+  if (rows.length === 0) return ''
+  return rows.map(([resource, value]) => `${Number(value.toFixed(2)).toLocaleString()} ${resource}`).join(' / ')
+}
+
+function buildRunBrief(runDetail, storyItems) {
+  const activity = runDetail?.activity || {}
+  const totalEvents = Number(activity.total_events || 0)
+  const deaths = Number(activity.deaths || 0)
+  const dormant = Number(activity.became_dormant || 0)
+  const revivals = Number(activity.agent_revived || 0)
+  const laws = Number(activity.laws_passed || 0)
+  const proposals = Number(activity.proposal_actions || 0)
+  const aidRequests = Number(activity.aid_requests || 0)
+  const aidRefusals = Number(activity.aid_refusals || 0)
+  const trades = Number(activity.trade_actions || 0)
+  const publicOrder = Number(activity.public_order_events || 0)
+  const conflicts = Number(activity.conflict_events || 0)
+  const firstMoment = storyItems[0]
+  const lastMoment = storyItems[storyItems.length - 1]
+  const sentences = []
+
+  if (totalEvents > 0) {
+    sentences.push(`This completed run produced ${totalEvents.toLocaleString()} scoped events.`)
+  }
+
+  const survivalBits = []
+  if (deaths > 0) survivalBits.push(`${deaths.toLocaleString()} death${deaths === 1 ? '' : 's'}`)
+  if (dormant > 0) survivalBits.push(`${dormant.toLocaleString()} dormancy event${dormant === 1 ? '' : 's'}`)
+  if (revivals > 0) survivalBits.push(`${revivals.toLocaleString()} revival${revivals === 1 ? '' : 's'}`)
+  if (survivalBits.length > 0) sentences.push(`Survival pressure showed up as ${survivalBits.join(', ')}.`)
+
+  if (laws > 0 || proposals > 0) {
+    sentences.push(`Governance stayed active with ${proposals.toLocaleString()} proposal action${proposals === 1 ? '' : 's'} and ${laws.toLocaleString()} law${laws === 1 ? '' : 's'} passed.`)
+  }
+
+  if (aidRequests > 0 || aidRefusals > 0 || trades > 0) {
+    const tradeSummary = getTradeAmountSummary(activity)
+    sentences.push(`Resource coordination included ${aidRequests.toLocaleString()} aid request${aidRequests === 1 ? '' : 's'}, ${aidRefusals.toLocaleString()} aid refusal${aidRefusals === 1 ? '' : 's'}, and ${trades.toLocaleString()} trade${trades === 1 ? '' : 's'}${tradeSummary ? ` (${tradeSummary})` : ''}.`)
+  }
+
+  if (publicOrder > 0 || conflicts > 0) {
+    sentences.push(`Public order was not just a label: the run logged ${publicOrder.toLocaleString()} public-order signal${publicOrder === 1 ? '' : 's'} and ${conflicts.toLocaleString()} conflict signal${conflicts === 1 ? '' : 's'}.`)
+  }
+
+  if (firstMoment && lastMoment && getEventId(firstMoment) !== getEventId(lastMoment)) {
+    sentences.push(`The curated replay starts with ${getEventTitle(firstMoment).toLowerCase()} and ends around ${getEventTitle(lastMoment).toLowerCase()}.`)
+  }
+
+  if (sentences.length === 0) {
+    return 'Replay data exists, but the run does not yet have enough non-routine story signals for a useful recap.'
+  }
+  return sentences.slice(0, 5).join(' ')
+}
+
+function buildRecapRows(runDetail, storyItems) {
+  const activity = runDetail?.activity || {}
+  const storyCounts = storyItems.reduce((counts, item) => {
+    const key = getChapterKey(item)
+    counts[key] = Number(counts[key] || 0) + 1
+    return counts
+  }, {})
+  return [
+    {
+      label: 'Survival',
+      value: `${formatNumber(activity.deaths)} deaths / ${formatNumber(activity.became_dormant)} dormant`,
+      detail: `${formatNumber(activity.agent_revived)} revivals recorded.`,
+      tone: Number(activity.deaths || 0) > 0 || Number(activity.became_dormant || 0) > 0 ? 'alert' : 'neutral',
+    },
+    {
+      label: 'Governance',
+      value: `${formatNumber(activity.laws_passed)} laws passed`,
+      detail: `${formatNumber(activity.proposal_actions)} proposal actions and ${formatNumber(activity.vote_actions)} votes.`,
+      tone: Number(storyCounts.governance || 0) > 0 ? 'up' : 'neutral',
+    },
+    {
+      label: 'Aid / Trade',
+      value: `${formatNumber(activity.aid_requests)} aid requests`,
+      detail: `${formatNumber(activity.aid_refusals)} refusals and ${formatNumber(activity.trade_actions)} trades.`,
+      tone: Number(activity.aid_refusals || 0) > 0 ? 'alert' : 'neutral',
+    },
+    {
+      label: 'Public Order',
+      value: `${formatNumber(activity.public_order_events)} signals`,
+      detail: `${formatNumber(activity.conflict_events)} conflict signals in the run window.`,
+      tone: Number(activity.conflict_events || 0) > 0 ? 'alert' : 'neutral',
+    },
+  ]
 }
 
 function getReportRows(reports) {
@@ -171,7 +369,7 @@ function getOutcomeRows(runDetail, storyItems, sourceTraces, playbackItems) {
     },
     {
       label: 'Replay',
-      value: `${storyItems.length.toLocaleString()} chapters`,
+      value: `${storyItems.length.toLocaleString()} moments`,
       detail: `${playbackItems.length.toLocaleString()} playback events available for reconstruction.`,
     },
     {
@@ -252,6 +450,7 @@ export default function RunReplay() {
 
   const playbackItems = useMemo(() => Array.isArray(playback?.items) ? playback.items : [], [playback])
   const storyItems = useMemo(() => getStoryItems(story, playbackItems), [story, playbackItems])
+  const replayChapters = useMemo(() => buildReplayChapters(storyItems), [storyItems])
   const sourceTraces = useMemo(() => Array.isArray(runDetail?.source_traces) ? runDetail.source_traces : [], [runDetail])
   const reportRows = useMemo(() => getReportRows(reports), [reports])
   const outcomeRows = useMemo(
@@ -267,6 +466,12 @@ export default function RunReplay() {
     }
     return storyItems[0]
   }, [selectedEventId, storyItems])
+  const activeChapter = useMemo(() => {
+    if (replayChapters.length === 0) return null
+    return getChapterForEvent(replayChapters, getEventId(activeStoryItem)) || replayChapters[0]
+  }, [activeStoryItem, replayChapters])
+  const runBrief = useMemo(() => buildRunBrief(runDetail, storyItems), [runDetail, storyItems])
+  const recapRows = useMemo(() => buildRecapRows(runDetail, storyItems), [runDetail, storyItems])
 
   function getReportUrl(row, action) {
     const format = preferredReportFormat(row)
@@ -339,6 +544,25 @@ export default function RunReplay() {
 
           {activeTab === 'overview' && (
             <>
+              <div className="card run-replay-brief-card">
+                <div className="card-header">
+                  <h3>Run In Brief</h3>
+                  <span className="strip-meta">Completed-run recap</span>
+                </div>
+                <div className="card-body">
+                  <p className="run-replay-brief-copy">{runBrief}</p>
+                  <div className="run-replay-recap-grid">
+                    {recapRows.map((row) => (
+                      <div key={row.label} className={`run-replay-recap-item ${row.tone}`}>
+                        <span>{row.label}</span>
+                        <strong>{row.value}</strong>
+                        <p>{row.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               <div className="stats-grid run-detail-stats">
                 <div className="stat-card">
                   <div className="stat-header">
@@ -418,84 +642,139 @@ export default function RunReplay() {
           )}
 
           {activeTab === 'replay' && (
-            <div className="run-replay-grid">
-              <div className="card run-replay-rail">
+            <>
+              <div className="card run-replay-brief-card">
                 <div className="card-header">
                   <h3>
-                    <ListTree size={18} />
-                    Key Moments
+                    <TimerReset size={18} />
+                    What Happened
                   </h3>
-                  <span className="strip-meta">{storyItems.length} moments</span>
+                  <span className="strip-meta">{storyItems.length} curated moments</span>
                 </div>
                 <div className="card-body">
-                  {storyItems.length === 0 ? (
-                    <div className="empty-state compact">No curated replay moments are available yet. Routine work and idle events are hidden here; use Evidence for the raw log.</div>
-                  ) : (
-                    <div className="run-replay-chapter-list">
-                      {storyItems.map((item, index) => {
-                        const eventId = getEventId(item)
-                        const selected = eventId > 0 && eventId === getEventId(activeStoryItem)
-                        return (
-                          <button
-                            key={`${eventId || index}-${getEventTitle(item)}`}
-                            type="button"
-                            className={`run-replay-chapter ${selected ? 'active' : ''}`}
-                            onClick={() => setSelectedEventId(eventId)}
-                          >
-                            <span>{item?.chapter ? `Moment ${index + 1} - ${item.chapter}` : `Moment ${index + 1}`}</span>
-                            <strong>{getEventTitle(item)}</strong>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
+                  <p className="run-replay-brief-copy">{runBrief}</p>
+                  <div className="run-replay-recap-grid">
+                    {recapRows.map((row) => (
+                      <div key={row.label} className={`run-replay-recap-item ${row.tone}`}>
+                        <span>{row.label}</span>
+                        <strong>{row.value}</strong>
+                        <p>{row.detail}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="card run-replay-main">
-                <div className="card-header">
-                  <h3>{activeStoryItem ? getEventTitle(activeStoryItem) : 'Replay'}</h3>
-                  {activeStoryItem && <span className="strip-meta">{formatRelative(getEventTime(activeStoryItem))}</span>}
-                </div>
-                <div className="card-body">
-                  {activeStoryItem ? (
-                    <>
-                      <p className="run-replay-description">{getEventDescription(activeStoryItem)}</p>
-                      {activeStoryItem?.why_this_matters && (
-                        <div className="run-replay-why">
-                          <span>Why this mattered</span>
-                          <p>{activeStoryItem.why_this_matters}</p>
-                        </div>
-                      )}
-                      {Array.isArray(activeStoryItem?.deltas) && activeStoryItem.deltas.length > 0 && (
-                        <div className="run-replay-deltas" aria-label="Replay moment signals">
-                          {activeStoryItem.deltas.map((delta) => (
-                            <span key={`${delta.label}-${delta.value}`} className={`run-replay-delta ${delta.tone || 'neutral'}`}>
-                              <strong>{delta.label}</strong>
-                              {delta.value}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <div className="run-replay-actions">
-                        {getEventId(activeStoryItem) > 0 && (
-                          <>
-                            <Link className="btn btn-secondary" to={`/runs/${encodeURIComponent(cleanRunId)}?event=${getEventId(activeStoryItem)}`}>
-                              Evidence
-                            </Link>
-                            <Link className="btn btn-secondary" to={`/timeline?event=${getEventId(activeStoryItem)}`}>
-                              Raw Event Log
-                            </Link>
-                          </>
-                        )}
+              <div className="run-replay-grid">
+                <div className="card run-replay-rail">
+                  <div className="card-header">
+                    <h3>
+                      <ListTree size={18} />
+                      Story Threads
+                    </h3>
+                    <span className="strip-meta">{replayChapters.length} threads</span>
+                  </div>
+                  <div className="card-body">
+                    {replayChapters.length === 0 ? (
+                      <div className="empty-state compact">No curated replay moments are available yet. Routine work and idle events are hidden here; use Evidence for the raw log.</div>
+                    ) : (
+                      <div className="run-replay-chapter-list">
+                        {replayChapters.map((chapter) => {
+                          const selected = chapter.key === activeChapter?.key
+                          return (
+                            <button
+                              key={chapter.key}
+                              type="button"
+                              className={`run-replay-chapter ${selected ? 'active' : ''}`}
+                              onClick={() => setSelectedEventId(Number(chapter.lead_event_id || 0))}
+                            >
+                              <span>{chapter.count} moment{chapter.count === 1 ? '' : 's'}</span>
+                              <strong>{chapter.label}</strong>
+                              <em>{chapter.summary}</em>
+                            </button>
+                          )
+                        })}
                       </div>
-                    </>
-                  ) : (
-                    <div className="empty-state compact">Replay data has not been generated for this run.</div>
-                  )}
+                    )}
+                  </div>
+                </div>
+
+                <div className="card run-replay-main">
+                  <div className="card-header">
+                    <h3>{activeChapter ? activeChapter.label : 'Replay'}</h3>
+                    {activeChapter && <span className="strip-meta">{activeChapter.count} moment{activeChapter.count === 1 ? '' : 's'}</span>}
+                  </div>
+                  <div className="card-body">
+                    {activeChapter ? (
+                      <>
+                        <p className="run-replay-description">{activeChapter.summary}</p>
+                        {activeStoryItem && (
+                          <div className="run-replay-featured">
+                            <div className="run-replay-featured-header">
+                              <span>Selected moment</span>
+                              <strong>{formatRelative(getEventTime(activeStoryItem))}</strong>
+                            </div>
+                            <h4>{getEventTitle(activeStoryItem)}</h4>
+                            <p>{getEventDescription(activeStoryItem)}</p>
+                            {activeStoryItem?.why_this_matters && (
+                              <div className="run-replay-why">
+                                <span>Why this mattered</span>
+                                <p>{activeStoryItem.why_this_matters}</p>
+                              </div>
+                            )}
+                            {Array.isArray(activeStoryItem?.deltas) && activeStoryItem.deltas.length > 0 && (
+                              <div className="run-replay-deltas" aria-label="Replay moment signals">
+                                {activeStoryItem.deltas.map((delta) => (
+                                  <span key={`${delta.label}-${delta.value}`} className={`run-replay-delta ${delta.tone || 'neutral'}`}>
+                                    <strong>{delta.label}</strong>
+                                    {delta.value}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <div className="run-replay-actions">
+                              {getEventId(activeStoryItem) > 0 && (
+                                <>
+                                  <Link className="btn btn-secondary" to={`/runs/${encodeURIComponent(cleanRunId)}?event=${getEventId(activeStoryItem)}`}>
+                                    Evidence
+                                  </Link>
+                                  <Link className="btn btn-secondary" to={`/timeline?event=${getEventId(activeStoryItem)}`}>
+                                    Raw Event Log
+                                  </Link>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {activeChapter.items.length > 1 && (
+                          <div className="run-replay-moment-list" aria-label={`${activeChapter.label} moments`}>
+                            {activeChapter.items.map((item, index) => {
+                              const eventId = getEventId(item)
+                              const selected = eventId > 0 && eventId === getEventId(activeStoryItem)
+                              return (
+                                <button
+                                  key={`${eventId || index}-${getEventTitle(item)}`}
+                                  type="button"
+                                  className={`run-replay-moment-item ${selected ? 'active' : ''}`}
+                                  onClick={() => setSelectedEventId(eventId)}
+                                >
+                                  <span>{formatLabel(item.event_type || item.category || 'event')}</span>
+                                  <strong>{getEventTitle(item)}</strong>
+                                  <p>{clampText(getEventDescription(item), 150)}</p>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="empty-state compact">Replay data has not been generated for this run.</div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            </>
           )}
 
           {activeTab === 'evidence' && (

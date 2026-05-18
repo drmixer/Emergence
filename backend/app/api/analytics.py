@@ -178,6 +178,12 @@ REPLAY_STORY_CATEGORY_PRIORITY = {
     "alliance": 4,
     "notable": 1,
 }
+REPLAY_STORY_EVENT_TYPE_CAPS = {
+    "request_aid": 2,
+    "refuse_aid": 2,
+    "trade": 2,
+    "create_proposal": 2,
+}
 REPLAY_STORY_CHAPTERS = ("Trigger", "Escalation", "Turning Point", "Outcome")
 REPLAY_STORY_CHAPTER_DESCRIPTIONS = {
     "Trigger": "The first decisive shift that made this run worth following.",
@@ -841,6 +847,7 @@ def _select_replay_story_payloads(turns: list[dict[str, Any]], target_count: int
 
     selected: list[dict[str, Any]] = []
     category_counts: dict[str, int] = {}
+    event_type_counts: dict[str, int] = {}
     max_per_category = max(2, (bounded_target + 2) // 3)
 
     for turn in ranked:
@@ -848,8 +855,12 @@ def _select_replay_story_payloads(turns: list[dict[str, Any]], target_count: int
             break
 
         category = str(turn.get("category") or "notable")
+        event_type = str(turn.get("event_type") or "").strip()
         current_category_count = int(category_counts.get(category, 0))
         if current_category_count >= max_per_category:
+            continue
+        event_type_cap = REPLAY_STORY_EVENT_TYPE_CAPS.get(event_type)
+        if event_type_cap is not None and int(event_type_counts.get(event_type, 0)) >= event_type_cap:
             continue
 
         turn_timestamp = _plot_turn_created_at_ms(turn)
@@ -862,6 +873,8 @@ def _select_replay_story_payloads(turns: list[dict[str, Any]], target_count: int
 
         selected.append(turn)
         category_counts[category] = current_category_count + 1
+        if event_type:
+            event_type_counts[event_type] = int(event_type_counts.get(event_type, 0)) + 1
 
     if len(selected) < bounded_target:
         for turn in ranked:
@@ -870,7 +883,13 @@ def _select_replay_story_payloads(turns: list[dict[str, Any]], target_count: int
             event_id = int(turn.get("event_id") or 0)
             if any(int(item.get("event_id") or 0) == event_id for item in selected):
                 continue
+            event_type = str(turn.get("event_type") or "").strip()
+            event_type_cap = REPLAY_STORY_EVENT_TYPE_CAPS.get(event_type)
+            if event_type_cap is not None and int(event_type_counts.get(event_type, 0)) >= event_type_cap:
+                continue
             selected.append(turn)
+            if event_type:
+                event_type_counts[event_type] = int(event_type_counts.get(event_type, 0)) + 1
 
     selected.sort(key=_plot_turn_created_at_ms)
 

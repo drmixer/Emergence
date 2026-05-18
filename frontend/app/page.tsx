@@ -11,7 +11,7 @@ import { ScrollToTopButton } from "@/components/scroll-to-top"
 
 export default function Page() {
   return (
-    <main className="relative min-h-screen">
+    <main className="relative min-h-screen max-w-full overflow-x-hidden">
       <SideNav />
       <div className="grid-bg fixed inset-0 opacity-30" aria-hidden="true" />
       <div className="noise-overlay" aria-hidden="true" />

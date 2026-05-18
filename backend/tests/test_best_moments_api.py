@@ -138,6 +138,35 @@ def test_select_replay_story_payloads_hides_routine_work_and_idle():
     assert all(item["event_type"] not in {"work", "idle", "vote"} for item in selected)
 
 
+def test_select_replay_story_payloads_limits_repeated_action_types():
+    turns = [
+        *[
+            _turn(
+                360 + index,
+                event_type="request_aid",
+                category="cooperation",
+                salience=91 - index,
+                created_at=f"2026-04-09T08:{index:02d}:00+00:00",
+            )
+            for index in range(5)
+        ],
+        _turn(370, event_type="trade", category="cooperation", salience=83, created_at="2026-04-09T09:00:00+00:00"),
+        _turn(371, event_type="trade", category="cooperation", salience=82, created_at="2026-04-09T09:30:00+00:00"),
+        _turn(372, event_type="proposal_resolved", category="governance", salience=88, created_at="2026-04-09T10:00:00+00:00"),
+        _turn(373, event_type="law_passed", category="governance", salience=87, created_at="2026-04-09T10:30:00+00:00"),
+        _turn(374, event_type="agent_died", category="conflict", salience=95, created_at="2026-04-09T11:00:00+00:00"),
+        _turn(375, event_type="became_dormant", category="crisis", salience=86, created_at="2026-04-09T11:30:00+00:00"),
+        _turn(376, event_type="world_event", category="crisis", salience=84, created_at="2026-04-09T12:00:00+00:00"),
+    ]
+
+    selected = analytics_api._select_replay_story_payloads(turns, target_count=10)
+    event_types = [item["event_type"] for item in selected]
+
+    assert event_types.count("request_aid") <= 2
+    assert "trade" in event_types
+    assert "law_passed" in event_types
+
+
 def test_replay_story_endpoint_returns_chaptered_payload(monkeypatch):
     fake_session = _FakeSession()
     now = datetime(2026, 4, 9, 12, 0, 0, tzinfo=timezone.utc)
