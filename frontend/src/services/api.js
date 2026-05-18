@@ -256,7 +256,7 @@ class APIService {
         return this.fetch(`/api/analytics/plot-turns/replay-story?${params.toString()}`)
     }
 
-    async getRunPlayback(runId, pageLimit = 500) {
+    async getRunPlayback(runId, pageLimit = 500, maxItems = 1000) {
         const cleanRunId = String(runId || '').trim()
         if (!cleanRunId) {
             throw new Error('runId is required')
@@ -266,10 +266,12 @@ class APIService {
         let totalCount = null
         let items = []
         let basePayload = null
+        const boundedMaxItems = Math.max(1, Number(maxItems || pageLimit || 500))
+        const boundedPageLimit = Math.max(1, Number(pageLimit || 500))
 
-        while (totalCount === null || offset < totalCount) {
+        while ((totalCount === null || offset < totalCount) && items.length < boundedMaxItems) {
             const params = new URLSearchParams()
-            params.append('limit', String(pageLimit))
+            params.append('limit', String(Math.min(boundedPageLimit, boundedMaxItems - items.length)))
             params.append('offset', String(offset))
 
             const payload = await this.fetch(`/api/analytics/runs/${encodeURIComponent(cleanRunId)}/playback?${params.toString()}`, {
@@ -294,6 +296,7 @@ class APIService {
             items,
             count: items.length,
             total_count: totalCount ?? items.length,
+            truncated: totalCount !== null ? items.length < totalCount : false,
         }
     }
 

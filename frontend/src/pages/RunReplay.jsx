@@ -222,7 +222,7 @@ export default function RunReplay() {
 
       const [detailResult, playbackResult, storyResult, reportsResult] = await Promise.allSettled([
         api.getRunDetail(runId, 96, 24, 45),
-        api.getRunPlayback(runId),
+        api.getRunPlayback(runId, 100, 300),
         api.getReplayStory(96, 45, 10, runId),
         api.getRunReports(runId),
       ])
