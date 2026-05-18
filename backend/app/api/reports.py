@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ RUN_ARTIFACT_TYPES = (
     "run_summary",
 )
 FORMATS = ("json", "markdown")
+PUBLIC_CANARY_K_SERIES_RE = re.compile(r"(^|[_-])k\d+($|[_-])")
 
 
 def _reports_root() -> Path:
@@ -97,9 +99,16 @@ def _is_public_canary_run(row: SimulationRun | None) -> bool:
     if row is None:
         return False
     run_class = str(row.run_class or "").strip()
+    if run_class != "special_exploratory":
+        return False
     condition_name = str(row.condition_name or "").strip().lower()
     run_id = str(row.run_id or "").strip().lower()
-    return run_class == "special_exploratory" and ("canary" in condition_name or "_k" in condition_name or "-k" in run_id)
+    has_public_marker = "public_canary" in condition_name or "public-canary" in condition_name
+    has_k_series_marker = bool(
+        PUBLIC_CANARY_K_SERIES_RE.search(condition_name)
+        or PUBLIC_CANARY_K_SERIES_RE.search(run_id)
+    )
+    return has_public_marker or has_k_series_marker
 
 
 def _resolve_download_path(raw_path: str) -> Path:
