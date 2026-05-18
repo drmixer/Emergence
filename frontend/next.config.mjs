@@ -8,9 +8,10 @@ const securityHeaders = [
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self'",
-      // Next streams inline hydration data for the app router. Without a nonce
-      // pipeline, blocking inline scripts leaves the landing page unhydrated.
-      "script-src 'self' 'unsafe-inline'",
+      // Next streams inline hydration data for the app router. The legacy
+      // React app bundle also includes a core-js global-detection path that
+      // uses Function(...), so direct dashboard/archive routes need eval.
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self'",
