@@ -106,11 +106,13 @@ const NARRATIVE_BEAT_RULES = [
 ]
 
 const REPORT_LABELS = {
-  approachable_report: 'Approachable Report',
+  approachable_report: 'Approachable Story',
   technical_report: 'Technical Report',
   planner_report: 'Next-Run Plan',
   run_summary: 'Run Summary',
 }
+
+const EVIDENCE_DEFAULT_LIMIT = 80
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString()
@@ -211,6 +213,19 @@ function isReplayMomentCandidate(item) {
   if (STRONG_REPLAY_CATEGORIES.has(category)) return true
   if (SOCIAL_REPLAY_CATEGORIES.has(category)) return salience >= 70
   return salience >= 75
+}
+
+function isEvidenceTraceCandidate(item) {
+  if (!item || getEventId(item) <= 0) return false
+  const eventType = String(item?.event_type || '').trim()
+  const category = String(item?.category || '').trim()
+  const title = getEventTitle(item).toLowerCase()
+
+  if (ROUTINE_REPLAY_EVENT_TYPES.has(eventType)) return false
+  if (title === 'work' || title === 'idle') return false
+  if (SIGNAL_REPLAY_EVENT_TYPES.has(eventType)) return true
+  if (STRONG_REPLAY_CATEGORIES.has(category) || SOCIAL_REPLAY_CATEGORIES.has(category)) return true
+  return Number(item?.salience || 0) >= 70
 }
 
 function getStoryItems(story, playbackItems) {
@@ -464,6 +479,7 @@ export default function RunReplay() {
   const [story, setStory] = useState({ items: [], chapters: [] })
   const [reports, setReports] = useState(null)
   const [selectedEventId, setSelectedEventId] = useState(() => requestedEventId > 0 ? requestedEventId : 0)
+  const [showRawEvidence, setShowRawEvidence] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -533,6 +549,16 @@ export default function RunReplay() {
   const runBrief = useMemo(() => buildRunBrief(runDetail, storyItems), [runDetail, storyItems])
   const recapRows = useMemo(() => buildRecapRows(runDetail, storyItems), [runDetail, storyItems])
   const narrativeBeats = useMemo(() => buildNarrativeBeats(storyItems), [storyItems])
+  const evidenceItems = useMemo(() => {
+    const rawItems = sourceTraces.length > 0 ? sourceTraces : playbackItems
+    if (showRawEvidence) return rawItems.slice(0, 300)
+    const filteredSource = sourceTraces.filter(isEvidenceTraceCandidate)
+    if (filteredSource.length > 0) return filteredSource.slice(0, EVIDENCE_DEFAULT_LIMIT)
+    if (storyItems.length > 0) return storyItems.slice(0, EVIDENCE_DEFAULT_LIMIT)
+    return playbackItems.filter(isEvidenceTraceCandidate).slice(0, EVIDENCE_DEFAULT_LIMIT)
+  }, [playbackItems, showRawEvidence, sourceTraces, storyItems])
+  const rawEvidenceCount = sourceTraces.length || playbackItems.length
+  const hiddenRoutineEvidenceCount = Math.max(0, rawEvidenceCount - evidenceItems.length)
 
   function getReportUrl(row, action) {
     const format = preferredReportFormat(row)
@@ -540,6 +566,12 @@ export default function RunReplay() {
     return action === 'download'
       ? api.getRunReportDownloadUrl(runId, row.type, format)
       : api.getRunReportViewUrl(runId, row.type, format)
+  }
+
+  function getReportViewPath(row) {
+    const format = preferredReportFormat(row)
+    if (!format || !row?.type) return ''
+    return `/runs/${encodeURIComponent(runId)}/reports/${encodeURIComponent(row.type)}?format=${encodeURIComponent(format)}`
   }
 
   const provenance = runDetail?.provenance || {}
@@ -873,11 +905,29 @@ export default function RunReplay() {
           {activeTab === 'evidence' && (
             <div className="card">
               <div className="card-header">
-                <h3>Evidence Links</h3>
-                <span className="strip-meta">{sourceTraces.length || playbackItems.length} available</span>
+                <h3>{showRawEvidence ? 'Raw Evidence Links' : 'Story Evidence'}</h3>
+                <span className="strip-meta">
+                  {evidenceItems.length} shown · {rawEvidenceCount} raw
+                </span>
               </div>
+              {rawEvidenceCount > 0 && (
+                <div className="run-evidence-toolbar">
+                  <p>
+                    {showRawEvidence
+                      ? 'Showing raw source traces, including routine work and idle events.'
+                      : `${hiddenRoutineEvidenceCount.toLocaleString()} routine or low-signal trace${hiddenRoutineEvidenceCount === 1 ? '' : 's'} hidden by default.`}
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setShowRawEvidence((value) => !value)}
+                  >
+                    {showRawEvidence ? 'Show Story Evidence' : 'Show Raw Evidence'}
+                  </button>
+                </div>
+              )}
               <div className="card-body run-trace-list">
-                {(sourceTraces.length > 0 ? sourceTraces : playbackItems.slice(0, 20)).map((trace, index) => {
+                {evidenceItems.map((trace, index) => {
                   const eventId = Number(trace?.event_id || trace?.id || 0)
                   return (
                     <div key={`${eventId || index}-${getEventTitle(trace)}`} className="run-trace-item">
@@ -910,7 +960,7 @@ export default function RunReplay() {
                     </div>
                   )
                 })}
-                {sourceTraces.length === 0 && playbackItems.length === 0 && (
+                {evidenceItems.length === 0 && (
                   <div className="empty-state compact">No event evidence is available for this run.</div>
                 )}
               </div>
@@ -935,15 +985,13 @@ export default function RunReplay() {
                         <span>{formatTimestamp(row.updated_at)}</span>
                       </div>
                       <div className="reports-item-actions">
-                        <a
+                        <Link
                           className="btn btn-secondary"
-                          href={getReportUrl(row, 'view')}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                          to={getReportViewPath(row)}
                         >
-                          <ExternalLink size={14} />
+                          <FileText size={14} />
                           Open
-                        </a>
+                        </Link>
                         <a
                           className="btn btn-secondary"
                           href={getReportUrl(row, 'download')}

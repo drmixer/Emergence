@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Download,
-  ExternalLink,
   FileSearch,
   RefreshCw,
   TimerReset,
@@ -54,7 +53,7 @@ function preferredFormat(artifact) {
 }
 
 const ARCHIVE_REPORT_ARTIFACTS = [
-  ['approachable_report', 'Research Report'],
+  ['approachable_report', 'Approachable Story'],
   ['technical_report', 'Technical Report'],
   ['planner_report', 'Next-Run Plan'],
   ['run_summary', 'Run Summary'],
@@ -229,6 +228,12 @@ export default function Reports() {
     return action === 'download'
       ? api.getRunReportDownloadUrl(runId, artifactType, format)
       : api.getRunReportViewUrl(runId, artifactType, format)
+  }
+
+  function getArtifactViewPath(runId, artifactType, artifact) {
+    const format = preferredFormat(artifact)
+    if (!runId || !artifact?.available || !format) return ''
+    return `/runs/${encodeURIComponent(runId)}/reports/${encodeURIComponent(artifactType)}?format=${encodeURIComponent(format)}`
   }
 
   const items = Array.isArray(archive?.items) ? archive.items : []
@@ -412,9 +417,9 @@ export default function Reports() {
                           Ended {formatTimestamp(summary.run_ended_at)} · {formatDuration(summary.duration_hours)}
                         </p>
                       </div>
-                      <Link to={getStoryReplayHref(runId)} className="btn btn-primary">
+                      <Link to={`/runs/${encodeURIComponent(runId)}/replay?tab=overview`} className="btn btn-primary">
                         <TimerReset size={14} />
-                        {isLatestPublicRun ? 'Replay Latest Run' : 'Open Replay'}
+                        {isLatestPublicRun ? 'Start With Latest Recap' : 'Open Recap'}
                       </Link>
                     </div>
 
@@ -453,6 +458,13 @@ export default function Reports() {
                     <div className="archive-run-actions">
                       <Link
                         className="btn btn-secondary"
+                        to={getStoryReplayHref(runId)}
+                      >
+                        <TimerReset size={14} />
+                        Replay
+                      </Link>
+                      <Link
+                        className="btn btn-secondary"
                         to={`/runs/${encodeURIComponent(runId)}`}
                       >
                         <FileSearch size={14} />
@@ -460,16 +472,14 @@ export default function Reports() {
                       </Link>
                       {reportLinks.map(({ artifactType, label, artifact }) => (
                         <div key={artifactType} className="archive-report-action">
-                          <a
+                          <Link
                             className="btn btn-secondary"
-                            href={getArtifactUrl(runId, artifactType, artifact, 'view')}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            to={getArtifactViewPath(runId, artifactType, artifact)}
                             title={`Open ${label}`}
                           >
-                            <ExternalLink size={14} />
+                            <FileSearch size={14} />
                             {label}
-                          </a>
+                          </Link>
                           <a
                             className="btn btn-secondary btn-icon-only"
                             href={getArtifactUrl(runId, artifactType, artifact, 'download')}

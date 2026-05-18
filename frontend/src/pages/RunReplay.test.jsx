@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -187,5 +187,46 @@ describe('RunReplay', () => {
     const storyThreads = screen.getByText(/Story Threads/i).closest('.card')
     expect(within(storyThreads).queryByText(/^Work$/i)).not.toBeInTheDocument()
     expect(within(storyThreads).queryByText(/^Idle$/i)).not.toBeInTheDocument()
+  })
+
+  it('hides routine work from evidence by default while keeping a raw audit toggle', async () => {
+    api.getRunDetail.mockResolvedValueOnce({
+      run_id: 'run-1',
+      captured_at: '2026-05-18T05:00:00.000Z',
+      run_metadata: { condition_name: 'canary_k11', run_class: 'special_exploratory' },
+      activity: { total_events: 4, deaths: 0, became_dormant: 0 },
+      llm: { calls: 2 },
+      provenance: { verification_state: 'verified' },
+      source_traces: [
+        {
+          event_id: 1,
+          event_type: 'work',
+          title: 'Work',
+          description: 'Apex-50 farmed 1.40 food in 1h',
+          salience: 39,
+          created_at: '2026-05-18T04:00:00.000Z',
+        },
+        {
+          event_id: 2,
+          event_type: 'create_proposal',
+          title: 'Create Proposal',
+          description: 'Prime-24 created proposal: Active Agent Basic Needs Law',
+          salience: 64,
+          created_at: '2026-05-18T04:05:00.000Z',
+        },
+      ],
+    })
+
+    renderRunReplay('/runs/run-1/replay?mode=timeline')
+
+    expect(await screen.findByText(/Story Evidence/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Create Proposal/i).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/^Work$/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/routine or low-signal/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Show Raw Evidence/i }))
+
+    expect(screen.getByText(/Raw Evidence Links/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/^Work$/i).length).toBeGreaterThan(0)
   })
 })

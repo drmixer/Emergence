@@ -122,6 +122,25 @@ def test_story_sections_enforce_evidence_links_and_claim_gate():
             assert links
 
 
+def test_story_markdown_reads_as_prose_without_claim_prefixes():
+    payload = run_reports._build_story_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="baseline_v1",
+        season_number=2,
+        replicate_count=2,
+    )
+
+    markdown = run_reports._story_markdown(payload)
+
+    assert "- Claim:" not in markdown
+    assert "## What Happened" in markdown
+    assert "The main arc was survival pressure" in markdown
+    assert "## Story Moments" in markdown
+    assert "Representative moment" not in markdown
+
+
 def test_merge_generated_tags_preserves_custom_tags_only():
     merged = run_reports._merge_generated_tags(
         existing_tags=[
@@ -446,6 +465,61 @@ def test_collect_run_snapshot_uses_runtime_tagged_events_when_llm_usage_is_absen
         assert snapshot["verification_state"] == "partial"
         assert snapshot["activity"]["total_events"] == 1
         assert snapshot["key_moments"][0]["event_type"] == "reserve_aid"
+    finally:
+        db_session.close()
+
+
+def test_collect_run_snapshot_prefers_story_signals_over_recent_routine_events():
+    db_session = _build_snapshot_session()
+    try:
+        started_at = datetime(2026, 4, 7, 21, 0, tzinfo=timezone.utc)
+        agent = Agent(
+            agent_number=7,
+            display_name="Tagged Agent",
+            model_type="gm_gemini_2_5_flash",
+            tier=1,
+            personality_type="neutral",
+            status="active",
+            system_prompt="prompt",
+        )
+        db_session.add(agent)
+        db_session.flush()
+        db_session.add(
+            SimulationRun(
+                run_id="run-story-signals",
+                run_mode="test",
+                protocol_version="protocol_v1",
+                condition_name="behavior_eval_control_v1",
+                run_class="standard_72h",
+                started_at=started_at,
+            )
+        )
+        db_session.add(
+            Event(
+                agent_id=agent.id,
+                event_type="law_passed",
+                description="Agents passed an emergency aid floor.",
+                event_metadata={"runtime": {"run_id": "run-story-signals", "run_mode": "test"}},
+                created_at=started_at + run_reports.timedelta(minutes=2),
+            )
+        )
+        for index in range(20):
+            db_session.add(
+                Event(
+                    agent_id=agent.id,
+                    event_type="work",
+                    description=f"Agent performed routine work {index}.",
+                    event_metadata={"runtime": {"run_id": "run-story-signals", "run_mode": "test"}},
+                    created_at=started_at + run_reports.timedelta(minutes=10 + index),
+                )
+            )
+        db_session.commit()
+
+        snapshot = run_reports._collect_run_snapshot(db_session, run_id="run-story-signals")
+
+        assert snapshot["key_moments"]
+        assert snapshot["key_moments"][0]["event_type"] == "law_passed"
+        assert all(moment["event_type"] != "work" for moment in snapshot["key_moments"])
     finally:
         db_session.close()
 

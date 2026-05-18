@@ -38,6 +38,7 @@ const Method = lazy(() => import('./pages/Method'))
 const Glossary = lazy(() => import('./pages/Glossary'))
 const RunDetail = lazy(() => import('./pages/RunDetail'))
 const RunReplay = lazy(() => import('./pages/RunReplay'))
+const ReportViewer = lazy(() => import('./pages/ReportViewer'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Privacy = lazy(() => import('./pages/Privacy'))
 const Terms = lazy(() => import('./pages/Terms'))
@@ -281,6 +282,7 @@ function App() {
                 <Route path="/terms" element={<Terms />} />
                 <Route path="/ops" element={opsUiEnabled() ? <Ops /> : <NotFound />} />
                 <Route path="/runs/:runId/replay" element={<RunReplay />} />
+                <Route path="/runs/:runId/reports/:artifactType" element={<ReportViewer />} />
                 <Route path="/runs/:runId" element={<RunDetail />} />
               </Routes>
             </Suspense>

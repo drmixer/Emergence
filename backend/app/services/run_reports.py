@@ -63,6 +63,60 @@ DEFAULT_CONDITION_CANDIDATES = (
     "provider_mix_shift_v1",
 )
 
+ROUTINE_REPORT_EVENT_TYPES = {"idle", "work", "vote", "processing_error"}
+STORY_SIGNAL_EVENT_TYPES = {
+    "agent_died",
+    "became_dormant",
+    "agent_revived",
+    "awakened",
+    "law_passed",
+    "proposal_resolved",
+    "create_proposal",
+    "world_event",
+    "trade",
+    "request_aid",
+    "refuse_aid",
+    "public_accusation",
+    "contest_proposal",
+    "initiate_sanction",
+    "initiate_seizure",
+    "initiate_exile",
+    "vote_enforcement",
+    "enforcement_initiated",
+    "agent_sanctioned",
+    "resources_seized",
+    "agent_exiled",
+    "reserve_aid",
+    "reserve_shortfall",
+    "starvation_warning",
+}
+STORY_EVENT_PRIORITY = {
+    "agent_died": 100,
+    "became_dormant": 96,
+    "agent_revived": 92,
+    "law_passed": 90,
+    "proposal_resolved": 86,
+    "create_proposal": 78,
+    "reserve_shortfall": 76,
+    "starvation_warning": 74,
+    "request_aid": 70,
+    "refuse_aid": 70,
+    "trade": 68,
+    "world_event": 66,
+    "public_accusation": 64,
+    "contest_proposal": 64,
+    "initiate_sanction": 62,
+    "initiate_seizure": 62,
+    "initiate_exile": 62,
+    "vote_enforcement": 60,
+    "enforcement_initiated": 60,
+    "agent_sanctioned": 60,
+    "resources_seized": 60,
+    "agent_exiled": 60,
+    "reserve_aid": 56,
+    "awakened": 54,
+}
+
 _RUN_REPORT_STATUS_LOCK = Lock()
 _RUN_REPORT_PIPELINE_STATUS: dict[str, Any] = {
     "closeout": {
@@ -325,6 +379,38 @@ def _reference_for_event(event: dict[str, Any], *, label_prefix: str) -> dict[st
     if event_id <= 0:
         return None
     return {"label": f"{label_prefix} Event #{event_id}", "href": f"/api/events/{event_id}"}
+
+
+def _story_event_priority(event_type: str) -> int:
+    clean_type = str(event_type or "").strip()
+    if clean_type in ROUTINE_REPORT_EVENT_TYPES:
+        return 0
+    if clean_type in STORY_EVENT_PRIORITY:
+        return int(STORY_EVENT_PRIORITY[clean_type])
+    if clean_type in CONFLICT_EVENT_TYPES:
+        return 58
+    if clean_type in COOPERATION_EVENT_TYPES:
+        return 52
+    if clean_type in STORY_SIGNAL_EVENT_TYPES:
+        return 50
+    return 18 if clean_type else 0
+
+
+def _format_count_phrase(value: int | float, singular: str, plural: str | None = None) -> str:
+    count = int(value or 0)
+    noun = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count:,} {noun}"
+
+
+def _sentence_join(parts: list[str]) -> str:
+    cleaned = [str(part or "").strip() for part in parts if str(part or "").strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
 
 
 def _select_topic_tags(snapshot: dict[str, Any]) -> list[str]:
@@ -636,14 +722,46 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
                 )
               )
             ORDER BY e.created_at DESC, e.id DESC
-            LIMIT 16
+            LIMIT 96
             """
         ),
         {"run_id": run_id, "since_ts": run_started_at},
     ).fetchall()
 
+    ranked_key_rows = []
+    for row in key_moment_rows:
+        event_type = str((row.event_type if row else "") or "").strip()
+        priority = _story_event_priority(event_type)
+        description = str((row.description if row else "") or "").strip()
+        if priority <= 0 or not description:
+            continue
+        ranked_key_rows.append((priority, row))
+    if not ranked_key_rows:
+        ranked_key_rows = [
+            (1, row)
+            for row in key_moment_rows
+            if str((row.event_type if row else "") or "").strip() not in ROUTINE_REPORT_EVENT_TYPES
+            and str((row.description if row else "") or "").strip()
+        ]
+    ranked_key_rows = sorted(
+        ranked_key_rows,
+        key=lambda item: (
+            item[0],
+            (_coerce_utc_datetime(item[1].created_at).timestamp() if _coerce_utc_datetime(item[1].created_at) else 0.0),
+            int((item[1].id if item[1] else 0) or 0),
+        ),
+        reverse=True,
+    )[:16]
+    selected_key_rows = sorted(
+        [row for _priority, row in ranked_key_rows],
+        key=lambda row: (
+            (_coerce_utc_datetime(row.created_at).timestamp() if _coerce_utc_datetime(row.created_at) else 0.0),
+            int((row.id if row else 0) or 0),
+        ),
+    )
+
     key_moments = []
-    for row in reversed(key_moment_rows):
+    for row in selected_key_rows:
         event_id = int((row.id if row else 0) or 0)
         if event_id <= 0:
             continue
@@ -1466,10 +1584,12 @@ def _story_markdown(payload: dict[str, Any]) -> str:
         rows.append(f"## {heading}")
         rows.append("")
         for paragraph in section.get("paragraphs") or []:
-            rows.append(f"- Claim: {str(paragraph).strip()}")
+            text = str(paragraph).strip()
+            if text:
+                rows.append(text)
+                rows.append("")
         references = section.get("references") or []
         if references:
-            rows.append("")
             rows.append("Evidence:")
             for reference in references:
                 rows.append(f"- [{reference.get('label')}]({reference.get('href')})")
@@ -1728,51 +1848,79 @@ def _build_story_sections(
     llm = snapshot.get("llm") if isinstance(snapshot, dict) else {}
     evidence_links = _base_evidence_links(run_id)
     key_moments = list(snapshot.get("key_moments") or [])
-    first_moment = key_moments[0] if key_moments else {}
+    total_events = int((activity or {}).get("total_events") or 0)
+    visible_events = int((activity or {}).get("viewer_visible_events_default") or total_events)
+    calls = int((llm or {}).get("calls") or 0)
+    deaths = int((activity or {}).get("deaths") or 0)
+    dormant = int((activity or {}).get("became_dormant") or 0)
+    revived = int((activity or {}).get("agent_revived") or 0)
+    proposals = int((activity or {}).get("proposal_actions") or 0)
+    votes = int((activity or {}).get("vote_actions") or 0)
+    laws = int((activity or {}).get("laws_passed") or 0)
+    aid = int((activity or {}).get("reserve_aid") or 0)
+    trades = int((activity or {}).get("trade_actions") or 0)
+    conflict = int((activity or {}).get("conflict_events") or 0)
+    cooperation = int((activity or {}).get("cooperation_events") or 0)
+
+    pressure_parts = []
+    if deaths > 0:
+        pressure_parts.append(_format_count_phrase(deaths, "death"))
+    if dormant > 0:
+        pressure_parts.append(_format_count_phrase(dormant, "dormancy event"))
+    if revived > 0:
+        pressure_parts.append(_format_count_phrase(revived, "revival"))
+    pressure_text = _sentence_join(pressure_parts) or "no deaths, dormancy events, or revivals in the selected run window"
+
+    governance_text = (
+        f"Governance produced {_format_count_phrase(proposals, 'proposal')}, "
+        f"{_format_count_phrase(votes, 'vote')}, and {_format_count_phrase(laws, 'passed law')}."
+    )
+    coordination_text = (
+        f"Coordination showed {_format_count_phrase(aid, 'reserve-aid event')} and "
+        f"{_format_count_phrase(trades, 'trade')}, alongside "
+        f"{_format_count_phrase(conflict, 'conflict signal')} and "
+        f"{_format_count_phrase(cooperation, 'cooperation signal')}."
+    )
+    overview_text = (
+        f"This run produced {visible_events:,} viewer-visible events "
+        f"({total_events:,} total scoped events) across {calls:,} LLM calls. "
+        f"The main arc was survival pressure: {pressure_text}. "
+        f"{governance_text} {coordination_text}"
+    )
+
+    moment_claims = []
+    for moment in key_moments[:5]:
+        event_type = str(moment.get("event_type") or "event").replace("_", " ")
+        description = str(moment.get("description") or "").strip()
+        if not description:
+            continue
+        moment_claims.append(
+            _build_claim_block(
+                claim=f"{event_type.title()}: {description}",
+                evidence_links=[
+                    *evidence_links,
+                    _reference_for_event(moment, label_prefix="Story Moment"),
+                ],
+            )
+        )
+    if not moment_claims:
+        moment_claims.append(
+            _build_claim_block(
+                claim="No non-routine story moments were selected for this report; use the evidence view for the raw event log.",
+                evidence_links=evidence_links,
+            )
+        )
 
     sections = [
         _claims_to_section(
             heading="What Happened",
             claims=[
-                _build_claim_block(
-                    claim=(
-                        f"In this simulation run, we observed {int((activity or {}).get('total_events') or 0):,} "
-                        f"scoped events and {int((llm or {}).get('calls') or 0):,} LLM calls."
-                    ),
-                    evidence_links=evidence_links,
-                ),
-                _build_claim_block(
-                    claim=(
-                        f"Governance activity included {int((activity or {}).get('proposal_actions') or 0):,} "
-                        f"proposals, {int((activity or {}).get('vote_actions') or 0):,} votes, and "
-                        f"{int((activity or {}).get('laws_passed') or 0):,} passed laws."
-                    ),
-                    evidence_links=evidence_links,
-                ),
+                _build_claim_block(claim=overview_text, evidence_links=evidence_links),
             ],
         ),
         _claims_to_section(
-            heading="Major Moments",
-            claims=[
-                _build_claim_block(
-                    claim=(
-                        f"Representative moment: {str(first_moment.get('event_type') or 'event')} - "
-                        f"{str(first_moment.get('description') or 'No description available.')}"
-                    ),
-                    evidence_links=[
-                        *evidence_links,
-                        _reference_for_event(first_moment, label_prefix="Major Moment"),
-                    ],
-                ),
-                _build_claim_block(
-                    claim=(
-                        f"Conflict/cooperation balance in this run was "
-                        f"{int((activity or {}).get('conflict_events') or 0)} conflict events vs "
-                        f"{int((activity or {}).get('cooperation_events') or 0)} cooperation events."
-                    ),
-                    evidence_links=evidence_links,
-                ),
-            ],
+            heading="Story Moments",
+            claims=moment_claims,
             extra_references=[_reference_for_event(event, label_prefix="Moment") for event in key_moments[:5]],
         ),
     ]

@@ -361,6 +361,20 @@ class APIService {
         return this.getRunReportUrl(runId, artifactType, format, 'view')
     }
 
+    async getRunReportText(runId, artifactType, format = 'markdown') {
+        const cleanRunId = String(runId || '').trim()
+        const cleanArtifactType = String(artifactType || '').trim()
+        const cleanFormat = String(format || '').trim() || 'markdown'
+        if (!cleanRunId || !cleanArtifactType) {
+            throw new Error('runId and artifactType are required')
+        }
+        const response = await fetch(this.getRunReportViewUrl(cleanRunId, cleanArtifactType, cleanFormat))
+        if (!response.ok) {
+            throw new Error(`API error: ${response.status}`)
+        }
+        return response.text()
+    }
+
     getRunReportDownloadUrl(runId, artifactType, format = 'json') {
         return this.getRunReportUrl(runId, artifactType, format, 'download')
     }
