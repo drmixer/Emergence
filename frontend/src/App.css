@@ -786,6 +786,70 @@ tr:last-child td {
   padding-top: var(--spacing-md);
 }
 
+.run-recap-card .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.run-recap-copy {
+  max-width: 920px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.run-recap-copy p {
+  margin: 0 0 var(--spacing-sm);
+}
+
+.run-recap-copy p:last-child {
+  margin-bottom: 0;
+}
+
+.run-recap-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.run-recap-grid > div {
+  min-height: 128px;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.run-recap-grid svg {
+  color: var(--accent-blue);
+  margin-bottom: var(--spacing-md);
+}
+
+.run-recap-grid span,
+.run-recap-grid em {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.5;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.run-recap-grid strong {
+  display: block;
+  margin-top: var(--spacing-xs);
+  color: var(--text-primary);
+  font-size: 0.98rem;
+  line-height: 1.45;
+}
+
+.run-recap-grid em {
+  margin-top: var(--spacing-xs);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .run-provenance-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2001,6 +2065,10 @@ tr:last-child td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .run-recap-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .archive-run-foot {
     flex-direction: column;
   }
@@ -2037,6 +2105,10 @@ tr:last-child td {
   }
 
   .run-outcome-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .run-recap-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -10,6 +10,9 @@ import {
   CircleCheck,
   CircleAlert,
   CircleDashed,
+  Users,
+  Scale,
+  Package,
 } from 'lucide-react'
 import { api } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
@@ -29,11 +32,35 @@ function formatUsd(value) {
   })
 }
 
+function formatResourceAmount(value) {
+  const number = Number(value || 0)
+  if (!Number.isFinite(number) || number <= 0) return '0'
+  return number.toLocaleString(undefined, { maximumFractionDigits: 1 })
+}
+
 function formatTimestamp(value) {
   if (!value) return 'Unknown'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Unknown'
   return date.toLocaleString()
+}
+
+function splitSummaryText(value) {
+  return String(value || '')
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+}
+
+function getTradeAmountSummary(activity) {
+  const amounts = activity?.trade_amounts || {}
+  const parts = ['food', 'energy', 'materials']
+    .map((resource) => {
+      const amount = Number(amounts?.[resource] || 0)
+      return amount > 0 ? `${formatResourceAmount(amount)} ${resource}` : ''
+    })
+    .filter(Boolean)
+  return parts.length > 0 ? parts.join(' / ') : 'No resource totals available'
 }
 
 function formatDate(value) {
@@ -149,6 +176,8 @@ export default function RunDetail() {
   const [focusedSourceMessage, setFocusedSourceMessage] = useState(null)
   const [focusedEventError, setFocusedEventError] = useState('')
   const [overviewScope, setOverviewScope] = useState(null)
+  const [overviewAgents, setOverviewAgents] = useState(null)
+  const [runSummary, setRunSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [shareNotice, setShareNotice] = useState('')
@@ -160,9 +189,10 @@ export default function RunDetail() {
       setLoading(true)
       setError('')
       try {
-        const [detailResult, overviewResult] = await Promise.allSettled([
+        const [detailResult, overviewResult, summaryResult] = await Promise.allSettled([
           api.getRunDetail(runId, 48, 16, 55),
           api.fetch('/api/analytics/overview'),
+          api.getLatestSummary(runId),
         ])
         if (detailResult.status !== 'fulfilled') {
           throw detailResult.reason
@@ -174,11 +204,23 @@ export default function RunDetail() {
               ? overviewResult.value.scope
               : null
           )
+          setOverviewAgents(
+            overviewResult.status === 'fulfilled' && overviewResult.value?.agents
+              ? overviewResult.value.agents
+              : null
+          )
+          setRunSummary(
+            summaryResult.status === 'fulfilled' && summaryResult.value
+              ? summaryResult.value
+              : null
+          )
         }
       } catch (loadError) {
         if (!cancelled) {
           setData(null)
           setOverviewScope(null)
+          setOverviewAgents(null)
+          setRunSummary(null)
           setError(loadError?.message || 'Failed to load run details')
         }
       } finally {
@@ -264,6 +306,12 @@ export default function RunDetail() {
   const isNotLatestCompletedRun = Boolean(
     latestCompletedRunId && cleanCurrentRunId && latestCompletedRunId !== cleanCurrentRunId
   )
+  const latestCompletedPopulation =
+    latestCompletedRunId && latestCompletedRunId === cleanCurrentRunId && overviewAgents && typeof overviewAgents === 'object'
+      ? overviewAgents
+      : null
+  const summaryParagraphs = splitSummaryText(runSummary?.summary)
+  const tradeAmountSummary = getTradeAmountSummary(data?.activity)
   const timeWindowSummary =
     startTime && endTime ? `${formatTimestamp(startTime)} -> ${formatTimestamp(endTime)}` : 'Unknown time window'
 
@@ -483,12 +531,76 @@ export default function RunDetail() {
       )}
       {!loading && !error && isTuningRun && (
         <div className="feed-notice">
-          This run is labeled as a tuning run and is excluded from the public archived-run history by default.
+          This run is exploratory/tuning-labeled. Treat it as a public canary, not a claim-bearing finished result.
         </div>
       )}
 
       {!loading && !error && data && (
         <>
+          <div className="card run-recap-card">
+            <div className="card-header">
+              <h3>Run Recap</h3>
+              <span className="strip-meta">
+                {runSummary?.source === 'run_summary_fallback'
+                  ? 'Closeout summary'
+                  : runSummary?.source
+                    ? 'Daily summary'
+                    : 'Computed from run detail'}
+              </span>
+            </div>
+            <div className="card-body">
+              <div className="run-recap-copy">
+                {summaryParagraphs.length > 0 ? (
+                  summaryParagraphs.slice(0, 3).map((paragraph) => (
+                    <p key={paragraph}>{paragraph}</p>
+                  ))
+                ) : (
+                  <p>
+                    This run recorded {formatNumber(data?.activity?.total_events)} scoped events and {formatNumber(data?.llm?.calls)} model calls.
+                    Use the metrics below to inspect survival, aid, governance, public order, and model behavior.
+                  </p>
+                )}
+              </div>
+              <div className="run-recap-grid">
+                <div>
+                  <Users size={17} />
+                  <span>Population</span>
+                  {latestCompletedPopulation ? (
+                    <strong>
+                      {formatNumber(latestCompletedPopulation.active)} active / {formatNumber(latestCompletedPopulation.dormant)} dormant / {formatNumber(latestCompletedPopulation.dead)} dead
+                    </strong>
+                  ) : (
+                    <strong>
+                      {formatNumber(data?.activity?.became_dormant)} dormant events / {formatNumber(data?.activity?.agent_revived)} revivals / {formatNumber(data?.activity?.deaths)} deaths
+                    </strong>
+                  )}
+                </div>
+                <div>
+                  <Package size={17} />
+                  <span>Aid &amp; Trade</span>
+                  <strong>
+                    {formatNumber(data?.activity?.aid_requests)} aid requests / {formatNumber(data?.activity?.trade_actions)} trades
+                  </strong>
+                  <em>{tradeAmountSummary}</em>
+                </div>
+                <div>
+                  <Scale size={17} />
+                  <span>Governance</span>
+                  <strong>
+                    {formatNumber(data?.activity?.proposal_actions)} proposals / {formatNumber(data?.activity?.vote_actions)} votes / {formatNumber(data?.activity?.laws_passed)} laws
+                  </strong>
+                </div>
+                <div>
+                  <ShieldCheck size={17} />
+                  <span>Public Order</span>
+                  <strong>
+                    {formatNumber(data?.activity?.public_order_events)} public-order signals / {formatNumber(data?.activity?.conflict_events)} conflict signals
+                  </strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="card run-provenance-card">
             <div className="card-header">
               <h3>
@@ -618,8 +730,14 @@ export default function RunDetail() {
                 <div><span>Proposal actions</span><strong>{formatNumber(data?.activity?.proposal_actions)}</strong></div>
                 <div><span>Votes</span><strong>{formatNumber(data?.activity?.vote_actions)}</strong></div>
                 <div><span>Forum actions</span><strong>{formatNumber(data?.activity?.forum_actions)}</strong></div>
+                <div><span>Direct messages</span><strong>{formatNumber(data?.activity?.direct_messages)}</strong></div>
+                <div><span>Aid requests</span><strong>{formatNumber(data?.activity?.aid_requests)}</strong></div>
+                <div><span>Trades</span><strong>{formatNumber(data?.activity?.trade_actions)}</strong></div>
                 <div><span>Laws passed</span><strong>{formatNumber(data?.activity?.laws_passed)}</strong></div>
+                <div><span>Became dormant</span><strong>{formatNumber(data?.activity?.became_dormant)}</strong></div>
+                <div><span>Revivals</span><strong>{formatNumber(data?.activity?.agent_revived)}</strong></div>
                 <div><span>Deaths</span><strong>{formatNumber(data?.activity?.deaths)}</strong></div>
+                <div><span>Public order</span><strong>{formatNumber(data?.activity?.public_order_events)}</strong></div>
               </div>
             </div>
           </div>

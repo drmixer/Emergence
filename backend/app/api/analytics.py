@@ -3,6 +3,7 @@ Analytics & Highlights API Router
 """
 import logging
 import json
+import re
 from io import BytesIO
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from datetime import date, datetime, timedelta, timezone
@@ -135,6 +136,8 @@ PLOT_TURN_BASE_SCORES = {
     "create_proposal": 60,
     "vote_enforcement": 72,
 }
+
+TRADE_DESCRIPTION_RE = re.compile(r"\btraded\s+([0-9]+(?:\.[0-9]+)?)\s+([A-Za-z_ -]+?)\s+to\b", re.IGNORECASE)
 BEST_MOMENT_CATEGORY_PRIORITY = {
     "crisis": 5,
     "conflict": 4,
@@ -2780,8 +2783,17 @@ def run_detail(
                   COALESCE(SUM(CASE WHEN e.event_type = 'create_proposal' THEN 1 ELSE 0 END), 0) AS proposal_actions,
                   COALESCE(SUM(CASE WHEN e.event_type = 'vote' THEN 1 ELSE 0 END), 0) AS vote_actions,
                   COALESCE(SUM(CASE WHEN e.event_type IN ('forum_post', 'forum_reply') THEN 1 ELSE 0 END), 0) AS forum_actions,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'direct_message' THEN 1 ELSE 0 END), 0) AS direct_messages,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'request_aid' THEN 1 ELSE 0 END), 0) AS aid_requests,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'refuse_aid' THEN 1 ELSE 0 END), 0) AS aid_refusals,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'trade' THEN 1 ELSE 0 END), 0) AS trade_actions,
                   COALESCE(SUM(CASE WHEN e.event_type = 'law_passed' THEN 1 ELSE 0 END), 0) AS laws_passed,
-                  COALESCE(SUM(CASE WHEN e.event_type = 'agent_died' THEN 1 ELSE 0 END), 0) AS deaths
+                  COALESCE(SUM(CASE WHEN e.event_type = 'agent_died' THEN 1 ELSE 0 END), 0) AS deaths,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'became_dormant' THEN 1 ELSE 0 END), 0) AS became_dormant,
+                  COALESCE(SUM(CASE WHEN e.event_type = 'agent_revived' THEN 1 ELSE 0 END), 0) AS agent_revived,
+                  COALESCE(SUM(CASE WHEN e.event_type IN ('public_accusation', 'initiate_sanction', 'initiate_seizure', 'initiate_exile', 'vote_enforcement', 'enforcement_initiated', 'agent_sanctioned', 'resources_seized', 'agent_exiled', 'invalid_action', 'refuse_aid', 'contest_proposal') THEN 1 ELSE 0 END), 0) AS public_order_events,
+                  COALESCE(SUM(CASE WHEN e.event_type IN ('public_accusation', 'refuse_aid', 'contest_proposal', 'initiate_sanction', 'initiate_seizure', 'initiate_exile', 'vote_enforcement', 'enforcement_initiated', 'agent_sanctioned', 'resources_seized', 'agent_exiled') THEN 1 ELSE 0 END), 0) AS conflict_events,
+                  COALESCE(SUM(CASE WHEN e.event_type IN ('trade', 'direct_message', 'request_aid', 'forum_reply', 'forum_post', 'agent_revived') THEN 1 ELSE 0 END), 0) AS cooperation_events
                 FROM events e
                 WHERE e.created_at >= :since_ts
                   AND e.created_at <= :until_ts
@@ -2790,6 +2802,38 @@ def run_detail(
             ),
             {"run_id": clean_run_id, "since_ts": run_started_at, "until_ts": run_ended_at},
         ).first()
+
+        trade_rows = db.execute(
+            text(
+                """
+                SELECT e.description, e.event_metadata
+                FROM events e
+                WHERE e.created_at >= :since_ts
+                  AND e.created_at <= :until_ts
+                  AND e.event_type = 'trade'
+                  AND (e.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                """
+            ),
+            {"run_id": clean_run_id, "since_ts": run_started_at, "until_ts": run_ended_at},
+        ).fetchall()
+        trade_amounts: dict[str, float] = {"food": 0.0, "energy": 0.0, "materials": 0.0}
+        for trade_row in trade_rows:
+            metadata = trade_row.event_metadata if isinstance(trade_row.event_metadata, dict) else {}
+            action = metadata.get("action") if isinstance(metadata.get("action"), dict) else {}
+            resource_type = str(action.get("resource_type") or metadata.get("resource_type") or "").strip().lower()
+            raw_amount = action.get("amount", metadata.get("amount"))
+            amount = 0.0
+            try:
+                amount = float(raw_amount or 0.0)
+            except (TypeError, ValueError):
+                amount = 0.0
+            if not resource_type or amount <= 0:
+                match = TRADE_DESCRIPTION_RE.search(str(trade_row.description or ""))
+                if match:
+                    amount = float(match.group(1) or 0.0)
+                    resource_type = str(match.group(2) or "").strip().lower()
+            if resource_type in trade_amounts and amount > 0:
+                trade_amounts[resource_type] += amount
 
         scored = _collect_scored_plot_turns(
             db,
@@ -2881,8 +2925,18 @@ def run_detail(
                 "proposal_actions": int((runtime_actions.proposal_actions if runtime_actions else 0) or 0),
                 "vote_actions": int((runtime_actions.vote_actions if runtime_actions else 0) or 0),
                 "forum_actions": int((runtime_actions.forum_actions if runtime_actions else 0) or 0),
+                "direct_messages": int((runtime_actions.direct_messages if runtime_actions else 0) or 0),
+                "aid_requests": int((runtime_actions.aid_requests if runtime_actions else 0) or 0),
+                "aid_refusals": int((runtime_actions.aid_refusals if runtime_actions else 0) or 0),
+                "trade_actions": int((runtime_actions.trade_actions if runtime_actions else 0) or 0),
+                "trade_amounts": {key: round(value, 4) for key, value in trade_amounts.items()},
                 "laws_passed": int((runtime_actions.laws_passed if runtime_actions else 0) or 0),
                 "deaths": int((runtime_actions.deaths if runtime_actions else 0) or 0),
+                "became_dormant": int((runtime_actions.became_dormant if runtime_actions else 0) or 0),
+                "agent_revived": int((runtime_actions.agent_revived if runtime_actions else 0) or 0),
+                "public_order_events": int((runtime_actions.public_order_events if runtime_actions else 0) or 0),
+                "conflict_events": int((runtime_actions.conflict_events if runtime_actions else 0) or 0),
+                "cooperation_events": int((runtime_actions.cooperation_events if runtime_actions else 0) or 0),
             },
             "provenance": {
                 "run_id": clean_run_id,

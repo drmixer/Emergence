@@ -364,7 +364,7 @@ export default function Dashboard() {
 
             {idleDashboard && (
                 <NoActiveRunNotice
-                    message="Live metrics will return when the next simulation starts. For now, review completed evidence in the archive."
+                    message="The live dashboard pauses between runs. Open the latest completed run for archived stats, recap, replay, and source evidence."
                     lastCompletedRunId={lastCompletedRunId}
                 />
             )}

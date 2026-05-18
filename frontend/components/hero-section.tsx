@@ -43,6 +43,7 @@ export function HeroSection() {
     coalitions: 0,
   })
   const [simulationActive, setSimulationActive] = useState(false)
+  const [lastCompletedRunId, setLastCompletedRunId] = useState("")
   const [quotes, setQuotes] = useState<string[]>([])
   const [quoteIndex, setQuoteIndex] = useState(0)
 
@@ -89,10 +90,27 @@ export function HeroSection() {
         if (cancelled) return
 
         const isLive = overview?.scope?.simulation_active === true
+        const completedRunId = String(overview?.scope?.last_completed_run_id || "").trim()
         setSimulationActive(isLive)
+        setLastCompletedRunId(completedRunId)
 
         if (!isLive) {
-          setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
+          if (completedRunId) {
+            const runDetail = await fetch(
+              `${apiBase}/api/analytics/runs/${encodeURIComponent(completedRunId)}?hours_fallback=48&trace_limit=3&min_salience=55`
+            )
+              .then((response) => (response.ok ? response.json() : null))
+              .catch(() => null)
+            if (cancelled) return
+            setStats({
+              day: 0,
+              deaths: runDetail?.activity?.deaths ?? 0,
+              laws: runDetail?.activity?.laws_passed ?? 0,
+              coalitions: runDetail?.activity?.cooperation_events ?? 0,
+            })
+          } else {
+            setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
+          }
           setQuotes([])
           return
         }
@@ -207,7 +225,7 @@ export function HeroSection() {
             </div>
             <div className="border border-border/60 p-3">
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <Network className="h-3.5 w-3.5" /> Coalition Links
+                <Network className="h-3.5 w-3.5" /> {isIdle ? "Cooperation Signals" : "Coalition Links"}
               </div>
               <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">
                 {statsLoading ? "..." : stats.coalitions.toLocaleString()}
@@ -224,7 +242,9 @@ export function HeroSection() {
             </h3>
             <p className="mt-3 max-w-xl font-mono text-xs leading-relaxed text-muted-foreground">
               {isIdle
-                ? "No run is active right now. The dashboard will update when the next live run begins."
+                ? lastCompletedRunId
+                  ? "The live run has ended. Open the latest run detail for recap, stats, replay, and source evidence."
+                  : "No run is active right now. The dashboard will update when the next live run begins."
                 : "The agents are surviving, cooperating, competing, and voting inside a fixed rule set. No script. No predetermined outcome."}
             </p>
             <p className="mt-3 max-w-xl font-mono text-[11px] leading-relaxed text-muted-foreground/80">
@@ -232,7 +252,7 @@ export function HeroSection() {
             </p>
           </div>
           <Link
-            href="/dashboard"
+            href={isIdle && lastCompletedRunId ? `/runs/${encodeURIComponent(lastCompletedRunId)}` : "/dashboard"}
             onClick={() =>
               trackKpiEvent("landing_run_click", {
                 surface: "next_hero_cta",
@@ -242,7 +262,7 @@ export function HeroSection() {
             className="inline-flex items-center gap-3 border border-foreground bg-foreground px-6 py-3 font-mono text-xs uppercase tracking-widest text-background transition-all duration-200 hover:translate-x-0.5"
           >
             <Play className="h-4 w-4" />
-            {isIdle ? "View Dashboard" : "Watch Live"}
+            {isIdle && lastCompletedRunId ? "Latest Run Details" : isIdle ? "View Dashboard" : "Watch Live"}
             <ArrowUpRight className="h-4 w-4" />
           </Link>
         </div>

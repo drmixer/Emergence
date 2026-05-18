@@ -93,6 +93,15 @@ def _duration_hours(started_at: Any, ended_at: Any) -> float | None:
     return round((end_dt - start_dt).total_seconds() / 3600, 2)
 
 
+def _is_public_canary_run(row: SimulationRun | None) -> bool:
+    if row is None:
+        return False
+    run_class = str(row.run_class or "").strip()
+    condition_name = str(row.condition_name or "").strip().lower()
+    run_id = str(row.run_id or "").strip().lower()
+    return run_class == "special_exploratory" and ("canary" in condition_name or "_k" in condition_name or "-k" in run_id)
+
+
 def _resolve_download_path(raw_path: str) -> Path:
     try:
         artifact_path = resolve_registered_artifact_path(str(raw_path or ""))
@@ -300,7 +309,8 @@ def list_archived_runs(
             and bool(run_row.protocol_deviation)
             and str(run_row.deviation_reason or "").strip() == "tuning_run"
         )
-        if is_tuning and not include_tuning:
+        is_public_canary = _is_public_canary_run(run_row)
+        if is_tuning and not is_public_canary and not include_tuning:
             hidden_tuning_count += 1
             continue
         items.append(

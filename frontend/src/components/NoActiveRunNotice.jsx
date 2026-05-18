@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 import { getStoryReplayHref } from '../utils/bestMoments'
 
 export default function NoActiveRunNotice({
-    title = 'No run in progress',
-    message = 'This live surface will update when the next simulation starts. Review completed evidence in the archive for the last run.',
+    title = 'No live run right now',
+    message = 'The latest run has ended. You can still open its evidence page, replay major events, or browse older completed runs in the archive.',
     lastCompletedRunId = '',
 }) {
     const cleanRunId = String(lastCompletedRunId || '').trim()
@@ -23,7 +23,7 @@ export default function NoActiveRunNotice({
                             <>
                                 <Link to={`/runs/${encodeURIComponent(cleanRunId)}`} className="btn btn-primary">
                                     <FileSearch size={14} />
-                                    Latest Evidence
+                                    Latest Run Details
                                 </Link>
                                 <Link to={getStoryReplayHref(cleanRunId)} className="btn btn-secondary">
                                     <TimerReset size={14} />
