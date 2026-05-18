@@ -159,7 +159,11 @@ export function HeroSection() {
   const nextRun = getNextScheduledRun()
 
   return (
-    <section ref={sectionRef} id="hero" className="relative min-h-screen flex items-center px-4 md:pl-28 md:pr-12">
+    <section
+      ref={sectionRef}
+      id="hero"
+      className="relative min-h-screen flex items-center px-4 pt-16 pb-12 sm:pt-20 md:py-0 md:pl-28 md:pr-12"
+    >
       {/* Left vertical label */}
       <div className="hidden md:block absolute left-4 md:left-6 top-1/2 -translate-y-1/2">
         <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground -rotate-90 origin-left block whitespace-nowrap">
