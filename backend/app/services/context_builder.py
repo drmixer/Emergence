@@ -1339,6 +1339,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
     context_parts.append(
         "  - If a thread already has many replies around the same proposal/law, do not add another agreement summary. Move the situation with a concrete offer, refusal, amendment, named ask, trade, aid request, contest, or vote."
     )
+    context_parts.append(
+        "  - If two replies have already restated support, an energy-floor point, or a public-aid/pool-floor point for the same proposal/law, do not add a third version. Vote, contest, ask a named agent for a commitment, or propose a concrete amendment instead."
+    )
     context_parts.append("")
 
     if recent_system_alerts:

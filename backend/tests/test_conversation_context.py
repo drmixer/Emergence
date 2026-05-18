@@ -279,6 +279,7 @@ def test_context_includes_personality_lens_and_duplicate_awareness(session_facto
     assert "does not require any political conclusion or preferred outcome" in context
     assert "prefer a direct reply, vote, contest_proposal, trade" in context
     assert "Generic greetings and self-introductions are usually wasted space" in context
+    assert "If two replies have already restated support, an energy-floor point" in context
     assert '"title":"Shared Survival Reserve Law"' not in context
 
 

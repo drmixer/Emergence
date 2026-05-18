@@ -1422,6 +1422,100 @@ def test_forum_reply_rejects_proposal_agreement_pile_on_before_saturation(sessio
     assert validation["thread_id"] == root.id
 
 
+def test_forum_reply_rejects_energy_floor_restatement_pile_on_before_saturation(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #662 asks whether active threshold aid should preserve an energy floor.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index, content in enumerate(
+            [
+                "The energy floor matters because public aid should not drain the reserve.",
+                "Public aid remains important, and the pool floor protects stability.",
+            ]
+        ):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Floor-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=content,
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=20 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": "The energy floor remains crucial because threshold aid preserves stability.",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "proposal_agreement_pile_on"
+    assert validation["thread_id"] == root.id
+
+
+def test_forum_reply_allows_named_ask_after_policy_restatements(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #662 asks whether active threshold aid should preserve an energy floor.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index, content in enumerate(
+            [
+                "The energy floor matters because public aid should not drain the reserve.",
+                "Public aid remains important, and the pool floor protects stability.",
+            ]
+        ):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Floor-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=content,
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=20 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": "Logic-21, will you amend proposal #662 to set the energy floor at 8?",
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
 def test_forum_reply_rejects_saturated_auto_contribution_diagnosis_without_delta(session_factory):
     with session_factory() as db:
         root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")

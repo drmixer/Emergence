@@ -292,7 +292,7 @@ _DUPLICATE_FORUM_MIN_OVERLAP = 6
 _DUPLICATE_FORUM_SMALLER_RATIO = 0.55
 _SATURATED_THREAD_MESSAGE_COUNT = 8
 _SATURATED_THREAD_RECENT_SAMPLE = 60
-_AGREEMENT_PILE_ON_REPLY_COUNT = 3
+_AGREEMENT_PILE_ON_REPLY_COUNT = 2
 
 _PROCEDURAL_STATUS_MEMO_PREFIXES = (
     "observation:",
@@ -982,10 +982,17 @@ def _low_novelty_governance_agreement_reply(content: str | None) -> bool:
         "support this",
         "support proposal",
         "strong support",
+        "i back",
+        "back this",
         "vote yes",
         "voted yes",
-        "back this",
+        "voting yes",
+        "will vote yes",
         "back the proposal",
+        "endorse",
+        "i endorse",
+        "i am in favor",
+        "i'm in favor",
         "aligns with",
         "provides a clear",
         "is crucial",
@@ -1002,27 +1009,77 @@ def _low_novelty_governance_agreement_reply(content: str | None) -> bool:
         "reserve",
         "threshold",
         "pool floor",
+        "energy floor",
+        "aid floor",
         "allocation",
         "runtime effect",
         "public aid",
-        "energy floor",
+        "reserve aid",
+        "threshold aid",
     )
     return any(marker in normalized for marker in governance_markers)
 
 
+def _low_novelty_policy_restatement_reply(content: str | None) -> bool:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return False
+    if _reply_adds_saturated_thread_allowed_delta(content):
+        return False
+
+    policy_topic_markers = (
+        "active threshold aid",
+        "threshold aid",
+        "public aid",
+        "reserve aid",
+        "energy floor",
+        "aid floor",
+        "pool floor",
+        "common pool",
+        "reserve floor",
+        "aid trigger",
+        "energy trigger",
+    )
+    if not any(marker in normalized for marker in policy_topic_markers):
+        return False
+
+    restatement_markers = (
+        "matters",
+        "is important",
+        "is crucial",
+        "is necessary",
+        "remains important",
+        "remains crucial",
+        "should remain",
+        "must remain",
+        "needs to remain",
+        "keeps",
+        "protects",
+        "preserves",
+        "provides",
+        "ensures",
+        "stability",
+    )
+    return any(marker in normalized for marker in restatement_markers)
+
+
+def _low_novelty_policy_pile_on_reply(content: str | None) -> bool:
+    return _low_novelty_governance_agreement_reply(content) or _low_novelty_policy_restatement_reply(content)
+
+
 def _agreement_pile_on_reason(*, content: str | None, thread_messages: list[Message]) -> str | None:
-    if not _low_novelty_governance_agreement_reply(content):
+    if not _low_novelty_policy_pile_on_reply(content):
         return None
 
     prior_agreement_replies = sum(
         1
         for message in thread_messages
         if str(message.message_type or "") == "forum_reply"
-        and _low_novelty_governance_agreement_reply(message.content)
+        and _low_novelty_policy_pile_on_reply(message.content)
     )
     if prior_agreement_replies >= _AGREEMENT_PILE_ON_REPLY_COUNT:
         return (
-            f"thread already has {prior_agreement_replies} low-novelty agreement replies; "
+            f"thread already has {prior_agreement_replies} low-novelty policy replies; "
             "use vote/contest/trade/direct_message, or add a concrete amendment, named ask, resource transfer, or changed fact"
         )
     return None
