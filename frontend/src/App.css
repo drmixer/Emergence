@@ -165,6 +165,8 @@
   margin-top: var(--spacing-md);
   font-size: 1rem;
   line-height: 1.6;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* Stats Grid - Glassmorphism Cards */
@@ -429,10 +431,17 @@
 /* Tables */
 .table-container {
   overflow-x: auto;
+  max-width: 100%;
   background: var(--gradient-card);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius-xl);
   padding: var(--spacing-md);
+}
+
+.compact-table-container {
+  padding: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
 }
 
 table {
@@ -902,10 +911,16 @@ tr:last-child td {
   max-width: 920px;
   color: var(--text-secondary);
   line-height: 1.65;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .run-recap-copy p {
   margin: 0 0 var(--spacing-sm);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .run-recap-copy p:last-child {
@@ -948,6 +963,8 @@ tr:last-child td {
   color: var(--text-primary);
   font-size: 0.98rem;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .run-recap-grid em {
@@ -969,6 +986,14 @@ tr:last-child td {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 0.2rem;
+}
+
+.run-provenance-grid > div,
+.run-provenance-grid strong {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .verification-badge {
@@ -1197,6 +1222,7 @@ tr:last-child td {
   flex-direction: column;
   gap: 0.5rem;
   min-width: 160px;
+  max-width: 100%;
 }
 
 @media (max-width: 900px) {

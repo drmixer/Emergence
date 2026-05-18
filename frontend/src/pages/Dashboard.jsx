@@ -553,38 +553,40 @@ export default function Dashboard() {
                         {loading || secondaryLoading ? (
                             <SkeletonTable rows={3} cols={4} />
                         ) : (
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Proposal</th>
-                                        <th>Author</th>
-                                        <th>Votes</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {proposals.map(proposal => (
-                                        <tr key={proposal.id}>
-                                            <td>{proposal.title}</td>
-                                            <td>
-                                                {proposal.author
-                                                    ? formatAgentDisplayLabel(proposal.author)
-                                                    : 'Unknown'}
-                                            </td>
-                                            <td>
-                                                <span style={{ color: 'var(--accent-green)' }}>{proposal.votes_for}</span>
-                                                {' / '}
-                                                <span style={{ color: 'var(--accent-red)' }}>{proposal.votes_against}</span>
-                                            </td>
-                                            <td>
-                                                <span className={`badge badge-${proposal.status === 'active' ? 'active' : 'passed'}`}>
-                                                    {proposal.status}
-                                                </span>
-                                            </td>
+                            <div className="table-container compact-table-container" tabIndex={0}>
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Proposal</th>
+                                            <th>Author</th>
+                                            <th>Votes</th>
+                                            <th>Status</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        {proposals.map(proposal => (
+                                            <tr key={proposal.id}>
+                                                <td>{proposal.title}</td>
+                                                <td>
+                                                    {proposal.author
+                                                        ? formatAgentDisplayLabel(proposal.author)
+                                                        : 'Unknown'}
+                                                </td>
+                                                <td>
+                                                    <span style={{ color: 'var(--accent-green)' }}>{proposal.votes_for}</span>
+                                                    {' / '}
+                                                    <span style={{ color: 'var(--accent-red)' }}>{proposal.votes_against}</span>
+                                                </td>
+                                                <td>
+                                                    <span className={`badge badge-${proposal.status === 'active' ? 'active' : 'passed'}`}>
+                                                        {proposal.status}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -599,32 +601,34 @@ export default function Dashboard() {
                         {loading || secondaryLoading ? (
                             <SkeletonTable rows={5} cols={4} />
                         ) : (
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Agent</th>
-                                        <th>Tier</th>
-                                        <th>Actions (24h)</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {topAgents.map(agent => (
-                                        <tr key={agent.agent_id}>
-                                            <td>
-                                                <Link to={`/agents/${agent.agent_number}`}>
-                                                    {formatAgentDisplayLabel(agent)}
-                                                </Link>
-                                            </td>
-                                            <td>
-                                                <span className={`badge badge-tier-${agent.tier}`}>
-                                                    Tier {agent.tier}
-                                                </span>
-                                            </td>
-                                            <td>{agent.action_count}</td>
+                            <div className="table-container compact-table-container" tabIndex={0}>
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Agent</th>
+                                            <th>Tier</th>
+                                            <th>Actions (24h)</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        {topAgents.map(agent => (
+                                            <tr key={agent.agent_id}>
+                                                <td>
+                                                    <Link to={`/agents/${agent.agent_number}`}>
+                                                        {formatAgentDisplayLabel(agent)}
+                                                    </Link>
+                                                </td>
+                                                <td>
+                                                    <span className={`badge badge-tier-${agent.tier}`}>
+                                                        Tier {agent.tier}
+                                                    </span>
+                                                </td>
+                                                <td>{agent.action_count}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         )}
                     </div>
                 </div>

@@ -201,6 +201,7 @@ a:hover {
   border-radius: var(--radius-lg);
   overflow: hidden;
   min-width: 0;
+  max-width: 100%;
 }
 
 .card-header {
@@ -210,10 +211,14 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-md);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .card-body {
   padding: var(--spacing-lg);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .badge {

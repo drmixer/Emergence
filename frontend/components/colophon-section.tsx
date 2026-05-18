@@ -16,10 +16,11 @@ export function ColophonSection() {
     if (!sectionRef.current) return
 
     const ctx = gsap.context(() => {
+      const isMobile = window.matchMedia("(max-width: 640px)").matches
       // Header slide in
       if (headerRef.current) {
         gsap.from(headerRef.current, {
-          x: -60,
+          x: isMobile ? 0 : -60,
           opacity: 0,
           duration: 1,
           ease: "power3.out",
@@ -71,7 +72,7 @@ export function ColophonSection() {
     <section
       ref={sectionRef}
       id="colophon"
-      className="relative py-32 pl-6 md:pl-28 pr-6 md:pr-12 border-t border-border/30"
+      className="relative overflow-x-hidden py-32 pl-6 md:pl-28 pr-6 md:pr-12 border-t border-border/30"
     >
       {/* Section header */}
       <div ref={headerRef} className="mb-16">

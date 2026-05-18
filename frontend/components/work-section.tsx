@@ -58,10 +58,11 @@ export function WorkSection() {
     if (!sectionRef.current || !headerRef.current || !gridRef.current) return
 
     const ctx = gsap.context(() => {
+      const isMobile = window.matchMedia("(max-width: 640px)").matches
       // Header slide in from left
       gsap.fromTo(
         headerRef.current,
-        { x: -60, opacity: 0 },
+        { x: isMobile ? 0 : -60, opacity: 0 },
         {
           x: 0,
           opacity: 1,
@@ -97,7 +98,7 @@ export function WorkSection() {
   }, [])
 
   return (
-    <section ref={sectionRef} id="work" className="relative py-32 pl-6 md:pl-28 pr-6 md:pr-12">
+    <section ref={sectionRef} id="work" className="relative overflow-x-hidden py-32 pl-6 md:pl-28 pr-6 md:pr-12">
       {/* Section header */}
       <div ref={headerRef} className="mb-16 flex items-end justify-between">
         <div>

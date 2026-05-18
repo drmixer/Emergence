@@ -77,10 +77,11 @@ export function SignalsSection() {
     if (!sectionRef.current || !headerRef.current || !cardsRef.current) return
 
     const ctx = gsap.context(() => {
+      const isMobile = window.matchMedia("(max-width: 640px)").matches
       // Header slide in from left
       gsap.fromTo(
         headerRef.current,
-        { x: -60, opacity: 0 },
+        { x: isMobile ? 0 : -60, opacity: 0 },
         {
           x: 0,
           opacity: 1,
@@ -98,7 +99,7 @@ export function SignalsSection() {
       if (cards) {
         gsap.fromTo(
           cards,
-          { x: -100, opacity: 0 },
+          { x: isMobile ? 0 : -100, opacity: 0 },
           {
             x: 0,
             opacity: 1,
@@ -133,7 +134,7 @@ export function SignalsSection() {
   }, [])
 
   return (
-    <section id="signals" ref={sectionRef} className="relative py-32 pl-6 md:pl-28">
+    <section id="signals" ref={sectionRef} className="relative overflow-x-hidden py-32 pl-6 md:pl-28">
       <div
         ref={cursorRef}
         className={cn(
