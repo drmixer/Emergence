@@ -1,6 +1,10 @@
 "use client"
 
-import LegacyAppHost from "../../src/LegacyAppHost"
+import dynamic from "next/dynamic"
+
+const LegacyAppHost = dynamic(() => import("../../src/LegacyAppHost"), {
+  ssr: false,
+})
 
 export default function LegacyRoute() {
   return <LegacyAppHost />
