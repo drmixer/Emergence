@@ -8,7 +8,9 @@ const securityHeaders = [
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self'",
-      "script-src 'self'",
+      // Next streams inline hydration data for the app router. Without a nonce
+      // pipeline, blocking inline scripts leaves the landing page unhydrated.
+      "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self'",
