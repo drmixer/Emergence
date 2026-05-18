@@ -11,7 +11,7 @@ import re
 from threading import Lock
 from typing import Any
 
-from sqlalchemy import String, cast, text
+from sqlalchemy import String, bindparam, cast, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -701,7 +701,7 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         {"run_id": run_id, "since_ts": run_started_at},
     ).first()
 
-    key_moment_rows = db.execute(
+    key_moment_query = (
         text(
             """
             SELECT
@@ -719,14 +719,51 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
                   WHERE u.agent_id IS NOT NULL
                     AND u.run_id = :run_id
                     AND u.created_at >= :since_ts
-                )
+                  )
               )
+              AND e.event_type IN :signal_event_types
             ORDER BY e.created_at DESC, e.id DESC
-            LIMIT 96
+            LIMIT 500
             """
-        ),
-        {"run_id": run_id, "since_ts": run_started_at},
+        )
+        .bindparams(bindparam("signal_event_types", expanding=True))
+    )
+    key_moment_rows = db.execute(
+        key_moment_query,
+        {
+            "run_id": run_id,
+            "since_ts": run_started_at,
+            "signal_event_types": tuple(sorted(STORY_SIGNAL_EVENT_TYPES)),
+        },
     ).fetchall()
+
+    if not key_moment_rows:
+        key_moment_rows = db.execute(
+            text(
+                """
+                SELECT
+                  e.id,
+                  e.event_type,
+                  e.description,
+                  e.created_at
+                FROM events e
+                WHERE e.created_at >= :since_ts
+                  AND (
+                    (e.event_metadata -> 'runtime' ->> 'run_id') = :run_id
+                    OR e.agent_id IN (
+                      SELECT DISTINCT u.agent_id
+                      FROM llm_usage u
+                      WHERE u.agent_id IS NOT NULL
+                        AND u.run_id = :run_id
+                        AND u.created_at >= :since_ts
+                    )
+                  )
+                ORDER BY e.created_at DESC, e.id DESC
+                LIMIT 96
+                """
+            ),
+            {"run_id": run_id, "since_ts": run_started_at},
+        ).fetchall()
 
     ranked_key_rows = []
     for row in key_moment_rows:
