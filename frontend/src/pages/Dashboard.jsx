@@ -305,7 +305,9 @@ export default function Dashboard() {
                     Current Run
                 </h1>
                 <p className="page-description">
-                    {isPreLaunch
+                    {idleDashboard
+                        ? 'No simulation is live right now. Use the latest completed run for recap, replay, and evidence.'
+                        : isPreLaunch
                         ? 'The experiment is about to begin...'
                         : 'Live operational state for the active simulation run.'
                     }

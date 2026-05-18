@@ -17,6 +17,32 @@ import {
 import { api } from '../services/api'
 
 const VALID_TABS = new Set(['overview', 'replay', 'evidence', 'reports'])
+const ROUTINE_REPLAY_EVENT_TYPES = new Set(['work', 'idle', 'vote', 'processing_error'])
+const SIGNAL_REPLAY_EVENT_TYPES = new Set([
+  'agent_died',
+  'became_dormant',
+  'agent_revived',
+  'awakened',
+  'law_passed',
+  'proposal_resolved',
+  'create_proposal',
+  'world_event',
+  'trade',
+  'request_aid',
+  'refuse_aid',
+  'public_accusation',
+  'contest_proposal',
+  'initiate_sanction',
+  'initiate_seizure',
+  'initiate_exile',
+  'vote_enforcement',
+  'enforcement_initiated',
+  'agent_sanctioned',
+  'resources_seized',
+  'agent_exiled',
+])
+const STRONG_REPLAY_CATEGORIES = new Set(['crisis', 'conflict', 'governance'])
+const SOCIAL_REPLAY_CATEGORIES = new Set(['cooperation', 'alliance'])
 
 const REPORT_LABELS = {
   approachable_report: 'Approachable Report',
@@ -74,11 +100,24 @@ function getEventTime(item) {
   return item?.created_at || item?.timestamp || ''
 }
 
+function isReplayMomentCandidate(item) {
+  const eventType = String(item?.event_type || '').trim()
+  const category = String(item?.category || '').trim()
+  const salience = Number(item?.salience || 0)
+
+  if (getEventId(item) <= 0) return false
+  if (ROUTINE_REPLAY_EVENT_TYPES.has(eventType)) return false
+  if (SIGNAL_REPLAY_EVENT_TYPES.has(eventType)) return true
+  if (STRONG_REPLAY_CATEGORIES.has(category)) return true
+  if (SOCIAL_REPLAY_CATEGORIES.has(category)) return salience >= 70
+  return salience >= 75
+}
+
 function getStoryItems(story, playbackItems) {
   const storyItems = Array.isArray(story?.items) ? story.items : []
   if (storyItems.length > 0) return storyItems
   return (Array.isArray(playbackItems) ? playbackItems : [])
-    .filter((item) => getEventDescription(item))
+    .filter((item) => getEventDescription(item) && isReplayMomentCandidate(item))
     .slice(0, 8)
     .map((item, index) => ({
       ...item,
@@ -384,13 +423,13 @@ export default function RunReplay() {
                 <div className="card-header">
                   <h3>
                     <ListTree size={18} />
-                    Chapters
+                    Key Moments
                   </h3>
                   <span className="strip-meta">{storyItems.length} moments</span>
                 </div>
                 <div className="card-body">
                   {storyItems.length === 0 ? (
-                    <div className="empty-state compact">No replay moments are available for this run.</div>
+                    <div className="empty-state compact">No curated replay moments are available yet. Routine work and idle events are hidden here; use Evidence for the raw log.</div>
                   ) : (
                     <div className="run-replay-chapter-list">
                       {storyItems.map((item, index) => {
@@ -403,7 +442,7 @@ export default function RunReplay() {
                             className={`run-replay-chapter ${selected ? 'active' : ''}`}
                             onClick={() => setSelectedEventId(eventId)}
                           >
-                            <span>{item?.chapter || `Moment ${index + 1}`}</span>
+                            <span>{item?.chapter ? `Moment ${index + 1} - ${item.chapter}` : `Moment ${index + 1}`}</span>
                             <strong>{getEventTitle(item)}</strong>
                           </button>
                         )
@@ -424,8 +463,18 @@ export default function RunReplay() {
                       <p className="run-replay-description">{getEventDescription(activeStoryItem)}</p>
                       {activeStoryItem?.why_this_matters && (
                         <div className="run-replay-why">
-                          <span>Why watch</span>
+                          <span>Why this mattered</span>
                           <p>{activeStoryItem.why_this_matters}</p>
+                        </div>
+                      )}
+                      {Array.isArray(activeStoryItem?.deltas) && activeStoryItem.deltas.length > 0 && (
+                        <div className="run-replay-deltas" aria-label="Replay moment signals">
+                          {activeStoryItem.deltas.map((delta) => (
+                            <span key={`${delta.label}-${delta.value}`} className={`run-replay-delta ${delta.tone || 'neutral'}`}>
+                              <strong>{delta.label}</strong>
+                              {delta.value}
+                            </span>
+                          ))}
                         </div>
                       )}
                       <div className="run-replay-actions">

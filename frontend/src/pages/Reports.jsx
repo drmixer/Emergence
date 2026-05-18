@@ -384,13 +384,14 @@ export default function Reports() {
           )}
           {!loading && items.length > 0 && (
             <div className="archive-run-list">
-              {items.map((item) => {
+              {items.map((item, index) => {
                 const runId = String(item?.run_id || '').trim()
                 const summary = item?.summary || {}
                 const metrics = summary?.metrics || {}
                 const runMetadata = item?.run_metadata || {}
                 const artifacts = item?.artifacts || {}
                 const takeaway = getRunTakeaway(item)
+                const isLatestPublicRun = !includeTuning && index === 0
                 const reportLinks = ARCHIVE_REPORT_ARTIFACTS
                   .map(([artifactType, label]) => ({
                     artifactType,
@@ -400,17 +401,20 @@ export default function Reports() {
                   .filter(({ artifact }) => artifact?.available && preferredFormat(artifact))
 
                 return (
-                  <article key={runId} className="archive-run-card">
+                  <article key={runId} className={`archive-run-card ${isLatestPublicRun ? 'latest' : ''}`}>
                     <div className="archive-run-card-head">
                       <div>
-                        <h3>{runId}</h3>
+                        <div className="archive-run-title-row">
+                          <h3>{runId}</h3>
+                          {isLatestPublicRun && <span>Latest completed run</span>}
+                        </div>
                         <p>
                           Ended {formatTimestamp(summary.run_ended_at)} · {formatDuration(summary.duration_hours)}
                         </p>
                       </div>
                       <Link to={getStoryReplayHref(runId)} className="btn btn-primary">
                         <TimerReset size={14} />
-                        Open Replay
+                        {isLatestPublicRun ? 'Replay Latest Run' : 'Open Replay'}
                       </Link>
                     </div>
 
@@ -452,7 +456,7 @@ export default function Reports() {
                         to={`/runs/${encodeURIComponent(runId)}`}
                       >
                         <FileSearch size={14} />
-                        Evidence
+                        {isLatestPublicRun ? 'Latest Run Details' : 'Evidence'}
                       </Link>
                       {reportLinks.map(({ artifactType, label, artifact }) => (
                         <div key={artifactType} className="archive-report-action">

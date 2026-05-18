@@ -469,7 +469,7 @@ export default function RunDetail() {
           Run Evidence
         </h1>
         <p className="page-description">
-          Public metrics, provenance, and source traces for a specific simulation <GlossaryTooltip termKey="run">run</GlossaryTooltip>.
+          Public metrics, provenance, and source traces for a specific simulation <GlossaryTooltip termKey="run">run</GlossaryTooltip>. A day here is a simulation cycle, not a 24-hour calendar day.
         </p>
       </div>
 

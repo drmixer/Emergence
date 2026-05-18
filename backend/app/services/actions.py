@@ -292,6 +292,7 @@ _DUPLICATE_FORUM_MIN_OVERLAP = 6
 _DUPLICATE_FORUM_SMALLER_RATIO = 0.55
 _SATURATED_THREAD_MESSAGE_COUNT = 8
 _SATURATED_THREAD_RECENT_SAMPLE = 60
+_AGREEMENT_PILE_ON_REPLY_COUNT = 3
 
 _PROCEDURAL_STATUS_MEMO_PREFIXES = (
     "observation:",
@@ -965,6 +966,65 @@ def _low_novelty_saturated_thread_reason(
         return "saturated policy thread needs a concrete new action, not another diagnosis"
     if governance_hits >= 2:
         return "saturated policy thread needs concrete new action, not another summary"
+    return None
+
+
+def _low_novelty_governance_agreement_reply(content: str | None) -> bool:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return False
+    if _reply_adds_saturated_thread_allowed_delta(content):
+        return False
+
+    agreement_markers = (
+        "i agree",
+        "i support",
+        "support this",
+        "support proposal",
+        "strong support",
+        "vote yes",
+        "voted yes",
+        "back this",
+        "back the proposal",
+        "aligns with",
+        "provides a clear",
+        "is crucial",
+        "is important",
+    )
+    if not any(marker in normalized for marker in agreement_markers):
+        return False
+
+    governance_markers = (
+        "proposal #",
+        "law #",
+        "active threshold aid",
+        "common pool",
+        "reserve",
+        "threshold",
+        "pool floor",
+        "allocation",
+        "runtime effect",
+        "public aid",
+        "energy floor",
+    )
+    return any(marker in normalized for marker in governance_markers)
+
+
+def _agreement_pile_on_reason(*, content: str | None, thread_messages: list[Message]) -> str | None:
+    if not _low_novelty_governance_agreement_reply(content):
+        return None
+
+    prior_agreement_replies = sum(
+        1
+        for message in thread_messages
+        if str(message.message_type or "") == "forum_reply"
+        and _low_novelty_governance_agreement_reply(message.content)
+    )
+    if prior_agreement_replies >= _AGREEMENT_PILE_ON_REPLY_COUNT:
+        return (
+            f"thread already has {prior_agreement_replies} low-novelty agreement replies; "
+            "use vote/contest/trade/direct_message, or add a concrete amendment, named ask, resource transfer, or changed fact"
+        )
     return None
 
 
@@ -1805,6 +1865,17 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                     "offer, refusal, amendment, named ask, or choose vote/contest/trade/direct_message"
                 ),
             }
+        agreement_pile_on_reason = _agreement_pile_on_reason(
+            content=content,
+            thread_messages=thread_messages,
+        )
+        if agreement_pile_on_reason:
+            return {
+                "valid": False,
+                "reason_code": "proposal_agreement_pile_on",
+                "thread_id": thread_root.id,
+                "reason": agreement_pile_on_reason,
+            }
         saturated_reason = _low_novelty_saturated_thread_reason(
             content=content,
             thread_messages=thread_messages,
@@ -2434,7 +2505,7 @@ async def _execute_request_aid(db: Session, agent: Agent, action: dict) -> dict:
     amount = Decimal(str(action.get("amount")))
     reason_text = " ".join((action.get("reason") or "").split())
     message_content = (
-        f"I am requesting {amount.normalize()} {resource_type} from you. Reason: {reason_text}"
+        f"Can you send {amount.normalize()} {resource_type}? {reason_text}"
     )
 
     message = Message(
@@ -2532,7 +2603,7 @@ async def _execute_refuse_aid(db: Session, agent: Agent, action: dict) -> dict:
     target_name = target.display_name or f"Agent #{target.agent_number}"
     reason_text = " ".join((action.get("reason") or "").split())
     message_content = (
-        f"I am refusing your request or expectation for aid right now. Reason: {reason_text}"
+        f"I cannot provide aid right now. {reason_text}"
     )
 
     message = Message(

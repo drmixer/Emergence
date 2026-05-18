@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 import { getStoryReplayHref } from '../utils/bestMoments'
 
 export default function NoActiveRunNotice({
-    title = 'No live run right now',
-    message = 'The latest run has ended. You can still open its evidence page, replay major events, or browse older completed runs in the archive.',
+    title = 'Live run ended',
+    message = 'No simulation is live right now. Open the latest completed run for the recap, replay, metrics, and source evidence.',
     lastCompletedRunId = '',
 }) {
     const cleanRunId = String(lastCompletedRunId || '').trim()

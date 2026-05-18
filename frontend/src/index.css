@@ -35,6 +35,11 @@
   --accent-primary: #ffffff;
   --accent-secondary: #c8c8d0;
   --accent-glow: rgba(255, 255, 255, 0.15);
+  --accent-blue: #93c5fd;
+  --accent-green: #86efac;
+  --accent-orange: #fbbf24;
+  --accent-purple: #c4b5fd;
+  --accent-red: #fca5a5;
 
   /* Status Colors - Muted, elegant versions */
   --status-success: #b8b8c0;
@@ -102,6 +107,7 @@
 html {
   font-size: 16px;
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
@@ -110,8 +116,15 @@ body {
   color: var(--text-primary);
   line-height: 1.6;
   min-height: 100vh;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* Typography */
@@ -196,6 +209,7 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--spacing-md);
 }
 
 .card-body {

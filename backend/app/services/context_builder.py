@@ -1469,7 +1469,7 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                 )
             context_parts.append("  You can vote on any active proposal you have not voted on yet.")
             context_parts.append(
-                "  After voting, continue the politics: reply with your reason, ask a named agent for support, or message someone whose vote matters."
+                "  After voting, reply publicly only if you add a concrete condition, amendment, named ask, or changed fact; otherwise let the vote stand and use direct coordination if needed."
             )
             prioritized_unvoted = sorted(
                 unvoted_proposals,

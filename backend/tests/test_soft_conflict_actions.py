@@ -141,7 +141,7 @@ def test_refuse_aid_creates_direct_message_and_target_notice(session_factory):
     assert result["success"] is True
     assert direct_message.message_type == "direct_message"
     assert direct_message.recipient_agent_id == target_id
-    assert "refusing your request or expectation for aid" in direct_message.content
+    assert direct_message.content == "I cannot provide aid right now. I am too close to dormancy to spare food."
     assert notice.agent_id == target_id
     assert "refused to provide aid" in notice.description
 
@@ -187,7 +187,7 @@ def test_request_aid_creates_direct_message_and_target_notice(session_factory):
     assert result["success"] is True
     assert direct_message.message_type == "direct_message"
     assert direct_message.recipient_agent_id == target_id
-    assert "requesting 3 food" in direct_message.content
+    assert direct_message.content == "Can you send 3 food? I will go dormant next cycle without help."
     assert notice.agent_id == target_id
     assert "requested 3 food from you" in notice.description
 
@@ -1375,6 +1375,51 @@ def test_forum_reply_allows_concrete_action_in_saturated_thread(session_factory)
         )
 
     assert validation == {"valid": True}
+
+
+def test_forum_reply_rejects_proposal_agreement_pile_on_before_saturation(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #662 asks whether active threshold aid should preserve a pool floor.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index in range(3):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Agree-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=f"I agree with law #662. The common pool reserve should remain protected note {index}.",
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=20 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "I support proposal #662; the energy floor matters for public aid."
+                    ),
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "proposal_agreement_pile_on"
+    assert validation["thread_id"] == root.id
 
 
 def test_forum_reply_rejects_saturated_auto_contribution_diagnosis_without_delta(session_factory):

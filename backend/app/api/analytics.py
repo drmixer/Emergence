@@ -146,6 +146,38 @@ BEST_MOMENT_CATEGORY_PRIORITY = {
     "cooperation": 3,
     "notable": 2,
 }
+REPLAY_STORY_ROUTINE_EVENT_TYPES = {"work", "idle", "vote", "processing_error"}
+REPLAY_STORY_SIGNAL_EVENT_TYPES = {
+    "agent_died",
+    "became_dormant",
+    "agent_revived",
+    "awakened",
+    "law_passed",
+    "proposal_resolved",
+    "create_proposal",
+    "world_event",
+    "trade",
+    "request_aid",
+    "refuse_aid",
+    "public_accusation",
+    "contest_proposal",
+    "initiate_sanction",
+    "initiate_seizure",
+    "initiate_exile",
+    "vote_enforcement",
+    "enforcement_initiated",
+    "agent_sanctioned",
+    "resources_seized",
+    "agent_exiled",
+}
+REPLAY_STORY_CATEGORY_PRIORITY = {
+    "crisis": 6,
+    "conflict": 5,
+    "governance": 5,
+    "cooperation": 4,
+    "alliance": 4,
+    "notable": 1,
+}
 REPLAY_STORY_CHAPTERS = ("Trigger", "Escalation", "Turning Point", "Outcome")
 REPLAY_STORY_CHAPTER_DESCRIPTIONS = {
     "Trigger": "The first decisive shift that made this run worth following.",
@@ -746,8 +778,49 @@ def _replay_story_state_deltas(payload: dict[str, Any]) -> list[dict[str, str]]:
     return deduped
 
 
+def _replay_story_signal_priority(payload: dict[str, Any]) -> int:
+    event_type = str(payload.get("event_type") or "").strip()
+    category = str(payload.get("category") or "notable").strip()
+    priority = int(REPLAY_STORY_CATEGORY_PRIORITY.get(category, 1))
+
+    if event_type in {
+        "agent_died",
+        "law_passed",
+        "proposal_resolved",
+        "world_event",
+        "agent_exiled",
+        "resources_seized",
+        "agent_sanctioned",
+    }:
+        priority += 3
+    elif event_type in {"became_dormant", "agent_revived", "awakened"}:
+        priority += 2
+    elif event_type in {"trade", "request_aid", "refuse_aid", "create_proposal", "contest_proposal"}:
+        priority += 1
+
+    return priority
+
+
+def _is_replay_story_candidate(payload: dict[str, Any]) -> bool:
+    event_type = str(payload.get("event_type") or "").strip()
+    category = str(payload.get("category") or "notable").strip()
+    salience = int(payload.get("salience") or 0)
+
+    if int(payload.get("event_id") or 0) <= 0:
+        return False
+    if event_type in REPLAY_STORY_ROUTINE_EVENT_TYPES:
+        return False
+    if event_type in REPLAY_STORY_SIGNAL_EVENT_TYPES:
+        return True
+    if category in {"crisis", "conflict", "governance"}:
+        return True
+    if category in {"cooperation", "alliance"}:
+        return salience >= 70
+    return salience >= 75
+
+
 def _select_replay_story_payloads(turns: list[dict[str, Any]], target_count: int = 8) -> list[dict[str, Any]]:
-    clean_turns = [turn for turn in turns if int(turn.get("event_id") or 0) > 0]
+    clean_turns = [turn for turn in turns if _is_replay_story_candidate(turn)]
     if not clean_turns:
         return []
 
@@ -758,7 +831,11 @@ def _select_replay_story_payloads(turns: list[dict[str, Any]], target_count: int
 
     ranked = sorted(
         clean_turns,
-        key=lambda turn: (int(turn.get("salience") or 0), _plot_turn_created_at_ms(turn)),
+        key=lambda turn: (
+            _replay_story_signal_priority(turn),
+            int(turn.get("salience") or 0),
+            _plot_turn_created_at_ms(turn),
+        ),
         reverse=True,
     )
 
@@ -1613,7 +1690,7 @@ def plot_turns_replay_story(
             window_start=window_start,
             now=window_end,
             min_salience=min_salience,
-            candidate_limit=max(limit * 8, 240),
+            candidate_limit=max(limit * 600, 6000),
             run_id=effective_run_id,
             strict_run_scope=bool(effective_run_id),
         )

@@ -123,6 +123,21 @@ def test_select_replay_story_payloads_assigns_chapters_and_deltas():
     assert selected[3]["run_id"] == "run-20260409A"
 
 
+def test_select_replay_story_payloads_hides_routine_work_and_idle():
+    turns = [
+        _turn(351, event_type="work", category="notable", salience=100, created_at="2026-04-09T08:00:00+00:00"),
+        _turn(352, event_type="idle", category="notable", salience=100, created_at="2026-04-09T08:05:00+00:00"),
+        _turn(355, event_type="vote", category="cooperation", salience=100, created_at="2026-04-09T08:30:00+00:00"),
+        _turn(353, event_type="law_passed", category="governance", salience=88, created_at="2026-04-09T09:00:00+00:00"),
+        _turn(354, event_type="request_aid", category="cooperation", salience=68, created_at="2026-04-09T10:00:00+00:00"),
+    ]
+
+    selected = analytics_api._select_replay_story_payloads(turns, target_count=4)
+
+    assert [item["event_id"] for item in selected] == [353, 354]
+    assert all(item["event_type"] not in {"work", "idle", "vote"} for item in selected)
+
+
 def test_replay_story_endpoint_returns_chaptered_payload(monkeypatch):
     fake_session = _FakeSession()
     now = datetime(2026, 4, 9, 12, 0, 0, tzinfo=timezone.utc)
