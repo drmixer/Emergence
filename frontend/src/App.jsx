@@ -16,6 +16,7 @@ import {
   Share2,
   TrendingUp,
   BookOpen,
+  CalendarDays,
 } from 'lucide-react'
 
 // Pages (route-level code splitting)
@@ -40,6 +41,7 @@ const RunDetail = lazy(() => import('./pages/RunDetail'))
 const RunReplay = lazy(() => import('./pages/RunReplay'))
 const ReportViewer = lazy(() => import('./pages/ReportViewer'))
 const Reports = lazy(() => import('./pages/Reports'))
+const RunCalendar = lazy(() => import('./pages/RunCalendar'))
 const Privacy = lazy(() => import('./pages/Privacy'))
 const Terms = lazy(() => import('./pages/Terms'))
 
@@ -113,6 +115,7 @@ function App() {
     { path: '/network', icon: Share2, label: 'Network' },
     { path: '/governance', icon: Scale, label: 'Governance' },
     { path: '/resources', icon: Package, label: 'Resources' },
+    { path: '/calendar', icon: CalendarDays, label: 'Calendar' },
     { path: '/archive', icon: FileSearch, label: 'Archive' },
     { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
     { path: '/glossary', icon: BookOpen, label: 'Glossary' },
@@ -271,6 +274,7 @@ function App() {
                 <Route path="/network" element={<Network />} />
                 <Route path="/timeline" element={<Timeline />} />
                 <Route path="/highlights" element={<HighlightsCompatibility />} />
+                <Route path="/calendar" element={<RunCalendar />} />
                 <Route path="/archive" element={<Reports />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/leaderboards" element={<Leaderboards />} />

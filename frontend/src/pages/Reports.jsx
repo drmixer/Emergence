@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
+  CalendarDays,
   Download,
   FileSearch,
   RefreshCw,
   TimerReset,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { getNextScheduledRun, getScheduleEntryForRunId } from '../data/runSchedule'
 import { getStoryReplayHref } from '../utils/bestMoments'
 
 function formatTimestamp(value) {
@@ -242,6 +244,7 @@ export default function Reports() {
   const legacyReportsRoute = String(location.pathname || '').trim() === '/reports'
   const comparisonGroups = buildComparisonGroups(items)
   const archiveModeLabel = includeTuning ? 'All Archived Runs' : 'Public Archive'
+  const nextScheduledRun = getNextScheduledRun()
 
   return (
     <div className="reports-page archive-page">
@@ -269,6 +272,22 @@ export default function Reports() {
       {!error && includeTuning && (
         <div className="feed-notice">
           Tuning and exploratory closeouts are included in this operator view.
+        </div>
+      )}
+
+      {nextScheduledRun && (
+        <div className="card archive-schedule-card">
+          <div className="card-body archive-schedule-body">
+            <div>
+              <span className="archive-schedule-eyebrow">Next scheduled run</span>
+              <h2>{nextScheduledRun.label}: {nextScheduledRun.declaredQuestion}</h2>
+              <p>{nextScheduledRun.watchFor}</p>
+            </div>
+            <Link to="/calendar" className="btn btn-secondary">
+              <CalendarDays size={14} />
+              Run Calendar
+            </Link>
+          </div>
         </div>
       )}
 
@@ -397,6 +416,7 @@ export default function Reports() {
                 const artifacts = item?.artifacts || {}
                 const takeaway = getRunTakeaway(item)
                 const isLatestPublicRun = !includeTuning && index === 0
+                const scheduledRun = getScheduleEntryForRunId(runId)
                 const reportLinks = ARCHIVE_REPORT_ARTIFACTS
                   .map(([artifactType, label]) => ({
                     artifactType,
@@ -425,6 +445,25 @@ export default function Reports() {
 
                     {takeaway && (
                       <p className="archive-run-takeaway">{takeaway}</p>
+                    )}
+
+                    {scheduledRun && (
+                      <div className="archive-run-schedule-context">
+                        <div>
+                          <span>Declared question</span>
+                          <strong>{scheduledRun.declaredQuestion}</strong>
+                        </div>
+                        <div>
+                          <span>Claim boundary</span>
+                          <strong>{scheduledRun.claimBoundary}</strong>
+                        </div>
+                        {scheduledRun.resultNote && (
+                          <div>
+                            <span>Result note</span>
+                            <strong>{scheduledRun.resultNote}</strong>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     <div className="archive-run-meta">

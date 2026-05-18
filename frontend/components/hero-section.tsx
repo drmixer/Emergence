@@ -7,7 +7,8 @@ import { SplitFlapText } from "@/components/split-flap-text"
 import { BitmapChevron } from "@/components/bitmap-chevron"
 import { resolveApiBase } from "@/lib/api-base"
 import { trackKpiEvent, trackKpiEventOnce } from "@/lib/kpi-client"
-import { Activity, ArrowUpRight, Network, Play, Radio, Scale, Skull } from "lucide-react"
+import { Activity, ArrowUpRight, CalendarDays, Network, Play, Radio, Scale, Skull } from "lucide-react"
+import { getNextScheduledRun } from "@/src/data/runSchedule"
 import gsap from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 
@@ -95,22 +96,7 @@ export function HeroSection() {
         setLastCompletedRunId(completedRunId)
 
         if (!isLive) {
-          if (completedRunId) {
-            const runDetail = await fetch(
-              `${apiBase}/api/analytics/runs/${encodeURIComponent(completedRunId)}?hours_fallback=48&trace_limit=3&min_salience=55`
-            )
-              .then((response) => (response.ok ? response.json() : null))
-              .catch(() => null)
-            if (cancelled) return
-            setStats({
-              day: 0,
-              deaths: runDetail?.activity?.deaths ?? 0,
-              laws: runDetail?.activity?.laws_passed ?? 0,
-              coalitions: runDetail?.activity?.cooperation_events ?? 0,
-            })
-          } else {
-            setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
-          }
+          setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
           setQuotes([])
           return
         }
@@ -170,6 +156,7 @@ export function HeroSection() {
   }, [quoteIndex, quotes, simulationActive])
 
   const isIdle = !simulationActive
+  const nextRun = getNextScheduledRun()
 
   return (
     <section ref={sectionRef} id="hero" className="relative min-h-screen flex items-center px-4 md:pl-28 md:pr-12">
@@ -196,42 +183,52 @@ export function HeroSection() {
 
         <div className="mt-10 max-w-4xl border border-border/70 bg-card/30 p-4">
           <div className="mb-4 flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Live Stats Preview</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
+              {isIdle && !statsLoading ? "Live Stats Offline" : "Live Stats Preview"}
+            </span>
             <span className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               {statsLoading ? <Activity className="h-3.5 w-3.5 animate-pulse" /> : <Radio className="h-3.5 w-3.5" />}
               {statsLoading ? "Loading" : isIdle ? "Idle" : "Live"}
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="border border-border/60 p-3">
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <Activity className="h-3.5 w-3.5" /> Day
-              </div>
-              <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">{statsLoading ? "..." : stats.day}</p>
-            </div>
-            <div className="border border-border/60 p-3">
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <Skull className="h-3.5 w-3.5" /> Deaths
-              </div>
-              <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">
-                {statsLoading ? "..." : stats.deaths.toLocaleString()}
+          {isIdle && !statsLoading ? (
+            <div className="border border-border/60 p-4">
+              <p className="font-mono text-xs leading-relaxed text-muted-foreground">
+                No simulation is live right now. Live counters resume when the next run starts; completed-run numbers stay in Archive and run detail pages.
               </p>
             </div>
-            <div className="border border-border/60 p-3">
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <Scale className="h-3.5 w-3.5" /> Laws Enacted
+          ) : (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="border border-border/60 p-3">
+                <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                  <Activity className="h-3.5 w-3.5" /> Day
+                </div>
+                <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">{statsLoading ? "..." : stats.day}</p>
               </div>
-              <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">{statsLoading ? "..." : stats.laws.toLocaleString()}</p>
-            </div>
-            <div className="border border-border/60 p-3">
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                <Network className="h-3.5 w-3.5" /> {isIdle ? "Cooperation Signals" : "Coalition Links"}
+              <div className="border border-border/60 p-3">
+                <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                  <Skull className="h-3.5 w-3.5" /> Deaths
+                </div>
+                <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">
+                  {statsLoading ? "..." : stats.deaths.toLocaleString()}
+                </p>
               </div>
-              <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">
-                {statsLoading ? "..." : stats.coalitions.toLocaleString()}
-              </p>
+              <div className="border border-border/60 p-3">
+                <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                  <Scale className="h-3.5 w-3.5" /> Laws Enacted
+                </div>
+                <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">{statsLoading ? "..." : stats.laws.toLocaleString()}</p>
+              </div>
+              <div className="border border-border/60 p-3">
+                <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                  <Network className="h-3.5 w-3.5" /> Coalition Links
+                </div>
+                <p className="mt-2 font-[var(--font-bebas)] text-4xl leading-none">
+                  {statsLoading ? "..." : stats.coalitions.toLocaleString()}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="mt-6 grid max-w-4xl gap-4 border border-foreground/30 bg-foreground/5 p-4 md:grid-cols-[1fr_auto] md:items-center">
@@ -242,39 +239,52 @@ export function HeroSection() {
             </h3>
             <p className="mt-3 max-w-xl font-mono text-xs leading-relaxed text-muted-foreground">
               {isIdle
-                ? lastCompletedRunId
-                  ? "The live run has ended. Open the latest run detail for recap, stats, replay, and source evidence."
+                ? nextRun
+                  ? `Next run: ${nextRun.label}. ${nextRun.declaredQuestion}`
                   : "No run is active right now. The dashboard will update when the next live run begins."
                 : "The agents are surviving, cooperating, competing, and voting inside a fixed rule set. No script. No predetermined outcome."}
             </p>
+            {isIdle && nextRun && (
+              <p className="mt-2 max-w-xl font-mono text-[11px] leading-relaxed text-muted-foreground/80">
+                {nextRun.claimBoundary}
+              </p>
+            )}
             <p className="mt-3 max-w-xl font-mono text-[11px] leading-relaxed text-muted-foreground/80">
               Signal: {quote}
             </p>
           </div>
           <Link
-            href={isIdle && lastCompletedRunId ? `/runs/${encodeURIComponent(lastCompletedRunId)}` : "/dashboard"}
+            href={isIdle ? "/calendar" : "/dashboard"}
             onClick={() =>
               trackKpiEvent("landing_run_click", {
                 surface: "next_hero_cta",
-                target: "dashboard",
+                target: isIdle ? "calendar" : "dashboard",
               })
             }
             className="inline-flex items-center gap-3 border border-foreground bg-foreground px-6 py-3 font-mono text-xs uppercase tracking-widest text-background transition-all duration-200 hover:translate-x-0.5"
           >
-            <Play className="h-4 w-4" />
-            {isIdle && lastCompletedRunId ? "Latest Run Details" : isIdle ? "View Dashboard" : "Watch Live"}
+            {isIdle ? <CalendarDays className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {isIdle ? "Run Calendar" : "Watch Live"}
             <ArrowUpRight className="h-4 w-4" />
           </Link>
         </div>
 
         <div className="mt-10 flex flex-wrap items-center gap-4 sm:gap-8">
           <Link
-            href="/articles"
+            href="/archive"
             className="group inline-flex items-center gap-3 border border-foreground/20 px-6 py-3 font-mono text-xs uppercase tracking-widest text-foreground transition-all duration-200 hover:border-foreground hover:text-foreground"
           >
-            <ScrambleTextOnHover text="Enter the Archive" as="span" duration={0.6} />
+            <ScrambleTextOnHover text="Run Archive" as="span" duration={0.6} />
             <BitmapChevron className="transition-transform duration-[400ms] ease-in-out group-hover:rotate-45" />
           </Link>
+          {lastCompletedRunId && (
+            <Link
+              href={`/runs/${encodeURIComponent(lastCompletedRunId)}`}
+              className="font-mono text-xs uppercase tracking-widest text-muted-foreground transition-colors duration-200 hover:text-foreground"
+            >
+              Latest Run Evidence
+            </Link>
+          )}
           <a
             href="#work"
             className="font-mono text-xs uppercase tracking-widest text-muted-foreground transition-colors duration-200 hover:text-foreground"
