@@ -42,27 +42,26 @@ npm install
 npm run dev
 ```
 
-You'll need API keys or service credentials for OpenRouter, Mistral, and/or Google Vertex Gemini to power the LLMs. See the `.env.example` files for what's required. Deprecated Groq env vars may still exist in some deploy environments for compatibility, but they are no longer used for routing.
+You'll need API keys or service credentials for the model routes you enable. The default examples cover OpenRouter, Mistral, and Google Vertex Gemini. See the `.env.example` files for the full local configuration shape. Deprecated Groq env vars may still exist in older deploy environments for compatibility, but they are no longer used for routing.
 
 ## Production Database
 
 Production uses PostgreSQL. Neon is the current hosted Postgres option for this stack.
 
-If you run this on Railway with an external Neon database:
+If you run this on Railway, Fly, Render, or a similar host with an external Postgres database:
 
-1. Create a Neon project and copy the pooled Postgres connection string.
-2. Set `DATABASE_URL` in both `backend` and `worker` services.
-3. Deploy the `worker` service from the same `backend/` directory with `WORKER_MODE=true` so `start.sh` launches `worker.py`.
+1. Create a hosted Postgres database and set `DATABASE_URL` for both the API and worker process.
+2. Set `REDIS_URL` if you want Redis-backed budget counters and readiness checks.
 3. Run migrations with `alembic upgrade head`.
-4. During testing, pause the simulation outside active windows to save DB and inference costs:
+4. Run the API process with `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+5. Run the worker from the same `backend/` package with `WORKER_MODE=true`.
+6. During testing, pause the simulation outside active windows to save database and inference costs.
 
 ```bash
 cd backend
-railway run -s backend -- venv/bin/python scripts/simulation_control.py stop
-railway run -s backend -- venv/bin/python scripts/simulation_control.py status
+python scripts/simulation_control.py stop
+python scripts/simulation_control.py status
 ```
-
-More details: `docs/DEPLOYMENT.md`.
 
 ## Runtime + Report Controls
 
@@ -71,22 +70,16 @@ From repo root:
 ```bash
 # Simulation runtime controls
 make sim-status
-make sim-preset PRESET=internal_scarcity_tight_v1
-make sim-preset PRESET=internal_scarcity_tight_v2
-make sim-preset PRESET=internal_scarcity_tight_v3
-make sim-preset PRESET=internal_scarcity_tight_v4
-make sim-preset PRESET=internal_scarcity_tight_v5
 make sim-start RUN_MODE=real
 make sim-start RUN_MODE=real RUN_CLASS=special_exploratory TUNING_RUN=1
 make sim-start RUN_MODE=real RUN_CLASS=deep_96h
 make sim-stop
-# Railway-side scheduled stop; does not depend on the local machine staying awake
-make sim-stop-schedule RUN_ID=real-20260415T085921Z STOP_AT=2026-04-16T10:00:00-07:00
+make sim-stop-schedule RUN_ID=<run_id> STOP_AT=<iso_timestamp>
 make sim-stop-unschedule
 
 # Local macOS launchd fallback if you explicitly want a machine-local guard
-make sim-stop-schedule-local RUN_ID=real-20260415T085921Z STOP_AT=2026-04-16T10:00:00-07:00
-make sim-stop-unschedule-local RUN_ID=real-20260415T085921Z
+make sim-stop-schedule-local RUN_ID=<run_id> STOP_AT=<iso_timestamp>
+make sim-stop-unschedule-local RUN_ID=<run_id>
 
 # Run-scoped research outputs
 make report-rebuild RUN_ID=run-20260210T120000Z
