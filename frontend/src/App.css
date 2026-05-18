@@ -897,6 +897,60 @@ tr:last-child td {
   overflow-wrap: anywhere;
 }
 
+.run-replay-narrative {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-lg);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.run-replay-beat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  width: 100%;
+  padding: var(--spacing-md);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+
+.run-replay-beat:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.055);
+  transform: translateY(-1px);
+}
+
+.run-replay-beat span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.run-replay-beat strong {
+  color: var(--text-primary);
+  font-size: 0.94rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.run-replay-beat p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .run-provenance-card .card-body {
   padding-top: var(--spacing-md);
 }
@@ -1255,6 +1309,10 @@ tr:last-child td {
   }
 
   .run-replay-recap-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .run-replay-narrative {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2502,6 +2560,10 @@ tr:last-child td {
   }
 
   .run-replay-recap-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .run-replay-narrative {
     grid-template-columns: 1fr;
   }
 

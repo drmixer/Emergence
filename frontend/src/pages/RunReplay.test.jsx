@@ -146,5 +146,46 @@ describe('RunReplay', () => {
     expect(within(storyThreads).getByText(/Governance Decisions/i)).toBeInTheDocument()
     expect(within(storyThreads).getByText(/Aid & Trade/i)).toBeInTheDocument()
     expect(within(storyThreads).queryByText(/^Work$/i)).not.toBeInTheDocument()
+
+    const narrativeBeats = screen.getByLabelText(/Replay narrative beats/i)
+    expect(within(narrativeBeats).getByText(/Opening Signal/i)).toBeInTheDocument()
+    expect(within(narrativeBeats).getByText(/Governance Response/i)).toBeInTheDocument()
+    expect(within(narrativeBeats).getByText(/Pressure Point/i)).toBeInTheDocument()
+    expect(within(narrativeBeats).queryByText(/^Work$/i)).not.toBeInTheDocument()
+  })
+
+  it('does not promote routine playback into replay threads when curated story is empty', async () => {
+    api.getReplayStory.mockResolvedValueOnce({ items: [], chapters: [] })
+    api.getRunPlayback.mockResolvedValueOnce({
+      items: [
+        makeMoment({
+          event_id: 99,
+          event_type: 'work',
+          category: 'notable',
+          title: 'Work',
+          description: 'Apex-50 farmed 1.40 food in 1h',
+          salience: 100,
+        }),
+        makeMoment({
+          event_id: 100,
+          event_type: 'idle',
+          category: 'notable',
+          title: 'Idle',
+          description: 'Apex-50 waited.',
+          salience: 100,
+        }),
+      ],
+      count: 2,
+      total_count: 2,
+    })
+
+    renderRunReplay()
+
+    expect(await screen.findByText(/No curated replay moments are available yet/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Replay narrative beats/i)).not.toBeInTheDocument()
+
+    const storyThreads = screen.getByText(/Story Threads/i).closest('.card')
+    expect(within(storyThreads).queryByText(/^Work$/i)).not.toBeInTheDocument()
+    expect(within(storyThreads).queryByText(/^Idle$/i)).not.toBeInTheDocument()
   })
 })

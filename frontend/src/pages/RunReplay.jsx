@@ -78,6 +78,33 @@ const REPLAY_CHAPTER_META = {
   },
 }
 
+const NARRATIVE_BEAT_RULES = [
+  {
+    key: 'opening',
+    label: 'Opening Signal',
+    match: () => true,
+    fallback: 'The first non-routine moment selected for the replay.',
+  },
+  {
+    key: 'governance',
+    label: 'Governance Response',
+    match: (item) => getChapterKey(item) === 'governance',
+    fallback: 'The clearest proposal, vote, or law signal in the curated run story.',
+  },
+  {
+    key: 'pressure',
+    label: 'Pressure Point',
+    match: (item) => ['survival', 'aid_trade', 'public_order', 'system'].includes(getChapterKey(item)),
+    fallback: 'The moment where survival pressure, resource coordination, or disorder became visible.',
+  },
+  {
+    key: 'outcome',
+    label: 'Late Outcome',
+    match: (_item, index, items) => index === items.length - 1,
+    fallback: 'The last curated signal in the replay window.',
+  },
+]
+
 const REPORT_LABELS = {
   approachable_report: 'Approachable Report',
   technical_report: 'Technical Report',
@@ -138,6 +165,39 @@ function clampText(value, maxLength = 220) {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
   if (!text || text.length <= maxLength) return text
   return `${text.slice(0, maxLength - 1).trim()}...`
+}
+
+function chooseNarrativeBeat(items, rule, usedEventIds) {
+  if (!Array.isArray(items) || items.length === 0) return null
+  const orderedItems = rule.key === 'outcome' ? [...items].reverse() : items
+  const found = orderedItems.find((item) => {
+    const eventId = getEventId(item)
+    const index = items.findIndex((candidate) => getEventId(candidate) === eventId)
+    return eventId > 0 && !usedEventIds.has(eventId) && rule.match(item, index, items)
+  })
+  return found || null
+}
+
+function buildNarrativeBeats(storyItems) {
+  if (!Array.isArray(storyItems) || storyItems.length === 0) return []
+  const usedEventIds = new Set()
+  const beats = []
+
+  NARRATIVE_BEAT_RULES.forEach((rule) => {
+    const item = chooseNarrativeBeat(storyItems, rule, usedEventIds)
+    if (!item) return
+    const eventId = getEventId(item)
+    usedEventIds.add(eventId)
+    beats.push({
+      key: `${rule.key}-${eventId}`,
+      label: rule.label,
+      title: getEventTitle(item),
+      detail: clampText(item?.why_this_matters || getEventDescription(item) || rule.fallback, 190),
+      eventId,
+    })
+  })
+
+  return beats
 }
 
 function isReplayMomentCandidate(item) {
@@ -219,7 +279,7 @@ function buildReplayChapters(storyItems) {
         ...chapter,
         count,
         summary: count > 1
-          ? `${count} notable ${chapter.shortLabel.toLowerCase()} moments. ${chapter.description}`
+          ? `${count} notable ${chapter.shortLabel.toLowerCase()} moments, led by ${lead ? getEventTitle(lead).toLowerCase() : 'a source event'}. ${chapter.description}`
           : `${chapter.description} ${lead ? clampText(getEventDescription(lead), 160) : ''}`.trim(),
       }
     })
@@ -472,6 +532,7 @@ export default function RunReplay() {
   }, [activeStoryItem, replayChapters])
   const runBrief = useMemo(() => buildRunBrief(runDetail, storyItems), [runDetail, storyItems])
   const recapRows = useMemo(() => buildRecapRows(runDetail, storyItems), [runDetail, storyItems])
+  const narrativeBeats = useMemo(() => buildNarrativeBeats(storyItems), [storyItems])
 
   function getReportUrl(row, action) {
     const format = preferredReportFormat(row)
@@ -560,6 +621,22 @@ export default function RunReplay() {
                       </div>
                     ))}
                   </div>
+                  {narrativeBeats.length > 0 && (
+                    <div className="run-replay-narrative" aria-label="Replay narrative beats">
+                      {narrativeBeats.map((beat) => (
+                        <button
+                          key={beat.key}
+                          type="button"
+                          className="run-replay-beat"
+                          onClick={() => setSelectedEventId(beat.eventId)}
+                        >
+                          <span>{beat.label}</span>
+                          <strong>{beat.title}</strong>
+                          <p>{beat.detail}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -662,6 +739,22 @@ export default function RunReplay() {
                       </div>
                     ))}
                   </div>
+                  {narrativeBeats.length > 0 && (
+                    <div className="run-replay-narrative" aria-label="Replay narrative beats">
+                      {narrativeBeats.map((beat) => (
+                        <button
+                          key={beat.key}
+                          type="button"
+                          className="run-replay-beat"
+                          onClick={() => setSelectedEventId(beat.eventId)}
+                        >
+                          <span>{beat.label}</span>
+                          <strong>{beat.title}</strong>
+                          <p>{beat.detail}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

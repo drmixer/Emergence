@@ -245,6 +245,92 @@ def test_run_playback_supports_pagination(playback_session_factory, monkeypatch)
     assert body["items"][0]["description"] == "page event 2"
 
 
+def test_replay_story_excludes_routine_work_even_when_salient(playback_session_factory, monkeypatch):
+    session = playback_session_factory()
+    run_started_at = datetime(2026, 4, 20, 8, 0, 0, tzinfo=timezone.utc)
+
+    agent = Agent(
+        agent_number=4,
+        display_name="Agent #4",
+        model_type="or_gpt_oss_20b_free",
+        tier=1,
+        personality_type="neutral",
+        status="active",
+        system_prompt="{}",
+    )
+    session.add(agent)
+    session.flush()
+
+    session.add(
+        SimulationRun(
+            run_id="run-story-no-work",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="special_exploratory",
+            started_at=run_started_at,
+            ended_at=run_started_at + timedelta(hours=2),
+        )
+    )
+
+    session.add_all(
+        [
+            Event(
+                agent_id=agent.id,
+                event_type="work",
+                description="Agent #4 farmed 1.40 food in 1h",
+                created_at=run_started_at + timedelta(minutes=1),
+                event_metadata={"runtime": {"run_id": "run-story-no-work"}},
+            ),
+            Event(
+                agent_id=agent.id,
+                event_type="vote",
+                description="Agent #4 voted yes on a proposal",
+                created_at=run_started_at + timedelta(minutes=2),
+                event_metadata={"runtime": {"run_id": "run-story-no-work"}},
+            ),
+            Event(
+                agent_id=agent.id,
+                event_type="proposal_resolved",
+                description="Proposal 'Emergency Aid Floor' passed (8/1)",
+                created_at=run_started_at + timedelta(minutes=20),
+                event_metadata={"runtime": {"run_id": "run-story-no-work"}, "result": "passed"},
+            ),
+            Event(
+                agent_id=agent.id,
+                event_type="request_aid",
+                description="Agent #4 requested 2 food from Agent #5",
+                created_at=run_started_at + timedelta(minutes=40),
+                event_metadata={"runtime": {"run_id": "run-story-no-work"}},
+            ),
+            Event(
+                agent_id=agent.id,
+                event_type="agent_died",
+                description="Agent #9 died after dormant upkeep failure",
+                created_at=run_started_at + timedelta(minutes=80),
+                event_metadata={"runtime": {"run_id": "run-story-no-work"}},
+            ),
+        ]
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(analytics_api, "SessionLocal", playback_session_factory)
+
+    with _make_client() as client:
+        response = client.get(
+            "/api/analytics/plot-turns/replay-story"
+            "?run_id=run-story-no-work&hours=96&min_salience=1&limit=4"
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    event_types = [item["event_type"] for item in body["items"]]
+    assert "work" not in event_types
+    assert "vote" not in event_types
+    assert event_types == ["proposal_resolved", "request_aid", "agent_died"]
+    assert [item["chapter"] for item in body["items"]] == ["Trigger", "Escalation", "Outcome"]
+
+
 def test_run_detail_is_strictly_run_scoped_and_end_clamped(playback_session_factory, monkeypatch):
     session = playback_session_factory()
     run_started_at = datetime(2026, 4, 20, 2, 0, 0, tzinfo=timezone.utc)
