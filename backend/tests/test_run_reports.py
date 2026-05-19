@@ -111,7 +111,16 @@ def test_story_sections_enforce_evidence_links_and_claim_gate():
         replicate_count=2,
     )
     assert sections
-    assert any(section.get("heading") == "Limitations and Claim Boundaries" for section in sections)
+    assert [section.get("heading") for section in sections] == [
+        "Declared Question",
+        "Short Answer",
+        "Run Arc",
+        "Survival Pressure",
+        "Governance, Aid, and Public Order",
+        "Evidence To Check",
+        "What This Does Not Prove",
+        "Next Run Watchpoints",
+    ]
     claim_texts = [paragraph for section in sections for paragraph in (section.get("paragraphs") or [])]
     assert any("replicate threshold" in str(text) for text in claim_texts)
     for section in sections:
@@ -135,10 +144,30 @@ def test_story_markdown_reads_as_prose_without_claim_prefixes():
     markdown = run_reports._story_markdown(payload)
 
     assert "- Claim:" not in markdown
-    assert "## What Happened" in markdown
+    assert "## Short Answer" in markdown
     assert "The main arc was survival pressure" in markdown
-    assert "## Story Moments" in markdown
+    assert "## Run Arc" in markdown
     assert "Representative moment" not in markdown
+
+
+def test_story_payload_includes_gemini_ready_template_without_fallback():
+    payload = run_reports._build_story_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="baseline_v1",
+        season_number=2,
+        replicate_count=2,
+    )
+
+    generation = payload["gemini_story_generation"]
+    assert payload["story_template_version"] == run_reports.POST_RUN_STORY_TEMPLATE_VERSION
+    assert generation["provider"] == "gemini"
+    assert generation["model_type"] == run_reports.POST_RUN_STORY_GEMINI_MODEL_TYPE
+    assert generation["fallback_allowed"] is False
+    assert "Declared Question" in generation["user_prompt"]
+    assert "Do not invent events" in generation["system_prompt"]
+    assert generation["context"]["required_sections"][0]["heading"] == "Declared Question"
 
 
 def test_merge_generated_tags_preserves_custom_tags_only():

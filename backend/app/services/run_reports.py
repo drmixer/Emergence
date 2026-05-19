@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 REPORT_GENERATOR_VERSION = "run-report-v1"
 REPORT_TEMPLATE_VERSION = "run-report-v1"
+POST_RUN_STORY_TEMPLATE_VERSION = "post-run-story-template-v1"
+POST_RUN_STORY_GEMINI_MODEL_TYPE = "gm_gemini_2_5_flash"
 
 CONTENT_TYPE_TECHNICAL = "technical_report"
 CONTENT_TYPE_APPROACHABLE = "approachable_article"
@@ -46,6 +48,49 @@ EVIDENCE_FULL = "full"
 EVIDENCE_PARTIAL = "partial"
 
 UNKNOWN_CONDITION = "unknown"
+
+POST_RUN_STORY_TEMPLATE_SECTIONS = (
+    {
+        "key": "declared_question",
+        "heading": "Declared Question",
+        "purpose": "State what this run was asking before interpreting what happened.",
+    },
+    {
+        "key": "short_answer",
+        "heading": "Short Answer",
+        "purpose": "Give the fastest accurate read of the run in two or three sentences.",
+    },
+    {
+        "key": "run_arc",
+        "heading": "Run Arc",
+        "purpose": "Explain the sequence: opening pressure, response, turning points, and end state.",
+    },
+    {
+        "key": "survival_pressure",
+        "heading": "Survival Pressure",
+        "purpose": "Summarize deaths, dormancy, recovery, and resource stress without relying on raw counters alone.",
+    },
+    {
+        "key": "governance_aid_public_order",
+        "heading": "Governance, Aid, and Public Order",
+        "purpose": "Explain proposals, laws, aid/trade, refusals, and conflict/order signals as a readable social pattern.",
+    },
+    {
+        "key": "evidence_to_check",
+        "heading": "Evidence To Check",
+        "purpose": "Point readers to the few traces that best support the story, while keeping raw audit paths available.",
+    },
+    {
+        "key": "claim_boundary",
+        "heading": "What This Does Not Prove",
+        "purpose": "Preserve run-class claim discipline and avoid treating exploratory canaries as finished research.",
+    },
+    {
+        "key": "next_run_watchpoints",
+        "heading": "Next Run Watchpoints",
+        "purpose": "Turn unresolved questions into specific things to watch in the next run.",
+    },
+)
 
 MANAGED_TAG_PREFIXES = (
     "run_id:",
@@ -506,6 +551,115 @@ def _count_condition_replicates(db: Session, *, condition_name: str, run_id: str
     except Exception:
         return 1, None, claim_gate
     return max(1, len(run_ids)), None, claim_gate
+
+
+def _story_template_section_list() -> list[dict[str, str]]:
+    return [dict(section) for section in POST_RUN_STORY_TEMPLATE_SECTIONS]
+
+
+def _run_claim_boundary_text(*, run_class: str | None, status_label: str, condition_name: str, replicate_count: int) -> str:
+    clean_run_class = str(run_class or "").strip().lower()
+    if clean_run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
+        return (
+            "This is a special_exploratory public canary. It can show what happened in this run, "
+            "but it is non-claim-bearing by default and excluded from baseline condition synthesis."
+        )
+    if status_label == STATUS_REPLICATED:
+        return (
+            f"Condition `{condition_name}` has {replicate_count} eligible replicate(s), so it may support "
+            "condition-level comparison when the linked evidence is checked."
+        )
+    return (
+        f"Condition `{condition_name}` has {replicate_count} eligible replicate(s). Treat this as an "
+        "observational run story until the replicate threshold is met."
+    )
+
+
+def _story_generation_context(
+    *,
+    snapshot: dict[str, Any],
+    status_label: str,
+    evidence_completeness: str,
+    condition_name: str,
+    season_number: int | None,
+    replicate_count: int,
+) -> dict[str, Any]:
+    activity = snapshot.get("activity") if isinstance(snapshot, dict) else {}
+    llm = snapshot.get("llm") if isinstance(snapshot, dict) else {}
+    duplicate_summary = ((snapshot.get("duplicate_waves") or {}).get("summary") or {}) if isinstance(snapshot, dict) else {}
+    social_followthrough = snapshot.get("social_followthrough") if isinstance(snapshot, dict) else {}
+    key_moments = list(snapshot.get("key_moments") or [])[:12]
+    run_class = str(snapshot.get("run_class") or "").strip().lower()
+
+    return {
+        "template_version": POST_RUN_STORY_TEMPLATE_VERSION,
+        "run_framing": {
+            "run_id": snapshot.get("run_id"),
+            "run_class": run_class or None,
+            "condition_name": condition_name,
+            "season_number": season_number,
+            "status_label": status_label,
+            "evidence_completeness": evidence_completeness,
+            "replicate_count": int(replicate_count),
+            "claim_boundary": _run_claim_boundary_text(
+                run_class=run_class,
+                status_label=status_label,
+                condition_name=condition_name,
+                replicate_count=replicate_count,
+            ),
+        },
+        "metrics": {
+            "total_events": int((activity or {}).get("total_events") or 0),
+            "viewer_visible_events_default": int((activity or {}).get("viewer_visible_events_default") or 0),
+            "llm_calls": int((llm or {}).get("calls") or 0),
+            "deaths": int((activity or {}).get("deaths") or 0),
+            "became_dormant": int((activity or {}).get("became_dormant") or 0),
+            "agent_revived": int((activity or {}).get("agent_revived") or 0),
+            "proposal_actions": int((activity or {}).get("proposal_actions") or 0),
+            "vote_actions": int((activity or {}).get("vote_actions") or 0),
+            "laws_passed": int((activity or {}).get("laws_passed") or 0),
+            "aid_requests": int((social_followthrough or {}).get("aid_requests") or 0),
+            "aid_answered": int((social_followthrough or {}).get("answered") or 0),
+            "trade_actions": int((activity or {}).get("trade_actions") or 0),
+            "conflict_events": int((activity or {}).get("conflict_events") or 0),
+            "cooperation_events": int((activity or {}).get("cooperation_events") or 0),
+            "duplicate_wave_count": int((duplicate_summary or {}).get("wave_count") or 0),
+            "proposal_wave_count": int((duplicate_summary or {}).get("proposal_wave_count") or 0),
+            "forum_wave_count": int((duplicate_summary or {}).get("forum_wave_count") or 0),
+            "provider_model_fallback_calls": int((llm or {}).get("provider_model_fallback_calls") or 0),
+            "deterministic_forced_idle_actions": int((activity or {}).get("deterministic_forced_idle_actions") or 0),
+            "deterministic_routine_fallback_actions": int((activity or {}).get("deterministic_routine_fallback_actions") or 0),
+        },
+        "key_moments": key_moments,
+        "evidence_links": _base_evidence_links(str(snapshot.get("run_id") or "")),
+        "required_sections": _story_template_section_list(),
+    }
+
+
+def _story_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
+    section_headings = "\n".join(
+        f"- {section['heading']}: {section['purpose']}"
+        for section in _story_template_section_list()
+    )
+    system_prompt = (
+        "You write Emergence post-run stories for public readers. "
+        "Use only the provided run context and evidence. Do not invent events, agents, causes, or conclusions. "
+        "Keep exploratory canaries clearly non-claim-bearing. Do not use provider/model fallback. "
+        "Write for fast comprehension first, with links and details available for audit."
+    )
+    user_prompt = (
+        "Generate a markdown post-run story using these exact section headings:\n"
+        f"{section_headings}\n\n"
+        "Style constraints:\n"
+        "- Start with the answer, then explain the arc.\n"
+        "- Use concrete counts only when they make the story easier to understand.\n"
+        "- Avoid raw event-list narration.\n"
+        "- Mention duplicate/repeated waves only as grouped evidence, not as independent events.\n"
+        "- End with watchpoints for the next run.\n\n"
+        "Run context JSON:\n"
+        f"{json.dumps(context, indent=2, sort_keys=True)}"
+    )
+    return {"system_prompt": system_prompt, "user_prompt": user_prompt}
 
 
 def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -> tuple[Any, Any, str]:
@@ -1898,6 +2052,14 @@ def _build_story_sections(
     trades = int((activity or {}).get("trade_actions") or 0)
     conflict = int((activity or {}).get("conflict_events") or 0)
     cooperation = int((activity or {}).get("cooperation_events") or 0)
+    social_followthrough = snapshot.get("social_followthrough") if isinstance(snapshot, dict) else {}
+    duplicate_summary = ((snapshot.get("duplicate_waves") or {}).get("summary") or {}) if isinstance(snapshot, dict) else {}
+    aid_requests = int((social_followthrough or {}).get("aid_requests") or 0)
+    aid_answered = int((social_followthrough or {}).get("answered") or 0)
+    duplicate_waves = int((duplicate_summary or {}).get("wave_count") or 0)
+    proposal_waves = int((duplicate_summary or {}).get("proposal_wave_count") or 0)
+    forum_waves = int((duplicate_summary or {}).get("forum_wave_count") or 0)
+    run_class = str(snapshot.get("run_class") or "").strip().lower()
 
     pressure_parts = []
     if deaths > 0:
@@ -1923,6 +2085,40 @@ def _build_story_sections(
         f"({total_events:,} total scoped events) across {calls:,} LLM calls. "
         f"The main arc was survival pressure: {pressure_text}. "
         f"{governance_text} {coordination_text}"
+    )
+    declared_question_text = (
+        f"This story template treats run `{run_id}` as the answerable unit and condition `{condition_name}` "
+        "as the declared setup to interpret against. The generated story should state the pre-run question "
+        "when one is supplied by the run schedule, then keep the answer bounded to this run's evidence."
+    )
+    short_answer_text = (
+        f"Fast read: {pressure_text}. {governance_text} "
+        f"Signals are grouped so repeated proposal/forum waves ({duplicate_waves:,} detected) do not read as independent events."
+    )
+    survival_text = (
+        f"Survival pressure registered as {pressure_text}. "
+        "Use the linked event traces to distinguish direct deaths, dormancy, and recovery from routine work or idle noise."
+    )
+    social_text = (
+        f"Governance and coordination produced {_format_count_phrase(proposals, 'proposal')}, "
+        f"{_format_count_phrase(laws, 'passed law')}, {_format_count_phrase(aid_requests, 'aid request')}, "
+        f"{_format_count_phrase(aid_answered, 'answered aid request')}, and {_format_count_phrase(trades, 'trade')}. "
+        f"Public-order/conflict pressure registered as {_format_count_phrase(conflict, 'signal')}; duplicate-wave diagnostics found "
+        f"{proposal_waves:,} proposal wave(s) and {forum_waves:,} forum wave(s)."
+    )
+    evidence_text = (
+        "The story should lead with the smallest set of moments that explain the run, then point readers to source traces "
+        "for audit. Raw counters and repeated traces should support the narrative, not become the narrative."
+    )
+    boundary_text = _run_claim_boundary_text(
+        run_class=run_class,
+        status_label=status_label,
+        condition_name=condition_name,
+        replicate_count=replicate_count,
+    )
+    next_watch_text = (
+        "Next-run watchpoints should turn unresolved ambiguity into observable checks: whether the story remains readable live, "
+        "whether repeated message waves collapse after anti-pile-on changes, and whether evidence surfaces make the run easy to audit."
     )
 
     moment_claims = []
@@ -1950,71 +2146,62 @@ def _build_story_sections(
 
     sections = [
         _claims_to_section(
-            heading="What Happened",
+            heading="Declared Question",
             claims=[
-                _build_claim_block(claim=overview_text, evidence_links=evidence_links),
+                _build_claim_block(claim=declared_question_text, evidence_links=evidence_links),
             ],
         ),
         _claims_to_section(
-            heading="Story Moments",
+            heading="Short Answer",
+            claims=[
+                _build_claim_block(claim=overview_text, evidence_links=evidence_links),
+                _build_claim_block(claim=short_answer_text, evidence_links=evidence_links),
+            ],
+        ),
+        _claims_to_section(
+            heading="Run Arc",
             claims=moment_claims,
             extra_references=[_reference_for_event(event, label_prefix="Moment") for event in key_moments[:5]],
         ),
+        _claims_to_section(
+            heading="Survival Pressure",
+            claims=[
+                _build_claim_block(claim=survival_text, evidence_links=evidence_links),
+            ],
+        ),
+        _claims_to_section(
+            heading="Governance, Aid, and Public Order",
+            claims=[
+                _build_claim_block(claim=social_text, evidence_links=evidence_links),
+            ],
+        ),
+        _claims_to_section(
+            heading="Evidence To Check",
+            claims=[
+                _build_claim_block(claim=evidence_text, evidence_links=evidence_links),
+            ],
+            extra_references=[_reference_for_event(event, label_prefix="Evidence") for event in key_moments[:5]],
+        ),
+        _claims_to_section(
+            heading="What This Does Not Prove",
+            claims=[
+                _build_claim_block(claim=boundary_text, evidence_links=evidence_links),
+                _build_claim_block(
+                    claim=(
+                        "All nontrivial claims in this report include evidence links so findings remain traceable "
+                        "to run-level telemetry."
+                    ),
+                    evidence_links=evidence_links,
+                ),
+            ],
+        ),
+        _claims_to_section(
+            heading="Next Run Watchpoints",
+            claims=[
+                _build_claim_block(claim=next_watch_text, evidence_links=evidence_links),
+            ],
+        ),
     ]
-
-    run_class = str(snapshot.get("run_class") or "").strip().lower()
-    if run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
-        claim_text = (
-            "This run is labeled special_exploratory; comparative baseline claims remain gated unless "
-            "separately replicated under non-exploratory conditions."
-        )
-    elif status_label == STATUS_REPLICATED:
-        claim_text = (
-            f"Across {replicate_count} replicates for condition `{condition_name}`, this run can be used for "
-            "comparative condition summaries."
-        )
-    else:
-        claim_text = (
-            f"Condition `{condition_name}` currently has {replicate_count} replicate(s); comparative claims stay "
-            "gated until the replicate threshold (>=3) is met."
-        )
-
-    sections.extend(
-        [
-            _claims_to_section(
-                heading="Why It Matters (Within This Simulation)",
-                claims=[
-                    _build_claim_block(claim=claim_text, evidence_links=evidence_links),
-                    _build_claim_block(
-                        claim=(
-                            "Exploratory simulation results should be interpreted under this run's assumptions "
-                            "and verified against run evidence before drawing strong conclusions."
-                        ),
-                        evidence_links=evidence_links,
-                    ),
-                ],
-            ),
-            _claims_to_section(
-                heading="Limitations and Claim Boundaries",
-                claims=[
-                    _build_claim_block(
-                        claim=(
-                            "This story report should not be interpreted as generalized causal proof beyond "
-                            "the tested simulation condition."
-                        ),
-                        evidence_links=evidence_links,
-                    ),
-                    _build_claim_block(
-                        claim=(
-                            "All nontrivial claims in this report include evidence links so findings remain "
-                            "traceable to run-level telemetry."
-                        ),
-                        evidence_links=evidence_links,
-                    ),
-                ],
-            ),
-        ]
-    )
     return sections
 
 
@@ -2082,10 +2269,30 @@ def _build_story_payload(
     season_number: int | None,
     replicate_count: int,
 ) -> dict[str, Any]:
+    generation_context = _story_generation_context(
+        snapshot=snapshot,
+        status_label=status_label,
+        evidence_completeness=evidence_completeness,
+        condition_name=condition_name,
+        season_number=season_number,
+        replicate_count=replicate_count,
+    )
+    generation_prompt = _story_generation_prompt(generation_context)
     return {
         "run_id": snapshot.get("run_id"),
         "generated_at_utc": snapshot.get("generated_at_utc"),
         "run_class": snapshot.get("run_class"),
+        "story_template_version": POST_RUN_STORY_TEMPLATE_VERSION,
+        "story_template_sections": _story_template_section_list(),
+        "gemini_story_generation": {
+            "status": "template_ready",
+            "provider": "gemini",
+            "model_type": POST_RUN_STORY_GEMINI_MODEL_TYPE,
+            "fallback_allowed": False,
+            "system_prompt": generation_prompt["system_prompt"],
+            "user_prompt": generation_prompt["user_prompt"],
+            "context": generation_context,
+        },
         "exploratory_label": (
             "exploratory"
             if str(snapshot.get("run_class") or "").strip().lower() == RUN_CLASS_SPECIAL_EXPLORATORY
