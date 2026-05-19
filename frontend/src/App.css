@@ -2173,6 +2173,60 @@ tr:last-child td {
   overflow-wrap: anywhere;
 }
 
+.run-brief-viewer-path {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.run-brief-viewer-path > span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.run-brief-viewer-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.run-brief-viewer-step {
+  min-width: 0;
+  padding: var(--spacing-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.run-brief-viewer-step strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.run-brief-viewer-step p {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.run-brief-viewer-step a {
+  display: inline-flex;
+  margin-top: var(--spacing-sm);
+  color: var(--accent-blue);
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+
+.run-brief-viewer-step a:hover {
+  text-decoration: underline;
+}
+
 .run-brief-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3104,7 +3158,8 @@ tr:last-child td {
   .run-calendar-summary,
   .run-calendar-detail-grid,
   .run-brief-detail-grid,
-  .run-brief-detail-grid.full {
+  .run-brief-detail-grid.full,
+  .run-brief-viewer-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -3186,7 +3241,8 @@ tr:last-child td {
   .run-calendar-summary,
   .run-calendar-detail-grid,
   .run-brief-detail-grid,
-  .run-brief-detail-grid.full {
+  .run-brief-detail-grid.full,
+  .run-brief-viewer-steps {
     grid-template-columns: 1fr;
   }
 

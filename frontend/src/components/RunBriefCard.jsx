@@ -106,6 +106,30 @@ function RunBriefActions({ run, mode }) {
   )
 }
 
+function RunViewerPath({ run }) {
+  const steps = Array.isArray(run.viewerPath) ? run.viewerPath.filter((step) => String(step?.label || '').trim()) : []
+  if (steps.length === 0) return null
+
+  return (
+    <div className="run-brief-viewer-path" aria-label={`${run.label} viewer path`}>
+      <span>How to follow this run</span>
+      <div className="run-brief-viewer-steps">
+        {steps.map((step) => (
+          <div key={`${step.label}-${step.href || ''}`} className="run-brief-viewer-step">
+            <strong>{step.label}</strong>
+            <p>{step.detail}</p>
+            {step.href && (
+              <Link to={step.href}>
+                {step.linkLabel || 'Open'}
+              </Link>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function RunBriefCard({
   run,
   variant = 'compact',
@@ -157,6 +181,8 @@ export default function RunBriefCard({
           </div>
         ))}
       </div>
+
+      <RunViewerPath run={run} />
 
       <RunBriefActions run={run} mode={actionMode} />
     </article>

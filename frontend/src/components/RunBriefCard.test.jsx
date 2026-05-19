@@ -22,19 +22,23 @@ describe('RunBriefCard', () => {
     expect(screen.getByRole('heading', { name: 'K12' })).toBeInTheDocument()
     expect(screen.getByText(/Do the new viewer\/story\/evidence changes/i)).toBeInTheDocument()
     expect(screen.getByText(/Exploratory public canary; non-claim-bearing/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Run Calendar/i })).toHaveAttribute('href', '/calendar')
+    expect(screen.getByText(/How to follow this run/i)).toBeInTheDocument()
+    expect(screen.getByText(/Before launch/i)).toBeInTheDocument()
+    expect(screen.getByText(/During live run/i)).toBeInTheDocument()
+    expect(screen.getByText(/After closeout/i)).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /Run Calendar/i }).some((link) => link.getAttribute('href') === '/calendar')).toBe(true)
   })
 
   it('uses completed-run actions for archived schedule entries', () => {
     const run = RUN_SCHEDULE.find((entry) => entry.label === 'K11')
 
-    render(
+    const { container } = render(
       <MemoryRouter>
         <RunBriefCard run={run} variant="full" actionMode="contextual" />
       </MemoryRouter>
     )
 
-    const actions = screen.getByRole('link', { name: /Recap/i }).closest('.run-brief-actions')
+    const actions = container.querySelector('.run-brief-actions')
     expect(within(actions).getByRole('link', { name: /Recap/i })).toHaveAttribute(
       'href',
       '/runs/real-20260517T220144Z/replay?tab=overview'
@@ -43,6 +47,8 @@ describe('RunBriefCard', () => {
       'href',
       '/runs/real-20260517T220144Z'
     )
+    expect(screen.getByText(/Start with recap/i)).toBeInTheDocument()
+    expect(screen.getByText(/Read the story report/i)).toBeInTheDocument()
     expect(screen.getAllByText(/not finished research/i).length).toBeGreaterThan(0)
   })
 })

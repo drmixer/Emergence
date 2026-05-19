@@ -1,3 +1,45 @@
+const PUBLIC_CANARY_VIEWER_PATH = [
+  {
+    label: 'Before launch',
+    detail: 'Read the declared question, run class, claim boundary, and watch points before the run starts.',
+    href: '/calendar',
+    linkLabel: 'Run Calendar',
+  },
+  {
+    label: 'During live run',
+    detail: 'Use Current Run for live status, then check Governance, Messages, Resources, and Agents for pressure signals.',
+    href: '/dashboard',
+    linkLabel: 'Current Run',
+  },
+  {
+    label: 'After closeout',
+    detail: 'Start from Archive for recap, replay, evidence, and story/report artifacts tied back to the declared question.',
+    href: '/archive',
+    linkLabel: 'Archive',
+  },
+]
+
+const RESEARCH_VIEWER_PATH = [
+  {
+    label: 'Before launch',
+    detail: 'Check the season question, declared condition, run class, and what comparison this run is meant to support.',
+    href: '/calendar',
+    linkLabel: 'Run Calendar',
+  },
+  {
+    label: 'During live run',
+    detail: 'Follow Current Run, Resources, Governance, and model-attribution evidence without treating one run as a conclusion.',
+    href: '/dashboard',
+    linkLabel: 'Current Run',
+  },
+  {
+    label: 'After closeout',
+    detail: 'Use Archive and evidence pages to compare against declared replicates or subtests before making claims.',
+    href: '/archive',
+    linkLabel: 'Archive',
+  },
+]
+
 export const RUN_SCHEDULE = [
   {
     id: 'k12-public-canary',
@@ -21,6 +63,7 @@ export const RUN_SCHEDULE = [
       live: '/dashboard',
       archive: '/archive',
     },
+    viewerPath: PUBLIC_CANARY_VIEWER_PATH,
   },
   {
     id: 'k13-governance-readability-canary',
@@ -44,6 +87,7 @@ export const RUN_SCHEDULE = [
       live: '/dashboard',
       archive: '/archive',
     },
+    viewerPath: PUBLIC_CANARY_VIEWER_PATH,
   },
   {
     id: 'k14-aid-trade-pressure-canary',
@@ -67,6 +111,7 @@ export const RUN_SCHEDULE = [
       live: '/dashboard',
       archive: '/archive',
     },
+    viewerPath: PUBLIC_CANARY_VIEWER_PATH,
   },
   {
     id: 'k15-public-order-canary',
@@ -90,6 +135,7 @@ export const RUN_SCHEDULE = [
       live: '/dashboard',
       archive: '/archive',
     },
+    viewerPath: PUBLIC_CANARY_VIEWER_PATH,
   },
   {
     id: 'season-1-run-1-research-baseline',
@@ -113,6 +159,7 @@ export const RUN_SCHEDULE = [
       live: '/dashboard',
       archive: '/archive',
     },
+    viewerPath: RESEARCH_VIEWER_PATH,
   },
   {
     id: 'k11-public-pipeline-canary',
@@ -139,6 +186,26 @@ export const RUN_SCHEDULE = [
       report: '/runs/real-20260517T220144Z/reports/approachable_report?format=markdown',
       archive: '/archive',
     },
+    viewerPath: [
+      {
+        label: 'Start with recap',
+        detail: 'Use the replay overview first; it explains the completed canary before raw evidence.',
+        href: '/runs/real-20260517T220144Z/replay?tab=overview',
+        linkLabel: 'Recap',
+      },
+      {
+        label: 'Check evidence',
+        detail: 'Open the run evidence page for story evidence, raw traces, and public metrics behind the recap.',
+        href: '/runs/real-20260517T220144Z',
+        linkLabel: 'Evidence',
+      },
+      {
+        label: 'Read the story report',
+        detail: 'Use the approachable report for a narrative closeout while keeping K11 framed as exploratory.',
+        href: '/runs/real-20260517T220144Z/reports/approachable_report?format=markdown',
+        linkLabel: 'Story Report',
+      },
+    ],
   },
 ]
 
