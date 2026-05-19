@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { Activity, Clock, TrendingUp } from 'lucide-react'
+import GlossaryTooltip from './GlossaryTooltip'
 
 function formatCycleCountdown(seconds) {
     if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) {
@@ -103,7 +104,9 @@ export default function ActivityPulse({
                 <div className="pulse-divider" />
 
                 <div className="pulse-stat day">
-                    <span className="day-label">Day</span>
+                    <span className="day-label">
+                        <GlossaryTooltip termKey="day">Day</GlossaryTooltip>
+                    </span>
                     <span className="day-value">{dayNumber}</span>
                 </div>
 

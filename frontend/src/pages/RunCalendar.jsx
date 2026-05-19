@@ -11,6 +11,7 @@ import {
   TimerReset,
 } from 'lucide-react'
 import { getLatestCompletedScheduledRun, getNextScheduledRun, getRunSchedule } from '../data/runSchedule'
+import GlossaryTooltip from '../components/GlossaryTooltip'
 
 const STATUS_ICONS = {
   Upcoming: Clock,
@@ -34,6 +35,14 @@ function ScheduleLink({ to, children, primary = false }) {
   )
 }
 
+function getRunClassTermKey(runClass) {
+  const normalized = String(runClass || '').trim().toLowerCase()
+  if (normalized === 'standard_72h') return 'standard-72h'
+  if (normalized === 'deep_96h') return 'deep-96h'
+  if (normalized === 'special_exploratory') return 'special-exploratory'
+  return 'run-class'
+}
+
 function RunScheduleArticle({ run, featured = false }) {
   const isCompleted = run.status === 'Completed'
   return (
@@ -47,7 +56,9 @@ function RunScheduleArticle({ run, featured = false }) {
             </span>
             <h2>{run.label}</h2>
           </div>
-          <p>{run.track} · {run.runClass} · {run.theme}</p>
+          <p>
+            {run.track} · <GlossaryTooltip termKey={getRunClassTermKey(run.runClass)}>{run.runClass}</GlossaryTooltip> · {run.theme}
+          </p>
         </div>
         <div className="run-calendar-time">
           <em>{run.planningState}</em>
@@ -147,7 +158,7 @@ export default function RunCalendar() {
           Run Calendar
         </h1>
         <p className="page-description">
-          Public canaries and research runs with declared questions, watch points, and evidence paths.
+          Public <GlossaryTooltip termKey="public-canary">canaries</GlossaryTooltip> and <GlossaryTooltip termKey="research-run">research runs</GlossaryTooltip> with declared questions, watch points, and evidence paths.
         </p>
       </div>
 

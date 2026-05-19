@@ -306,7 +306,7 @@ export default function Dashboard() {
                 </h1>
                 <p className="page-description">
                     {idleDashboard
-                        ? 'No simulation is live right now. Use the latest completed run for recap, replay, and evidence.'
+                        ? 'No simulation is live right now. Check the run calendar for upcoming runs.'
                         : isPreLaunch
                         ? 'The experiment is about to begin...'
                         : 'Live operational state for the active simulation run.'
@@ -314,7 +314,7 @@ export default function Dashboard() {
                 </p>
             </div>
 
-            <div className="card trust-note-card">
+            {!idleDashboard && <div className="card trust-note-card">
                 <div className="card-body trust-note-body">
                     <ShieldCheck size={16} />
                     <p>
@@ -322,9 +322,9 @@ export default function Dashboard() {
                     </p>
                     <Link to="/method" className="trust-note-link">Method</Link>
                 </div>
-            </div>
+            </div>}
 
-            <div className="card k11-watch-card">
+            {!idleDashboard && <div className="card k11-watch-card">
                 <div className="card-body k11-watch-body">
                     <div className="k11-watch-intro">
                         <span className="k11-eyebrow">{publicRunFraming.label}</span>
@@ -342,7 +342,7 @@ export default function Dashboard() {
                         ))}
                     </div>
                 </div>
-            </div>
+            </div>}
 
             {/* Activity Pulse */}
             {!loading && stats && hasActiveRun && (
@@ -366,8 +366,10 @@ export default function Dashboard() {
 
             {idleDashboard && (
                 <NoActiveRunNotice
-                    message="The live dashboard pauses between runs. Open the latest completed run for archived stats, recap, replay, and source evidence."
+                    title="No active run"
+                    message="No simulation is live right now. Check the run calendar for upcoming runs; completed-run evidence stays in the archive."
                     lastCompletedRunId={lastCompletedRunId}
+                    showCompletedRunHandoff={false}
                 />
             )}
 

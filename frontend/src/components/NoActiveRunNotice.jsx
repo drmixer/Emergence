@@ -64,6 +64,7 @@ export default function NoActiveRunNotice({
     title = 'Live run ended',
     message = 'No simulation is live right now. Open the latest completed run for the recap, replay, metrics, and source evidence.',
     lastCompletedRunId = '',
+    showCompletedRunHandoff = true,
 }) {
     const cleanRunId = String(lastCompletedRunId || '').trim()
     const [latestRunState, setLatestRunState] = useState({
@@ -75,7 +76,7 @@ export default function NoActiveRunNotice({
     useEffect(() => {
         let cancelled = false
 
-        if (!cleanRunId) return () => {
+        if (!cleanRunId || !showCompletedRunHandoff) return () => {
             cancelled = true
         }
 
@@ -106,7 +107,7 @@ export default function NoActiveRunNotice({
         return () => {
             cancelled = true
         }
-    }, [cleanRunId])
+    }, [cleanRunId, showCompletedRunHandoff])
 
     const runDetail = latestRunState.runId === cleanRunId ? latestRunState.runDetail : null
     const storyMoments = latestRunState.runId === cleanRunId ? latestRunState.storyMoments : []
@@ -121,11 +122,11 @@ export default function NoActiveRunNotice({
                     <Activity size={28} />
                     <div>
                         <strong>{title}</strong>
-                        {cleanRunId && <span>Latest completed run: {cleanRunId}</span>}
+                        {showCompletedRunHandoff && cleanRunId && <span>Latest completed run: {cleanRunId}</span>}
                     </div>
                     <p>{message}</p>
-                    {runSummary && <p className="no-active-run-summary">{runSummary}</p>}
-                    {snapshotRows.length > 0 && (
+                    {showCompletedRunHandoff && runSummary && <p className="no-active-run-summary">{runSummary}</p>}
+                    {showCompletedRunHandoff && snapshotRows.length > 0 && (
                         <div className="no-active-run-snapshot" aria-label="Latest completed run snapshot">
                             {snapshotRows.map((row) => (
                                 <div key={row.label}>
@@ -136,7 +137,7 @@ export default function NoActiveRunNotice({
                             ))}
                         </div>
                     )}
-                    {storyMoments.length > 0 && (
+                    {showCompletedRunHandoff && storyMoments.length > 0 && (
                         <div className="no-active-run-moments" aria-label="Latest completed run moments">
                             {storyMoments.map((moment) => (
                                 <Link
@@ -157,7 +158,7 @@ export default function NoActiveRunNotice({
                         </div>
                     )}
                     <div className="no-active-run-actions">
-                        {cleanRunId && (
+                        {showCompletedRunHandoff && cleanRunId && (
                             <>
                                 <Link to={`/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-primary">
                                     <TimerReset size={14} />

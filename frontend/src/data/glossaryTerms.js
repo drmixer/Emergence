@@ -6,6 +6,12 @@ export const GLOSSARY_TERMS = [
         definition: 'A single simulation execution window with one run ID and fixed settings.',
     },
     {
+        key: 'day',
+        label: 'Day',
+        shortLabel: 'day',
+        definition: 'A simulation day is an internal cycle label used by the run clock. It is not a 24-hour calendar day; several simulation days can pass during one real-world day.',
+    },
+    {
         key: 'season',
         label: 'Season',
         shortLabel: 'season',
@@ -22,6 +28,42 @@ export const GLOSSARY_TERMS = [
         label: 'Tournament',
         shortLabel: 'tournament',
         definition: 'A special exploratory run after an epoch with selected champions, labeled separately from baseline research runs and allowed continuity-protective deterministic fallback.',
+    },
+    {
+        key: 'run-class',
+        label: 'Run Class',
+        shortLabel: 'run class',
+        definition: 'The declared operating category for a run. It controls duration expectations, claim discipline, and failure-handling policy.',
+    },
+    {
+        key: 'public-canary',
+        label: 'Public Canary',
+        shortLabel: 'public canary',
+        definition: 'A public exploratory run used to test the pipeline, viewer experience, or a specific observable theme before treating later runs as stronger research evidence.',
+    },
+    {
+        key: 'research-run',
+        label: 'Research Run',
+        shortLabel: 'research run',
+        definition: 'A stricter, claim-bearing run intended to support controlled comparison when it follows a declared condition and has enough evidence or replicates.',
+    },
+    {
+        key: 'standard-72h',
+        label: 'standard_72h',
+        shortLabel: 'standard_72h',
+        definition: 'The default research run class. It targets a 72-hour real-world window, has stricter claim discipline, and uses forced idle rather than routine continuity protection on terminal LLM failure.',
+    },
+    {
+        key: 'deep-96h',
+        label: 'deep_96h',
+        shortLabel: 'deep_96h',
+        definition: 'A longer, pre-declared research run class for deeper observation. It preserves the same no-provider-fallback and forced-idle failure policy as standard_72h.',
+    },
+    {
+        key: 'special-exploratory',
+        label: 'special_exploratory',
+        shortLabel: 'special_exploratory',
+        definition: 'A flexible public-facing run class for canaries, showcases, tournaments, or themed stress tests. It is non-claim-bearing by default and may use disclosed routine continuity protection.',
     },
     {
         key: 'carryover',

@@ -58,20 +58,23 @@ export default function Method() {
 
             <h3>Run Classes & Failure Policy</h3>
             <ul>
-              <li><strong>standard_72h:</strong> default research run; no provider/model fallback; terminal LLM failure resolves to forced idle.</li>
-              <li><strong>deep_96h:</strong> longer research run; no provider/model fallback; terminal LLM failure resolves to forced idle.</li>
-              <li><strong>special_exploratory:</strong> exploratory/showcase run; no provider/model fallback; terminal LLM failure may use deterministic routine continuity protection.</li>
+              <li><strong><GlossaryTooltip termKey="standard-72h">standard_72h</GlossaryTooltip>:</strong> default research run; no provider/model fallback; terminal LLM failure resolves to forced idle.</li>
+              <li><strong><GlossaryTooltip termKey="deep-96h">deep_96h</GlossaryTooltip>:</strong> longer research run; no provider/model fallback; terminal LLM failure resolves to forced idle.</li>
+              <li><strong><GlossaryTooltip termKey="special-exploratory">special_exploratory</GlossaryTooltip>:</strong> exploratory/showcase run; no provider/model fallback; terminal LLM failure may use deterministic routine continuity protection.</li>
               <li><strong>Unknown model assignments:</strong> treated as configuration errors, not silently remapped.</li>
             </ul>
 
             <h3>Research Cadence Terms</h3>
             <ul>
               <li><GlossaryTooltip termKey="run">Run</GlossaryTooltip>: one simulation execution window with a fixed run ID.</li>
+              <li><GlossaryTooltip termKey="day">Day</GlossaryTooltip>: a simulation cycle label, not a 24-hour calendar day.</li>
               <li><GlossaryTooltip termKey="season">Season</GlossaryTooltip>: four runs under one primary hypothesis.</li>
               <li><GlossaryTooltip termKey="epoch">Epoch</GlossaryTooltip>: four seasons grouped for crossover/tournament boundaries.</li>
               <li><GlossaryTooltip termKey="tournament">Tournament</GlossaryTooltip>: a special post-epoch exploratory showdown run.</li>
               <li><GlossaryTooltip termKey="carryover">Carryover</GlossaryTooltip>: selected identities continuing into a new season with memory summary.</li>
               <li><GlossaryTooltip termKey="exploratory">Exploratory run</GlossaryTooltip>: intentionally separated from baseline condition synthesis.</li>
+              <li><GlossaryTooltip termKey="public-canary">Public canary</GlossaryTooltip>: a public exploratory run used to test the pipeline or viewer experience before stronger research claims.</li>
+              <li><GlossaryTooltip termKey="research-run">Research run</GlossaryTooltip>: a stricter run intended for controlled comparison and claim-bearing evidence.</li>
               <li><GlossaryTooltip termKey="canonical-identity">Canonical identity</GlossaryTooltip>: Agent #NN tracking key used for attribution and analytics.</li>
             </ul>
 

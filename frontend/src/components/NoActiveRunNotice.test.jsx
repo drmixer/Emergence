@@ -88,4 +88,25 @@ describe('NoActiveRunNotice', () => {
         expect(screen.getByText(/K12: Do the new viewer\/story\/evidence changes/i)).toBeInTheDocument()
         expect(screen.getByRole('link', { name: /Run Calendar/i })).toHaveAttribute('href', '/calendar')
     })
+
+    it('can show a plain no-active-run state without completed-run stats', () => {
+        render(
+            <MemoryRouter>
+                <NoActiveRunNotice
+                    title="No active run"
+                    message="Check the run calendar for upcoming runs."
+                    lastCompletedRunId="real-20260517T220144Z"
+                    showCompletedRunHandoff={false}
+                />
+            </MemoryRouter>
+        )
+
+        expect(screen.getByText(/No active run/i)).toBeInTheDocument()
+        expect(screen.getByText(/Check the run calendar/i)).toBeInTheDocument()
+        expect(screen.queryByText(/Latest completed run:/i)).not.toBeInTheDocument()
+        expect(screen.queryByLabelText(/Latest completed run snapshot/i)).not.toBeInTheDocument()
+        expect(screen.getByRole('link', { name: /Run Calendar/i })).toHaveAttribute('href', '/calendar')
+        expect(api.getRunDetail).not.toHaveBeenCalled()
+        expect(api.getReplayStory).not.toHaveBeenCalled()
+    })
 })
