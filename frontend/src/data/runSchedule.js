@@ -171,3 +171,11 @@ export function getScheduleEntryForRunId(runId) {
   if (!cleanRunId) return null
   return RUN_SCHEDULE.find((run) => run.runId === cleanRunId) || null
 }
+
+export function getRunClassTermKey(runClass) {
+  const normalized = String(runClass || '').trim().toLowerCase()
+  if (normalized === 'standard_72h') return 'standard-72h'
+  if (normalized === 'deep_96h') return 'deep-96h'
+  if (normalized === 'special_exploratory') return 'special-exploratory'
+  return 'run-class'
+}

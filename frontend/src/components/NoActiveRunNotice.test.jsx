@@ -84,8 +84,6 @@ describe('NoActiveRunNotice', () => {
             'href',
             '/runs/real-20260517T220144Z'
         )
-        expect(screen.getByText(/Next scheduled run/i)).toBeInTheDocument()
-        expect(screen.getByText(/K12: Do the new viewer\/story\/evidence changes/i)).toBeInTheDocument()
         expect(screen.getByRole('link', { name: /Run Calendar/i })).toHaveAttribute('href', '/calendar')
     })
 

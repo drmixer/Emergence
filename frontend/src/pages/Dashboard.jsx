@@ -22,8 +22,10 @@ import ActivityPulse from '../components/ActivityPulse'
 import { ResourceBar, CriticalAgentsBanner } from '../components/ResourceBar'
 import { SkeletonEventCard, SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
 import NoActiveRunNotice from '../components/NoActiveRunNotice'
+import RunBriefCard from '../components/RunBriefCard'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { getPublicRunFraming } from '../../lib/public-run-framing'
+import { getNextScheduledRun, getScheduleEntryForRunId } from '../data/runSchedule'
 
 const DashboardSocialDynamicsChart = lazy(() => import('../components/DashboardSocialDynamicsChart'))
 
@@ -295,6 +297,11 @@ export default function Dashboard() {
     const mobility = classMobility?.mobility || {}
     const inequality = classMobility?.inequality || {}
     const publicRunFraming = getPublicRunFraming(runMetadata)
+    const nextScheduledRun = getNextScheduledRun()
+    const activeScheduledRun =
+        hasActiveRun
+            ? getScheduleEntryForRunId(scope?.active_run_id) || (nextScheduledRun?.status === 'Live' ? nextScheduledRun : null)
+            : null
 
     return (
         <div className="dashboard">
@@ -324,7 +331,16 @@ export default function Dashboard() {
                 </div>
             </div>}
 
-            {!idleDashboard && <div className="card k11-watch-card">
+            {!idleDashboard && activeScheduledRun && (
+                <RunBriefCard
+                    run={activeScheduledRun}
+                    variant="compact"
+                    heading="Current run brief"
+                    actionMode="contextual"
+                />
+            )}
+
+            {!idleDashboard && !activeScheduledRun && <div className="card k11-watch-card">
                 <div className="card-body k11-watch-body">
                     <div className="k11-watch-intro">
                         <span className="k11-eyebrow">{publicRunFraming.label}</span>
@@ -370,6 +386,15 @@ export default function Dashboard() {
                     message="No simulation is live right now. Check the run calendar for upcoming runs; completed-run evidence stays in the archive."
                     lastCompletedRunId={lastCompletedRunId}
                     showCompletedRunHandoff={false}
+                />
+            )}
+
+            {idleDashboard && nextScheduledRun && (
+                <RunBriefCard
+                    run={nextScheduledRun}
+                    variant="compact"
+                    heading="Next scheduled run"
+                    actionMode="calendar"
                 />
             )}
 

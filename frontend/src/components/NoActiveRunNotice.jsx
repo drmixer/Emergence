@@ -2,7 +2,6 @@ import { Activity, CalendarDays, FileSearch, TimerReset } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
-import { getNextScheduledRun } from '../data/runSchedule'
 import { getStoryReplayHref } from '../utils/bestMoments'
 
 function formatNumber(value) {
@@ -113,8 +112,6 @@ export default function NoActiveRunNotice({
     const storyMoments = latestRunState.runId === cleanRunId ? latestRunState.storyMoments : []
     const snapshotRows = runDetail ? buildSnapshotRows(runDetail) : []
     const runSummary = buildRunSummary(runDetail)
-    const nextRun = getNextScheduledRun()
-
     return (
         <div className="card no-active-run-card">
             <div className="card-body">
@@ -148,13 +145,6 @@ export default function NoActiveRunNotice({
                                     <strong>{moment.title || moment.event_type || 'Run moment'}</strong>
                                 </Link>
                             ))}
-                        </div>
-                    )}
-                    {nextRun && (
-                        <div className="no-active-run-next">
-                            <span>Next scheduled run</span>
-                            <strong>{nextRun.label}: {nextRun.declaredQuestion}</strong>
-                            <em>{nextRun.claimBoundary}</em>
                         </div>
                     )}
                     <div className="no-active-run-actions">

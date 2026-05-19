@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  CalendarDays,
   Download,
   FileSearch,
   RefreshCw,
@@ -10,6 +9,7 @@ import {
 import { api } from '../services/api'
 import { getNextScheduledRun, getScheduleEntryForRunId } from '../data/runSchedule'
 import { getStoryReplayHref } from '../utils/bestMoments'
+import RunBriefCard from '../components/RunBriefCard'
 
 function formatTimestamp(value) {
   if (!value) return 'Unknown'
@@ -276,19 +276,12 @@ export default function Reports() {
       )}
 
       {nextScheduledRun && (
-        <div className="card archive-schedule-card">
-          <div className="card-body archive-schedule-body">
-            <div>
-              <span className="archive-schedule-eyebrow">Next scheduled run</span>
-              <h2>{nextScheduledRun.label}: {nextScheduledRun.declaredQuestion}</h2>
-              <p>{nextScheduledRun.watchFor}</p>
-            </div>
-            <Link to="/calendar" className="btn btn-secondary">
-              <CalendarDays size={14} />
-              Run Calendar
-            </Link>
-          </div>
-        </div>
+        <RunBriefCard
+          run={nextScheduledRun}
+          variant="compact"
+          heading="Next scheduled run"
+          actionMode="calendar"
+        />
       )}
 
       <div className="message-tabs archive-mode-tabs">

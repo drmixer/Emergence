@@ -1449,36 +1449,6 @@ tr:last-child td {
   overflow-wrap: anywhere;
 }
 
-.no-active-run-next {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  width: 100%;
-  padding: var(--spacing-md);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-.no-active-run-next span {
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.no-active-run-next strong {
-  color: var(--text-primary);
-  font-size: 0.98rem;
-  line-height: 1.4;
-}
-
-.no-active-run-next em {
-  color: var(--text-secondary);
-  font-size: 0.88rem;
-  font-style: normal;
-}
-
 .no-active-run-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1730,32 +1700,6 @@ tr:last-child td {
 
 .archive-stats-grid {
   margin-top: 0;
-}
-
-.archive-schedule-body {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-md);
-}
-
-.archive-schedule-body h2 {
-  margin: 0.25rem 0 0;
-  font-size: 1.25rem;
-  letter-spacing: 0;
-}
-
-.archive-schedule-body p {
-  margin: 0.45rem 0 0;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.archive-schedule-eyebrow {
-  color: var(--text-muted);
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .archive-run-list {
@@ -2073,6 +2017,166 @@ tr:last-child td {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
+}
+
+.run-brief-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-xl);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.run-brief-card.featured,
+.run-brief-card.status-upcoming {
+  border-color: rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.016)),
+    rgba(255, 255, 255, 0.012);
+}
+
+.run-brief-compact {
+  gap: var(--spacing-md);
+}
+
+.run-brief-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--spacing-lg);
+  align-items: flex-start;
+}
+
+.run-brief-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.run-brief-title-row h2 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.run-brief-compact .run-brief-title-row h2 {
+  font-size: 1.5rem;
+}
+
+.run-brief-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.85rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.78rem;
+}
+
+.run-brief-heading {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.run-brief-head p {
+  margin: 0.45rem 0 0;
+  color: var(--text-secondary);
+}
+
+.run-brief-time {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  min-width: 12rem;
+}
+
+.run-brief-time em {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.72rem;
+  font-style: normal;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.run-brief-time span {
+  color: var(--text-secondary);
+}
+
+.run-brief-time strong {
+  color: var(--text-primary);
+}
+
+.run-brief-question {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: flex-start;
+  padding: var(--spacing-md) 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.run-brief-question svg {
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+  color: var(--accent-blue);
+}
+
+.run-brief-question span,
+.run-brief-detail-grid span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.run-brief-question strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  line-height: 1.45;
+}
+
+.run-brief-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-md);
+}
+
+.run-brief-detail-grid.full {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.run-brief-detail-grid > div {
+  min-width: 0;
+}
+
+.run-brief-detail-grid p {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.run-brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
 }
 
 .run-calendar-item {
@@ -2983,27 +3087,29 @@ tr:last-child td {
 
   .archive-current-run-body,
   .archive-run-card-head,
-  .archive-schedule-body,
-  .run-calendar-item-head {
+  .run-calendar-item-head,
+  .run-brief-head {
     flex-direction: column;
   }
 
   .archive-run-card-head > .btn,
   .archive-current-run-actions .btn,
   .archive-run-actions .btn,
-  .archive-report-action,
-  .archive-schedule-body .btn {
+  .archive-report-action {
     flex: 1 1 180px;
   }
 
   .archive-run-stats,
   .archive-run-schedule-context,
   .run-calendar-summary,
-  .run-calendar-detail-grid {
+  .run-calendar-detail-grid,
+  .run-brief-detail-grid,
+  .run-brief-detail-grid.full {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .run-calendar-time {
+  .run-calendar-time,
+  .run-brief-time {
     align-items: flex-start;
     min-width: 0;
   }
@@ -3055,7 +3161,8 @@ tr:last-child td {
   .run-topbar-actions,
   .no-active-run-actions,
   .archive-run-actions,
-  .run-calendar-actions {
+  .run-calendar-actions,
+  .run-brief-actions {
     width: 100%;
   }
 
@@ -3063,6 +3170,7 @@ tr:last-child td {
   .no-active-run-actions .btn,
   .archive-run-actions .btn,
   .run-calendar-actions .btn,
+  .run-brief-actions .btn,
   .archive-report-action,
   .archive-report-action .btn:first-child {
     width: 100%;
@@ -3076,7 +3184,9 @@ tr:last-child td {
   .archive-run-stats,
   .archive-run-schedule-context,
   .run-calendar-summary,
-  .run-calendar-detail-grid {
+  .run-calendar-detail-grid,
+  .run-brief-detail-grid,
+  .run-brief-detail-grid.full {
     grid-template-columns: 1fr;
   }
 
