@@ -13,10 +13,11 @@ describe('run schedule', () => {
     expect(nextRun).toMatchObject({
       label: 'K12',
       theme: 'Viewer Comprehension',
-      planningState: 'Locked',
+      planningState: 'Live',
       track: 'Public Canary',
       runClass: 'special_exploratory',
-      status: 'Upcoming',
+      status: 'Live',
+      runId: 'real-20260519T063000Z',
       claimBoundary: 'Exploratory public canary; non-claim-bearing.',
     })
     expect(nextRun.declaredQuestion).toMatch(/viewer\/story\/evidence changes/i)
@@ -61,6 +62,7 @@ describe('run schedule', () => {
   })
 
   it('can look up schedule context for archived run cards', () => {
+    expect(getScheduleEntryForRunId('real-20260519T063000Z')?.label).toBe('K12')
     expect(getScheduleEntryForRunId('real-20260517T220144Z')?.label).toBe('K11')
     expect(getScheduleEntryForRunId('unknown')).toBeNull()
   })

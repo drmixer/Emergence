@@ -58,7 +58,7 @@ export default function RunCalendar() {
       <div className="run-calendar-note">
         <AlertCircle size={16} />
         <p>
-          K11 remains an exploratory public pipeline canary. K12 is the locked next canary; later dates stay tentative until each run condition is ready to launch.
+          K11 remains an exploratory public pipeline canary. K12 is the live viewer-comprehension canary; later dates stay tentative until each run condition is ready to launch.
         </p>
       </div>
 

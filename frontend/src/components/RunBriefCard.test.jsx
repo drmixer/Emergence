@@ -71,7 +71,7 @@ describe('RunBriefCard', () => {
     fireEvent.click(screen.getAllByRole('link', { name: /Run Calendar/i })[0])
 
     expect(trackKpiEvent).toHaveBeenCalledWith('run_path_click', expect.objectContaining({
-      runId: 'k12-public-canary',
+      runId: 'real-20260519T063000Z',
       surface: 'dashboard_idle',
       target: 'viewer_path:Before launch',
     }))
