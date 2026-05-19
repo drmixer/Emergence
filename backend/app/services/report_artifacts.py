@@ -58,6 +58,7 @@ def _regenerate_artifact(db: Session, row: RunReportArtifact) -> RunReportArtifa
                 actor_id=REPORT_REBUILD_ACTOR_ID,
                 condition_name=metadata.get("condition_name"),
                 season_number=metadata.get("season_number"),
+                generate_story_with_gemini=bool(metadata.get("story_generate_with_gemini")),
             )
         elif artifact_type == "run_summary":
             generate_and_record_run_summary(

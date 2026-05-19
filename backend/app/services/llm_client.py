@@ -428,6 +428,7 @@ class LLMClient:
         client: AsyncOpenAI,
         agent_id: int | None,
         checkpoint_number: int | None,
+        usage_run_id: str | None = None,
         model_type: str,
         model_name: str,
         system_prompt: str,
@@ -514,7 +515,7 @@ class LLMClient:
         except Exception as e:
             latency_ms = int((time.monotonic() - started) * 1000)
             usage_budget.record_call(
-                run_id=self._current_run_id(),
+                run_id=(str(usage_run_id or "").strip()[:64] or self._current_run_id()),
                 agent_id=agent_id,
                 checkpoint_number=checkpoint_number,
                 provider=provider_name,
@@ -539,7 +540,7 @@ class LLMClient:
         total_tokens = int(getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens))
         byok_used = self._extract_byok_used(response=response, provider_name=provider_name)
         usage_budget.record_call(
-            run_id=self._current_run_id(),
+            run_id=(str(usage_run_id or "").strip()[:64] or self._current_run_id()),
             agent_id=agent_id,
             checkpoint_number=checkpoint_number,
             provider=provider_name,
@@ -587,6 +588,7 @@ class LLMClient:
         user_prompt: str,
         agent_id: int | None = None,
         checkpoint_number: int | None = None,
+        usage_run_id: str | None = None,
         max_tokens: int = 500,
         temperature: float = 0.7,
         max_retries: int = 3,
@@ -629,6 +631,7 @@ class LLMClient:
                     client=client,
                     agent_id=agent_id,
                     checkpoint_number=checkpoint_number,
+                    usage_run_id=usage_run_id,
                     model_type=model_type,
                     model_name=model_name,
                     system_prompt=system_prompt,

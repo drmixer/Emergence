@@ -87,6 +87,41 @@ def test_list_and_download_run_reports(reports_client):
     assert '"ok":true' in view_response.text
 
 
+def test_missing_story_artifact_regenerates_with_gemini_flag(reports_client, monkeypatch):
+    _client, db_session, tmp_dir = reports_client
+    missing_file = tmp_dir / "runs" / "run-1" / "approachable_report.json"
+    row = RunReportArtifact(
+        run_id="run-1",
+        artifact_type="approachable_report",
+        artifact_format="json",
+        artifact_path=str(missing_file),
+        status="completed",
+        metadata_json={
+            "condition_name": "baseline_v1",
+            "season_number": 2,
+            "story_generate_with_gemini": True,
+        },
+    )
+    db_session.add(row)
+    db_session.commit()
+    calls: list[dict[str, object]] = []
+
+    def _fake_rebuild_run_bundle(_db, **kwargs):
+        calls.append(kwargs)
+        missing_file.parent.mkdir(parents=True, exist_ok=True)
+        missing_file.write_text('{"ok":true}\n', encoding="utf-8")
+
+    monkeypatch.setattr(report_artifacts, "rebuild_run_bundle", _fake_rebuild_run_bundle)
+
+    path = report_artifacts.ensure_artifact_path(db_session, row)
+
+    assert path == missing_file
+    assert calls[0]["run_id"] == "run-1"
+    assert calls[0]["condition_name"] == "baseline_v1"
+    assert calls[0]["season_number"] == 2
+    assert calls[0]["generate_story_with_gemini"] is True
+
+
 def test_list_and_download_condition_comparison_reports(reports_client):
     client, db_session, tmp_dir = reports_client
     json_file = tmp_dir / "conditions" / "baseline-v1" / "condition_comparison.json"

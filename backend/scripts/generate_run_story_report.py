@@ -19,6 +19,11 @@ def main() -> int:
     parser.add_argument("--run-id", required=True, help="Run ID to synthesize.")
     parser.add_argument("--condition", default="", help="Optional condition label for tagging/replicate gating.")
     parser.add_argument("--season-number", type=int, default=0, help="Optional season number tag.")
+    parser.add_argument(
+        "--generate-with-gemini",
+        action="store_true",
+        help="Use the configured Gemini route to generate the public story sections. No provider/model fallback is used.",
+    )
     args = parser.parse_args()
 
     db = SessionLocal()
@@ -28,6 +33,7 @@ def main() -> int:
             run_id=str(args.run_id or "").strip(),
             condition_name=str(args.condition or "").strip() or None,
             season_number=(int(args.season_number) if int(args.season_number or 0) > 0 else None),
+            generate_with_gemini=bool(args.generate_with_gemini),
         )
         db.commit()
         run_dir = Path(__file__).resolve().parents[2] / "output" / "reports" / "runs"
@@ -39,6 +45,7 @@ def main() -> int:
                     "evidence_completeness": payload.get("evidence_completeness"),
                     "replicate_count": payload.get("replicate_count"),
                     "condition_name": payload.get("condition_name"),
+                    "story_generation_status": (payload.get("gemini_story_generation") or {}).get("status"),
                     "outdir": str(run_dir / str(payload.get("run_id") or "")),
                 }
             )

@@ -135,6 +135,7 @@ def test_create_completion_with_budget_throttles_gemini(monkeypatch):
             client=client.gemini_client,
             agent_id=23,
             checkpoint_number=2,
+            usage_run_id="report-run-1",
             model_type="gm_gemini_2_0_flash_lite",
             model_name="gemini-2.0-flash-lite",
             system_prompt="system",
@@ -151,6 +152,7 @@ def test_create_completion_with_budget_throttles_gemini(monkeypatch):
     assert calls == {"gemini_throttle": 1, "openrouter_throttle": 0}
     assert response.usage.total_tokens == 18
     assert recorded and recorded[0]["provider"] == "gemini"
+    assert recorded[0]["run_id"] == "report-run-1"
     assert recorded[0]["success"] is True
     assert "extra_body" not in create_kwargs[0]
 

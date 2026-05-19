@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
@@ -37,6 +38,7 @@ REPORT_GENERATOR_VERSION = "run-report-v1"
 REPORT_TEMPLATE_VERSION = "run-report-v1"
 POST_RUN_STORY_TEMPLATE_VERSION = "post-run-story-template-v1"
 POST_RUN_STORY_GEMINI_MODEL_TYPE = "gm_gemini_2_5_flash"
+POST_RUN_STORY_LLM_GENERATOR_VERSION = "post-run-story-gemini-v1"
 
 CONTENT_TYPE_TECHNICAL = "technical_report"
 CONTENT_TYPE_APPROACHABLE = "approachable_article"
@@ -641,6 +643,23 @@ def _story_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
         f"- {section['heading']}: {section['purpose']}"
         for section in _story_template_section_list()
     )
+    metrics = context.get("metrics") if isinstance(context, dict) else {}
+    count_constraints = "\n".join(
+        [
+            f"- Total scoped events: {int((metrics or {}).get('total_events') or 0)}",
+            f"- Viewer-visible events: {int((metrics or {}).get('viewer_visible_events_default') or 0)}",
+            f"- LLM calls: {int((metrics or {}).get('llm_calls') or 0)}",
+            f"- Deaths: {int((metrics or {}).get('deaths') or 0)}",
+            f"- Dormancy events: {int((metrics or {}).get('became_dormant') or 0)}",
+            f"- Revivals: {int((metrics or {}).get('agent_revived') or 0)}",
+            f"- Passed laws: {int((metrics or {}).get('laws_passed') or 0)}",
+            f"- Aid requests: {int((metrics or {}).get('aid_requests') or 0)}",
+            f"- Answered aid requests: {int((metrics or {}).get('aid_answered') or 0)}",
+            f"- Trades: {int((metrics or {}).get('trade_actions') or 0)}",
+            f"- Conflict signals: {int((metrics or {}).get('conflict_events') or 0)}",
+            f"- Cooperation signals: {int((metrics or {}).get('cooperation_events') or 0)}",
+        ]
+    )
     system_prompt = (
         "You write Emergence post-run stories for public readers. "
         "Use only the provided run context and evidence. Do not invent events, agents, causes, or conclusions. "
@@ -653,13 +672,165 @@ def _story_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
         "Style constraints:\n"
         "- Start with the answer, then explain the arc.\n"
         "- Use concrete counts only when they make the story easier to understand.\n"
+        "- Treat the mandatory count constraints below as authoritative; do not add subtotals to those totals unless the context explicitly provides a subtotal.\n"
+        "- If selected traces mention a subset of events, call them selected traces, not extra events.\n"
         "- Avoid raw event-list narration.\n"
         "- Mention duplicate/repeated waves only as grouped evidence, not as independent events.\n"
         "- End with watchpoints for the next run.\n\n"
+        "Mandatory count constraints:\n"
+        f"{count_constraints}\n\n"
         "Run context JSON:\n"
         f"{json.dumps(context, indent=2, sort_keys=True)}"
     )
     return {"system_prompt": system_prompt, "user_prompt": user_prompt}
+
+
+def _story_llm_model_type() -> str:
+    configured = str(getattr(settings, "RUN_REPORT_STORY_LLM_MODEL_TYPE", "") or "").strip()
+    return configured or POST_RUN_STORY_GEMINI_MODEL_TYPE
+
+
+def _strip_markdown_code_fence(markdown: str) -> str:
+    text_value = str(markdown or "").strip()
+    if not text_value.startswith("```"):
+        return text_value
+    lines = text_value.splitlines()
+    if len(lines) >= 2 and lines[0].strip().startswith("```") and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return text_value
+
+
+def _sanitize_generated_story_paragraph(paragraph: str) -> str:
+    clean = str(paragraph or "").strip()
+    clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", clean)
+    clean = re.sub(r"https?://\S+", "", clean)
+    return re.sub(r"\s+", " ", clean).strip()
+
+
+def _split_generated_story_markdown(markdown: str) -> dict[str, list[str]]:
+    text_value = _strip_markdown_code_fence(markdown)
+    section_headings = {str(section["heading"]).strip() for section in _story_template_section_list()}
+    sections: dict[str, list[str]] = {}
+    current_heading: str | None = None
+    current_lines: list[str] = []
+
+    def _flush() -> None:
+        nonlocal current_heading, current_lines
+        if not current_heading:
+            current_lines = []
+            return
+        paragraphs: list[str] = []
+        bucket: list[str] = []
+        for raw_line in current_lines:
+            line = raw_line.strip()
+            if not line:
+                if bucket:
+                    paragraph = _sanitize_generated_story_paragraph(" ".join(bucket))
+                    if paragraph:
+                        paragraphs.append(paragraph)
+                    bucket = []
+                continue
+            if line.startswith(("- ", "* ")):
+                if bucket:
+                    paragraph = _sanitize_generated_story_paragraph(" ".join(bucket))
+                    if paragraph:
+                        paragraphs.append(paragraph)
+                    bucket = []
+                paragraph = _sanitize_generated_story_paragraph(line[2:])
+                if paragraph:
+                    paragraphs.append(paragraph)
+                continue
+            bucket.append(line)
+        if bucket:
+            paragraph = _sanitize_generated_story_paragraph(" ".join(bucket))
+            if paragraph:
+                paragraphs.append(paragraph)
+        sections[current_heading] = [paragraph for paragraph in paragraphs if paragraph]
+        current_lines = []
+
+    for raw_line in text_value.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip().rstrip(":").strip()
+            if heading in section_headings:
+                _flush()
+                current_heading = heading
+                current_lines = []
+                continue
+        bullet_match = re.match(r"^[-*]\s+([^:]+):\s*(.*)$", stripped)
+        if bullet_match:
+            heading = str(bullet_match.group(1) or "").strip().rstrip(":").strip()
+            if heading in section_headings:
+                _flush()
+                current_heading = heading
+                first_line = str(bullet_match.group(2) or "").strip()
+                current_lines = [first_line] if first_line else []
+                continue
+        if current_heading:
+            current_lines.append(raw_line)
+    _flush()
+    return sections
+
+
+def _sections_from_generated_story_markdown(
+    *,
+    markdown: str,
+    fallback_sections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    generated_by_heading = _split_generated_story_markdown(markdown)
+    if not generated_by_heading:
+        return fallback_sections
+
+    sections: list[dict[str, Any]] = []
+    fallback_by_heading = {
+        str(section.get("heading") or "").strip(): section
+        for section in fallback_sections
+        if isinstance(section, dict)
+    }
+    for template_section in _story_template_section_list():
+        heading = str(template_section["heading"]).strip()
+        fallback = fallback_by_heading.get(heading) or {}
+        paragraphs = generated_by_heading.get(heading) or list(fallback.get("paragraphs") or [])
+        sections.append(
+            {
+                "heading": heading,
+                "paragraphs": paragraphs,
+                "references": _normalize_links(fallback.get("references") or []),
+                "template_version": POST_RUN_STORY_TEMPLATE_VERSION,
+                "generated_by": POST_RUN_STORY_LLM_GENERATOR_VERSION,
+            }
+        )
+    return sections
+
+
+async def generate_post_run_story_markdown_with_gemini(payload: dict[str, Any]) -> str:
+    generation = payload.get("gemini_story_generation") if isinstance(payload, dict) else {}
+    if not isinstance(generation, dict):
+        raise ValueError("story payload is missing gemini_story_generation")
+
+    from app.services.llm_client import llm_client
+
+    model_type = _story_llm_model_type()
+    response = await llm_client.get_completion(
+        model_type=model_type,
+        system_prompt=str(generation.get("system_prompt") or ""),
+        user_prompt=str(generation.get("user_prompt") or ""),
+        usage_run_id=str(payload.get("run_id") or ""),
+        max_tokens=max(700, int(getattr(settings, "RUN_REPORT_STORY_LLM_MAX_TOKENS", 3200) or 3200)),
+        temperature=0.35,
+        max_retries=2,
+    )
+    if not response:
+        raise RuntimeError("Gemini story generation returned no content")
+    return _strip_markdown_code_fence(response)
+
+
+def _run_story_generation_blocking(payload: dict[str, Any]) -> str:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(generate_post_run_story_markdown_with_gemini(payload))
+    raise RuntimeError("Gemini story generation cannot run inside an active event loop; use the CLI target")
 
 
 def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -> tuple[Any, Any, str]:
@@ -2268,6 +2439,8 @@ def _build_story_payload(
     condition_name: str,
     season_number: int | None,
     replicate_count: int,
+    generated_story_markdown: str | None = None,
+    generation_error: str | None = None,
 ) -> dict[str, Any]:
     generation_context = _story_generation_context(
         snapshot=snapshot,
@@ -2278,6 +2451,26 @@ def _build_story_payload(
         replicate_count=replicate_count,
     )
     generation_prompt = _story_generation_prompt(generation_context)
+    deterministic_sections = _build_story_sections(
+        snapshot=snapshot,
+        status_label=status_label,
+        condition_name=condition_name,
+        replicate_count=replicate_count,
+    )
+    clean_generated_story = _strip_markdown_code_fence(generated_story_markdown or "")
+    generated_sections = (
+        _sections_from_generated_story_markdown(
+            markdown=clean_generated_story,
+            fallback_sections=deterministic_sections,
+        )
+        if clean_generated_story
+        else deterministic_sections
+    )
+    generation_status = "template_ready"
+    if clean_generated_story:
+        generation_status = "generated"
+    elif generation_error:
+        generation_status = "failed"
     return {
         "run_id": snapshot.get("run_id"),
         "generated_at_utc": snapshot.get("generated_at_utc"),
@@ -2285,13 +2478,16 @@ def _build_story_payload(
         "story_template_version": POST_RUN_STORY_TEMPLATE_VERSION,
         "story_template_sections": _story_template_section_list(),
         "gemini_story_generation": {
-            "status": "template_ready",
+            "status": generation_status,
             "provider": "gemini",
-            "model_type": POST_RUN_STORY_GEMINI_MODEL_TYPE,
+            "model_type": _story_llm_model_type(),
             "fallback_allowed": False,
+            "generator_version": POST_RUN_STORY_LLM_GENERATOR_VERSION,
             "system_prompt": generation_prompt["system_prompt"],
             "user_prompt": generation_prompt["user_prompt"],
             "context": generation_context,
+            "generated_markdown": clean_generated_story or None,
+            "error": str(generation_error or "").strip() or None,
         },
         "exploratory_label": (
             "exploratory"
@@ -2303,12 +2499,8 @@ def _build_story_payload(
         "condition_name": condition_name,
         "season_number": season_number,
         "replicate_count": replicate_count,
-        "sections": _build_story_sections(
-            snapshot=snapshot,
-            status_label=status_label,
-            condition_name=condition_name,
-            replicate_count=replicate_count,
-        ),
+        "sections": generated_sections,
+        "deterministic_sections": deterministic_sections,
     }
 
 
@@ -2621,6 +2813,7 @@ def generate_run_story_artifact(
     run_id: str,
     condition_name: str | None = None,
     season_number: int | None = None,
+    generate_with_gemini: bool = False,
 ) -> dict[str, Any]:
     clean_run_id = _coerce_run_id(run_id)
     snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
@@ -2650,6 +2843,29 @@ def generate_run_story_artifact(
         season_number=clean_season_number,
         replicate_count=replicate_count,
     )
+    if generate_with_gemini:
+        try:
+            generated_story_markdown = _run_story_generation_blocking(payload)
+            payload = _build_story_payload(
+                snapshot=snapshot,
+                status_label=status_label,
+                evidence_completeness=evidence_completeness,
+                condition_name=clean_condition,
+                season_number=clean_season_number,
+                replicate_count=replicate_count,
+                generated_story_markdown=generated_story_markdown,
+            )
+        except Exception as exc:
+            payload = _build_story_payload(
+                snapshot=snapshot,
+                status_label=status_label,
+                evidence_completeness=evidence_completeness,
+                condition_name=clean_condition,
+                season_number=clean_season_number,
+                replicate_count=replicate_count,
+                generation_error=str(exc),
+            )
+            raise
     if claim_gate:
         payload["claim_gate"] = claim_gate
     outdir = _artifact_dir_for_run(clean_run_id)
@@ -2671,6 +2887,9 @@ def generate_run_story_artifact(
             "status_label": status_label,
             "evidence_completeness": evidence_completeness,
             "claim_gate": claim_gate,
+            "generator_version": REPORT_GENERATOR_VERSION,
+            "story_generate_with_gemini": bool(generate_with_gemini),
+            "story_generation_status": (payload.get("gemini_story_generation") or {}).get("status"),
         },
     )
     _record_artifact(
@@ -2750,6 +2969,7 @@ def rebuild_run_bundle(
     actor_id: str,
     condition_name: str | None = None,
     season_number: int | None = None,
+    generate_story_with_gemini: bool = False,
 ) -> RunBundleResult:
     clean_run_id = _coerce_run_id(run_id)
     initial_snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
@@ -2771,6 +2991,7 @@ def rebuild_run_bundle(
         run_id=clean_run_id,
         condition_name=clean_condition,
         season_number=clean_season_number,
+        generate_with_gemini=generate_story_with_gemini,
     )
     planner_payload = generate_next_run_plan_artifact(
         db,
@@ -2923,15 +3144,19 @@ def generate_run_bundle_for_run_id(
     actor_id: str,
     condition_name: str | None = None,
     season_number: int | None = None,
+    generate_story_with_gemini: bool | None = None,
 ) -> dict[str, Any]:
     db = SessionLocal()
     try:
+        if generate_story_with_gemini is None:
+            generate_story_with_gemini = bool(getattr(settings, "RUN_REPORT_STORY_LLM_ENABLED", False))
         result = rebuild_run_bundle(
             db,
             run_id=run_id,
             actor_id=actor_id,
             condition_name=condition_name,
             season_number=season_number,
+            generate_story_with_gemini=bool(generate_story_with_gemini),
         )
         db.commit()
         return {

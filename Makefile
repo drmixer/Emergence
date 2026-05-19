@@ -1,4 +1,4 @@
-.PHONY: sim-status sim-start sim-stop sim-budget sim-stop-schedule sim-stop-unschedule sim-stop-schedule-local sim-stop-unschedule-local sim-preset report-rebuild report-tech report-story report-plan report-export compare-condition tournament-select
+.PHONY: sim-status sim-start sim-stop sim-budget sim-stop-schedule sim-stop-unschedule sim-stop-schedule-local sim-stop-unschedule-local sim-preset report-rebuild report-tech report-story report-story-gemini report-plan report-export compare-condition tournament-select
 
 RUN_MODE ?= real
 RUN_ID ?=
@@ -65,6 +65,12 @@ report-tech:
 
 report-story:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/generate_run_story_report.py --run-id "$(RUN_ID)" \
+		$(if $(CONDITION),--condition "$(CONDITION)",) \
+		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
+
+report-story-gemini:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/generate_run_story_report.py --run-id "$(RUN_ID)" \
+		--generate-with-gemini \
 		$(if $(CONDITION),--condition "$(CONDITION)",) \
 		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
 

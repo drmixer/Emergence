@@ -192,6 +192,12 @@ class Settings(BaseSettings):
     RUN_REPORT_BACKFILL_CHECK_INTERVAL_MINUTES: int = 60
     RUN_REPORT_BACKFILL_MAX_RUNS_PER_PASS: int = 3
     RUN_REPORT_BACKFILL_ACTOR: str = "report-backfill-bot"
+    # Optional one-call Gemini story generation for post-run public reports.
+    # Disabled by default so backfills and closeouts do not silently spend tokens
+    # until the operator explicitly opts in.
+    RUN_REPORT_STORY_LLM_ENABLED: bool = False
+    RUN_REPORT_STORY_LLM_MODEL_TYPE: str = "gm_gemini_2_5_flash"
+    RUN_REPORT_STORY_LLM_MAX_TOKENS: int = 3200
 
     # Rate limiting
     MAX_ACTIONS_PER_HOUR: int = 20

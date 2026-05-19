@@ -170,6 +170,131 @@ def test_story_payload_includes_gemini_ready_template_without_fallback():
     assert generation["context"]["required_sections"][0]["heading"] == "Declared Question"
 
 
+def test_story_payload_can_use_gemini_markdown_as_template_sections():
+    generated_markdown = """
+## Declared Question
+Can the viewer follow the run?
+
+## Short Answer
+Yes, but the story still needs tighter evidence links.
+
+## Run Arc
+The run opened with resource pressure and moved into governance.
+
+## Survival Pressure
+One agent died and several agents became dormant.
+
+## Governance, Aid, and Public Order
+The social pattern centered on aid requests and lawmaking.
+
+## Evidence To Check
+Check the linked replay moments before treating this as more than a canary.
+
+## What This Does Not Prove
+This exploratory canary does not prove a general model-society pattern.
+
+## Next Run Watchpoints
+Watch whether the next run is easier to follow live.
+""".strip()
+    payload = run_reports._build_story_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="baseline_v1",
+        season_number=2,
+        replicate_count=2,
+        generated_story_markdown=generated_markdown,
+    )
+
+    assert payload["gemini_story_generation"]["status"] == "generated"
+    assert payload["gemini_story_generation"]["generated_markdown"] == generated_markdown
+    assert payload["sections"][0]["paragraphs"] == ["Can the viewer follow the run?"]
+    assert payload["sections"][0]["generated_by"] == run_reports.POST_RUN_STORY_LLM_GENERATOR_VERSION
+    assert payload["deterministic_sections"][0]["heading"] == "Declared Question"
+
+
+def test_story_payload_parses_gemini_bullet_labeled_sections():
+    generated_markdown = """
+- Declared Question: Can the viewer follow the run?
+- Short Answer: Yes, but the story still needs tighter evidence links.
+- Run Arc: The run opened with resource pressure and moved into governance.
+- Survival Pressure: One agent died and several agents became dormant.
+- Governance, Aid, and Public Order: The social pattern centered on aid requests and lawmaking.
+- Evidence To Check:
+    * Check the linked replay moments.
+    * Verify the source events before making claims.
+- What This Does Not Prove: This exploratory canary does not prove a general model-society pattern.
+- Next Run Watchpoints: Watch whether the next run is easier to follow live.
+""".strip()
+
+    payload = run_reports._build_story_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="baseline_v1",
+        season_number=2,
+        replicate_count=2,
+        generated_story_markdown=generated_markdown,
+    )
+
+    assert payload["sections"][0]["paragraphs"] == ["Can the viewer follow the run?"]
+    assert payload["sections"][5]["paragraphs"] == [
+        "Check the linked replay moments.",
+        "Verify the source events before making claims.",
+    ]
+
+
+def test_story_payload_strips_generated_links_from_prose():
+    generated_markdown = """
+## Declared Question:
+See [Run Detail](https://wrong.example/runs/1) for context.
+
+## Short Answer
+The run remained exploratory.
+""".strip()
+
+    payload = run_reports._build_story_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="baseline_v1",
+        season_number=2,
+        replicate_count=2,
+        generated_story_markdown=generated_markdown,
+    )
+
+    assert payload["sections"][0]["paragraphs"] == ["See Run Detail for context."]
+
+
+def test_generate_post_run_story_markdown_uses_configured_gemini_route(monkeypatch):
+    payload = run_reports._build_story_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="baseline_v1",
+        season_number=2,
+        replicate_count=2,
+    )
+    calls: list[dict[str, object]] = []
+
+    class FakeClient:
+        async def get_completion(self, **kwargs):
+            calls.append(kwargs)
+            return "```markdown\n## Declared Question\nCanary question.\n```"
+
+    import app.services.llm_client as llm_client_module
+
+    monkeypatch.setattr(llm_client_module, "llm_client", FakeClient())
+    monkeypatch.setattr(run_reports.settings, "RUN_REPORT_STORY_LLM_MODEL_TYPE", "gm_gemini_2_5_flash", raising=False)
+
+    markdown = asyncio.run(run_reports.generate_post_run_story_markdown_with_gemini(payload))
+
+    assert markdown == "## Declared Question\nCanary question."
+    assert calls[0]["model_type"] == "gm_gemini_2_5_flash"
+    assert calls[0]["usage_run_id"] == "run-20260210T120000Z"
+    assert calls[0]["max_retries"] == 2
+
+
 def test_merge_generated_tags_preserves_custom_tags_only():
     merged = run_reports._merge_generated_tags(
         existing_tags=[
