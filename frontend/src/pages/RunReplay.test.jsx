@@ -223,10 +223,14 @@ describe('RunReplay', () => {
     expect(screen.getAllByText(/Create Proposal/i).length).toBeGreaterThan(0)
     expect(screen.queryByText(/^Work$/i)).not.toBeInTheDocument()
     expect(screen.getByText(/routine or low-signal/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /All 1/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Governance 1/i }))
+    expect(screen.getByText(/Proposals, voting, laws/i)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Show Raw Evidence/i }))
 
     expect(screen.getByText(/Raw Evidence Links/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Other 1/i }))
     expect(screen.getAllByText(/^Work$/i).length).toBeGreaterThan(0)
   })
 })

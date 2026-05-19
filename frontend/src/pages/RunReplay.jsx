@@ -15,6 +15,12 @@ import {
   TimerReset,
 } from 'lucide-react'
 import { api } from '../services/api'
+import {
+  buildEvidenceCategoryFilters,
+  EVIDENCE_CATEGORY_META,
+  filterEvidenceByCategory,
+  getEvidenceCategoryKey,
+} from '../utils/evidenceCategories'
 
 const VALID_TABS = new Set(['overview', 'replay', 'evidence', 'reports'])
 const ROUTINE_REPLAY_EVENT_TYPES = new Set(['work', 'idle', 'vote', 'processing_error'])
@@ -480,6 +486,7 @@ export default function RunReplay() {
   const [reports, setReports] = useState(null)
   const [selectedEventId, setSelectedEventId] = useState(() => requestedEventId > 0 ? requestedEventId : 0)
   const [showRawEvidence, setShowRawEvidence] = useState(false)
+  const [activeEvidenceCategory, setActiveEvidenceCategory] = useState('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -557,6 +564,15 @@ export default function RunReplay() {
     if (storyItems.length > 0) return storyItems.slice(0, EVIDENCE_DEFAULT_LIMIT)
     return playbackItems.filter(isEvidenceTraceCandidate).slice(0, EVIDENCE_DEFAULT_LIMIT)
   }, [playbackItems, showRawEvidence, sourceTraces, storyItems])
+  const evidenceCategoryFilters = useMemo(() => buildEvidenceCategoryFilters(evidenceItems), [evidenceItems])
+  const selectedEvidenceCategory = evidenceCategoryFilters.some((filter) => filter.key === activeEvidenceCategory)
+    ? activeEvidenceCategory
+    : 'all'
+  const filteredEvidenceItems = useMemo(
+    () => filterEvidenceByCategory(evidenceItems, selectedEvidenceCategory),
+    [evidenceItems, selectedEvidenceCategory],
+  )
+  const selectedEvidenceCategoryMeta = EVIDENCE_CATEGORY_META[selectedEvidenceCategory] || EVIDENCE_CATEGORY_META.all
   const rawEvidenceCount = sourceTraces.length || playbackItems.length
   const hiddenRoutineEvidenceCount = Math.max(0, rawEvidenceCount - evidenceItems.length)
 
@@ -907,16 +923,21 @@ export default function RunReplay() {
               <div className="card-header">
                 <h3>{showRawEvidence ? 'Raw Evidence Links' : 'Story Evidence'}</h3>
                 <span className="strip-meta">
-                  {evidenceItems.length} shown · {rawEvidenceCount} raw
+                  {filteredEvidenceItems.length} shown · {rawEvidenceCount} raw
                 </span>
               </div>
               {rawEvidenceCount > 0 && (
-                <div className="run-evidence-toolbar">
-                  <p>
-                    {showRawEvidence
-                      ? 'Showing raw source traces, including routine work and idle events.'
-                      : `${hiddenRoutineEvidenceCount.toLocaleString()} routine or low-signal trace${hiddenRoutineEvidenceCount === 1 ? '' : 's'} hidden by default.`}
-                  </p>
+                <div className="run-evidence-toolbar stacked">
+                  <div>
+                    <p>
+                      {showRawEvidence
+                        ? 'Showing raw source traces, including routine work and idle events.'
+                        : `${hiddenRoutineEvidenceCount.toLocaleString()} routine or low-signal trace${hiddenRoutineEvidenceCount === 1 ? '' : 's'} hidden by default.`}
+                    </p>
+                    <p className="run-evidence-why">
+                      <strong>{selectedEvidenceCategoryMeta.label}:</strong> {selectedEvidenceCategoryMeta.description}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     className="btn btn-secondary"
@@ -926,8 +947,24 @@ export default function RunReplay() {
                   </button>
                 </div>
               )}
+              {evidenceCategoryFilters.length > 1 && (
+                <div className="evidence-filter-row" aria-label="Evidence categories">
+                  {evidenceCategoryFilters.map((filter) => (
+                    <button
+                      key={filter.key}
+                      type="button"
+                      aria-label={`${filter.label} ${filter.count}`}
+                      className={`evidence-filter-chip ${selectedEvidenceCategory === filter.key ? 'active' : ''}`}
+                      onClick={() => setActiveEvidenceCategory(filter.key)}
+                    >
+                      <span>{filter.label}</span>
+                      <strong>{filter.count}</strong>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="card-body run-trace-list">
-                {evidenceItems.map((trace, index) => {
+                {filteredEvidenceItems.map((trace, index) => {
                   const eventId = Number(trace?.event_id || trace?.id || 0)
                   return (
                     <div key={`${eventId || index}-${getEventTitle(trace)}`} className="run-trace-item">
@@ -935,6 +972,7 @@ export default function RunReplay() {
                         <h4>{trace.title || getEventTitle(trace)}</h4>
                         <p>{getEventDescription(trace)}</p>
                         <div className="run-trace-meta">
+                          <span>{EVIDENCE_CATEGORY_META[getEvidenceCategoryKey(trace)]?.label || 'Other'}</span>
                           <span>{formatLabel(trace.event_type || trace.category || 'event')}</span>
                           {trace.salience !== undefined && <span>Salience {trace.salience}</span>}
                           <span>{formatRelative(getEventTime(trace))}</span>
@@ -960,7 +998,7 @@ export default function RunReplay() {
                     </div>
                   )
                 })}
-                {evidenceItems.length === 0 && (
+                {filteredEvidenceItems.length === 0 && (
                   <div className="empty-state compact">No event evidence is available for this run.</div>
                 )}
               </div>

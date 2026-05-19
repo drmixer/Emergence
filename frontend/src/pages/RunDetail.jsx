@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import {
@@ -19,6 +19,12 @@ import { trackShareAction } from '../services/shareAnalytics'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 import GlossaryTooltip from '../components/GlossaryTooltip'
 import { getStoryReplayHref, getTimelineReplayHref } from '../utils/bestMoments'
+import {
+  buildEvidenceCategoryFilters,
+  EVIDENCE_CATEGORY_META,
+  filterEvidenceByCategory,
+  getEvidenceCategoryKey,
+} from '../utils/evidenceCategories'
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString()
@@ -181,6 +187,7 @@ export default function RunDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [shareNotice, setShareNotice] = useState('')
+  const [activeTraceCategory, setActiveTraceCategory] = useState('all')
 
   useEffect(() => {
     let cancelled = false
@@ -314,6 +321,16 @@ export default function RunDetail() {
   const tradeAmountSummary = getTradeAmountSummary(data?.activity)
   const timeWindowSummary =
     startTime && endTime ? `${formatTimestamp(startTime)} -> ${formatTimestamp(endTime)}` : 'Unknown time window'
+  const sourceTraces = useMemo(() => Array.isArray(data?.source_traces) ? data.source_traces : [], [data])
+  const traceCategoryFilters = useMemo(() => buildEvidenceCategoryFilters(sourceTraces), [sourceTraces])
+  const selectedTraceCategory = traceCategoryFilters.some((filter) => filter.key === activeTraceCategory)
+    ? activeTraceCategory
+    : 'all'
+  const filteredSourceTraces = useMemo(
+    () => filterEvidenceByCategory(sourceTraces, selectedTraceCategory),
+    [selectedTraceCategory, sourceTraces],
+  )
+  const selectedTraceCategoryMeta = EVIDENCE_CATEGORY_META[selectedTraceCategory] || EVIDENCE_CATEGORY_META.all
 
   const shareRun = async () => {
     const origin = window.location.origin
@@ -745,11 +762,36 @@ export default function RunDetail() {
           <div className="card">
             <div className="card-header">
               <h3>Source Trace Links</h3>
-              <span className="strip-meta">{Array.isArray(data?.source_traces) ? data.source_traces.length : 0} traces</span>
+              <span className="strip-meta">{filteredSourceTraces.length} shown · {sourceTraces.length} traces</span>
             </div>
+            {sourceTraces.length > 0 && (
+              <>
+                <div className="run-evidence-toolbar stacked">
+                  <p className="run-evidence-why">
+                    <strong>{selectedTraceCategoryMeta.label}:</strong> {selectedTraceCategoryMeta.description}
+                  </p>
+                </div>
+                {traceCategoryFilters.length > 1 && (
+                  <div className="evidence-filter-row" aria-label="Evidence categories">
+                    {traceCategoryFilters.map((filter) => (
+                      <button
+                        key={filter.key}
+                        type="button"
+                        aria-label={`${filter.label} ${filter.count}`}
+                        className={`evidence-filter-chip ${selectedTraceCategory === filter.key ? 'active' : ''}`}
+                        onClick={() => setActiveTraceCategory(filter.key)}
+                      >
+                        <span>{filter.label}</span>
+                        <strong>{filter.count}</strong>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
             <div className="card-body run-trace-list">
-              {Array.isArray(data?.source_traces) && data.source_traces.length > 0 ? (
-                data.source_traces.map((trace) => {
+              {filteredSourceTraces.length > 0 ? (
+                filteredSourceTraces.map((trace) => {
                   const isFocused = requestedEventId > 0 && Number(trace.event_id) === requestedEventId
                   return (
                   <div key={trace.event_id} className={`run-trace-item ${isFocused ? 'focused' : ''}`}>
@@ -757,6 +799,7 @@ export default function RunDetail() {
                       <h4>{trace.title || trace.event_type}</h4>
                       <p>{trace.description}</p>
                       <div className="run-trace-meta">
+                        <span>{EVIDENCE_CATEGORY_META[getEvidenceCategoryKey(trace)]?.label || 'Other'}</span>
                         <span>{trace.event_type}</span>
                         <span>Salience {trace.salience}</span>
                         <span>{formatRelative(trace.created_at)}</span>

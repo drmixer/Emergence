@@ -2483,6 +2483,10 @@ tr:last-child td {
   min-width: 0;
 }
 
+.run-evidence-toolbar.stacked {
+  align-items: flex-start;
+}
+
 .run-evidence-toolbar p {
   margin: 0;
   color: var(--text-secondary);
@@ -2491,8 +2495,53 @@ tr:last-child td {
   overflow-wrap: anywhere;
 }
 
+.run-evidence-toolbar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.run-evidence-why strong {
+  color: var(--text-primary);
+}
+
 .run-evidence-toolbar .btn {
   flex: 0 0 auto;
+}
+
+.evidence-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.evidence-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.1rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.evidence-filter-chip:hover,
+.evidence-filter-chip.active {
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.evidence-filter-chip strong {
+  color: var(--text-primary);
+  font-size: 0.78rem;
 }
 
 .run-replay-featured {
