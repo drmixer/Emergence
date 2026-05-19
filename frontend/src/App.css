@@ -1247,10 +1247,38 @@ tr:last-child td {
   outline: 1px solid rgba(255, 255, 255, 0.3);
 }
 
+.run-trace-item.grouped {
+  background: rgba(255, 255, 255, 0.028);
+}
+
+.run-trace-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  min-width: 0;
+}
+
 .run-trace-main h4 {
   font-size: 1rem;
   margin-bottom: 0.35rem;
   overflow-wrap: anywhere;
+}
+
+.run-trace-title-row h4 {
+  min-width: 0;
+}
+
+.run-trace-count {
+  flex: 0 0 auto;
+  padding: 0.22rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .run-trace-main p {
@@ -1269,6 +1297,80 @@ tr:last-child td {
   gap: 0.6rem;
   color: var(--text-muted);
   font-size: 0.78rem;
+}
+
+.run-trace-summary-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.2rem 0 0.65rem;
+  padding-left: var(--spacing-md);
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.run-trace-summary-list p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.run-trace-details {
+  margin-top: var(--spacing-md);
+}
+
+.run-trace-details summary {
+  width: fit-content;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.run-trace-details summary:hover {
+  color: var(--text-primary);
+}
+
+.run-trace-detail-list {
+  display: grid;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.run-trace-detail-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.14);
+  min-width: 0;
+}
+
+.run-trace-detail-row strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.run-trace-detail-row p {
+  margin: 0 0 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.run-trace-detail-row span {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.run-trace-detail-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 132px;
 }
 
 .run-trace-links {
@@ -1300,6 +1402,16 @@ tr:last-child td {
   }
 
   .run-trace-links {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .run-trace-detail-row {
+    grid-template-columns: 1fr;
+  }
+
+  .run-trace-detail-links {
+    min-width: 0;
     flex-direction: row;
     flex-wrap: wrap;
   }

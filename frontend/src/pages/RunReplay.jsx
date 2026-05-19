@@ -16,10 +16,10 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import {
+  buildEvidenceGroups,
   buildEvidenceCategoryFilters,
   EVIDENCE_CATEGORY_META,
   filterEvidenceByCategory,
-  getEvidenceCategoryKey,
 } from '../utils/evidenceCategories'
 
 const VALID_TABS = new Set(['overview', 'replay', 'evidence', 'reports'])
@@ -572,6 +572,7 @@ export default function RunReplay() {
     () => filterEvidenceByCategory(evidenceItems, selectedEvidenceCategory),
     [evidenceItems, selectedEvidenceCategory],
   )
+  const groupedEvidenceItems = useMemo(() => buildEvidenceGroups(filteredEvidenceItems), [filteredEvidenceItems])
   const selectedEvidenceCategoryMeta = EVIDENCE_CATEGORY_META[selectedEvidenceCategory] || EVIDENCE_CATEGORY_META.all
   const rawEvidenceCount = sourceTraces.length || playbackItems.length
   const hiddenRoutineEvidenceCount = Math.max(0, rawEvidenceCount - evidenceItems.length)
@@ -923,7 +924,7 @@ export default function RunReplay() {
               <div className="card-header">
                 <h3>{showRawEvidence ? 'Raw Evidence Links' : 'Story Evidence'}</h3>
                 <span className="strip-meta">
-                  {filteredEvidenceItems.length} shown · {rawEvidenceCount} raw
+                  {groupedEvidenceItems.length} cards · {filteredEvidenceItems.length} traces
                 </span>
               </div>
               {rawEvidenceCount > 0 && (
@@ -937,6 +938,11 @@ export default function RunReplay() {
                     <p className="run-evidence-why">
                       <strong>{selectedEvidenceCategoryMeta.label}:</strong> {selectedEvidenceCategoryMeta.description}
                     </p>
+                    {filteredEvidenceItems.length > groupedEvidenceItems.length && (
+                      <p className="run-evidence-why">
+                        <strong>Grouped:</strong> {filteredEvidenceItems.length.toLocaleString()} traces compressed into {groupedEvidenceItems.length.toLocaleString()} skimmable cards. Expand a card for every source trace and raw link.
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -964,23 +970,77 @@ export default function RunReplay() {
                 </div>
               )}
               <div className="card-body run-trace-list">
-                {filteredEvidenceItems.map((trace, index) => {
-                  const eventId = Number(trace?.event_id || trace?.id || 0)
+                {groupedEvidenceItems.map((group, index) => {
+                  const lead = group.lead || group.items[0] || {}
+                  const eventId = Number(lead?.event_id || lead?.id || 0)
+                  const groupMeta = EVIDENCE_CATEGORY_META[group.categoryKey] || EVIDENCE_CATEGORY_META.other
+                  const leadDescription = getEventDescription(lead)
+                  const extraSummaries = group.summaries
+                    .filter((summary) => summary !== leadDescription)
+                    .slice(0, 2)
                   return (
-                    <div key={`${eventId || index}-${getEventTitle(trace)}`} className="run-trace-item">
+                    <div key={`${group.key}-${index}`} className={`run-trace-item ${group.count > 1 ? 'grouped' : ''}`}>
                       <div className="run-trace-main">
-                        <h4>{trace.title || getEventTitle(trace)}</h4>
-                        <p>{getEventDescription(trace)}</p>
-                        <div className="run-trace-meta">
-                          <span>{EVIDENCE_CATEGORY_META[getEvidenceCategoryKey(trace)]?.label || 'Other'}</span>
-                          <span>{formatLabel(trace.event_type || trace.category || 'event')}</span>
-                          {trace.salience !== undefined && <span>Salience {trace.salience}</span>}
-                          <span>{formatRelative(getEventTime(trace))}</span>
+                        <div className="run-trace-title-row">
+                          <h4>{lead.title || group.title || getEventTitle(lead)}</h4>
+                          {group.count > 1 && (
+                            <span className="run-trace-count">{group.count} traces</span>
+                          )}
                         </div>
+                        <p>{leadDescription}</p>
+                        {extraSummaries.length > 0 && (
+                          <div className="run-trace-summary-list" aria-label={`${group.title} grouped evidence examples`}>
+                            {extraSummaries.map((summary) => (
+                              <p key={summary}>{clampText(summary, 150)}</p>
+                            ))}
+                          </div>
+                        )}
+                        <div className="run-trace-meta">
+                          <span>{groupMeta.label}</span>
+                          <span>{formatLabel(lead.event_type || lead.category || 'event')}</span>
+                          {lead.salience !== undefined && <span>Top salience {lead.salience}</span>}
+                          <span>{formatRelative(getEventTime(lead))}</span>
+                        </div>
+                        {group.count > 1 && (
+                          <details className="run-trace-details">
+                            <summary>Show all {group.count} source traces</summary>
+                            <div className="run-trace-detail-list">
+                              {group.items.map((trace, traceIndex) => {
+                                const traceEventId = Number(trace?.event_id || trace?.id || 0)
+                                return (
+                                  <div key={`${traceEventId || traceIndex}-${getEventDescription(trace)}`} className="run-trace-detail-row">
+                                    <div>
+                                      <strong>{trace.title || getEventTitle(trace)}</strong>
+                                      <p>{getEventDescription(trace)}</p>
+                                      <span>{formatRelative(getEventTime(trace)) || formatLabel(trace.event_type || 'event')}</span>
+                                    </div>
+                                    <div className="run-trace-detail-links">
+                                      {trace.trace_url && (
+                                        <a href={trace.trace_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
+                                          Event API <ExternalLink size={14} />
+                                        </a>
+                                      )}
+                                      {traceEventId > 0 && (
+                                        <>
+                                          <Link to={`/runs/${encodeURIComponent(cleanRunId)}?event=${traceEventId}`} className="btn btn-secondary">
+                                            Detail
+                                          </Link>
+                                          <Link to={`/timeline?event=${traceEventId}`} className="btn btn-secondary">
+                                            Raw Log
+                                          </Link>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </details>
+                        )}
                       </div>
                       <div className="run-trace-links">
-                        {trace.trace_url && (
-                          <a href={trace.trace_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
+                        {lead.trace_url && (
+                          <a href={lead.trace_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
                             Event API <ExternalLink size={14} />
                           </a>
                         )}
@@ -998,7 +1058,7 @@ export default function RunReplay() {
                     </div>
                   )
                 })}
-                {filteredEvidenceItems.length === 0 && (
+                {groupedEvidenceItems.length === 0 && (
                   <div className="empty-state compact">No event evidence is available for this run.</div>
                 )}
               </div>

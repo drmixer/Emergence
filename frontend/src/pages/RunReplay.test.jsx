@@ -233,4 +233,54 @@ describe('RunReplay', () => {
     fireEvent.click(screen.getByRole('button', { name: /Other 1/i }))
     expect(screen.getAllByText(/^Work$/i).length).toBeGreaterThan(0)
   })
+
+  it('groups repeated evidence while keeping source trace details expandable', async () => {
+    api.getRunDetail.mockResolvedValueOnce({
+      run_id: 'run-1',
+      captured_at: '2026-05-18T05:00:00.000Z',
+      run_metadata: { condition_name: 'canary_k11', run_class: 'special_exploratory' },
+      activity: { total_events: 4, deaths: 0, became_dormant: 0 },
+      llm: { calls: 2 },
+      provenance: { verification_state: 'verified' },
+      source_traces: [
+        {
+          event_id: 21,
+          event_type: 'request_aid',
+          title: 'Request Aid',
+          description: 'Beacon-2 requested 2 food from the common pool.',
+          salience: 58,
+          created_at: '2026-05-18T04:00:00.000Z',
+        },
+        {
+          event_id: 22,
+          event_type: 'request_aid',
+          title: 'Request Aid',
+          description: 'Cipher-3 requested 1 energy from an ally.',
+          salience: 82,
+          created_at: '2026-05-18T04:05:00.000Z',
+        },
+        {
+          event_id: 23,
+          event_type: 'law_passed',
+          title: 'Law Passed',
+          description: 'Agents passed an aid floor law.',
+          salience: 77,
+          created_at: '2026-05-18T04:10:00.000Z',
+        },
+      ],
+    })
+
+    renderRunReplay('/runs/run-1/replay?mode=timeline')
+
+    expect(await screen.findByText(/Story Evidence/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 cards · 3 traces/i)).toBeInTheDocument()
+    expect(screen.getByText(/3 traces compressed into 2 skimmable cards/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Cipher-3 requested 1 energy/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Beacon-2 requested 2 food/i).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByText(/Show all 2 source traces/i))
+
+    expect(screen.getAllByText(/Request Aid/i).length).toBeGreaterThan(1)
+    expect(screen.getAllByRole('link', { name: /Raw Log/i }).map((link) => link.getAttribute('href'))).toContain('/timeline?event=22')
+  })
 })

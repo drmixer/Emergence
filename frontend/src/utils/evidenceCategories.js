@@ -84,3 +84,81 @@ export function filterEvidenceByCategory(items, categoryKey) {
   if (key === 'all') return list
   return list.filter((item) => getEvidenceCategoryKey(item) === key)
 }
+
+function getEvidenceEventType(item) {
+  return String(item?.event_type || item?.category || 'event').trim().toLowerCase()
+}
+
+function getEvidenceTitle(item) {
+  return String(item?.title || item?.event_type || item?.category || 'Run event').trim()
+}
+
+function normalizeEvidenceGroupText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function getEvidenceGroupKey(item) {
+  const categoryKey = getEvidenceCategoryKey(item)
+  const eventType = getEvidenceEventType(item)
+  const title = normalizeEvidenceGroupText(getEvidenceTitle(item)) || eventType
+  return `${categoryKey}:${eventType}:${title}`
+}
+
+function getEvidenceSalience(item) {
+  const salience = Number(item?.salience)
+  return Number.isFinite(salience) ? salience : 0
+}
+
+function summarizeEvidenceGroup(items) {
+  const seen = new Set()
+  const summaries = []
+  ;(Array.isArray(items) ? items : []).forEach((item) => {
+    const summary = String(item?.description || item?.summary || '').replace(/\s+/g, ' ').trim()
+    const key = normalizeEvidenceGroupText(summary)
+    if (!summary || seen.has(key)) return
+    seen.add(key)
+    summaries.push(summary)
+  })
+  return summaries.slice(0, 3)
+}
+
+export function buildEvidenceGroups(items) {
+  const list = Array.isArray(items) ? items : []
+  const groups = []
+  const groupMap = new Map()
+
+  list.forEach((item, index) => {
+    const key = getEvidenceGroupKey(item)
+    const existing = groupMap.get(key)
+    if (existing) {
+      existing.items.push(item)
+      if (getEvidenceSalience(item) > getEvidenceSalience(existing.lead)) {
+        existing.lead = item
+      }
+      return
+    }
+
+    const group = {
+      key,
+      categoryKey: getEvidenceCategoryKey(item),
+      eventType: getEvidenceEventType(item),
+      title: getEvidenceTitle(item),
+      lead: item,
+      firstIndex: index,
+      items: [item],
+    }
+    groupMap.set(key, group)
+    groups.push(group)
+  })
+
+  return groups
+    .sort((left, right) => left.firstIndex - right.firstIndex)
+    .map((group) => ({
+      ...group,
+      count: group.items.length,
+      summaries: summarizeEvidenceGroup(group.items),
+    }))
+}
