@@ -5,6 +5,12 @@ import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 import './FirstTimeOnboarding.css'
 
 const ONBOARDING_STORAGE_KEY = 'emergence-first-time-onboarding-v1'
+const ONBOARDING_AUTO_OPEN_PATHS = new Set(['/', '/dashboard'])
+
+export function shouldAutoOpenOnboarding(pathname) {
+    const path = String(pathname || '').trim().toLowerCase() || '/'
+    return ONBOARDING_AUTO_OPEN_PATHS.has(path)
+}
 
 function readOnboardingState() {
     try {
@@ -27,7 +33,7 @@ export default function FirstTimeOnboarding() {
     const navigate = useNavigate()
     const [dismissed, setDismissed] = useState(readOnboardingState)
     const path = String(location.pathname || '').trim().toLowerCase()
-    const open = !dismissed && !path.startsWith('/ops')
+    const open = !dismissed && shouldAutoOpenOnboarding(path)
 
     useEffect(() => {
         if (!open) return
