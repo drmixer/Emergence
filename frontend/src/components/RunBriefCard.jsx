@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import GlossaryTooltip from './GlossaryTooltip'
 import { getRunClassTermKey } from '../data/runSchedule'
+import { trackKpiEvent } from '../services/kpiAnalytics'
 
 const STATUS_ICONS = {
   Upcoming: Clock,
@@ -25,10 +26,29 @@ function RunStatusIcon({ status }) {
   return <Icon size={18} />
 }
 
-function ScheduleLink({ to, children, primary = false }) {
+function trackRunPathClick(run, surface, target, href) {
+  trackKpiEvent('run_path_click', {
+    runId: run?.runId || run?.id || run?.label,
+    surface,
+    target,
+    metadata: {
+      href,
+      label: run?.label || '',
+      status: run?.status || '',
+      track: run?.track || '',
+      run_class: run?.runClass || '',
+    },
+  })
+}
+
+function ScheduleLink({ to, children, primary = false, run = null, surface = 'run_brief_card', target = 'run_link' }) {
   if (!to) return null
   return (
-    <Link to={to} className={`btn ${primary ? 'btn-primary' : 'btn-secondary'}`}>
+    <Link
+      to={to}
+      className={`btn ${primary ? 'btn-primary' : 'btn-secondary'}`}
+      onClick={() => trackRunPathClick(run, surface, target, to)}
+    >
       {children}
     </Link>
   )
@@ -55,13 +75,13 @@ function getFullRows(run) {
   ].filter(([, value]) => String(value || '').trim())
 }
 
-function RunBriefActions({ run, mode }) {
+function RunBriefActions({ run, mode, analyticsSurface }) {
   if (mode === 'none') return null
 
   if (mode === 'calendar') {
     return (
       <div className="run-brief-actions">
-        <ScheduleLink to="/calendar" primary>
+        <ScheduleLink to="/calendar" run={run} surface={analyticsSurface} target="calendar" primary>
           <CalendarDays size={14} />
           Run Calendar
         </ScheduleLink>
@@ -72,15 +92,15 @@ function RunBriefActions({ run, mode }) {
   if (run.status === 'Completed') {
     return (
       <div className="run-brief-actions">
-        <ScheduleLink to={run.links?.recap} primary>
+        <ScheduleLink to={run.links?.recap} run={run} surface={analyticsSurface} target="recap" primary>
           <TimerReset size={14} />
           Recap
         </ScheduleLink>
-        <ScheduleLink to={run.links?.evidence}>
+        <ScheduleLink to={run.links?.evidence} run={run} surface={analyticsSurface} target="evidence">
           <FileSearch size={14} />
           Evidence
         </ScheduleLink>
-        <ScheduleLink to={run.links?.report}>
+        <ScheduleLink to={run.links?.report} run={run} surface={analyticsSurface} target="story_report">
           <FileSearch size={14} />
           Story Report
         </ScheduleLink>
@@ -90,15 +110,15 @@ function RunBriefActions({ run, mode }) {
 
   return (
     <div className="run-brief-actions">
-      <ScheduleLink to={run.links?.live} primary={run.status === 'Live'}>
+      <ScheduleLink to={run.links?.live} run={run} surface={analyticsSurface} target="current_run" primary={run.status === 'Live'}>
         <RadioTower size={14} />
         Current Run
       </ScheduleLink>
-      <ScheduleLink to="/calendar" primary={run.status !== 'Live'}>
+      <ScheduleLink to="/calendar" run={run} surface={analyticsSurface} target="calendar" primary={run.status !== 'Live'}>
         <CalendarDays size={14} />
         Run Calendar
       </ScheduleLink>
-      <ScheduleLink to={run.links?.archive}>
+      <ScheduleLink to={run.links?.archive} run={run} surface={analyticsSurface} target="archive">
         <FileSearch size={14} />
         Archive
       </ScheduleLink>
@@ -106,7 +126,7 @@ function RunBriefActions({ run, mode }) {
   )
 }
 
-function RunViewerPath({ run }) {
+function RunViewerPath({ run, analyticsSurface }) {
   const steps = Array.isArray(run.viewerPath) ? run.viewerPath.filter((step) => String(step?.label || '').trim()) : []
   if (steps.length === 0) return null
 
@@ -119,7 +139,10 @@ function RunViewerPath({ run }) {
             <strong>{step.label}</strong>
             <p>{step.detail}</p>
             {step.href && (
-              <Link to={step.href}>
+              <Link
+                to={step.href}
+                onClick={() => trackRunPathClick(run, analyticsSurface, `viewer_path:${step.label}`, step.href)}
+              >
                 {step.linkLabel || 'Open'}
               </Link>
             )}
@@ -136,6 +159,7 @@ export default function RunBriefCard({
   heading = '',
   featured = false,
   actionMode = 'contextual',
+  analyticsSurface = 'run_brief_card',
 }) {
   if (!run) return null
 
@@ -182,9 +206,9 @@ export default function RunBriefCard({
         ))}
       </div>
 
-      <RunViewerPath run={run} />
+      <RunViewerPath run={run} analyticsSurface={analyticsSurface} />
 
-      <RunBriefActions run={run} mode={actionMode} />
+      <RunBriefActions run={run} mode={actionMode} analyticsSurface={analyticsSurface} />
     </article>
   )
 }

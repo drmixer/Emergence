@@ -337,6 +337,7 @@ export default function Dashboard() {
                     variant="compact"
                     heading="Current run brief"
                     actionMode="contextual"
+                    analyticsSurface="dashboard_current_run"
                 />
             )}
 
@@ -395,6 +396,7 @@ export default function Dashboard() {
                     variant="compact"
                     heading="Next scheduled run"
                     actionMode="calendar"
+                    analyticsSurface="dashboard_idle"
                 />
             )}
 

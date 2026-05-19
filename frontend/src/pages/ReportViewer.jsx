@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Download, ExternalLink, FileText } from 'lucide-react'
 import { api } from '../services/api'
+import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
 const REPORT_LABELS = {
   approachable_report: 'Approachable Story',
@@ -141,6 +142,19 @@ export default function ReportViewer() {
   const cleanRunId = String(runId || '').trim()
   const cleanArtifactType = String(artifactType || '').trim()
   const label = REPORT_LABELS[cleanArtifactType] || formatLabel(cleanArtifactType)
+
+  useEffect(() => {
+    if (!cleanRunId || !cleanArtifactType) return
+    trackKpiEventOnce('report_opened', `report_opened:${cleanRunId}:${cleanArtifactType}:${format}`, {
+      runId: cleanRunId,
+      surface: 'report_viewer',
+      target: cleanArtifactType,
+      metadata: {
+        format,
+        label,
+      },
+    })
+  }, [cleanArtifactType, cleanRunId, format, label])
 
   useEffect(() => {
     let cancelled = false

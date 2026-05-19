@@ -57,6 +57,29 @@ def test_normalize_kpi_event_accepts_onboarding_events():
     assert normalized["target"] == "open_dashboard"
 
 
+def test_normalize_kpi_event_accepts_viewer_journey_events():
+    for event_name in (
+        "calendar_view",
+        "archive_view",
+        "run_path_click",
+        "run_replay_tab_open",
+        "evidence_filter_used",
+        "raw_evidence_toggle",
+        "report_opened",
+    ):
+        normalized = kpi_rollups.normalize_kpi_event(
+            {
+                "event_name": event_name.upper(),
+                "visitor_id": "visitor-viewer-1",
+                "run_id": "k12-public-canary",
+                "surface": "run_calendar",
+                "target": "k12",
+            }
+        )
+        assert normalized["event_name"] == event_name
+        assert normalized["visitor_id"] == "visitor-viewer-1"
+
+
 def test_normalize_kpi_event_rejects_unsupported_event():
     with pytest.raises(ValueError, match="unsupported event_name"):
         kpi_rollups.normalize_kpi_event(
@@ -136,5 +159,87 @@ def test_get_recent_rollups_attaches_onboarding_metrics():
     assert seven_day["onboarding_completion_rate"] == pytest.approx(0.5)
     assert seven_day["onboarding_skip_rate"] == pytest.approx(0.5)
     assert seven_day["onboarding_glossary_open_rate"] == pytest.approx(0.5)
+
+    session.close()
+
+
+def test_get_recent_rollups_attaches_viewer_journey_metrics():
+    engine = create_engine(
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    KpiEvent.__table__.create(bind=engine)
+    KpiDailyRollup.__table__.create(bind=engine)
+    session = sessionmaker(bind=engine, future=True)()
+
+    day_key = date(2026, 2, 11)
+    session.add(KpiDailyRollup(day_key=day_key, landing_views=10))
+    session.add_all(
+        [
+            KpiEvent(
+                day_key=day_key,
+                occurred_at=now_utc(),
+                event_name="calendar_view",
+                visitor_id="visitor-1",
+            ),
+            KpiEvent(
+                day_key=day_key,
+                occurred_at=now_utc(),
+                event_name="calendar_view",
+                visitor_id="visitor-2",
+            ),
+            KpiEvent(
+                day_key=day_key,
+                occurred_at=now_utc(),
+                event_name="run_path_click",
+                visitor_id="visitor-1",
+                target="current_run",
+            ),
+            KpiEvent(
+                day_key=day_key,
+                occurred_at=now_utc(),
+                event_name="run_replay_tab_open",
+                visitor_id="visitor-1",
+                target="evidence",
+            ),
+            KpiEvent(
+                day_key=day_key,
+                occurred_at=now_utc(),
+                event_name="evidence_filter_used",
+                visitor_id="visitor-1",
+                target="governance",
+            ),
+            KpiEvent(
+                day_key=day_key,
+                occurred_at=now_utc(),
+                event_name="raw_evidence_toggle",
+                visitor_id="visitor-2",
+            ),
+            KpiEvent(
+                day_key=day_key,
+                occurred_at=now_utc(),
+                event_name="report_opened",
+                visitor_id="visitor-1",
+                target="approachable_report",
+            ),
+        ]
+    )
+    session.commit()
+
+    payload = kpi_rollups.get_recent_rollups(session, days=7, refresh=False)
+    latest = payload["summary"]["latest"]
+    seven_day = payload["summary"]["seven_day_avg"]
+
+    assert latest["calendar_view_visitors"] == 2
+    assert latest["run_path_click_visitors"] == 1
+    assert latest["run_replay_tab_open_visitors"] == 1
+    assert latest["evidence_filter_used_visitors"] == 1
+    assert latest["raw_evidence_toggle_visitors"] == 1
+    assert latest["report_open_visitors"] == 1
+    assert latest["story_report_open_visitors"] == 1
+    assert seven_day["calendar_view_visitors"] == 2
+    assert seven_day["story_report_open_visitors"] == 1
 
     session.close()

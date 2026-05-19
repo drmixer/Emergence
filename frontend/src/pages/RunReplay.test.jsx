@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { api } = vi.hoisted(() => ({
+const { api, trackKpiEvent, trackKpiEventOnce } = vi.hoisted(() => ({
   api: {
     getRunDetail: vi.fn(),
     getRunPlayback: vi.fn(),
@@ -12,9 +12,12 @@ const { api } = vi.hoisted(() => ({
     getRunReportDownloadUrl: vi.fn(),
     getRunReportViewUrl: vi.fn(),
   },
+  trackKpiEvent: vi.fn(),
+  trackKpiEventOnce: vi.fn(),
 }))
 
 vi.mock('../services/api', () => ({ api }))
+vi.mock('../services/kpiAnalytics', () => ({ trackKpiEvent, trackKpiEventOnce }))
 
 import RunReplay from './RunReplay'
 

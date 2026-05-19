@@ -1,11 +1,18 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RUN_SCHEDULE } from '../data/runSchedule'
 import RunBriefCard from './RunBriefCard'
 
+const { trackKpiEvent } = vi.hoisted(() => ({
+  trackKpiEvent: vi.fn(),
+}))
+
+vi.mock('../services/kpiAnalytics', () => ({ trackKpiEvent }))
+
 afterEach(() => {
   cleanup()
+  trackKpiEvent.mockClear()
 })
 
 describe('RunBriefCard', () => {
@@ -50,5 +57,23 @@ describe('RunBriefCard', () => {
     expect(screen.getByText(/Start with recap/i)).toBeInTheDocument()
     expect(screen.getByText(/Read the story report/i)).toBeInTheDocument()
     expect(screen.getAllByText(/not finished research/i).length).toBeGreaterThan(0)
+  })
+
+  it('tracks run-path clicks from schedule cards', () => {
+    const run = RUN_SCHEDULE.find((entry) => entry.label === 'K12')
+
+    render(
+      <MemoryRouter>
+        <RunBriefCard run={run} variant="compact" heading="Next scheduled run" actionMode="calendar" analyticsSurface="dashboard_idle" />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getAllByRole('link', { name: /Run Calendar/i })[0])
+
+    expect(trackKpiEvent).toHaveBeenCalledWith('run_path_click', expect.objectContaining({
+      runId: 'k12-public-canary',
+      surface: 'dashboard_idle',
+      target: 'viewer_path:Before launch',
+    }))
   })
 })

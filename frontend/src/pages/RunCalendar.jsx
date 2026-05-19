@@ -2,14 +2,28 @@ import {
   AlertCircle,
   CalendarDays,
 } from 'lucide-react'
+import { useEffect } from 'react'
 import { getLatestCompletedScheduledRun, getNextScheduledRun, getRunSchedule } from '../data/runSchedule'
 import GlossaryTooltip from '../components/GlossaryTooltip'
 import RunBriefCard from '../components/RunBriefCard'
+import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
 export default function RunCalendar() {
   const runs = getRunSchedule()
   const nextRun = getNextScheduledRun()
   const latestCompleted = getLatestCompletedScheduledRun()
+
+  useEffect(() => {
+    trackKpiEventOnce('calendar_view', 'run_calendar', {
+      surface: 'run_calendar',
+      target: 'calendar_page',
+      runId: nextRun?.runId || nextRun?.id || nextRun?.label,
+      metadata: {
+        next_run: nextRun?.label || '',
+        latest_completed: latestCompleted?.label || '',
+      },
+    })
+  }, [latestCompleted, nextRun])
 
   return (
     <div className="run-calendar-page">
@@ -50,7 +64,7 @@ export default function RunCalendar() {
 
       <section className="run-calendar-list" aria-label="Scheduled runs">
         {runs.map((run, index) => (
-          <RunBriefCard key={run.id} run={run} variant="full" featured={index === 0} actionMode="contextual" />
+          <RunBriefCard key={run.id} run={run} variant="full" featured={index === 0} actionMode="contextual" analyticsSurface="run_calendar" />
         ))}
       </section>
     </div>

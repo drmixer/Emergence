@@ -15,6 +15,7 @@ import {
   TimerReset,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 import {
   buildEvidenceGroups,
   buildEvidenceCategoryFilters,
@@ -597,6 +598,52 @@ export default function RunReplay() {
   const llm = runDetail?.llm || {}
   const cleanRunId = String(runId || '').trim()
 
+  useEffect(() => {
+    if (!cleanRunId || loading || error) return
+    trackKpiEventOnce('run_replay_tab_open', `run_replay_tab:${cleanRunId}:${activeTab}`, {
+      runId: cleanRunId,
+      surface: 'run_replay',
+      target: activeTab,
+      metadata: {
+        report_count: reportRows.length,
+        story_moments: storyItems.length,
+        evidence_cards: groupedEvidenceItems.length,
+      },
+    })
+  }, [activeTab, cleanRunId, error, groupedEvidenceItems.length, loading, reportRows.length, storyItems.length])
+
+  function setReplayTab(tab) {
+    setActiveTab(tab)
+  }
+
+  function toggleRawEvidence() {
+    const nextValue = !showRawEvidence
+    trackKpiEvent('raw_evidence_toggle', {
+      runId: cleanRunId,
+      surface: 'run_replay',
+      target: nextValue ? 'show_raw_evidence' : 'show_story_evidence',
+      metadata: {
+        raw_evidence_count: rawEvidenceCount,
+        hidden_routine_evidence_count: hiddenRoutineEvidenceCount,
+      },
+    })
+    setShowRawEvidence(nextValue)
+  }
+
+  function selectEvidenceCategory(categoryKey) {
+    if (categoryKey === selectedEvidenceCategory) return
+    trackKpiEvent('evidence_filter_used', {
+      runId: cleanRunId,
+      surface: 'run_replay',
+      target: categoryKey,
+      metadata: {
+        previous_category: selectedEvidenceCategory,
+        show_raw_evidence: showRawEvidence,
+      },
+    })
+    setActiveEvidenceCategory(categoryKey)
+  }
+
   return (
     <div className="run-replay-page">
       <div className="page-header">
@@ -644,7 +691,7 @@ export default function RunReplay() {
                 key={key}
                 type="button"
                 className={`filter-btn ${activeTab === key ? 'active' : ''}`}
-                onClick={() => setActiveTab(key)}
+                onClick={() => setReplayTab(key)}
               >
                 {createElement(icon, { size: 15 })}
                 {label}
@@ -947,7 +994,7 @@ export default function RunReplay() {
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => setShowRawEvidence((value) => !value)}
+                    onClick={toggleRawEvidence}
                   >
                     {showRawEvidence ? 'Show Story Evidence' : 'Show Raw Evidence'}
                   </button>
@@ -961,7 +1008,7 @@ export default function RunReplay() {
                       type="button"
                       aria-label={`${filter.label} ${filter.count}`}
                       className={`evidence-filter-chip ${selectedEvidenceCategory === filter.key ? 'active' : ''}`}
-                      onClick={() => setActiveEvidenceCategory(filter.key)}
+                      onClick={() => selectEvidenceCategory(filter.key)}
                     >
                       <span>{filter.label}</span>
                       <strong>{filter.count}</strong>

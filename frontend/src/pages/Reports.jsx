@@ -10,6 +10,7 @@ import { api } from '../services/api'
 import { getNextScheduledRun, getScheduleEntryForRunId } from '../data/runSchedule'
 import { getStoryReplayHref } from '../utils/bestMoments'
 import RunBriefCard from '../components/RunBriefCard'
+import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 
 function formatTimestamp(value) {
   if (!value) return 'Unknown'
@@ -87,6 +88,15 @@ function getRunTakeaway(item) {
 
 function getRunId(item) {
   return String(item?.run_id || '').trim()
+}
+
+function trackArchivePathClick(runId, target, metadata = {}) {
+  trackKpiEvent('run_path_click', {
+    runId,
+    surface: 'archive',
+    target,
+    metadata,
+  })
 }
 
 function getRunCondition(item) {
@@ -196,6 +206,14 @@ export default function Reports() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    trackKpiEventOnce('archive_view', 'archive', {
+      surface: 'archive',
+      target: 'archive_page',
+      metadata: { route: String(location.pathname || '') },
+    })
+  }, [location.pathname])
+
+  useEffect(() => {
     let cancelled = false
 
     async function load() {
@@ -281,6 +299,7 @@ export default function Reports() {
           variant="compact"
           heading="Next scheduled run"
           actionMode="calendar"
+          analyticsSurface="archive_next_run"
         />
       )}
 
@@ -370,10 +389,18 @@ export default function Reports() {
                           </span>
                         </div>
                         <div className="archive-comparison-actions">
-                          <Link to={getStoryReplayHref(runId)} className="btn btn-secondary">
+                          <Link
+                            to={getStoryReplayHref(runId)}
+                            className="btn btn-secondary"
+                            onClick={() => trackArchivePathClick(runId, 'comparison_replay')}
+                          >
                             Replay
                           </Link>
-                          <Link to={`/runs/${encodeURIComponent(runId)}`} className="btn btn-secondary">
+                          <Link
+                            to={`/runs/${encodeURIComponent(runId)}`}
+                            className="btn btn-secondary"
+                            onClick={() => trackArchivePathClick(runId, 'comparison_evidence')}
+                          >
                             Evidence
                           </Link>
                         </div>
@@ -430,7 +457,11 @@ export default function Reports() {
                           Ended {formatTimestamp(summary.run_ended_at)} · {formatDuration(summary.duration_hours)}
                         </p>
                       </div>
-                      <Link to={`/runs/${encodeURIComponent(runId)}/replay?tab=overview`} className="btn btn-primary">
+                      <Link
+                        to={`/runs/${encodeURIComponent(runId)}/replay?tab=overview`}
+                        className="btn btn-primary"
+                        onClick={() => trackArchivePathClick(runId, 'recap', { latest: isLatestPublicRun })}
+                      >
                         <TimerReset size={14} />
                         {isLatestPublicRun ? 'Start With Latest Recap' : 'Open Recap'}
                       </Link>
@@ -491,6 +522,7 @@ export default function Reports() {
                       <Link
                         className="btn btn-secondary"
                         to={getStoryReplayHref(runId)}
+                        onClick={() => trackArchivePathClick(runId, 'replay')}
                       >
                         <TimerReset size={14} />
                         Replay
@@ -498,6 +530,7 @@ export default function Reports() {
                       <Link
                         className="btn btn-secondary"
                         to={`/runs/${encodeURIComponent(runId)}`}
+                        onClick={() => trackArchivePathClick(runId, 'evidence', { latest: isLatestPublicRun })}
                       >
                         <FileSearch size={14} />
                         {isLatestPublicRun ? 'Latest Run Details' : 'Evidence'}
@@ -508,6 +541,7 @@ export default function Reports() {
                             className="btn btn-secondary"
                             to={getArtifactViewPath(runId, artifactType, artifact)}
                             title={`Open ${label}`}
+                            onClick={() => trackArchivePathClick(runId, `report:${artifactType}`)}
                           >
                             <FileSearch size={14} />
                             {label}

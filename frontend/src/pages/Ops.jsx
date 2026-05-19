@@ -1471,6 +1471,22 @@ export default function Ops() {
                         <span>Glossary open rate</span>
                         <strong>{formatPercent(kpiLatest.onboarding_glossary_open_rate)}</strong>
                       </div>
+                      <div className="ops-kv-item">
+                        <span>Calendar visitors</span>
+                        <strong>{Number(kpiLatest.calendar_view_visitors || 0).toLocaleString()}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Run-path click visitors</span>
+                        <strong>{Number(kpiLatest.run_path_click_visitors || 0).toLocaleString()}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Replay tab visitors</span>
+                        <strong>{Number(kpiLatest.run_replay_tab_open_visitors || 0).toLocaleString()}</strong>
+                      </div>
+                      <div className="ops-kv-item">
+                        <span>Story report visitors</span>
+                        <strong>{Number(kpiLatest.story_report_open_visitors || 0).toLocaleString()}</strong>
+                      </div>
                     </div>
 
                     <div className="ops-kpi-summary">
@@ -1479,6 +1495,8 @@ export default function Ops() {
                       <span>7d Avg D7 Retention: {formatPercent(kpiSevenDayAvg.d7_retention_rate)}</span>
                       <span>7d Avg Onboarding Completion: {formatPercent(kpiSevenDayAvg.onboarding_completion_rate)}</span>
                       <span>7d Avg Onboarding Skip: {formatPercent(kpiSevenDayAvg.onboarding_skip_rate)}</span>
+                      <span>7d Calendar Visitors: {Number(kpiSevenDayAvg.calendar_view_visitors || 0).toLocaleString()}</span>
+                      <span>7d Story Report Visitors: {Number(kpiSevenDayAvg.story_report_open_visitors || 0).toLocaleString()}</span>
                     </div>
 
                     {kpiItems.length > 0 && (
@@ -1497,6 +1515,12 @@ export default function Ops() {
                               <th>Onboarding Completed</th>
                               <th>Onboarding Skipped</th>
                               <th>Glossary Opens</th>
+                              <th>Calendar Visitors</th>
+                              <th>Run-path Click Visitors</th>
+                              <th>Replay Tab Visitors</th>
+                              <th>Evidence Filter Visitors</th>
+                              <th>Raw Evidence Visitors</th>
+                              <th>Story Report Visitors</th>
                               <th>Onboarding Completion</th>
                               <th>D1</th>
                               <th>D7</th>
@@ -1516,6 +1540,12 @@ export default function Ops() {
                                 <td>{Number(item.onboarding_completed_visitors || 0).toLocaleString()}</td>
                                 <td>{Number(item.onboarding_skipped_visitors || 0).toLocaleString()}</td>
                                 <td>{Number(item.onboarding_glossary_opened_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.calendar_view_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.run_path_click_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.run_replay_tab_open_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.evidence_filter_used_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.raw_evidence_toggle_visitors || 0).toLocaleString()}</td>
+                                <td>{Number(item.story_report_open_visitors || 0).toLocaleString()}</td>
                                 <td>{formatPercent(item.onboarding_completion_rate)}</td>
                                 <td>{formatPercent(item.d1_retention_rate)}</td>
                                 <td>{formatPercent(item.d7_retention_rate)}</td>

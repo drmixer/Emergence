@@ -14,6 +14,13 @@ ALLOWED_KPI_EVENT_NAMES = {
     "landing_view",
     "landing_run_click",
     "run_detail_view",
+    "calendar_view",
+    "archive_view",
+    "run_path_click",
+    "run_replay_tab_open",
+    "evidence_filter_used",
+    "raw_evidence_toggle",
+    "report_opened",
     "replay_start",
     "replay_complete",
     "share_clicked",
@@ -227,6 +234,100 @@ def _attach_onboarding_metrics(
         item["onboarding_completion_rate"] = _safe_ratio(completed_visitors, shown_visitors)
         item["onboarding_skip_rate"] = _safe_ratio(skipped_visitors, shown_visitors)
         item["onboarding_glossary_open_rate"] = _safe_ratio(glossary_visitors, shown_visitors)
+
+
+def _fetch_viewer_journey_metrics_by_day(
+    db: Session,
+    *,
+    start_day: date,
+    end_day: date,
+) -> dict[str, dict[str, int]]:
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              day_key,
+              COUNT(CASE WHEN event_name = 'calendar_view' THEN 1 END) AS calendar_views,
+              COUNT(DISTINCT CASE WHEN event_name = 'calendar_view' THEN visitor_id END) AS calendar_view_visitors,
+              COUNT(CASE WHEN event_name = 'archive_view' THEN 1 END) AS archive_views,
+              COUNT(DISTINCT CASE WHEN event_name = 'archive_view' THEN visitor_id END) AS archive_view_visitors,
+              COUNT(CASE WHEN event_name = 'run_path_click' THEN 1 END) AS run_path_clicks,
+              COUNT(DISTINCT CASE WHEN event_name = 'run_path_click' THEN visitor_id END) AS run_path_click_visitors,
+              COUNT(CASE WHEN event_name = 'run_replay_tab_open' THEN 1 END) AS run_replay_tab_opens,
+              COUNT(DISTINCT CASE WHEN event_name = 'run_replay_tab_open' THEN visitor_id END) AS run_replay_tab_open_visitors,
+              COUNT(CASE WHEN event_name = 'evidence_filter_used' THEN 1 END) AS evidence_filter_uses,
+              COUNT(DISTINCT CASE WHEN event_name = 'evidence_filter_used' THEN visitor_id END) AS evidence_filter_used_visitors,
+              COUNT(CASE WHEN event_name = 'raw_evidence_toggle' THEN 1 END) AS raw_evidence_toggles,
+              COUNT(DISTINCT CASE WHEN event_name = 'raw_evidence_toggle' THEN visitor_id END) AS raw_evidence_toggle_visitors,
+              COUNT(CASE WHEN event_name = 'report_opened' THEN 1 END) AS report_opens,
+              COUNT(DISTINCT CASE WHEN event_name = 'report_opened' THEN visitor_id END) AS report_open_visitors,
+              COUNT(CASE WHEN event_name = 'report_opened' AND target = 'approachable_report' THEN 1 END) AS story_report_opens,
+              COUNT(DISTINCT CASE WHEN event_name = 'report_opened' AND target = 'approachable_report' THEN visitor_id END) AS story_report_open_visitors
+            FROM kpi_events
+            WHERE day_key BETWEEN :start_day AND :end_day
+            GROUP BY day_key
+            """
+        ),
+        {"start_day": start_day, "end_day": end_day},
+    ).fetchall()
+
+    by_day: dict[str, dict[str, int]] = {}
+    for row in rows:
+        day_key_value = row.day_key
+        if hasattr(day_key_value, "isoformat"):
+            key = day_key_value.isoformat()
+        else:
+            key = str(day_key_value or "")
+        if not key:
+            continue
+        by_day[key] = {
+            "calendar_views": int(row.calendar_views or 0),
+            "calendar_view_visitors": int(row.calendar_view_visitors or 0),
+            "archive_views": int(row.archive_views or 0),
+            "archive_view_visitors": int(row.archive_view_visitors or 0),
+            "run_path_clicks": int(row.run_path_clicks or 0),
+            "run_path_click_visitors": int(row.run_path_click_visitors or 0),
+            "run_replay_tab_opens": int(row.run_replay_tab_opens or 0),
+            "run_replay_tab_open_visitors": int(row.run_replay_tab_open_visitors or 0),
+            "evidence_filter_uses": int(row.evidence_filter_uses or 0),
+            "evidence_filter_used_visitors": int(row.evidence_filter_used_visitors or 0),
+            "raw_evidence_toggles": int(row.raw_evidence_toggles or 0),
+            "raw_evidence_toggle_visitors": int(row.raw_evidence_toggle_visitors or 0),
+            "report_opens": int(row.report_opens or 0),
+            "report_open_visitors": int(row.report_open_visitors or 0),
+            "story_report_opens": int(row.story_report_opens or 0),
+            "story_report_open_visitors": int(row.story_report_open_visitors or 0),
+        }
+    return by_day
+
+
+def _attach_viewer_journey_metrics(
+    *,
+    items: list[dict[str, Any]],
+    viewer_journey_by_day: dict[str, dict[str, int]],
+) -> None:
+    for item in items:
+        day_key = str(item.get("day_key") or "")
+        source = viewer_journey_by_day.get(day_key, {})
+        for field in (
+            "calendar_views",
+            "calendar_view_visitors",
+            "archive_views",
+            "archive_view_visitors",
+            "run_path_clicks",
+            "run_path_click_visitors",
+            "run_replay_tab_opens",
+            "run_replay_tab_open_visitors",
+            "evidence_filter_uses",
+            "evidence_filter_used_visitors",
+            "raw_evidence_toggles",
+            "raw_evidence_toggle_visitors",
+            "report_opens",
+            "report_open_visitors",
+            "story_report_opens",
+            "story_report_open_visitors",
+        ):
+            item[field] = int(source.get(field, 0))
 
 
 def compute_daily_rollup(db: Session, *, day_key: date) -> dict[str, Any]:
@@ -539,7 +640,13 @@ def get_recent_rollups(db: Session, *, days: int, refresh: bool = True) -> dict[
                 start_day=min(day_keys),
                 end_day=max(day_keys),
             )
+            viewer_journey_by_day = _fetch_viewer_journey_metrics_by_day(
+                db,
+                start_day=min(day_keys),
+                end_day=max(day_keys),
+            )
             _attach_onboarding_metrics(items=items, onboarding_by_day=onboarding_by_day)
+            _attach_viewer_journey_metrics(items=items, viewer_journey_by_day=viewer_journey_by_day)
 
     latest = items[0] if items else None
 
@@ -549,6 +656,9 @@ def get_recent_rollups(db: Session, *, days: int, refresh: bool = True) -> dict[
         if not values:
             return None
         return sum(values) / len(values)
+
+    def _sum_field(field: str) -> int:
+        return sum(int(item.get(field) or 0) for item in window)
 
     summary = {
         "latest_day_key": latest.get("day_key") if latest else None,
@@ -564,6 +674,14 @@ def get_recent_rollups(db: Session, *, days: int, refresh: bool = True) -> dict[
             "onboarding_completion_rate": _avg_rate("onboarding_completion_rate"),
             "onboarding_skip_rate": _avg_rate("onboarding_skip_rate"),
             "onboarding_glossary_open_rate": _avg_rate("onboarding_glossary_open_rate"),
+            "calendar_view_visitors": _sum_field("calendar_view_visitors"),
+            "archive_view_visitors": _sum_field("archive_view_visitors"),
+            "run_path_click_visitors": _sum_field("run_path_click_visitors"),
+            "run_replay_tab_open_visitors": _sum_field("run_replay_tab_open_visitors"),
+            "evidence_filter_used_visitors": _sum_field("evidence_filter_used_visitors"),
+            "raw_evidence_toggle_visitors": _sum_field("raw_evidence_toggle_visitors"),
+            "report_open_visitors": _sum_field("report_open_visitors"),
+            "story_report_open_visitors": _sum_field("story_report_open_visitors"),
         },
     }
 
