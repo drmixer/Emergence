@@ -55,6 +55,7 @@ from app.services.live_run_scope import (
     get_run_window,
 )
 from app.services.run_policy import is_deterministic_fallback_forum_post_content
+from app.services.run_declarations import resolve_run_declaration
 from app.core.database import SessionLocal
 from app.models.models import (
     Event,
@@ -218,7 +219,7 @@ def _safe_ratio(numerator: int | float, denominator: int | float) -> float:
 def _serialize_run_registry_metadata(row: SimulationRun | None) -> dict[str, Any] | None:
     if row is None:
         return None
-    return {
+    payload = {
         "run_id": str(row.run_id),
         "run_mode": str(row.run_mode),
         "protocol_version": str(row.protocol_version or ""),
@@ -240,6 +241,19 @@ def _serialize_run_registry_metadata(row: SimulationRun | None) -> dict[str, Any
         "started_at": (ensure_utc(row.started_at).isoformat() if row.started_at else None),
         "ended_at": (ensure_utc(row.ended_at).isoformat() if row.ended_at else None),
     }
+    declaration = resolve_run_declaration(
+        run_id=str(row.run_id or ""),
+        condition_name=row.condition_name,
+        run_row=row,
+    )
+    if declaration is not None:
+        payload["run_declaration"] = {
+            "declared_question": declaration.declared_question,
+            "watch_for": declaration.watch_for,
+            "claim_boundary": declaration.claim_boundary,
+            "source": declaration.source,
+        }
+    return payload
 
 
 def _resolve_day_key(day: Optional[str]) -> date:
@@ -2140,6 +2154,14 @@ def overview():
         simulation_active = bool(runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE"))
         simulation_paused = bool(runtime_config_service.get_effective_value_cached("SIMULATION_PAUSED"))
         active_run_id = configured_run_id if simulation_active else None
+        active_run_row = (
+            db.query(SimulationRun)
+            .filter(SimulationRun.run_id == configured_run_id)
+            .first()
+            if configured_run_id
+            else None
+        )
+        active_run_metadata = _serialize_run_registry_metadata(active_run_row) if simulation_active else None
 
         last_completed_run = (
             db.query(SimulationRun)
@@ -2300,6 +2322,7 @@ def overview():
                 "last_completed_run_id": last_completed_run_id,
                 "last_completed_run_ended_at": last_completed_run.ended_at.isoformat() if last_completed_run and last_completed_run.ended_at else None,
             },
+            "run_metadata": active_run_metadata,
             "cycle_status": cycle_status,
             "agents": {
                 "total": total_agents,

@@ -25,7 +25,7 @@ import NoActiveRunNotice from '../components/NoActiveRunNotice'
 import RunBriefCard from '../components/RunBriefCard'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { getPublicRunFraming } from '../../lib/public-run-framing'
-import { getNextScheduledRun, getScheduleEntryForRunId } from '../data/runSchedule'
+import { getNextScheduledRun, getRunBriefForCurrentRun } from '../data/runSchedule'
 
 const DashboardSocialDynamicsChart = lazy(() => import('../components/DashboardSocialDynamicsChart'))
 
@@ -302,10 +302,7 @@ export default function Dashboard() {
     const inequality = classMobility?.inequality || {}
     const publicRunFraming = getPublicRunFraming(runMetadata)
     const nextScheduledRun = getNextScheduledRun()
-    const activeScheduledRun =
-        hasActiveRun
-            ? getScheduleEntryForRunId(scope?.active_run_id) || (nextScheduledRun?.status === 'Live' ? nextScheduledRun : null)
-            : null
+    const activeScheduledRun = hasActiveRun ? getRunBriefForCurrentRun(runMetadata, scope) : null
 
     return (
         <div className="dashboard">

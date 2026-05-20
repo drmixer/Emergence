@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildRunBriefFromMetadata,
   getCalendarSummaryRuns,
   getLatestCompletedScheduledRun,
+  getRunBriefForCurrentRun,
   getNextScheduledRun,
   getScheduleEntryForRunId,
   getRunSchedule,
+  mergeRunScheduleWithActiveRun,
 } from './runSchedule'
 
 describe('run schedule', () => {
@@ -73,5 +76,56 @@ describe('run schedule', () => {
     expect(getScheduleEntryForRunId('real-20260519T063000Z')?.label).toBe('K12')
     expect(getScheduleEntryForRunId('real-20260517T220144Z')?.label).toBe('K11')
     expect(getScheduleEntryForRunId('unknown')).toBeNull()
+  })
+
+  it('builds a live run card from backend metadata and declared question', () => {
+    const run = buildRunBriefFromMetadata({
+      run_id: 'real-20260522T063000Z',
+      condition_name: 'real_governance_readability_canary_k13',
+      run_class: 'special_exploratory',
+      started_at: '2026-05-22T06:30:00Z',
+      run_declaration: {
+        declared_question: 'Can governance discussion stay readable?',
+        watch_for: 'Watch proposal replies for distinct positions.',
+        claim_boundary: 'Exploratory public canary; non-claim-bearing.',
+      },
+    })
+
+    expect(run).toMatchObject({
+      label: 'K13',
+      status: 'Live',
+      runId: 'real-20260522T063000Z',
+      track: 'Public Canary',
+      runClass: 'special_exploratory',
+      declaredQuestion: 'Can governance discussion stay readable?',
+      watchFor: 'Watch proposal replies for distinct positions.',
+      claimBoundary: 'Exploratory public canary; non-claim-bearing.',
+    })
+    expect(run.links.evidence).toBe('/runs/real-20260522T063000Z')
+  })
+
+  it('promotes the matching scheduled card when the current run metadata names K13', () => {
+    const activeRun = getRunBriefForCurrentRun(
+      {
+        run_id: 'real-20260522T063000Z',
+        condition_name: 'real_governance_readability_canary_k13',
+        run_class: 'special_exploratory',
+        started_at: '2026-05-22T06:30:00Z',
+      },
+      { simulation_active: true, active_run_id: 'real-20260522T063000Z' }
+    )
+
+    expect(activeRun).toMatchObject({
+      label: 'K13',
+      status: 'Live',
+      planningState: 'Live',
+      runId: 'real-20260522T063000Z',
+      declaredQuestion: 'Can proposal discussion, voting, and passed laws stay readable without collapsing into agreement pile-on noise?',
+    })
+
+    const summary = getCalendarSummaryRuns({ activeRun })
+    expect(summary.primaryLabel).toBe('Current live run')
+    expect(summary.primaryRun?.label).toBe('K13')
+    expect(mergeRunScheduleWithActiveRun(activeRun).filter((run) => run.label === 'K13')).toHaveLength(1)
   })
 })

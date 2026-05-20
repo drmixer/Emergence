@@ -222,6 +222,207 @@ const STATUS_ORDER = {
   Completed: 4,
 }
 
+function cleanString(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function pickString(...values) {
+  for (const value of values) {
+    const clean = cleanString(value)
+    if (clean) return clean
+  }
+  return ''
+}
+
+function formatDateLabel(value) {
+  const timestamp = Date.parse(value || '')
+  if (!Number.isFinite(timestamp)) return ''
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(timestamp))
+}
+
+function formatConditionName(value) {
+  return cleanString(value)
+    .replace(/^real[_-]+/i, '')
+    .replace(/\b20\d{6}t?\d{0,6}z?\b/gi, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function inferRunLabel(metadata = {}) {
+  const explicit = pickString(
+    metadata?.public_label,
+    metadata?.publicLabel,
+    metadata?.label,
+  )
+  if (explicit) return explicit
+
+  const haystack = [metadata?.condition_name, metadata?.hypothesis_id, metadata?.season_id, metadata?.run_id]
+    .map((value) => cleanString(value))
+    .join(' ')
+  const kMatch = haystack.match(/(?:^|[^a-z0-9])(k\d+)(?:$|[^a-z0-9])/i)
+  if (kMatch) return kMatch[1].toUpperCase()
+
+  const runId = cleanString(metadata?.run_id)
+  return runId ? `Run ${runId}` : 'Current Run'
+}
+
+function inferTrack(runClass) {
+  const normalized = cleanString(runClass).toLowerCase()
+  if (normalized === 'standard_72h' || normalized === 'deep_96h') return 'Research'
+  if (normalized === 'special_exploratory') return 'Public Canary'
+  return 'Simulation Run'
+}
+
+function inferClaimBoundary(runClass) {
+  const normalized = cleanString(runClass).toLowerCase()
+  if (normalized === 'standard_72h' || normalized === 'deep_96h') {
+    return 'Research-track run; interpret under protocol conditions and replicate context.'
+  }
+  if (normalized === 'special_exploratory') {
+    return 'Exploratory public canary; non-claim-bearing.'
+  }
+  return 'Interpret this run under its declared metadata and source evidence.'
+}
+
+function getDeclaration(metadata = {}) {
+  const declaration = metadata?.run_declaration || metadata?.runDeclaration || {}
+  return declaration && typeof declaration === 'object' ? declaration : {}
+}
+
+export function getScheduleEntryForRunMetadata(metadata = {}) {
+  const runId = cleanString(metadata?.run_id)
+  const direct = getScheduleEntryForRunId(runId)
+  if (direct) return direct
+
+  const label = inferRunLabel(metadata)
+  return RUN_SCHEDULE.find((run) => cleanString(run.label).toLowerCase() === cleanString(label).toLowerCase()) || null
+}
+
+export function buildRunBriefFromMetadata(metadata = {}, options = {}) {
+  const source = metadata && typeof metadata === 'object' ? metadata : {}
+  const declaration = getDeclaration(source)
+  const status = pickString(options.status, source.status, source.ended_at ? 'Completed' : 'Live')
+  const runClass = pickString(source.run_class, options.runClass, 'special_exploratory')
+  const runId = pickString(source.run_id, options.runId)
+  const startedAtLabel = formatDateLabel(source.started_at)
+  const endedAtLabel = formatDateLabel(source.ended_at)
+  const label = inferRunLabel(source)
+  const conditionLabel = formatConditionName(source.condition_name)
+  const declaredQuestion = pickString(
+    declaration.declared_question,
+    declaration.declaredQuestion,
+    source.declared_question,
+    source.declaredQuestion,
+    'Declared question unavailable in current run metadata.',
+  )
+
+  return {
+    id: runId ? `runtime-${runId}` : `runtime-${label}`,
+    label,
+    theme: pickString(source.public_theme, source.publicTheme, conditionLabel, 'Live Run'),
+    planningState: status,
+    track: pickString(source.track, inferTrack(runClass)),
+    runClass,
+    status,
+    runId,
+    plannedStartLabel: startedAtLabel ? `Started ${startedAtLabel}` : 'Started time unavailable',
+    completedAt: source.ended_at || '',
+    expectedDuration: endedAtLabel ? `Closed ${endedAtLabel}` : 'Live now',
+    declaredQuestion,
+    watchFor: pickString(
+      declaration.watch_for,
+      declaration.watchFor,
+      source.watch_for,
+      source.watchFor,
+      'Follow live pressure, governance, messages, resources, and post-run evidence for this declared run.',
+    ),
+    declaredCondition: pickString(source.condition_name, 'Condition unavailable'),
+    changeFromPrior: pickString(source.change_from_prior, source.changeFromPrior),
+    usefulEvidence: pickString(
+      source.useful_evidence,
+      source.usefulEvidence,
+      'Run-scoped messages, proposals, laws, resource pressure, and report evidence tied to this run ID.',
+    ),
+    doesNotProve: pickString(
+      source.does_not_prove,
+      source.doesNotProve,
+      'One live run should not be treated as a broad conclusion without protocol context and evidence review.',
+    ),
+    claimBoundary: pickString(
+      declaration.claim_boundary,
+      declaration.claimBoundary,
+      source.claim_boundary,
+      source.claimBoundary,
+      inferClaimBoundary(runClass),
+    ),
+    resultNote: pickString(source.result_note, source.resultNote),
+    links: {
+      live: '/dashboard',
+      recap: runId ? `/runs/${encodeURIComponent(runId)}/replay?tab=overview` : '',
+      evidence: runId ? `/runs/${encodeURIComponent(runId)}` : '',
+      report: runId ? `/runs/${encodeURIComponent(runId)}/reports/approachable_report?format=markdown` : '',
+      archive: '/archive',
+    },
+    viewerPath: inferTrack(runClass) === 'Research' ? RESEARCH_VIEWER_PATH : PUBLIC_CANARY_VIEWER_PATH,
+  }
+}
+
+export function getRunBriefForCurrentRun(metadata = {}, scope = {}) {
+  const activeRunId = pickString(scope?.active_run_id, metadata?.run_id)
+  if (!activeRunId) return null
+
+  const source = {
+    ...(metadata && typeof metadata === 'object' ? metadata : {}),
+    run_id: activeRunId,
+  }
+  const scheduled = getScheduleEntryForRunMetadata(source)
+  if (scheduled) {
+    return {
+      ...scheduled,
+      id: `${scheduled.id || scheduled.label}-live`,
+      status: 'Live',
+      planningState: 'Live',
+      runId: activeRunId,
+      plannedStartLabel: pickString(
+        formatDateLabel(source.started_at) ? `Started ${formatDateLabel(source.started_at)}` : '',
+        scheduled.plannedStartLabel,
+      ),
+      expectedDuration: 'Live now',
+      links: {
+        ...(scheduled.links || {}),
+        live: '/dashboard',
+        recap: `/runs/${encodeURIComponent(activeRunId)}/replay?tab=overview`,
+        evidence: `/runs/${encodeURIComponent(activeRunId)}`,
+        report: `/runs/${encodeURIComponent(activeRunId)}/reports/approachable_report?format=markdown`,
+        archive: '/archive',
+      },
+    }
+  }
+
+  return buildRunBriefFromMetadata(source, { status: 'Live' })
+}
+
+export function mergeRunScheduleWithActiveRun(activeRun) {
+  const runs = getRunSchedule()
+  if (!activeRun) return runs
+  const activeRunId = cleanString(activeRun.runId)
+  const activeLabel = cleanString(activeRun.label).toLowerCase()
+  const rest = runs.filter((run) => {
+    const sameRunId = activeRunId && cleanString(run.runId) === activeRunId
+    const sameLabel = activeLabel && cleanString(run.label).toLowerCase() === activeLabel
+    return !sameRunId && !sameLabel
+  })
+  return [activeRun, ...rest]
+}
+
 export function getRunSchedule() {
   return [...RUN_SCHEDULE].sort((a, b) => {
     const statusDelta = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)
@@ -250,8 +451,8 @@ export function getLatestCompletedScheduledRun() {
   return getRunSchedule().find((run) => run.status === 'Completed') || null
 }
 
-export function getCalendarSummaryRuns() {
-  const currentLive = getCurrentLiveScheduledRun()
+export function getCalendarSummaryRuns({ activeRun = null } = {}) {
+  const currentLive = activeRun || getCurrentLiveScheduledRun()
   const nextUpcoming = getNextUpcomingScheduledRun()
   const latestCompleted = getLatestCompletedScheduledRun()
   const primaryRun = currentLive || nextUpcoming || latestCompleted

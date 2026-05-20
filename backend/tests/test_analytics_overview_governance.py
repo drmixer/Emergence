@@ -272,6 +272,58 @@ def test_overview_zeroes_day_number_when_no_run_is_active(
     body = response.json()
     assert body["scope"]["simulation_active"] is False
     assert body["day_number"] == 0
+    assert body["run_metadata"] is None
+
+
+def test_overview_surfaces_active_run_metadata_and_declared_question(
+    testing_session_factory,
+    monkeypatch,
+):
+    session = testing_session_factory()
+    run_started_at = datetime(2026, 5, 22, 6, 30, tzinfo=timezone.utc)
+    session.add(
+        SimulationRun(
+            run_id="real-20260522T063000Z",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            condition_name="real_governance_readability_canary_k13",
+            run_class="special_exploratory",
+            started_at=run_started_at,
+            start_reason=(
+                '{"declared_question":"Can governance discussion stay readable?",'
+                '"watch_for":"Watch proposal replies for distinct positions.",'
+                '"claim_boundary":"Exploratory public canary; non-claim-bearing."}'
+            ),
+        )
+    )
+    session.commit()
+    session.close()
+
+    runtime_values = {
+        "SIMULATION_ACTIVE": True,
+        "SIMULATION_PAUSED": False,
+        "SIMULATION_RUN_ID": "real-20260522T063000Z",
+    }
+    monkeypatch.setattr(analytics_api, "SessionLocal", testing_session_factory)
+    monkeypatch.setattr(
+        analytics_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: runtime_values.get(key),
+    )
+
+    with _make_client() as client:
+        response = client.get("/api/analytics/overview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run_metadata"]["run_id"] == "real-20260522T063000Z"
+    assert body["run_metadata"]["condition_name"] == "real_governance_readability_canary_k13"
+    assert body["run_metadata"]["run_declaration"] == {
+        "declared_question": "Can governance discussion stay readable?",
+        "watch_for": "Watch proposal replies for distinct positions.",
+        "claim_boundary": "Exploratory public canary; non-claim-bearing.",
+        "source": "simulation_run_metadata",
+    }
 
 
 def test_social_dynamics_includes_public_order_from_existing_signals(

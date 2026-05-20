@@ -2,28 +2,53 @@ import {
   AlertCircle,
   CalendarDays,
 } from 'lucide-react'
-import { useEffect } from 'react'
-import { getCalendarSummaryRuns, getNextScheduledRun, getRunSchedule } from '../data/runSchedule'
+import { useEffect, useState } from 'react'
+import {
+  getCalendarSummaryRuns,
+  getNextScheduledRun,
+  getRunBriefForCurrentRun,
+  mergeRunScheduleWithActiveRun,
+} from '../data/runSchedule'
 import GlossaryTooltip from '../components/GlossaryTooltip'
 import RunBriefCard from '../components/RunBriefCard'
+import { api } from '../services/api'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
 export default function RunCalendar() {
-  const runs = getRunSchedule()
+  const [activeRun, setActiveRun] = useState(null)
+  const runs = mergeRunScheduleWithActiveRun(activeRun)
   const nextRun = getNextScheduledRun()
-  const { primaryRun, primaryLabel, latestCompleted } = getCalendarSummaryRuns()
+  const { primaryRun, primaryLabel, latestCompleted } = getCalendarSummaryRuns({ activeRun })
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadActiveRun() {
+      const overview = await api.getAnalyticsOverview().catch(() => null)
+      if (cancelled) return
+      const scope = overview?.scope && typeof overview.scope === 'object' ? overview.scope : {}
+      const metadata = overview?.run_metadata && typeof overview.run_metadata === 'object' ? overview.run_metadata : {}
+      setActiveRun(scope?.simulation_active === true ? getRunBriefForCurrentRun(metadata, scope) : null)
+    }
+
+    void loadActiveRun()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     trackKpiEventOnce('calendar_view', 'run_calendar', {
       surface: 'run_calendar',
       target: 'calendar_page',
-      runId: nextRun?.runId || nextRun?.id || nextRun?.label,
+      runId: activeRun?.runId || nextRun?.runId || nextRun?.id || nextRun?.label,
       metadata: {
+        active_run: activeRun?.label || '',
         next_run: nextRun?.label || '',
         latest_completed: latestCompleted?.label || '',
       },
     })
-  }, [latestCompleted, nextRun])
+  }, [activeRun, latestCompleted, nextRun])
 
   return (
     <div className="run-calendar-page">
