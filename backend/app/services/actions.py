@@ -476,6 +476,80 @@ def _proposal_mechanism_signature(
     return None
 
 
+def _proposal_is_targeted_change_text(text: str) -> bool:
+    if not text:
+        return False
+    if not re.search(r"\b(?:proposal|law)\s*#?\s*\d+\b", text):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:amend|amendment|change|raise|lower|cap|exempt|withdraw|replace|target|trigger|floor|minimum|recipient)\b",
+            text,
+        )
+    )
+
+
+def _proposal_novelty_signature(
+    *,
+    proposal_type: str | None,
+    governance_class: str | None,
+    title: str | None,
+    description: str | None,
+    runtime_effect: object,
+) -> str | None:
+    ptype = str(proposal_type or "").strip().lower()
+    gclass = str(governance_class or "").strip().lower()
+    text = _proposal_policy_text(title, description)
+    if not text:
+        return None
+    if ptype == "amendment" or gclass == "amendment" or _runtime_effect_type(runtime_effect).endswith("_amendment"):
+        return None
+    if _proposal_is_targeted_change_text(text):
+        return None
+
+    has_aid = any(marker in text for marker in ("aid", "top up", "safety net", "cover", "coverage", "help", "support"))
+    has_threshold = any(
+        marker in text
+        for marker in (
+            "threshold",
+            "below",
+            "low energy",
+            "low food",
+            "survival",
+            "dormancy",
+            "dormant",
+            "critical",
+        )
+    )
+    has_public_pool = any(marker in text for marker in ("common pool", "reserve", "public aid", "pool"))
+    has_active_agent_scope = any(marker in text for marker in ("active agent", "active agents", "low energy", "low food", "survival"))
+    if has_aid and has_threshold and (has_public_pool or has_active_agent_scope):
+        return "threshold_aid_coverage"
+
+    has_floor = any(marker in text for marker in ("pool floor", "reserve floor", "minimum pool", "minimum reserve", "floor"))
+    has_protection = any(marker in text for marker in ("preserve", "protect", "maintain", "keep", "not drain"))
+    if has_public_pool and has_floor and (has_aid or has_threshold or has_protection):
+        return "pool_floor_protection"
+
+    has_voluntary = any(marker in text for marker in ("voluntary", "opt in", "consent", "non binding", "non mandatory"))
+    has_resource_sharing = any(
+        marker in text
+        for marker in (
+            "resource sharing",
+            "sharing protocol",
+            "share resources",
+            "surplus sharing",
+            "mutual aid",
+            "aid protocol",
+            "request aid",
+        )
+    )
+    if has_voluntary and has_resource_sharing:
+        return "voluntary_resource_aid_norm"
+
+    return None
+
+
 def _proposal_row_mechanism_signature(proposal: Proposal) -> str | None:
     return _proposal_mechanism_signature(
         proposal_type=proposal.proposal_type,
@@ -486,8 +560,28 @@ def _proposal_row_mechanism_signature(proposal: Proposal) -> str | None:
     )
 
 
+def _proposal_row_novelty_signature(proposal: Proposal) -> str | None:
+    return _proposal_novelty_signature(
+        proposal_type=proposal.proposal_type,
+        governance_class=proposal.governance_class,
+        title=proposal.title,
+        description=proposal.description,
+        runtime_effect=proposal.runtime_effect,
+    )
+
+
 def _action_mechanism_signature(action: dict) -> str | None:
     return _proposal_mechanism_signature(
+        proposal_type=action.get("proposal_type"),
+        governance_class=action.get("governance_class") or action.get("governanceClass"),
+        title=action.get("title"),
+        description=action.get("description"),
+        runtime_effect=action.get("runtime_effect"),
+    )
+
+
+def _action_novelty_signature(action: dict) -> str | None:
+    return _proposal_novelty_signature(
         proposal_type=action.get("proposal_type"),
         governance_class=action.get("governance_class") or action.get("governanceClass"),
         title=action.get("title"),
@@ -1361,11 +1455,14 @@ def _find_near_duplicate_active_proposal(db: Session, action: dict) -> Proposal 
         return None
     candidate_tokens = set(candidate_key.split())
     candidate_signature = _action_mechanism_signature(action)
-    if len(candidate_tokens) < 2:
+    candidate_novelty_signature = _action_novelty_signature(action)
+    if len(candidate_tokens) < 2 and not candidate_signature and not candidate_novelty_signature:
         return None
 
     for proposal in _active_run_proposal_query(db).all():
         if candidate_signature and _proposal_row_mechanism_signature(proposal) == candidate_signature:
+            return proposal
+        if candidate_novelty_signature and _proposal_row_novelty_signature(proposal) == candidate_novelty_signature:
             return proposal
         existing_key = _normalized_proposal_title_key(proposal.title)
         if not existing_key:

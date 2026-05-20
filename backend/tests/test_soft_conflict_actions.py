@@ -311,6 +311,88 @@ def test_create_proposal_rejects_duplicate_active_reserve_aid_mechanism(session_
     assert validation["proposal_id"] == existing.id
 
 
+def test_create_proposal_rejects_same_threshold_aid_topic_with_new_wording(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        existing = Proposal(
+            author_agent_id=author.id,
+            title="Active Threshold Aid Coverage",
+            description=(
+                "Use active threshold aid from the common pool for low-energy agents "
+                "while preserving the reserve pool floor."
+            ),
+            proposal_type="law",
+            governance_class="standing_law",
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(existing)
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Low Energy Safety Net",
+                    "description": (
+                        "Create a rule that covers agents below the energy threshold with "
+                        "public aid from the reserve before dormancy."
+                    ),
+                    "proposal_type": "rule",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "duplicate_active_proposal"
+    assert validation["proposal_id"] == existing.id
+
+
+def test_create_proposal_allows_targeted_amendment_to_threshold_aid_topic(session_factory):
+    with session_factory() as db:
+        author = _seed_agent(db, agent_number=11, display_name="Kite-11")
+        proposer = _seed_agent(db, agent_number=12, display_name="Lattice-12")
+        existing = Proposal(
+            id=740,
+            author_agent_id=author.id,
+            title="Active Threshold Aid Coverage",
+            description=(
+                "Use active threshold aid from the common pool for low-energy agents "
+                "while preserving the reserve pool floor."
+            ),
+            proposal_type="law",
+            governance_class="standing_law",
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=2),
+            created_at=now_utc(),
+        )
+        db.add(existing)
+        db.commit()
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                proposer,
+                {
+                    "action": "create_proposal",
+                    "title": "Amend Proposal #740 Energy Floor Exemption",
+                    "description": (
+                        "Amend Proposal #740 to exempt agents below 6 energy and cap any aid draw "
+                        "so the minimum pool floor remains protected."
+                    ),
+                    "proposal_type": "amendment",
+                    "governance_class": "amendment",
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
 def test_create_proposal_rejects_active_reserve_aid_covered_by_existing_law(session_factory):
     with session_factory() as db:
         author = _seed_agent(db, agent_number=11, display_name="Kite-11")
