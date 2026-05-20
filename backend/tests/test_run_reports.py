@@ -115,6 +115,7 @@ def test_story_sections_enforce_evidence_links_and_claim_gate():
     assert [section.get("heading") for section in sections] == [
         "Declared Question",
         "Short Answer",
+        "Highlights",
         "Run Arc",
         "Survival Pressure",
         "Governance, Aid, and Public Order",
@@ -146,6 +147,7 @@ def test_story_markdown_reads_as_prose_without_claim_prefixes():
 
     assert "- Claim:" not in markdown
     assert "## Short Answer" in markdown
+    assert "## Highlights" in markdown
     assert "The main arc was survival pressure" in markdown
     assert "## Run Arc" in markdown
     assert "Representative moment" not in markdown
@@ -167,8 +169,30 @@ def test_story_payload_includes_gemini_ready_template_without_fallback():
     assert generation["model_type"] == run_reports.POST_RUN_STORY_GEMINI_MODEL_TYPE
     assert generation["fallback_allowed"] is False
     assert "Declared Question" in generation["user_prompt"]
+    assert "Highlights" in generation["user_prompt"]
     assert "Do not invent events" in generation["system_prompt"]
     assert generation["context"]["required_sections"][0]["heading"] == "Declared Question"
+
+
+def test_story_highlights_section_summarizes_major_moments_and_pileons():
+    snapshot = _sample_snapshot()
+    snapshot["activity"]["deaths"] = 1
+    snapshot["activity"]["became_dormant"] = 3
+
+    payload = run_reports._build_story_payload(
+        snapshot=snapshot,
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="viewer_canary_v1",
+        season_number=None,
+        replicate_count=1,
+    )
+
+    highlight_section = next(section for section in payload["sections"] if section["heading"] == "Highlights")
+    highlight_text = "\n".join(highlight_section["paragraphs"])
+    assert "Major moments:" in highlight_text
+    assert "Who fell: 1 death and 3 dormancy events." in highlight_text
+    assert "2 repeated proposal/forum wave(s)" in highlight_text
 
 
 def test_story_payload_renders_declared_question_from_schedule_metadata():
@@ -202,6 +226,9 @@ Can the viewer follow the run?
 ## Short Answer
 Yes, but the story still needs tighter evidence links.
 
+## Highlights
+Major moments: a law passed and aid requests shaped the run.
+
 ## Run Arc
 The run opened with resource pressure and moved into governance.
 
@@ -234,6 +261,7 @@ Watch whether the next run is easier to follow live.
     assert payload["gemini_story_generation"]["generated_markdown"] == generated_markdown
     assert payload["sections"][0]["paragraphs"] == ["Can the viewer follow the run?"]
     assert payload["sections"][0]["generated_by"] == run_reports.POST_RUN_STORY_LLM_GENERATOR_VERSION
+    assert payload["sections"][2]["paragraphs"] == ["Major moments: a law passed and aid requests shaped the run."]
     assert payload["deterministic_sections"][0]["heading"] == "Declared Question"
 
 
@@ -271,6 +299,9 @@ Do the new viewer/story/evidence changes make a live run easier to follow?
 
 ## Short Answer
 Partly: the story had evidence, but the live viewer path still needed work.
+
+## Highlights
+Major moments: the report surfaced evidence links.
 """.strip()
 
     payload = run_reports._build_story_payload(
@@ -287,12 +318,14 @@ Partly: the story had evidence, but the live viewer path still needed work.
     assert payload["sections"][1]["paragraphs"] == [
         "Partly: the story had evidence, but the live viewer path still needed work."
     ]
+    assert payload["sections"][2]["paragraphs"] == ["Major moments: the report surfaced evidence links."]
 
 
 def test_story_payload_parses_gemini_bullet_labeled_sections():
     generated_markdown = """
 - Declared Question: Can the viewer follow the run?
 - Short Answer: Yes, but the story still needs tighter evidence links.
+- Highlights: Major moments: a repeated proposal wave became visible.
 - Run Arc: The run opened with resource pressure and moved into governance.
 - Survival Pressure: One agent died and several agents became dormant.
 - Governance, Aid, and Public Order: The social pattern centered on aid requests and lawmaking.
@@ -314,7 +347,7 @@ def test_story_payload_parses_gemini_bullet_labeled_sections():
     )
 
     assert payload["sections"][0]["paragraphs"] == ["Can the viewer follow the run?"]
-    assert payload["sections"][5]["paragraphs"] == [
+    assert payload["sections"][6]["paragraphs"] == [
         "Check the linked replay moments.",
         "Verify the source events before making claims.",
     ]

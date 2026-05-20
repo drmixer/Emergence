@@ -64,6 +64,11 @@ POST_RUN_STORY_TEMPLATE_SECTIONS = (
         "purpose": "Give the fastest accurate read of the run in two or three sentences.",
     },
     {
+        "key": "highlights",
+        "heading": "Highlights",
+        "purpose": "List the digestible major moments: what changed, who fell, and which repeated or unusual decisions shaped the run.",
+    },
+    {
         "key": "run_arc",
         "heading": "Run Arc",
         "purpose": "Explain the sequence: opening pressure, response, turning points, and end state.",
@@ -2318,6 +2323,23 @@ def _build_story_sections(
         f"Fast read: {pressure_text}. {governance_text} "
         f"Signals are grouped so repeated proposal/forum waves ({duplicate_waves:,} detected) do not read as independent events."
     )
+    major_moment_labels = []
+    for moment in key_moments[:3]:
+        event_type = str(moment.get("event_type") or "event").replace("_", " ").strip()
+        description = str(moment.get("description") or "").strip()
+        if not description:
+            continue
+        major_moment_labels.append(f"{event_type}: {description}")
+    highlights_major_text = (
+        "Major moments: " + "; ".join(major_moment_labels)
+        if major_moment_labels
+        else "Major moments: no non-routine highlights were selected; use the evidence view for the raw event log."
+    )
+    highlights_fall_text = f"Who fell: {pressure_text}."
+    highlights_weird_text = (
+        f"Repeated or unusual decisions: duplicate-wave diagnostics grouped {duplicate_waves:,} repeated proposal/forum wave(s), "
+        f"including {proposal_waves:,} proposal wave(s) and {forum_waves:,} forum wave(s), so the recap treats pile-ons as one pattern."
+    )
     survival_text = (
         f"Survival pressure registered as {pressure_text}. "
         "Use the linked event traces to distinguish direct deaths, dormancy, and recovery from routine work or idle noise."
@@ -2381,6 +2403,15 @@ def _build_story_sections(
                 _build_claim_block(claim=overview_text, evidence_links=evidence_links),
                 _build_claim_block(claim=short_answer_text, evidence_links=evidence_links),
             ],
+        ),
+        _claims_to_section(
+            heading="Highlights",
+            claims=[
+                _build_claim_block(claim=highlights_major_text, evidence_links=evidence_links),
+                _build_claim_block(claim=highlights_fall_text, evidence_links=evidence_links),
+                _build_claim_block(claim=highlights_weird_text, evidence_links=evidence_links),
+            ],
+            extra_references=[_reference_for_event(event, label_prefix="Highlight") for event in key_moments[:3]],
         ),
         _claims_to_section(
             heading="Run Arc",
