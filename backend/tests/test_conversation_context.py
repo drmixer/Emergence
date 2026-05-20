@@ -876,6 +876,111 @@ def test_social_silence_checkpoint_retries_non_social_action(session_factory, mo
     assert "who gets helped first" in message.content
 
 
+def test_k12_proposal_740_replay_retries_redundant_reply_into_vote(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+    monkeypatch.setattr(agent_loop, "SessionLocal", session_factory)
+    monkeypatch.setattr(
+        agent_loop.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: {
+            "SIMULATION_ACTIVE": True,
+            "SIMULATION_PAUSED": False,
+            "SIMULATION_RUN_ID": "real-20260519T063000Z",
+            "SIMULATION_RUN_MODE": "real",
+            "SIMULATION_RUN_CLASS": "special_exploratory",
+        }.get(key, ""),
+    )
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        author = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        now = now_utc()
+        agent.next_checkpoint_at = now - timedelta(minutes=1)
+        agent.last_checkpoint_at = now - timedelta(minutes=30)
+        proposal = Proposal(
+            id=740,
+            author_agent_id=author.id,
+            title="Threshold Aid Coverage",
+            description="Use active threshold aid for low-energy agents while preserving the pool floor.",
+            proposal_type="law",
+            status="active",
+            voting_closes_at=now + timedelta(hours=6),
+            created_at=now - timedelta(minutes=55),
+        )
+        root = Message(
+            id=740,
+            author_agent_id=author.id,
+            content="Proposal #740 asks whether active threshold aid should cover low-energy agents.",
+            message_type="forum_post",
+            created_at=now - timedelta(minutes=50),
+        )
+        db.add_all([proposal, root])
+        db.flush()
+        for index, content in enumerate(
+            [
+                "Proposal #740 already covers active threshold aid for low-energy agents.",
+                "This is already covered by proposal #740 and the reserve threshold mechanism.",
+            ]
+        ):
+            replier = _seed_agent(db, agent_number=10 + index, display_name=f"Covered-{index}")
+            db.add(
+                Message(
+                    author_agent_id=replier.id,
+                    parent_message_id=root.id,
+                    content=content,
+                    message_type="forum_reply",
+                    created_at=now - timedelta(minutes=20 - index),
+                )
+            )
+        db.commit()
+        agent_id = agent.id
+        root_id = root.id
+        proposal_id = proposal.id
+
+    calls = []
+
+    async def fake_get_agent_action(**kwargs):
+        calls.append(kwargs["context_prompt"])
+        if len(calls) == 1:
+            return {
+                "action": "forum_reply",
+                "parent_message_id": root_id,
+                "content": "Proposal #740 has already covered that active threshold aid mechanism.",
+            }
+        return {"action": "vote", "proposal_id": proposal_id, "vote": "yes"}
+
+    monkeypatch.setattr(agent_loop, "get_agent_action", fake_get_agent_action)
+
+    processor = agent_loop.AgentProcessor()
+    asyncio.run(processor._process_agent_turn(agent_id))
+
+    with session_factory() as db:
+        vote = db.query(Vote).filter(Vote.agent_id == agent_id, Vote.proposal_id == proposal_id).one()
+        repeated_reply = (
+            db.query(Message)
+            .filter(
+                Message.author_agent_id == agent_id,
+                Message.message_type == "forum_reply",
+                Message.parent_message_id == root_id,
+            )
+            .first()
+        )
+        action_event = db.query(Event).filter(Event.agent_id == agent_id, Event.event_type == "vote").one()
+        invalid_events = db.query(Event).filter(Event.agent_id == agent_id, Event.event_type == "invalid_action").all()
+
+    runtime = ((action_event.event_metadata or {}).get("runtime") or {})
+    assert vote.vote == "yes"
+    assert repeated_reply is None
+    assert invalid_events == []
+    assert len(calls) == 2
+    assert "[THREAD SUMMARY] proposal #740: 2 replies already say proposal/law is covered" in calls[0]
+    assert "REDUNDANT FORUM REPLY RETRY" in calls[1]
+    assert "Prefer action substitution" in calls[1]
+    assert runtime["redundant_forum_reply_retry"] is True
+    assert runtime["redundant_forum_reply_reason_code"] == "already_covered_pile_on"
+    assert runtime["run_id"] == "real-20260519T063000Z"
+
+
 def test_context_surfaces_incoming_request_inbox_with_actionable_tie_and_survival_read(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
 
