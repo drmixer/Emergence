@@ -358,12 +358,35 @@ class AgentProcessor:
                         and checkpoint_reason
                         and validation.get("reason_code") in {"duplicate_active_proposal", "duplicate_live_proposal_discussion"}
                     ):
-                        duplicate_followup = await self._build_duplicate_proposal_followup(
+                        rejected_reason_code = str(validation.get("reason_code") or "")
+                        duplicate_retry = await self._build_duplicate_proposal_retry(
                             db,
                             agent,
                             attempted_action=action_data,
                             validation=validation,
+                            model_type=model_type or "llama-3.1-8b",
+                            system_prompt=system_prompt or LLM_GUARDRAIL_PREFIX,
+                            context=context or "",
+                            checkpoint_number=checkpoint_number_hint,
+                            run_class=run_class,
                         )
+                        if duplicate_retry is not None:
+                            redirect_target_proposal_id = validation.get("proposal_id")
+                            action_data, validation, retry_meta = duplicate_retry
+                            if isinstance(retry_meta, dict):
+                                llm_meta = retry_meta
+                            runtime_metadata["duplicate_proposal_retry"] = True
+                            runtime_metadata["duplicate_proposal_reason_code"] = rejected_reason_code
+                            runtime_metadata["redirect_target_proposal_id"] = redirect_target_proposal_id
+                        if not validation["valid"]:
+                            duplicate_followup = await self._build_duplicate_proposal_followup(
+                                db,
+                                agent,
+                                attempted_action=action_data,
+                                validation=validation,
+                            )
+                        else:
+                            duplicate_followup = None
                         if duplicate_followup is not None:
                             redirect_target_proposal_id = validation.get("proposal_id")
                             action_data, validation = duplicate_followup
@@ -715,6 +738,61 @@ class AgentProcessor:
         # instead of manufacturing another generic "support the existing
         # proposal" reply. K5 showed those recovery replies can saturate a
         # single thread without adding new information.
+        return None
+
+    async def _build_duplicate_proposal_retry(
+        self,
+        db: Session,
+        agent: Agent,
+        *,
+        attempted_action: dict,
+        validation: dict,
+        model_type: str,
+        system_prompt: str,
+        context: str,
+        checkpoint_number: Optional[int],
+        run_class: str,
+    ) -> tuple[dict, dict, Optional[dict]] | None:
+        proposal_id = validation.get("proposal_id")
+        if not proposal_id:
+            return None
+        proposal = db.query(Proposal).filter(Proposal.id == proposal_id).first()
+        if proposal is None:
+            return None
+
+        attempted_title = str((attempted_action or {}).get("title") or "").strip() or "untitled proposal"
+        reason_code = str(validation.get("reason_code") or "duplicate_active_proposal")
+        reason = str(validation.get("reason") or "A similar active proposal already exists.")
+        corrective_context = (
+            f"{context}\n\n"
+            "DUPLICATE PROPOSAL RETRY:\n"
+            f"- Your previous create_proposal `{attempted_title}` was rejected as `{reason_code}`: {reason}\n"
+            f"- Existing proposal #{proposal.id}: {proposal.title or 'Untitled proposal'}\n"
+            f"- Existing proposal summary: {str(proposal.description or '').strip()[:500]}\n"
+            "- Do not create another proposal with the same mechanism or topic.\n"
+            "- Prefer action substitution: vote, contest_proposal, direct_message, trade, request_aid, refuse_aid, or public_accusation.\n"
+            "- Use forum_reply only to add a concrete amendment, named ask, resource move, refusal, or changed fact.\n"
+            "- Use create_proposal only if it is an explicit targeted amendment naming the existing proposal or law id and changing a specific trigger, floor, recipient, cap, or exemption.\n"
+            "- Respond with only the replacement JSON action."
+        )
+        retry_action = await get_agent_action(
+            agent_id=agent.id,
+            model_type=model_type,
+            system_prompt=system_prompt,
+            context_prompt=corrective_context,
+            checkpoint_number=checkpoint_number,
+            run_class=run_class,
+        )
+        if not retry_action:
+            return None
+        retry_meta = None
+        if isinstance(retry_action, dict):
+            maybe_meta = retry_action.pop("_llm_meta", None)
+            if isinstance(maybe_meta, dict):
+                retry_meta = maybe_meta
+        retry_validation = await validate_action(db, agent, retry_action)
+        if retry_validation["valid"]:
+            return retry_action, retry_validation, retry_meta
         return None
 
     @staticmethod

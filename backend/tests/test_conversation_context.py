@@ -981,6 +981,100 @@ def test_k12_proposal_740_replay_retries_redundant_reply_into_vote(session_facto
     assert runtime["run_id"] == "real-20260519T063000Z"
 
 
+def test_checkpoint_duplicate_proposal_retry_substitutes_contest_action(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+    monkeypatch.setattr(agent_loop, "SessionLocal", session_factory)
+    monkeypatch.setattr(
+        agent_loop.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: {
+            "SIMULATION_ACTIVE": True,
+            "SIMULATION_PAUSED": False,
+            "SIMULATION_RUN_ID": "test-duplicate-proposal-retry",
+            "SIMULATION_RUN_MODE": "test",
+            "SIMULATION_RUN_CLASS": "special_exploratory",
+        }.get(key, ""),
+    )
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        author = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        now = now_utc()
+        agent.next_checkpoint_at = now - timedelta(minutes=1)
+        agent.last_checkpoint_at = now - timedelta(minutes=30)
+        proposal = Proposal(
+            author_agent_id=author.id,
+            title="Active Threshold Aid Coverage",
+            description=(
+                "Use active threshold aid from the common pool for low-energy agents "
+                "while preserving the reserve pool floor."
+            ),
+            proposal_type="law",
+            governance_class="standing_law",
+            status="active",
+            voting_closes_at=now + timedelta(hours=6),
+            created_at=now - timedelta(minutes=45),
+        )
+        db.add(proposal)
+        db.commit()
+        agent_id = agent.id
+        proposal_id = proposal.id
+
+    calls = []
+
+    async def fake_get_agent_action(**kwargs):
+        calls.append(kwargs["context_prompt"])
+        if len(calls) == 1:
+            return {
+                "action": "create_proposal",
+                "title": "Low Energy Safety Net",
+                "description": (
+                    "Create a rule that covers agents below the energy threshold with "
+                    "public aid from the reserve before dormancy."
+                ),
+                "proposal_type": "rule",
+            }
+        return {
+            "action": "contest_proposal",
+            "proposal_id": proposal_id,
+            "reason": "I contest this unless it names the energy floor exemption and cap.",
+        }
+
+    monkeypatch.setattr(agent_loop, "get_agent_action", fake_get_agent_action)
+
+    processor = agent_loop.AgentProcessor()
+    asyncio.run(processor._process_agent_turn(agent_id))
+
+    with session_factory() as db:
+        duplicate = (
+            db.query(Proposal)
+            .filter(
+                Proposal.author_agent_id == agent_id,
+                Proposal.title == "Low Energy Safety Net",
+            )
+            .first()
+        )
+        action_event = (
+            db.query(Event)
+            .filter(Event.agent_id == agent_id, Event.event_type == "contest_proposal")
+            .one()
+        )
+        invalid_events = db.query(Event).filter(Event.agent_id == agent_id, Event.event_type == "invalid_action").all()
+
+    runtime = ((action_event.event_metadata or {}).get("runtime") or {})
+    action = ((action_event.event_metadata or {}).get("action") or {})
+    assert duplicate is None
+    assert invalid_events == []
+    assert len(calls) == 2
+    assert "DUPLICATE PROPOSAL RETRY" in calls[1]
+    assert "Prefer action substitution" in calls[1]
+    assert action["action"] == "contest_proposal"
+    assert action["proposal_id"] == proposal_id
+    assert runtime["duplicate_proposal_retry"] is True
+    assert runtime["duplicate_proposal_reason_code"] == "duplicate_active_proposal"
+    assert runtime["redirect_target_proposal_id"] == proposal_id
+
+
 def test_context_surfaces_incoming_request_inbox_with_actionable_tie_and_survival_read(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
 
