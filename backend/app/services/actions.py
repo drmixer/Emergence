@@ -293,6 +293,7 @@ _DUPLICATE_FORUM_SMALLER_RATIO = 0.55
 _SATURATED_THREAD_MESSAGE_COUNT = 8
 _SATURATED_THREAD_RECENT_SAMPLE = 60
 _AGREEMENT_PILE_ON_REPLY_COUNT = 2
+_ALREADY_COVERED_PILE_ON_REPLY_COUNT = 2
 
 _PROCEDURAL_STATUS_MEMO_PREFIXES = (
     "observation:",
@@ -1065,6 +1066,66 @@ def _low_novelty_policy_restatement_reply(content: str | None) -> bool:
 
 def _low_novelty_policy_pile_on_reply(content: str | None) -> bool:
     return _low_novelty_governance_agreement_reply(content) or _low_novelty_policy_restatement_reply(content)
+
+
+def _already_covered_restatement_reply(content: str | None) -> bool:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return False
+    if _reply_adds_saturated_thread_allowed_delta(content):
+        return False
+
+    covered_markers = (
+        "already covered",
+        "already covers",
+        "already addressed",
+        "already handled",
+        "already noted",
+        "covered above",
+        "covered already",
+        "has been covered",
+        "has already covered",
+        "has already been covered",
+        "was already covered",
+        "this is already covered",
+        "the proposal already covers",
+        "proposal already covers",
+    )
+    if not any(marker in normalized for marker in covered_markers):
+        return False
+
+    governance_markers = (
+        "proposal #",
+        "law #",
+        "proposal",
+        "law",
+        "aid",
+        "common pool",
+        "reserve",
+        "threshold",
+        "pool floor",
+        "energy floor",
+        "covered",
+    )
+    return any(marker in normalized for marker in governance_markers)
+
+
+def _already_covered_pile_on_reason(*, content: str | None, thread_messages: list[Message]) -> str | None:
+    if not _already_covered_restatement_reply(content):
+        return None
+
+    prior_covered_replies = sum(
+        1
+        for message in thread_messages
+        if str(message.message_type or "") == "forum_reply"
+        and _already_covered_restatement_reply(message.content)
+    )
+    if prior_covered_replies >= _ALREADY_COVERED_PILE_ON_REPLY_COUNT:
+        return (
+            f"thread already has {prior_covered_replies} replies saying the proposal/law was already covered; "
+            "use vote/contest/trade/direct_message, or add a concrete amendment, named ask, transfer, or changed fact"
+        )
+    return None
 
 
 def _agreement_pile_on_reason(*, content: str | None, thread_messages: list[Message]) -> str | None:
@@ -1886,7 +1947,25 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 ),
             }
         thread_root = _message_thread_root(db, parent)
-        duplicate_message = _find_near_duplicate_recent_forum_message(db, agent, action)
+        if _looks_like_personal_survival_request(thread_root.content) and _looks_like_governance_argument(content):
+            return {
+                "valid": False,
+                "reason": "Reply content appears to target proposal/law debate rather than the selected aid thread; choose the matching proposal discussion or use contest_proposal",
+            }
+        thread_messages = _message_thread_messages_this_run(db, thread_root)
+        covered_pile_on_reason = _already_covered_pile_on_reason(
+            content=content,
+            thread_messages=thread_messages,
+        )
+        if covered_pile_on_reason:
+            return {
+                "valid": False,
+                "thread_id": thread_root.id,
+                "reason_code": "already_covered_pile_on",
+                "reason": covered_pile_on_reason,
+            }
+        reply_adds_allowed_delta = _reply_adds_saturated_thread_allowed_delta(content)
+        duplicate_message = None if reply_adds_allowed_delta else _find_near_duplicate_recent_forum_message(db, agent, action)
         if (
             duplicate_message is not None
             and int(duplicate_message.id) not in {int(parent.id), int(thread_root.id)}
@@ -1900,16 +1979,14 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                     f"vote/contest, or reply more specifically to message #{duplicate_message.id}"
                 ),
             }
-        if _looks_like_personal_survival_request(thread_root.content) and _looks_like_governance_argument(content):
-            return {
-                "valid": False,
-                "reason": "Reply content appears to target proposal/law debate rather than the selected aid thread; choose the matching proposal discussion or use contest_proposal",
-            }
-        thread_messages = _message_thread_messages_this_run(db, thread_root)
-        duplicate_in_thread = _find_near_duplicate_in_thread(
-            content=content,
-            thread_messages=thread_messages,
-            author_agent_id=int(agent.id),
+        duplicate_in_thread = (
+            None
+            if reply_adds_allowed_delta
+            else _find_near_duplicate_in_thread(
+                content=content,
+                thread_messages=thread_messages,
+                author_agent_id=int(agent.id),
+            )
         )
         if duplicate_in_thread is not None and int(duplicate_in_thread.id) != int(parent.id):
             return {

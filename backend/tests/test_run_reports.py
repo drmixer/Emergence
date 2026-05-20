@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -170,6 +171,29 @@ def test_story_payload_includes_gemini_ready_template_without_fallback():
     assert generation["context"]["required_sections"][0]["heading"] == "Declared Question"
 
 
+def test_story_payload_renders_declared_question_from_schedule_metadata():
+    snapshot = _sample_snapshot()
+    snapshot["declared_question"] = "Do the new viewer/story/evidence changes make a live run easier to follow?"
+    snapshot["declared_watch_for"] = "Watch whether the recap answers the viewer-comprehension question."
+    snapshot["declared_question_source"] = "static_schedule"
+
+    payload = run_reports._build_story_payload(
+        snapshot=snapshot,
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="viewer_canary_v1",
+        season_number=None,
+        replicate_count=1,
+    )
+
+    generation = payload["gemini_story_generation"]
+    assert payload["declared_question"] == snapshot["declared_question"]
+    assert payload["sections"][0]["paragraphs"] == [snapshot["declared_question"]]
+    assert generation["context"]["run_framing"]["declared_question"] == snapshot["declared_question"]
+    assert "Mandatory declared question" in generation["user_prompt"]
+    assert snapshot["declared_question"] in generation["user_prompt"]
+
+
 def test_story_payload_can_use_gemini_markdown_as_template_sections():
     generated_markdown = """
 ## Declared Question
@@ -211,6 +235,58 @@ Watch whether the next run is easier to follow live.
     assert payload["sections"][0]["paragraphs"] == ["Can the viewer follow the run?"]
     assert payload["sections"][0]["generated_by"] == run_reports.POST_RUN_STORY_LLM_GENERATOR_VERSION
     assert payload["deterministic_sections"][0]["heading"] == "Declared Question"
+
+
+def test_story_payload_rejects_gemini_markdown_with_wrong_declared_question():
+    snapshot = _sample_snapshot()
+    snapshot["declared_question"] = "Do the new viewer/story/evidence changes make a live run easier to follow?"
+
+    generated_markdown = """
+## Declared Question
+Did scarcity pressure create durable governance and agent behavior?
+
+## Short Answer
+The run mostly showed scarcity pressure.
+""".strip()
+
+    with pytest.raises(ValueError, match="different declared question"):
+        run_reports._build_story_payload(
+            snapshot=snapshot,
+            status_label=run_reports.STATUS_OBSERVATIONAL,
+            evidence_completeness=run_reports.EVIDENCE_FULL,
+            condition_name="viewer_canary_v1",
+            season_number=None,
+            replicate_count=1,
+            generated_story_markdown=generated_markdown,
+        )
+
+
+def test_story_payload_keeps_declared_question_when_gemini_matches_it():
+    snapshot = _sample_snapshot()
+    snapshot["declared_question"] = "Do the new viewer/story/evidence changes make a live run easier to follow?"
+
+    generated_markdown = """
+## Declared Question
+Do the new viewer/story/evidence changes make a live run easier to follow?
+
+## Short Answer
+Partly: the story had evidence, but the live viewer path still needed work.
+""".strip()
+
+    payload = run_reports._build_story_payload(
+        snapshot=snapshot,
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="viewer_canary_v1",
+        season_number=None,
+        replicate_count=1,
+        generated_story_markdown=generated_markdown,
+    )
+
+    assert payload["sections"][0]["paragraphs"] == [snapshot["declared_question"]]
+    assert payload["sections"][1]["paragraphs"] == [
+        "Partly: the story had evidence, but the live viewer path still needed work."
+    ]
 
 
 def test_story_payload_parses_gemini_bullet_labeled_sections():

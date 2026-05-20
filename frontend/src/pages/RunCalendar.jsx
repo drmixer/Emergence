@@ -3,7 +3,7 @@ import {
   CalendarDays,
 } from 'lucide-react'
 import { useEffect } from 'react'
-import { getLatestCompletedScheduledRun, getNextScheduledRun, getRunSchedule } from '../data/runSchedule'
+import { getCalendarSummaryRuns, getNextScheduledRun, getRunSchedule } from '../data/runSchedule'
 import GlossaryTooltip from '../components/GlossaryTooltip'
 import RunBriefCard from '../components/RunBriefCard'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
@@ -11,7 +11,7 @@ import { trackKpiEventOnce } from '../services/kpiAnalytics'
 export default function RunCalendar() {
   const runs = getRunSchedule()
   const nextRun = getNextScheduledRun()
-  const latestCompleted = getLatestCompletedScheduledRun()
+  const { primaryRun, primaryLabel, latestCompleted } = getCalendarSummaryRuns()
 
   useEffect(() => {
     trackKpiEventOnce('calendar_view', 'run_calendar', {
@@ -39,9 +39,9 @@ export default function RunCalendar() {
 
       <section className="run-calendar-summary" aria-label="Run schedule summary">
         <div>
-          <span>Next scheduled run</span>
-          <strong>{nextRun?.label || 'Not scheduled'}</strong>
-          <p>{nextRun?.declaredQuestion || 'No upcoming run has been declared.'}</p>
+          <span>{primaryLabel}</span>
+          <strong>{primaryRun?.label || 'Not scheduled'}</strong>
+          <p>{primaryRun?.declaredQuestion || 'No upcoming run has been declared.'}</p>
         </div>
         <div>
           <span>Latest completed canary</span>
@@ -58,7 +58,7 @@ export default function RunCalendar() {
       <div className="run-calendar-note">
         <AlertCircle size={16} />
         <p>
-          K11 remains an exploratory public pipeline canary. K12 is the live viewer-comprehension canary; later dates stay tentative until each run condition is ready to launch.
+          K12 is closed as an exploratory viewer-comprehension canary, with the outage treated as a viewer-experience confound. K13 is the next tentative governance-readability canary.
         </p>
       </div>
 

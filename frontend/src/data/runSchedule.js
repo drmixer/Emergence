@@ -45,23 +45,26 @@ export const RUN_SCHEDULE = [
     id: 'k12-public-canary',
     label: 'K12',
     theme: 'Viewer Comprehension',
-    planningState: 'Live',
+    planningState: 'Completed',
     track: 'Public Canary',
     runClass: 'special_exploratory',
-    status: 'Live',
+    status: 'Completed',
     runId: 'real-20260519T063000Z',
     plannedStartLabel: 'Started May 19, 2026',
-    expectedDuration: '72h target window',
+    completedAt: '2026-05-20T04:32:21Z',
+    expectedDuration: 'Stopped early after about 22h of an up to 72h canary window',
     declaredQuestion: 'Do the new viewer/story/evidence changes make a live run easier to follow?',
     watchFor: 'Watch proposal discussion readability, pile-on reduction, and whether post-run story surfaces identify meaningful moments without work-event noise.',
-    declaredCondition: 'Viewer/story/evidence wrapper canary after K11 follow-up fixes',
+    declaredCondition: 'real_scarcity_viewer_wrapper_20260519_canary_k12_high_floor_pressure_v1',
     changeFromPrior: 'Same public-canary discipline as K11, but with the calendar, story replay, evidence defaults, report reader, and idle landing fixes in place before launch.',
     usefulEvidence: 'Viewers can identify what the run asked, follow live proposal/resource pressure, and use the recap/evidence/report path without confusing archived data for live state.',
-    doesNotProve: 'This does not prove a general society pattern or validate the research track; it tests whether the public wrapper is understandable during a live canary.',
+    doesNotProve: 'This does not prove a general society pattern or validate the research track. The Railway outage/SSL issue also confounds viewer-experience evidence, even though run data appears intact.',
     claimBoundary: 'Exploratory public canary; non-claim-bearing.',
-    resultNote: '',
+    resultNote: 'Stopped early after a Railway outage/SSL issue. Treat K12 as a public viewer-comprehension beta/canary, not finished research.',
     links: {
-      live: '/dashboard',
+      recap: '/runs/real-20260519T063000Z/replay?tab=overview',
+      evidence: '/runs/real-20260519T063000Z',
+      report: '/runs/real-20260519T063000Z/reports/approachable_report?format=markdown',
       archive: '/archive',
     },
     viewerPath: PUBLIC_CANARY_VIEWER_PATH,
@@ -70,10 +73,10 @@ export const RUN_SCHEDULE = [
     id: 'k13-governance-readability-canary',
     label: 'K13',
     theme: 'Governance Readability',
-    planningState: 'Tentative',
+    planningState: 'Upcoming',
     track: 'Public Canary',
     runClass: 'special_exploratory',
-    status: 'Tentative',
+    status: 'Upcoming',
     plannedStartLabel: 'Tentative late May 2026',
     expectedDuration: '72h target window',
     declaredQuestion: 'Can proposal discussion, voting, and passed laws stay readable without collapsing into agreement pile-on noise?',
@@ -172,6 +175,7 @@ export const RUN_SCHEDULE = [
     status: 'Completed',
     runId: 'real-20260517T220144Z',
     plannedStartLabel: 'Started May 17, 2026',
+    completedAt: '2026-05-18T17:02:22Z',
     expectedDuration: 'Short public pipeline canary',
     declaredQuestion: 'Can the public run pipeline produce visible survival, governance, and post-run evidence?',
     watchFor: 'This was a pipeline canary; the key outcome is whether viewers can understand what happened after the run.',
@@ -222,16 +226,44 @@ export function getRunSchedule() {
   return [...RUN_SCHEDULE].sort((a, b) => {
     const statusDelta = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)
     if (statusDelta !== 0) return statusDelta
+    if (a.status === 'Completed' && b.status === 'Completed') {
+      const completedDelta = (Date.parse(b.completedAt || '') || 0) - (Date.parse(a.completedAt || '') || 0)
+      if (completedDelta !== 0) return completedDelta
+    }
     return a.label.localeCompare(b.label, undefined, { numeric: true })
   })
 }
 
+export function getCurrentLiveScheduledRun() {
+  return getRunSchedule().find((run) => run.status === 'Live') || null
+}
+
+export function getNextUpcomingScheduledRun() {
+  return getRunSchedule().find((run) => run.status === 'Upcoming') || null
+}
+
 export function getNextScheduledRun() {
-  return getRunSchedule().find((run) => run.status === 'Live' || run.status === 'Upcoming') || null
+  return getCurrentLiveScheduledRun() || getNextUpcomingScheduledRun()
 }
 
 export function getLatestCompletedScheduledRun() {
   return getRunSchedule().find((run) => run.status === 'Completed') || null
+}
+
+export function getCalendarSummaryRuns() {
+  const currentLive = getCurrentLiveScheduledRun()
+  const nextUpcoming = getNextUpcomingScheduledRun()
+  const latestCompleted = getLatestCompletedScheduledRun()
+  const primaryRun = currentLive || nextUpcoming || latestCompleted
+  return {
+    primaryRun,
+    primaryLabel: currentLive
+      ? 'Current live run'
+      : nextUpcoming
+      ? 'Next scheduled run'
+      : 'Latest completed canary',
+    latestCompleted,
+  }
 }
 
 export function getScheduleEntryForRunId(runId) {

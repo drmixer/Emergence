@@ -1470,6 +1470,103 @@ def test_forum_reply_rejects_energy_floor_restatement_pile_on_before_saturation(
     assert validation["thread_id"] == root.id
 
 
+def test_forum_reply_rejects_already_covered_pile_on_before_saturation(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #740 asks whether active threshold aid should cover low-energy agents.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index, content in enumerate(
+            [
+                "Proposal #740 already covers active threshold aid for low-energy agents.",
+                "This is already covered by proposal #740 and the reserve threshold mechanism.",
+            ]
+        ):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Covered-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=content,
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=20 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": "Proposal #740 has already covered that active threshold aid mechanism.",
+                },
+            )
+        )
+
+    assert validation["valid"] is False
+    assert validation["reason_code"] == "already_covered_pile_on"
+    assert validation["thread_id"] == root.id
+
+
+def test_forum_reply_allows_already_covered_named_amendment_ask(session_factory):
+    with session_factory() as db:
+        root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")
+        replier = _seed_agent(db, agent_number=22, display_name="Nova-22")
+        root = Message(
+            author_agent_id=root_author.id,
+            content="Proposal #740 asks whether active threshold aid should cover low-energy agents.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=50),
+        )
+        db.add(root)
+        db.flush()
+        for index, content in enumerate(
+            [
+                "Proposal #740 already covers active threshold aid for low-energy agents.",
+                "This is already covered by proposal #740 and the reserve threshold mechanism.",
+            ]
+        ):
+            author = _seed_agent(db, agent_number=30 + index, display_name=f"Covered-{index}")
+            db.add(
+                Message(
+                    author_agent_id=author.id,
+                    parent_message_id=root.id,
+                    content=content,
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=20 - index),
+                )
+            )
+        db.commit()
+        db.refresh(root)
+
+        validation = asyncio.run(
+            actions.validate_action(
+                db,
+                replier,
+                {
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": (
+                        "Logic-21, since proposal #740 already covers threshold aid, "
+                        "will you amend it to add a 6 energy minimum pool floor?"
+                    ),
+                },
+            )
+        )
+
+    assert validation == {"valid": True}
+
+
 def test_forum_reply_allows_named_ask_after_policy_restatements(session_factory):
     with session_factory() as db:
         root_author = _seed_agent(db, agent_number=21, display_name="Logic-21")

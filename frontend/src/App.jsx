@@ -18,9 +18,9 @@ import {
   BookOpen,
   CalendarDays,
 } from 'lucide-react'
+import Dashboard from './pages/Dashboard'
 
 // Pages (route-level code splitting)
-const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Agents = lazy(() => import('./pages/Agents'))
 const Agent = lazy(() => import('./pages/Agent'))
 const Messages = lazy(() => import('./pages/Messages'))

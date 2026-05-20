@@ -30,6 +30,7 @@ from app.services.duplicate_waves import collect_duplicate_waves
 from app.services.emergence_metrics import COOPERATION_EVENT_TYPES, CONFLICT_EVENT_TYPES
 from app.services.live_run_scope import LiveRunWindow
 from app.services.reserve_semantics import reserve_policy_access_payload
+from app.services.run_declarations import resolve_run_declaration
 from app.services.runtime_config import runtime_config_service
 
 logger = logging.getLogger(__name__)
@@ -592,6 +593,8 @@ def _story_generation_context(
     social_followthrough = snapshot.get("social_followthrough") if isinstance(snapshot, dict) else {}
     key_moments = list(snapshot.get("key_moments") or [])[:12]
     run_class = str(snapshot.get("run_class") or "").strip().lower()
+    declared_question = str(snapshot.get("declared_question") or "").strip()
+    declared_watch_for = str(snapshot.get("declared_watch_for") or "").strip()
 
     return {
         "template_version": POST_RUN_STORY_TEMPLATE_VERSION,
@@ -603,6 +606,9 @@ def _story_generation_context(
             "status_label": status_label,
             "evidence_completeness": evidence_completeness,
             "replicate_count": int(replicate_count),
+            "declared_question": declared_question or None,
+            "declared_watch_for": declared_watch_for or None,
+            "declared_question_source": str(snapshot.get("declared_question_source") or "").strip() or None,
             "claim_boundary": _run_claim_boundary_text(
                 run_class=run_class,
                 status_label=status_label,
@@ -644,6 +650,16 @@ def _story_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
         for section in _story_template_section_list()
     )
     metrics = context.get("metrics") if isinstance(context, dict) else {}
+    run_framing = context.get("run_framing") if isinstance(context, dict) else {}
+    declared_question = str((run_framing or {}).get("declared_question") or "").strip()
+    declared_question_block = (
+        "Mandatory declared question:\n"
+        f"{declared_question}\n\n"
+        "The Declared Question section must render that question exactly. "
+        "The Short Answer must answer that question before discussing scarcity, governance, or other observed behavior.\n\n"
+        if declared_question
+        else ""
+    )
     count_constraints = "\n".join(
         [
             f"- Total scoped events: {int((metrics or {}).get('total_events') or 0)}",
@@ -669,6 +685,7 @@ def _story_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
     user_prompt = (
         "Generate a markdown post-run story using these exact section headings:\n"
         f"{section_headings}\n\n"
+        f"{declared_question_block}"
         "Style constraints:\n"
         "- Start with the answer, then explain the arc.\n"
         "- Use concrete counts only when they make the story easier to understand.\n"
@@ -772,10 +789,31 @@ def _split_generated_story_markdown(markdown: str) -> dict[str, list[str]]:
     return sections
 
 
+def _normalize_question_for_validation(value: str) -> str:
+    text_value = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower())
+    return re.sub(r"\s+", " ", text_value).strip()
+
+
+def _validate_generated_story_declared_question(*, markdown: str, declared_question: str) -> None:
+    clean_declared = str(declared_question or "").strip()
+    if not clean_declared:
+        return
+    sections = _split_generated_story_markdown(markdown)
+    declared_paragraphs = sections.get("Declared Question") or []
+    generated_declared = " ".join(str(item or "").strip() for item in declared_paragraphs if str(item or "").strip())
+    if not generated_declared:
+        raise ValueError("Gemini story generation did not include the declared question section.")
+    normalized_declared = _normalize_question_for_validation(clean_declared)
+    normalized_generated = _normalize_question_for_validation(generated_declared)
+    if normalized_declared not in normalized_generated:
+        raise ValueError("Gemini story generation answered a different declared question.")
+
+
 def _sections_from_generated_story_markdown(
     *,
     markdown: str,
     fallback_sections: list[dict[str, Any]],
+    declared_question: str | None = None,
 ) -> list[dict[str, Any]]:
     generated_by_heading = _split_generated_story_markdown(markdown)
     if not generated_by_heading:
@@ -790,7 +828,10 @@ def _sections_from_generated_story_markdown(
     for template_section in _story_template_section_list():
         heading = str(template_section["heading"]).strip()
         fallback = fallback_by_heading.get(heading) or {}
-        paragraphs = generated_by_heading.get(heading) or list(fallback.get("paragraphs") or [])
+        if heading == "Declared Question" and str(declared_question or "").strip():
+            paragraphs = list(fallback.get("paragraphs") or [])
+        else:
+            paragraphs = generated_by_heading.get(heading) or list(fallback.get("paragraphs") or [])
         sections.append(
             {
                 "heading": heading,
@@ -1280,6 +1321,11 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         min_cluster_size=2,
         limit=12,
     )
+    declaration = resolve_run_declaration(
+        run_id=run_id,
+        condition_name=(str(run_row.condition_name).strip() if run_row and run_row.condition_name else None),
+        run_row=run_row,
+    )
 
     return {
         "run_id": run_id,
@@ -1289,6 +1335,10 @@ def _collect_run_snapshot(db: Session, *, run_id: str) -> dict[str, Any]:
         "run_class": (str(run_row.run_class).strip() if run_row and run_row.run_class else None),
         "condition_name": (str(run_row.condition_name).strip() if run_row and run_row.condition_name else None),
         "season_number": (int(run_row.season_number) if run_row and run_row.season_number else None),
+        "declared_question": declaration.declared_question if declaration else None,
+        "declared_watch_for": declaration.watch_for if declaration else None,
+        "declared_claim_boundary": declaration.claim_boundary if declaration else None,
+        "declared_question_source": declaration.source if declaration else None,
         "verification_state": verification_state,
         "verification_source": source,
         "data_source_warning": data_source_warning,
@@ -2231,6 +2281,8 @@ def _build_story_sections(
     proposal_waves = int((duplicate_summary or {}).get("proposal_wave_count") or 0)
     forum_waves = int((duplicate_summary or {}).get("forum_wave_count") or 0)
     run_class = str(snapshot.get("run_class") or "").strip().lower()
+    declared_question = str(snapshot.get("declared_question") or "").strip()
+    declared_watch_for = str(snapshot.get("declared_watch_for") or "").strip()
 
     pressure_parts = []
     if deaths > 0:
@@ -2257,10 +2309,10 @@ def _build_story_sections(
         f"The main arc was survival pressure: {pressure_text}. "
         f"{governance_text} {coordination_text}"
     )
-    declared_question_text = (
+    declared_question_text = declared_question or (
         f"This story template treats run `{run_id}` as the answerable unit and condition `{condition_name}` "
-        "as the declared setup to interpret against. The generated story should state the pre-run question "
-        "when one is supplied by the run schedule, then keep the answer bounded to this run's evidence."
+        "as the declared setup to interpret against. No schedule-declared public question was found, so the "
+        "story must keep interpretation bounded to this run's evidence."
     )
     short_answer_text = (
         f"Fast read: {pressure_text}. {governance_text} "
@@ -2287,10 +2339,11 @@ def _build_story_sections(
         condition_name=condition_name,
         replicate_count=replicate_count,
     )
-    next_watch_text = (
+    fallback_next_watch_text = (
         "Next-run watchpoints should turn unresolved ambiguity into observable checks: whether the story remains readable live, "
         "whether repeated message waves collapse after anti-pile-on changes, and whether evidence surfaces make the run easy to audit."
     )
+    next_watch_text = declared_watch_for or fallback_next_watch_text
 
     moment_claims = []
     for moment in key_moments[:5]:
@@ -2458,10 +2511,17 @@ def _build_story_payload(
         replicate_count=replicate_count,
     )
     clean_generated_story = _strip_markdown_code_fence(generated_story_markdown or "")
+    declared_question = str(snapshot.get("declared_question") or "").strip()
+    if clean_generated_story:
+        _validate_generated_story_declared_question(
+            markdown=clean_generated_story,
+            declared_question=declared_question,
+        )
     generated_sections = (
         _sections_from_generated_story_markdown(
             markdown=clean_generated_story,
             fallback_sections=deterministic_sections,
+            declared_question=declared_question,
         )
         if clean_generated_story
         else deterministic_sections
@@ -2475,6 +2535,10 @@ def _build_story_payload(
         "run_id": snapshot.get("run_id"),
         "generated_at_utc": snapshot.get("generated_at_utc"),
         "run_class": snapshot.get("run_class"),
+        "declared_question": declared_question or None,
+        "declared_watch_for": str(snapshot.get("declared_watch_for") or "").strip() or None,
+        "declared_claim_boundary": str(snapshot.get("declared_claim_boundary") or "").strip() or None,
+        "declared_question_source": str(snapshot.get("declared_question_source") or "").strip() or None,
         "story_template_version": POST_RUN_STORY_TEMPLATE_VERSION,
         "story_template_sections": _story_template_section_list(),
         "gemini_story_generation": {

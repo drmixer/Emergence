@@ -17,7 +17,7 @@ afterEach(() => {
 
 describe('RunBriefCard', () => {
   it('renders an upcoming run from schedule metadata', () => {
-    const run = RUN_SCHEDULE.find((entry) => entry.label === 'K12')
+    const run = RUN_SCHEDULE.find((entry) => entry.label === 'K13')
 
     render(
       <MemoryRouter>
@@ -26,8 +26,8 @@ describe('RunBriefCard', () => {
     )
 
     expect(screen.getByText('Next scheduled run')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'K12' })).toBeInTheDocument()
-    expect(screen.getByText(/Do the new viewer\/story\/evidence changes/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'K13' })).toBeInTheDocument()
+    expect(screen.getByText(/proposal discussion, voting, and passed laws/i)).toBeInTheDocument()
     expect(screen.getByText(/Exploratory public canary; non-claim-bearing/i)).toBeInTheDocument()
     expect(screen.getByText(/How to follow this run/i)).toBeInTheDocument()
     expect(screen.getByText(/Before launch/i)).toBeInTheDocument()
@@ -60,7 +60,7 @@ describe('RunBriefCard', () => {
   })
 
   it('tracks run-path clicks from schedule cards', () => {
-    const run = RUN_SCHEDULE.find((entry) => entry.label === 'K12')
+    const run = RUN_SCHEDULE.find((entry) => entry.label === 'K13')
 
     render(
       <MemoryRouter>
@@ -71,7 +71,7 @@ describe('RunBriefCard', () => {
     fireEvent.click(screen.getAllByRole('link', { name: /Run Calendar/i })[0])
 
     expect(trackKpiEvent).toHaveBeenCalledWith('run_path_click', expect.objectContaining({
-      runId: 'real-20260519T063000Z',
+      runId: 'k13-governance-readability-canary',
       surface: 'dashboard_idle',
       target: 'viewer_path:Before launch',
     }))

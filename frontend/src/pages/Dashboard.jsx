@@ -278,8 +278,12 @@ export default function Dashboard() {
 
     // Check for pre-launch state
     const isPreLaunch = stats && stats.dayNumber === 0 && stats.totalMessages === 0
-    const hasActiveRun = Boolean(scope?.simulation_active)
-    const idleDashboard = !loading && scope?.simulation_active === false
+    const scopeKnown = !loading && scope !== null
+    const scopeResolving = loading || (!error && scope === null)
+    const scopeUnavailable = !loading && error && scope === null
+    const hasActiveRun = scopeKnown && Boolean(scope?.simulation_active)
+    const idleDashboard = scopeKnown && scope?.simulation_active === false
+    const liveDashboardVisible = scopeKnown && !idleDashboard
     const lastCompletedRunId = String(scope?.last_completed_run_id || '').trim()
     const socialChartData = socialSeries.map((row) => ({
         day: row.day_label,
@@ -314,6 +318,10 @@ export default function Dashboard() {
                 <p className="page-description">
                     {idleDashboard
                         ? 'No simulation is live right now. Check the run calendar for upcoming runs.'
+                        : scopeResolving
+                        ? 'Loading current run state before showing live or archived context.'
+                        : scopeUnavailable
+                        ? 'Current run state is unavailable. No run-specific context is shown until scope loads.'
                         : isPreLaunch
                         ? 'The experiment is about to begin...'
                         : 'Live operational state for the active simulation run.'
@@ -321,7 +329,16 @@ export default function Dashboard() {
                 </p>
             </div>
 
-            {!idleDashboard && <div className="card trust-note-card">
+            {scopeResolving && (
+                <div className="card trust-note-card">
+                    <div className="card-body trust-note-body">
+                        <ShieldCheck size={16} />
+                        <p>Resolving the active-run scope before showing run-specific context.</p>
+                    </div>
+                </div>
+            )}
+
+            {liveDashboardVisible && <div className="card trust-note-card">
                 <div className="card-body trust-note-body">
                     <ShieldCheck size={16} />
                     <p>
@@ -331,7 +348,7 @@ export default function Dashboard() {
                 </div>
             </div>}
 
-            {!idleDashboard && activeScheduledRun && (
+            {liveDashboardVisible && activeScheduledRun && (
                 <RunBriefCard
                     run={activeScheduledRun}
                     variant="compact"
@@ -341,7 +358,7 @@ export default function Dashboard() {
                 />
             )}
 
-            {!idleDashboard && !activeScheduledRun && <div className="card k11-watch-card">
+            {liveDashboardVisible && !activeScheduledRun && <div className="card k11-watch-card">
                 <div className="card-body k11-watch-body">
                     <div className="k11-watch-intro">
                         <span className="k11-eyebrow">{publicRunFraming.label}</span>
@@ -407,15 +424,15 @@ export default function Dashboard() {
             )}
 
             {/* Critical Agents Banner */}
-            {!idleDashboard && !loading && stats && stats.criticalFoodAgents > 0 && (
+            {liveDashboardVisible && !loading && stats && stats.criticalFoodAgents > 0 && (
                 <CriticalAgentsBanner count={stats.criticalFoodAgents} type="food" href="/resources?focus=critical-food" />
             )}
-            {!idleDashboard && !loading && stats && stats.criticalEnergyAgents > 0 && (
+            {liveDashboardVisible && !loading && stats && stats.criticalEnergyAgents > 0 && (
                 <CriticalAgentsBanner count={stats.criticalEnergyAgents} type="energy" href="/resources?focus=critical-energy" />
             )}
 
             {/* Crisis Strip */}
-            {!idleDashboard && !loading && (
+            {liveDashboardVisible && !loading && (
                 <div className="card crisis-strip-card">
                     <div className="card-header">
                         <h3>
@@ -456,7 +473,7 @@ export default function Dashboard() {
             )}
 
             {/* Stats Grid */}
-            {!idleDashboard && <div className="stats-grid">
+            {liveDashboardVisible && <div className="stats-grid">
                 {loading ? (
                     <>
                         <SkeletonStatCard />
@@ -536,7 +553,7 @@ export default function Dashboard() {
             </div>}
 
             {/* Resource Summary with Anxiety Indicators */}
-            {!idleDashboard && <div className="resource-grid">
+            {liveDashboardVisible && <div className="resource-grid">
                 {loading ? (
                     <>
                         <SkeletonStatCard />
@@ -571,7 +588,7 @@ export default function Dashboard() {
             </div>}
 
             {/* Content Grid */}
-            {!idleDashboard && <div className="content-grid">
+            {liveDashboardVisible && <div className="content-grid">
                 {/* Active Proposals */}
                 <div className="card">
                     <div className="card-header">
@@ -663,7 +680,7 @@ export default function Dashboard() {
                 </div>
             </div>}
 
-            {!idleDashboard && <div className="content-grid">
+            {liveDashboardVisible && <div className="content-grid">
                 <div className="card">
                     <div className="card-header">
                         <h3>
@@ -758,7 +775,7 @@ export default function Dashboard() {
                 </div>
             </div>}
 
-            {!idleDashboard && <div className="content-grid">
+            {liveDashboardVisible && <div className="content-grid">
                 <div className="card">
                     <div className="card-header">
                         <h3>Inequality</h3>
