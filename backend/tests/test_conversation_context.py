@@ -130,6 +130,107 @@ def test_context_includes_thread_root_and_bilateral_dm_history(session_factory, 
     assert "To you <-" in context
 
 
+def test_context_surfaces_thread_saturation_summary(session_factory, monkeypatch):
+    monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
+
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        author = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        root = Message(
+            author_agent_id=author.id,
+            content="Proposal #740 asks whether threshold aid already covers low-energy agents.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=20),
+        )
+        db.add(root)
+        db.flush()
+        for index, content in enumerate(
+            [
+                "Proposal #740 already covers active threshold aid for low-energy agents.",
+                "This is already covered by proposal #740 and the reserve threshold mechanism.",
+            ]
+        ):
+            replier = _seed_agent(db, agent_number=10 + index, display_name=f"Reply-{index}")
+            db.add(
+                Message(
+                    author_agent_id=replier.id,
+                    parent_message_id=root.id,
+                    content=content,
+                    message_type="forum_reply",
+                    created_at=now_utc() - timedelta(minutes=10 - index),
+                )
+            )
+        db.commit()
+        db.refresh(agent)
+
+        context = asyncio.run(context_builder.build_agent_context(db, agent))
+
+    assert "[THREAD SUMMARY] proposal #740: 2 replies already say proposal/law is covered" in context
+    assert "reply only with a concrete amendment, named ask, resource move, or changed fact" in context
+
+
+def test_redundant_forum_reply_retry_substitutes_valid_action(session_factory, monkeypatch):
+    with session_factory() as db:
+        agent = _seed_agent(db, agent_number=1, display_name="Atlas-1")
+        author = _seed_agent(db, agent_number=2, display_name="Beacon-2")
+        proposal = Proposal(
+            author_agent_id=author.id,
+            title="Threshold Aid Amendment",
+            description="Name a threshold aid condition.",
+            proposal_type="law",
+            status="active",
+            voting_closes_at=now_utc() + timedelta(hours=6),
+            created_at=now_utc() - timedelta(minutes=30),
+        )
+        root = Message(
+            author_agent_id=author.id,
+            content="Proposal #740 already covers low-energy agents.",
+            message_type="forum_post",
+            created_at=now_utc() - timedelta(minutes=20),
+        )
+        db.add_all([proposal, root])
+        db.commit()
+
+        calls = []
+
+        async def fake_get_agent_action(**kwargs):
+            calls.append(kwargs["context_prompt"])
+            return {"action": "vote", "proposal_id": proposal.id, "vote": "yes"}
+
+        monkeypatch.setattr(agent_loop, "get_agent_action", fake_get_agent_action)
+
+        result = asyncio.run(
+            agent_loop.AgentProcessor()._build_redundant_forum_reply_retry(
+                db,
+                agent,
+                attempted_action={
+                    "action": "forum_reply",
+                    "parent_message_id": root.id,
+                    "content": "Proposal #740 is already covered.",
+                },
+                validation={
+                    "valid": False,
+                    "reason_code": "already_covered_pile_on",
+                    "reason": "thread already has replies saying the proposal/law was already covered",
+                    "thread_id": root.id,
+                },
+                model_type="llama-3.1-8b",
+                system_prompt="System",
+                context="RECENT FORUM THREADS: proposal #740 is already saturated.",
+                checkpoint_number=1,
+                run_class="special_exploratory",
+            )
+        )
+
+    assert result is not None
+    retry_action, validation, _retry_meta = result
+    assert retry_action["action"] == "vote"
+    assert validation == {"valid": True}
+    assert "REDUNDANT FORUM REPLY RETRY" in calls[0]
+    assert "Prefer action substitution" in calls[0]
+    assert "already_covered_pile_on" in calls[0]
+
+
 def test_context_scopes_social_inputs_to_active_run_window(session_factory, monkeypatch):
     monkeypatch.setattr(context_builder.settings, "PERCEPTION_LAG_SECONDS", 0, raising=False)
 

@@ -1,6 +1,7 @@
 """
 Context Builder - Builds the prompt context for agent decisions.
 """
+import re
 from collections import Counter
 from datetime import timedelta
 from sqlalchemy.orm import Session
@@ -46,6 +47,7 @@ SOCIAL_SIGNAL_CONTEXT_LIMIT = 4
 INCOMING_AID_REQUEST_CONTEXT_LIMIT = 4
 PROPOSAL_ALIGNMENT_LIMIT = 4
 MESSAGE_PREVIEW_LIMIT = 220
+THREAD_SATURATION_REPLY_COUNT = 6
 
 
 def _empty_relationship_summary() -> RelationshipSummary:
@@ -62,6 +64,111 @@ def _preview_untrusted_text(text: str | None, limit: int = MESSAGE_PREVIEW_LIMIT
     if len(normalized) > limit:
         return normalized[:limit] + "..."
     return normalized
+
+
+def _normalized_context_text(text: str | None) -> str:
+    return " ".join(str(text or "").strip().lower().split())
+
+
+def _thread_saturation_summary(thread_messages: list[Message]) -> str | None:
+    replies = [message for message in thread_messages if message.message_type == "forum_reply"]
+    if not replies:
+        return None
+
+    covered_count = 0
+    support_count = 0
+    floor_restatement_count = 0
+    topic_ids: Counter[str] = Counter()
+    for message in thread_messages:
+        normalized = _normalized_context_text(message.content)
+        for kind, value in (
+            (match.group(1), match.group(2))
+            for match in re.finditer(r"\b(proposal|law)\s*#?\s*(\d+)\b", normalized)
+        ):
+            topic_ids[f"{kind} #{value}"] += 1
+        if message.message_type != "forum_reply":
+            continue
+
+        if any(
+            marker in normalized
+            for marker in (
+                "already covered",
+                "already covers",
+                "already addressed",
+                "already handled",
+                "covered above",
+                "has been covered",
+                "has already been covered",
+            )
+        ):
+            covered_count += 1
+        if any(
+            marker in normalized
+            for marker in (
+                "i agree",
+                "i support",
+                "support this",
+                "strong support",
+                "i endorse",
+                "aligns with",
+                "vote yes",
+                "voted yes",
+            )
+        ) and any(
+            marker in normalized
+            for marker in (
+                "proposal",
+                "law",
+                "common pool",
+                "reserve",
+                "threshold",
+                "public aid",
+                "pool floor",
+            )
+        ):
+            support_count += 1
+        if any(
+            marker in normalized
+            for marker in (
+                "energy floor",
+                "pool floor",
+                "aid floor",
+                "public aid",
+                "common pool",
+                "threshold aid",
+            )
+        ) and any(
+            marker in normalized
+            for marker in (
+                "important",
+                "crucial",
+                "necessary",
+                "remain",
+                "stability",
+                "protect",
+                "preserve",
+            )
+        ):
+            floor_restatement_count += 1
+
+    notes: list[str] = []
+    if len(replies) >= THREAD_SATURATION_REPLY_COUNT:
+        notes.append(f"{len(replies)} replies already in thread")
+    if covered_count >= 2:
+        notes.append(f"{covered_count} replies already say proposal/law is covered")
+    if support_count >= 2:
+        notes.append(f"{support_count} replies restate support")
+    if floor_restatement_count >= 2:
+        notes.append(f"{floor_restatement_count} replies restate the pool-floor/public-aid point")
+
+    if not notes:
+        return None
+
+    topic = topic_ids.most_common(1)[0][0] if topic_ids else "this thread"
+    return (
+        f"{topic}: {'; '.join(notes)}. Prefer vote, contest, trade, direct_message, or reply only with "
+        "a concrete amendment, named ask, resource move, or changed fact."
+    )
 
 
 def _agent_public_label(agent: Agent | None) -> str:
@@ -400,6 +507,7 @@ def _recent_forum_threads(db: Session, *, perception_cutoff=None, run_window: Li
             {
                 "root": root,
                 "replies": replies,
+                "saturation_summary": _thread_saturation_summary(thread_messages),
                 "latest_at": thread["latest_at"],
             }
         )
@@ -1299,6 +1407,9 @@ async def build_agent_context(db: Session, agent: Agent) -> str:
                 f"  [THREAD #{root.id}] {_message_author_label(root)} ({_message_time_label(root)}): "
                 f"[UNTRUSTED] {_preview_untrusted_text(root.content)}"
             )
+            saturation_summary = thread.get("saturation_summary")
+            if saturation_summary:
+                context_parts.append(f"    [THREAD SUMMARY] {saturation_summary}")
             replies = thread["replies"]
             if replies:
                 for reply in replies:
