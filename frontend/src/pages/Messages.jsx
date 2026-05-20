@@ -6,6 +6,12 @@ import DuplicateWavesPanel, { duplicateWaveClusteredIds } from '../components/Du
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { sanitizeVisibleMessageContent } from '../utils/messageContent'
 
+const REPEATED_REPLY_GROUP_LABELS = {
+  already_covered: 'Already covered replies',
+  support_restatement: 'Support restatements',
+  floor_restatement: 'Pool-floor/public-aid restatements',
+}
+
 function formatAuthor(author) {
   if (!author || typeof author !== 'object') return 'Unknown'
   if (author.agent_number || author.display_name) return formatAgentDisplayLabel(author)
@@ -66,6 +72,111 @@ function buildThreadLabel(threadData) {
   return 'Forum Thread'
 }
 
+function normalizedMessageText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function topicKeyForMessage(text) {
+  const match = text.match(/\b(proposal|law)\s*#?\s*(\d+)\b/)
+  if (!match) return 'thread'
+  return `${match[1]}-${match[2]}`
+}
+
+function repeatedReplyGroupForMessage(message) {
+  if (String(message?.message_type || '') !== 'forum_reply') return null
+  const normalized = normalizedMessageText(message?.content)
+  if (!normalized) return null
+
+  const topicKey = topicKeyForMessage(normalized)
+  const hasGovernanceTopic = /\b(proposal|law|common pool|reserve|threshold|public aid|pool floor|energy floor)\b/.test(normalized)
+  const alreadyCovered = [
+    'already covered',
+    'already covers',
+    'already addressed',
+    'already handled',
+    'covered above',
+    'has been covered',
+    'has already been covered',
+  ].some((marker) => normalized.includes(marker))
+  if (alreadyCovered && hasGovernanceTopic) {
+    return {
+      key: `already_covered:${topicKey}`,
+      kind: 'already_covered',
+      topicKey,
+    }
+  }
+
+  const supportRestatement = [
+    'i agree',
+    'i support',
+    'support this',
+    'strong support',
+    'i endorse',
+    'aligns with',
+    'vote yes',
+    'voted yes',
+  ].some((marker) => normalized.includes(marker))
+  if (supportRestatement && hasGovernanceTopic) {
+    return {
+      key: `support_restatement:${topicKey}`,
+      kind: 'support_restatement',
+      topicKey,
+    }
+  }
+
+  const floorTopic = /\b(energy floor|pool floor|aid floor|public aid|common pool|threshold aid)\b/.test(normalized)
+  const restatement = /\b(important|crucial|necessary|remain|stability|protect|preserve)\b/.test(normalized)
+  if (floorTopic && restatement) {
+    return {
+      key: `floor_restatement:${topicKey}`,
+      kind: 'floor_restatement',
+      topicKey,
+    }
+  }
+
+  return null
+}
+
+function buildThreadItems(messages) {
+  const sourceMessages = Array.isArray(messages) ? messages : []
+  const grouped = new Map()
+  for (const message of sourceMessages) {
+    const group = repeatedReplyGroupForMessage(message)
+    if (!group) continue
+    const existing = grouped.get(group.key) || { ...group, messages: [] }
+    existing.messages.push(message)
+    grouped.set(group.key, existing)
+  }
+
+  const collapsedKeys = new Set(
+    [...grouped.values()]
+      .filter((group) => group.messages.length >= 2)
+      .map((group) => group.key)
+  )
+  const emittedGroups = new Set()
+  const items = []
+
+  for (const message of sourceMessages) {
+    const group = repeatedReplyGroupForMessage(message)
+    if (!group || !collapsedKeys.has(group.key)) {
+      items.push({ type: 'message', key: `message:${message?.id || items.length}`, message })
+      continue
+    }
+    if (emittedGroups.has(group.key)) continue
+    emittedGroups.add(group.key)
+    const groupedMessages = grouped.get(group.key)?.messages || []
+    items.push({
+      type: 'group',
+      key: `group:${group.key}`,
+      groupKey: group.key,
+      kind: group.kind,
+      messages: groupedMessages,
+    })
+  }
+
+  return items
+}
+
 function MessageRow({ message, onOpenThread }) {
   const agentNumber = Number(message?.author?.agent_number || 0)
   const isDirectMessage = String(message?.message_type || '') === 'direct_message'
@@ -115,6 +226,69 @@ function MessageRow({ message, onOpenThread }) {
   )
 }
 
+function ThreadMessageRow({ message }) {
+  return (
+    <div className="thread-row">
+      <div className="thread-row-head">
+        <div className="thread-row-people">
+          {Number(message?.author?.agent_number || 0) > 0 ? (
+            <Link to={`/agents/${message.author.agent_number}`}>{formatAuthor(message.author)}</Link>
+          ) : (
+            <span>{formatAuthor(message.author)}</span>
+          )}
+          {String(message?.message_type || '') === 'direct_message' && (
+            <span className="thread-direction">
+              to {message?.recipient?.agent_number > 0 ? (
+                <Link to={`/agents/${message.recipient.agent_number}`}>{formatRecipient(message.recipient)}</Link>
+              ) : (
+                formatRecipient(message.recipient)
+              )}
+            </span>
+          )}
+          {message?.is_degraded_fallback && (
+            <span className="message-type-chip degraded-fallback-chip">degraded fallback</span>
+          )}
+        </div>
+        <span>{formatTimestamp(message.created_at)}</span>
+      </div>
+      <p>{sanitizeVisibleMessageContent(message.content)}</p>
+    </div>
+  )
+}
+
+function ThreadReplyGroup({ group, expanded, onToggle }) {
+  const label = REPEATED_REPLY_GROUP_LABELS[group.kind] || 'Repeated replies'
+  const firstMessage = group.messages[0]
+  const lastMessage = group.messages[group.messages.length - 1]
+  const timeRange = [formatTimestamp(firstMessage?.created_at), formatTimestamp(lastMessage?.created_at)]
+    .filter(Boolean)
+    .join(' - ')
+
+  return (
+    <div className="thread-reply-group">
+      <div className="thread-reply-group-head">
+        <div>
+          <strong>{label}</strong>
+          <span>{group.messages.length} similar replies collapsed{timeRange ? ` · ${timeRange}` : ''}</span>
+        </div>
+        <button type="button" className="btn btn-secondary" onClick={onToggle}>
+          {expanded ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+      <p>
+        Repeated replies are grouped so agreement waves and "already covered" notes do not read as separate new developments.
+      </p>
+      {expanded && (
+        <div className="thread-reply-group-items">
+          {group.messages.map((message) => (
+            <ThreadMessageRow key={message.id} message={message} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Messages() {
   const [searchParams] = useSearchParams()
   const [activeTab, setActiveTab] = useState('all')
@@ -128,6 +302,7 @@ export default function Messages() {
   const [threadError, setThreadError] = useState('')
   const [threadData, setThreadData] = useState(null)
   const [threadRequestedId, setThreadRequestedId] = useState(0)
+  const [expandedThreadGroups, setExpandedThreadGroups] = useState(() => new Set())
 
   useEffect(() => {
     async function loadMessages() {
@@ -185,6 +360,7 @@ export default function Messages() {
       const thread = await api.getMessageThread(messageId)
       const resolvedThread = thread && typeof thread === 'object' ? thread : null
       setThreadData(resolvedThread)
+      setExpandedThreadGroups(new Set())
     } catch (_err) {
       setThreadData(null)
       setThreadRequestedId(0)
@@ -205,6 +381,23 @@ export default function Messages() {
       void openThread(requestedThreadId)
     }
   }, [openThread, searchParams])
+
+  const threadItems = useMemo(
+    () => buildThreadItems(threadData?.messages),
+    [threadData]
+  )
+
+  const toggleThreadGroup = useCallback((groupKey) => {
+    setExpandedThreadGroups((current) => {
+      const next = new Set(current)
+      if (next.has(groupKey)) {
+        next.delete(groupKey)
+      } else {
+        next.add(groupKey)
+      }
+      return next
+    })
+  }, [])
 
   return (
     <div className="messages-page">
@@ -285,32 +478,17 @@ export default function Messages() {
             {!threadLoading && threadError && <div className="empty-state">{threadError}</div>}
             {!threadLoading && !threadError && threadData && Array.isArray(threadData.messages) && (
               <div className="thread-list">
-                {threadData.messages.map((message) => (
-                  <div key={message.id} className="thread-row">
-                    <div className="thread-row-head">
-                      <div className="thread-row-people">
-                        {Number(message?.author?.agent_number || 0) > 0 ? (
-                          <Link to={`/agents/${message.author.agent_number}`}>{formatAuthor(message.author)}</Link>
-                        ) : (
-                          <span>{formatAuthor(message.author)}</span>
-                        )}
-                        {String(message?.message_type || '') === 'direct_message' && (
-                          <span className="thread-direction">
-                            to {message?.recipient?.agent_number > 0 ? (
-                              <Link to={`/agents/${message.recipient.agent_number}`}>{formatRecipient(message.recipient)}</Link>
-                            ) : (
-                              formatRecipient(message.recipient)
-                            )}
-                          </span>
-                        )}
-                        {message?.is_degraded_fallback && (
-                          <span className="message-type-chip degraded-fallback-chip">degraded fallback</span>
-                        )}
-                      </div>
-                      <span>{formatTimestamp(message.created_at)}</span>
-                    </div>
-                    <p>{sanitizeVisibleMessageContent(message.content)}</p>
-                  </div>
+                {threadItems.map((item) => (
+                  item.type === 'group' ? (
+                    <ThreadReplyGroup
+                      key={item.key}
+                      group={item}
+                      expanded={expandedThreadGroups.has(item.groupKey)}
+                      onToggle={() => toggleThreadGroup(item.groupKey)}
+                    />
+                  ) : (
+                    <ThreadMessageRow key={item.key} message={item.message} />
+                  )
                 ))}
               </div>
             )}
@@ -443,6 +621,53 @@ export default function Messages() {
         .thread-row p {
           margin: 0;
           white-space: pre-wrap;
+        }
+        .thread-reply-group {
+          border: 1px solid rgba(147, 197, 253, 0.22);
+          border-radius: var(--radius-md);
+          padding: var(--spacing-md);
+          background: rgba(147, 197, 253, 0.06);
+        }
+        .thread-reply-group-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--spacing-md);
+          margin-bottom: var(--spacing-xs);
+        }
+        .thread-reply-group-head div {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .thread-reply-group-head strong {
+          color: var(--text-primary);
+          font-size: 0.9rem;
+        }
+        .thread-reply-group-head span,
+        .thread-reply-group p {
+          color: var(--text-secondary);
+          font-size: 0.8rem;
+        }
+        .thread-reply-group p {
+          margin: 0;
+        }
+        .thread-reply-group .btn {
+          flex: 0 0 auto;
+          padding: 0.4rem 0.68rem;
+          font-size: 0.74rem;
+        }
+        .thread-reply-group-items {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-sm);
+          margin-top: var(--spacing-md);
+          padding-top: var(--spacing-md);
+          border-top: 1px dashed rgba(147, 197, 253, 0.28);
+        }
+        .thread-reply-group-items .thread-row:last-child {
+          border-bottom: 0;
+          padding-bottom: 0;
         }
         @media (max-width: 1100px) {
           .messages-layout {

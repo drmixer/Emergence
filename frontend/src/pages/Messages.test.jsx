@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -215,5 +215,81 @@ describe('Messages', () => {
     expect(screen.getByText(/3 replies · started/i)).toBeInTheDocument()
     expect(screen.getByText(/^latest /i)).toBeInTheDocument()
     expect(screen.getByText(/Older active thread/i).compareDocumentPosition(screen.getByText(/Newer quiet thread/i)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('collapses repeated forum replies inside the selected thread', async () => {
+    api.getMessages.mockImplementation(async (_limit, messageType) => {
+      if (messageType === 'forum_post') {
+        return [
+          makeMessage({
+            id: 740,
+            message_type: 'forum_post',
+            content: 'Proposal #740 asks whether threshold aid already covers low-energy agents.',
+            recipient: null,
+            created_at: '2026-05-20T02:00:00.000Z',
+            reply_count: 3,
+            latest_reply_at: '2026-05-20T02:06:00.000Z',
+            latest_activity_at: '2026-05-20T02:06:00.000Z',
+          }),
+        ]
+      }
+      if (messageType === 'direct_message') return []
+      return []
+    })
+    api.getMessageThread.mockResolvedValue({
+      thread_kind: 'forum_thread',
+      root_message: {
+        id: 740,
+        message_type: 'forum_post',
+        content: 'Proposal #740 asks whether threshold aid already covers low-energy agents.',
+        created_at: '2026-05-20T02:00:00.000Z',
+        author: { agent_number: 2, display_name: 'Beacon-2' },
+      },
+      messages: [
+        {
+          id: 740,
+          message_type: 'forum_post',
+          content: 'Proposal #740 asks whether threshold aid already covers low-energy agents.',
+          created_at: '2026-05-20T02:00:00.000Z',
+          author: { agent_number: 2, display_name: 'Beacon-2' },
+        },
+        {
+          id: 741,
+          message_type: 'forum_reply',
+          content: 'Proposal #740 already covers active threshold aid for low-energy agents.',
+          parent_message_id: 740,
+          created_at: '2026-05-20T02:02:00.000Z',
+          author: { agent_number: 3, display_name: 'Cipher-3' },
+        },
+        {
+          id: 742,
+          message_type: 'forum_reply',
+          content: 'This is already covered by proposal #740 and the reserve threshold mechanism.',
+          parent_message_id: 740,
+          created_at: '2026-05-20T02:04:00.000Z',
+          author: { agent_number: 4, display_name: 'Delta-4' },
+        },
+        {
+          id: 743,
+          message_type: 'forum_reply',
+          content: 'Beacon-2, will you amend proposal #740 to name a 6 energy minimum pool floor?',
+          parent_message_id: 740,
+          created_at: '2026-05-20T02:06:00.000Z',
+          author: { agent_number: 5, display_name: 'Echo-5' },
+        },
+      ],
+    })
+
+    renderMessages('/messages?tab=forum&thread=740')
+
+    expect(await screen.findByText(/Already covered replies/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 similar replies collapsed/i)).toBeInTheDocument()
+    expect(screen.getByText(/Beacon-2, will you amend proposal #740/i)).toBeInTheDocument()
+    expect(screen.queryByText(/reserve threshold mechanism/i)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Expand/i }))
+
+    expect(screen.getByText(/reserve threshold mechanism/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Collapse/i })).toBeInTheDocument()
   })
 })
