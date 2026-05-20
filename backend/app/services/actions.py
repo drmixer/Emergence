@@ -813,6 +813,13 @@ def _reply_adds_saturated_thread_allowed_delta(content: str | None) -> bool:
     ):
         return True
 
+    if re.search(r"\b(?:i\s+)?(?:refuse|decline|cannot|can't|will not|won't)\b", normalized) and (
+        named_agent
+        or has_quantity
+        or re.search(r"\b(?:aid|request|trade|transfer|food|energy|materials?|proposal|law)\b", normalized)
+    ):
+        return True
+
     if re.search(r"\b(?:i changed my vote|i change my vote|i switched my vote|i switch my vote|my vote is now|i now vote|vote change)\b", normalized):
         return True
 
@@ -1202,6 +1209,65 @@ def _already_covered_restatement_reply(content: str | None) -> bool:
         "covered",
     )
     return any(marker in normalized for marker in governance_markers)
+
+
+def _redundant_forum_reply_no_new_information_reason(content: str | None) -> str | None:
+    normalized = " ".join(str(content or "").strip().lower().split())
+    if not normalized:
+        return None
+    if _reply_adds_saturated_thread_allowed_delta(content):
+        return None
+
+    covered_markers = (
+        "already covered",
+        "already covers",
+        "already addressed",
+        "already handled",
+        "already noted",
+        "already in this thread",
+        "already been discussed",
+        "covered above",
+        "covered already",
+        "has been covered",
+        "has already covered",
+        "has already been covered",
+        "was already covered",
+        "this is already covered",
+        "thread already covered",
+        "the thread already covered",
+        "proposal already covers",
+        "proposal already includes",
+        "proposal #",
+    )
+    if not any(marker in normalized for marker in covered_markers):
+        return None
+
+    no_new_information_markers = (
+        "no new",
+        "nothing new",
+        "no additional",
+        "without adding",
+        "i have nothing to add",
+        "nothing to add",
+        "same point",
+        "same issue",
+        "already enough",
+        "do not need another",
+        "no need to revisit",
+        "just confirming",
+        "just noting",
+    )
+    repeats_covered_state = (
+        _already_covered_restatement_reply(content)
+        or any(marker in normalized for marker in no_new_information_markers)
+    )
+    if not repeats_covered_state:
+        return None
+
+    return (
+        "forum reply says the proposal/thread is already covered but adds no concrete "
+        "amendment, named ask, resource move, refusal, or changed fact"
+    )
 
 
 def _already_covered_pile_on_reason(*, content: str | None, thread_messages: list[Message]) -> str | None:
@@ -2050,6 +2116,14 @@ async def validate_action(db: Session, agent: Agent, action: dict) -> dict:
                 "reason": "Reply content appears to target proposal/law debate rather than the selected aid thread; choose the matching proposal discussion or use contest_proposal",
             }
         thread_messages = _message_thread_messages_this_run(db, thread_root)
+        redundant_no_information_reason = _redundant_forum_reply_no_new_information_reason(content)
+        if redundant_no_information_reason:
+            return {
+                "valid": False,
+                "thread_id": thread_root.id,
+                "reason_code": "redundant_forum_reply_no_new_information",
+                "reason": redundant_no_information_reason,
+            }
         covered_pile_on_reason = _already_covered_pile_on_reason(
             content=content,
             thread_messages=thread_messages,

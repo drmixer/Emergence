@@ -47,6 +47,7 @@ SOCIAL_ACTION_TYPES = {
 }
 
 REDUNDANT_FORUM_REPLY_REASON_CODES = {
+    "redundant_forum_reply_no_new_information",
     "already_covered_pile_on",
     "duplicate_thread_reply",
     "proposal_agreement_pile_on",

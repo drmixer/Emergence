@@ -210,7 +210,7 @@ def test_redundant_forum_reply_retry_substitutes_valid_action(session_factory, m
                 },
                 validation={
                     "valid": False,
-                    "reason_code": "already_covered_pile_on",
+                    "reason_code": "redundant_forum_reply_no_new_information",
                     "reason": "thread already has replies saying the proposal/law was already covered",
                     "thread_id": root.id,
                 },
@@ -228,7 +228,7 @@ def test_redundant_forum_reply_retry_substitutes_valid_action(session_factory, m
     assert validation == {"valid": True}
     assert "REDUNDANT FORUM REPLY RETRY" in calls[0]
     assert "Prefer action substitution" in calls[0]
-    assert "already_covered_pile_on" in calls[0]
+    assert "redundant_forum_reply_no_new_information" in calls[0]
 
 
 def test_context_scopes_social_inputs_to_active_run_window(session_factory, monkeypatch):
@@ -977,7 +977,7 @@ def test_k12_proposal_740_replay_retries_redundant_reply_into_vote(session_facto
     assert "REDUNDANT FORUM REPLY RETRY" in calls[1]
     assert "Prefer action substitution" in calls[1]
     assert runtime["redundant_forum_reply_retry"] is True
-    assert runtime["redundant_forum_reply_reason_code"] == "already_covered_pile_on"
+    assert runtime["redundant_forum_reply_reason_code"] == "redundant_forum_reply_no_new_information"
     assert runtime["run_id"] == "real-20260519T063000Z"
 
 
