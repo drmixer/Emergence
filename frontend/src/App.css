@@ -1487,6 +1487,42 @@ tr:last-child td {
   color: var(--text-primary);
 }
 
+.no-active-run-brief-link {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: var(--spacing-md);
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: var(--radius-md);
+  background: rgba(96, 165, 250, 0.08);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.no-active-run-brief-link:hover {
+  border-color: rgba(96, 165, 250, 0.42);
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.no-active-run-brief-link span {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.no-active-run-brief-link strong {
+  color: var(--text-primary);
+  font-size: 0.96rem;
+  line-height: 1.45;
+}
+
 .no-active-run-snapshot {
   width: 100%;
   display: grid;

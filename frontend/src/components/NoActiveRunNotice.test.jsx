@@ -6,6 +6,7 @@ const { api } = vi.hoisted(() => ({
     api: {
         getRunDetail: vi.fn(),
         getReplayStory: vi.fn(),
+        getRunReports: vi.fn(),
     },
 }))
 
@@ -43,6 +44,15 @@ beforeEach(() => {
             },
         ],
     })
+    api.getRunReports.mockResolvedValue({
+        items: [
+            {
+                artifact_type: 'viewer_brief',
+                artifact_format: 'markdown',
+                status: 'completed',
+            },
+        ],
+    })
 })
 
 afterEach(() => {
@@ -72,6 +82,14 @@ describe('NoActiveRunNotice', () => {
         expect(within(moments).getByText(/Permanent Death/i)).toBeInTheDocument()
         expect(within(moments).getByText(/Proposal Passed/i)).toBeInTheDocument()
 
+        expect(screen.getByRole('link', { name: /Latest Emergence Brief/i })).toHaveAttribute(
+            'href',
+            '/runs/real-20260517T220144Z/reports/viewer_brief?format=markdown'
+        )
+        expect(screen.getByRole('link', { name: /Read The Brief/i })).toHaveAttribute(
+            'href',
+            '/runs/real-20260517T220144Z/reports/viewer_brief?format=markdown'
+        )
         expect(screen.getByRole('link', { name: /Run Recap/i })).toHaveAttribute(
             'href',
             '/runs/real-20260517T220144Z/replay?tab=overview'
@@ -106,5 +124,6 @@ describe('NoActiveRunNotice', () => {
         expect(screen.getByRole('link', { name: /Run Calendar/i })).toHaveAttribute('href', '/calendar')
         expect(api.getRunDetail).not.toHaveBeenCalled()
         expect(api.getReplayStory).not.toHaveBeenCalled()
+        expect(api.getRunReports).not.toHaveBeenCalled()
     })
 })

@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, FileSearch, TimerReset } from 'lucide-react'
+import { Activity, CalendarDays, FileSearch, FileText, TimerReset } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
@@ -59,6 +59,15 @@ function buildRunSummary(runDetail) {
     return `Latest completed run: ${parts.join(', ')}.`
 }
 
+function hasViewerBriefReport(reportsPayload) {
+    const items = Array.isArray(reportsPayload?.items) ? reportsPayload.items : []
+    return items.some((item) => (
+        String(item?.artifact_type || '').trim() === 'viewer_brief'
+        && String(item?.artifact_format || '').trim() === 'markdown'
+        && String(item?.status || '').trim() === 'completed'
+    ))
+}
+
 export default function NoActiveRunNotice({
     title = 'Live run ended',
     message = 'No simulation is live right now. Open the latest completed run for the recap, replay, metrics, and source evidence.',
@@ -70,6 +79,7 @@ export default function NoActiveRunNotice({
         runId: '',
         runDetail: null,
         storyMoments: [],
+        hasViewerBrief: false,
     })
 
     useEffect(() => {
@@ -80,9 +90,10 @@ export default function NoActiveRunNotice({
         }
 
         async function loadLatestRun() {
-            const [detailResult, storyResult] = await Promise.allSettled([
+            const [detailResult, storyResult, reportsResult] = await Promise.allSettled([
                 api.getRunDetail(cleanRunId, 96, 12, 45),
                 api.getReplayStory(96, 45, 6, cleanRunId),
+                typeof api.getRunReports === 'function' ? api.getRunReports(cleanRunId) : Promise.resolve(null),
             ])
             if (cancelled) return
 
@@ -94,11 +105,15 @@ export default function NoActiveRunNotice({
                 storyResult.status === 'fulfilled' && Array.isArray(storyResult.value?.items)
                     ? storyResult.value.items.slice(0, 2)
                     : []
+            const nextHasViewerBrief =
+                reportsResult.status === 'fulfilled'
+                && hasViewerBriefReport(reportsResult.value)
 
             setLatestRunState({
                 runId: cleanRunId,
                 runDetail: nextRunDetail,
                 storyMoments: nextStoryMoments,
+                hasViewerBrief: nextHasViewerBrief,
             })
         }
 
@@ -110,8 +125,12 @@ export default function NoActiveRunNotice({
 
     const runDetail = latestRunState.runId === cleanRunId ? latestRunState.runDetail : null
     const storyMoments = latestRunState.runId === cleanRunId ? latestRunState.storyMoments : []
+    const hasViewerBrief = latestRunState.runId === cleanRunId && latestRunState.hasViewerBrief
     const snapshotRows = runDetail ? buildSnapshotRows(runDetail) : []
     const runSummary = buildRunSummary(runDetail)
+    const viewerBriefHref = cleanRunId
+        ? `/runs/${encodeURIComponent(cleanRunId)}/reports/viewer_brief?format=markdown`
+        : ''
     return (
         <div className="card no-active-run-card">
             <div className="card-body">
@@ -123,6 +142,15 @@ export default function NoActiveRunNotice({
                     </div>
                     <p>{message}</p>
                     {showCompletedRunHandoff && runSummary && <p className="no-active-run-summary">{runSummary}</p>}
+                    {showCompletedRunHandoff && hasViewerBrief && (
+                        <Link className="no-active-run-brief-link" to={viewerBriefHref}>
+                            <span>
+                                <FileText size={15} />
+                                Latest Emergence Brief
+                            </span>
+                            <strong>Read the news-style recap before the next run starts.</strong>
+                        </Link>
+                    )}
                     {showCompletedRunHandoff && snapshotRows.length > 0 && (
                         <div className="no-active-run-snapshot" aria-label="Latest completed run snapshot">
                             {snapshotRows.map((row) => (
@@ -150,10 +178,16 @@ export default function NoActiveRunNotice({
                     <div className="no-active-run-actions">
                         {showCompletedRunHandoff && cleanRunId && (
                             <>
-                                <Link to={`/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-primary">
-                                    <TimerReset size={14} />
-                                    Run Recap
+                                <Link to={hasViewerBrief ? viewerBriefHref : `/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-primary">
+                                    {hasViewerBrief ? <FileText size={14} /> : <TimerReset size={14} />}
+                                    {hasViewerBrief ? 'Read The Brief' : 'Run Recap'}
                                 </Link>
+                                {hasViewerBrief && (
+                                    <Link to={`/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-secondary">
+                                        <TimerReset size={14} />
+                                        Run Recap
+                                    </Link>
+                                )}
                                 <Link to={`/runs/${encodeURIComponent(cleanRunId)}`} className="btn btn-secondary">
                                     <FileSearch size={14} />
                                     Evidence
