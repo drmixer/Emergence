@@ -3,6 +3,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
+  Eye,
   FileSearch,
   HelpCircle,
   RadioTower,
@@ -101,6 +102,10 @@ function RunBriefActions({ run, mode, analyticsSurface }) {
         <ScheduleLink to={run.links?.recap} run={run} surface={analyticsSurface} target="recap" primary>
           <TimerReset size={14} />
           Recap
+        </ScheduleLink>
+        <ScheduleLink to={run.links?.watch || (run.runId ? `/watch?run=${encodeURIComponent(run.runId)}` : '/watch')} run={run} surface={analyticsSurface} target="watch_replay">
+          <Eye size={14} />
+          Watch
         </ScheduleLink>
         <ScheduleLink to={run.links?.evidence} run={run} surface={analyticsSurface} target="evidence">
           <FileSearch size={14} />

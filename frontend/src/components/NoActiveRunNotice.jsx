@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, FileSearch, FileText, TimerReset } from 'lucide-react'
+import { Activity, CalendarDays, Eye, FileSearch, FileText, TimerReset } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../services/api'
@@ -188,6 +188,10 @@ export default function NoActiveRunNotice({
                                         Run Recap
                                     </Link>
                                 )}
+                                <Link to={`/watch?run=${encodeURIComponent(cleanRunId)}`} className="btn btn-secondary">
+                                    <Eye size={14} />
+                                    Watch Replay
+                                </Link>
                                 <Link to={`/runs/${encodeURIComponent(cleanRunId)}`} className="btn btn-secondary">
                                     <FileSearch size={14} />
                                     Evidence

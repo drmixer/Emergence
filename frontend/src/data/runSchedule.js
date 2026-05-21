@@ -63,6 +63,7 @@ export const RUN_SCHEDULE = [
     resultNote: 'Stopped early after a Railway outage/SSL issue. Treat K12 as a public viewer-comprehension beta/canary, not finished research.',
     links: {
       recap: '/runs/real-20260519T063000Z/replay?tab=overview',
+      watch: '/watch?run=real-20260519T063000Z',
       evidence: '/runs/real-20260519T063000Z',
       report: '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
       archive: '/archive',
@@ -89,6 +90,7 @@ export const RUN_SCHEDULE = [
     resultNote: '',
     links: {
       live: '/dashboard',
+      watch: '/watch',
       archive: '/archive',
     },
     viewerPath: PUBLIC_CANARY_VIEWER_PATH,
@@ -113,6 +115,7 @@ export const RUN_SCHEDULE = [
     resultNote: '',
     links: {
       live: '/dashboard',
+      watch: '/watch',
       archive: '/archive',
     },
     viewerPath: PUBLIC_CANARY_VIEWER_PATH,
@@ -137,6 +140,7 @@ export const RUN_SCHEDULE = [
     resultNote: '',
     links: {
       live: '/dashboard',
+      watch: '/watch',
       archive: '/archive',
     },
     viewerPath: PUBLIC_CANARY_VIEWER_PATH,
@@ -161,6 +165,7 @@ export const RUN_SCHEDULE = [
     resultNote: '',
     links: {
       live: '/dashboard',
+      watch: '/watch',
       archive: '/archive',
     },
     viewerPath: RESEARCH_VIEWER_PATH,
@@ -187,6 +192,7 @@ export const RUN_SCHEDULE = [
     resultNote: 'Completed, but viewer experience required substantial follow-up fixes.',
     links: {
       recap: '/runs/real-20260517T220144Z/replay?tab=overview',
+      watch: '/watch?run=real-20260517T220144Z',
       evidence: '/runs/real-20260517T220144Z',
       report: '/runs/real-20260517T220144Z/reports/approachable_report?format=markdown',
       archive: '/archive',
@@ -367,6 +373,7 @@ export function buildRunBriefFromMetadata(metadata = {}, options = {}) {
     links: {
       live: '/dashboard',
       recap: runId ? `/runs/${encodeURIComponent(runId)}/replay?tab=overview` : '',
+      watch: runId ? `/watch?run=${encodeURIComponent(runId)}` : '',
       evidence: runId ? `/runs/${encodeURIComponent(runId)}` : '',
       report: runId ? `/runs/${encodeURIComponent(runId)}/reports/viewer_brief?format=markdown` : '',
       archive: '/archive',
@@ -400,6 +407,7 @@ export function getRunBriefForCurrentRun(metadata = {}, scope = {}) {
         ...(scheduled.links || {}),
         live: '/dashboard',
         recap: `/runs/${encodeURIComponent(activeRunId)}/replay?tab=overview`,
+        watch: `/watch?run=${encodeURIComponent(activeRunId)}`,
         evidence: `/runs/${encodeURIComponent(activeRunId)}`,
         report: `/runs/${encodeURIComponent(activeRunId)}/reports/viewer_brief?format=markdown`,
         archive: '/archive',

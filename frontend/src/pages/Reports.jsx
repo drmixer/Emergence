@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Download,
+  Eye,
   FileSearch,
   RefreshCw,
   TimerReset,
@@ -462,6 +463,7 @@ export default function Reports() {
                   : (isLatestPublicRun ? 'Start With Latest Recap' : 'Open Recap')
                 const primaryActionTarget = latestViewerBriefAvailable ? 'report:viewer_brief:primary' : 'recap'
                 const replayPath = getStoryReplayHref(runId)
+                const watchPath = `/watch?run=${encodeURIComponent(runId)}`
                 const evidencePath = `/runs/${encodeURIComponent(runId)}`
                 const latestRunPathItems = isLatestPublicRun
                   ? [
@@ -471,6 +473,13 @@ export default function Reports() {
                         icon: <FileSearch size={14} />,
                         to: viewerBriefTeaserPath,
                         target: 'report:viewer_brief:path',
+                      },
+                      {
+                        label: 'Watch',
+                        meta: 'Run map',
+                        icon: <Eye size={14} />,
+                        to: watchPath,
+                        target: 'watch:path',
                       },
                       {
                         label: 'Replay',
@@ -607,6 +616,14 @@ export default function Reports() {
                     <div className="archive-run-actions">
                       {!isLatestPublicRun && (
                         <>
+                          <Link
+                            className="btn btn-secondary"
+                            to={watchPath}
+                            onClick={() => trackArchivePathClick(runId, 'watch_replay')}
+                          >
+                            <Eye size={14} />
+                            Watch Replay
+                          </Link>
                           <Link
                             className="btn btn-secondary"
                             to={replayPath}
