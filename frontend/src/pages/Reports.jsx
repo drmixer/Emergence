@@ -5,6 +5,7 @@ import {
   Eye,
   FileSearch,
   RefreshCw,
+  Sparkles,
   TimerReset,
 } from 'lucide-react'
 import { api } from '../services/api'
@@ -464,6 +465,7 @@ export default function Reports() {
                 const primaryActionTarget = latestViewerBriefAvailable ? 'report:viewer_brief:primary' : 'recap'
                 const replayPath = getStoryReplayHref(runId)
                 const watchPath = `/watch?run=${encodeURIComponent(runId)}`
+                const highlightsPath = `/runs/${encodeURIComponent(runId)}/highlights`
                 const evidencePath = `/runs/${encodeURIComponent(runId)}`
                 const latestRunPathItems = isLatestPublicRun
                   ? [
@@ -473,6 +475,13 @@ export default function Reports() {
                         icon: <FileSearch size={14} />,
                         to: viewerBriefTeaserPath,
                         target: 'report:viewer_brief:path',
+                      },
+                      {
+                        label: 'Highlights',
+                        meta: 'Digest',
+                        icon: <Sparkles size={14} />,
+                        to: highlightsPath,
+                        target: 'highlights:path',
                       },
                       {
                         label: 'Watch',
@@ -616,6 +625,14 @@ export default function Reports() {
                     <div className="archive-run-actions">
                       {!isLatestPublicRun && (
                         <>
+                          <Link
+                            className="btn btn-secondary"
+                            to={highlightsPath}
+                            onClick={() => trackArchivePathClick(runId, 'highlights_digest')}
+                          >
+                            <Sparkles size={14} />
+                            Highlights
+                          </Link>
                           <Link
                             className="btn btn-secondary"
                             to={watchPath}

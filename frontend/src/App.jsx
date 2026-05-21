@@ -44,6 +44,7 @@ const ReportViewer = lazy(() => import('./pages/ReportViewer'))
 const Reports = lazy(() => import('./pages/Reports'))
 const RunCalendar = lazy(() => import('./pages/RunCalendar'))
 const WatchReplay = lazy(() => import('./pages/WatchReplay'))
+const RunHighlightsDigest = lazy(() => import('./pages/RunHighlightsDigest'))
 const Privacy = lazy(() => import('./pages/Privacy'))
 const Terms = lazy(() => import('./pages/Terms'))
 
@@ -279,6 +280,7 @@ function App() {
                 <Route path="/highlights" element={<HighlightsCompatibility />} />
                 <Route path="/calendar" element={<RunCalendar />} />
                 <Route path="/watch" element={<WatchReplay />} />
+                <Route path="/runs/:runId/highlights" element={<RunHighlightsDigest />} />
                 <Route path="/archive" element={<Reports />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/leaderboards" element={<Leaderboards />} />

@@ -105,6 +105,10 @@ describe('Reports archive', () => {
       'href',
       '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
     )
+    expect(within(card).getByRole('link', { name: /Highlights: Digest/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260519T063000Z/highlights',
+    )
     expect(within(card).getByRole('link', { name: /Replay: Key moments/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/replay?mode=story60',
