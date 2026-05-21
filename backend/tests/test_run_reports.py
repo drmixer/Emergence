@@ -453,7 +453,10 @@ Watch whether the next run stays readable live.
     assert generation["fallback_allowed"] is False
     assert "accessible public news brief" in generation["context"]["style_contract"]["format"]
     assert "Do not invent events" in generation["system_prompt"]
+    assert "agents, not entities" in generation["system_prompt"]
     assert "Run Question" in generation["user_prompt"]
+    assert "The Lead must answer it" in generation["user_prompt"]
+    assert "next run or future run" in generation["user_prompt"]
     assert payload["sections"][1]["paragraphs"] == [snapshot["declared_question"]]
     assert payload["sections"][2]["generated_by"] == run_reports.VIEWER_BRIEF_LLM_GENERATOR_VERSION
 

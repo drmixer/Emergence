@@ -140,6 +140,45 @@ def test_missing_story_artifact_regenerates_with_gemini_flag(reports_client, mon
     assert calls[0]["generate_story_with_gemini"] is True
 
 
+def test_missing_viewer_brief_artifact_regenerates_with_gemini_flag(reports_client, monkeypatch):
+    _client, db_session, tmp_dir = reports_client
+    missing_file = tmp_dir / "runs" / "run-1" / "viewer_brief.md"
+    row = RunReportArtifact(
+        run_id="run-1",
+        artifact_type="viewer_brief",
+        artifact_format="markdown",
+        artifact_path=str(missing_file),
+        status="completed",
+        metadata_json={
+            "condition_name": "viewer_canary_v1",
+            "season_number": 0,
+            "viewer_brief_generate_with_gemini": True,
+        },
+    )
+    db_session.add(row)
+    db_session.commit()
+    calls: list[dict[str, object]] = []
+
+    def _fake_generate_run_viewer_brief_artifact(_db, **kwargs):
+        calls.append(kwargs)
+        missing_file.parent.mkdir(parents=True, exist_ok=True)
+        missing_file.write_text("# The Emergence Brief\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        report_artifacts,
+        "generate_run_viewer_brief_artifact",
+        _fake_generate_run_viewer_brief_artifact,
+    )
+
+    path = report_artifacts.ensure_artifact_path(db_session, row)
+
+    assert path == missing_file
+    assert calls[0]["run_id"] == "run-1"
+    assert calls[0]["condition_name"] == "viewer_canary_v1"
+    assert calls[0]["season_number"] == 0
+    assert calls[0]["generate_with_gemini"] is True
+
+
 def test_list_and_download_condition_comparison_reports(reports_client):
     client, db_session, tmp_dir = reports_client
     json_file = tmp_dir / "conditions" / "baseline-v1" / "condition_comparison.json"

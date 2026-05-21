@@ -17,6 +17,7 @@ from app.services.condition_reports import (
 )
 from app.services.run_reports import rebuild_run_bundle
 from app.services.run_reports import REPORT_GENERATOR_VERSION
+from app.services.run_reports import generate_run_viewer_brief_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,14 @@ def _regenerate_artifact(db: Session, row: RunReportArtifact) -> RunReportArtifa
                 condition_name=metadata.get("condition_name"),
                 season_number=metadata.get("season_number"),
                 generate_story_with_gemini=bool(metadata.get("story_generate_with_gemini")),
+            )
+        elif artifact_type == "viewer_brief":
+            generate_run_viewer_brief_artifact(
+                db,
+                run_id=str(row.run_id or "").strip(),
+                condition_name=metadata.get("condition_name"),
+                season_number=metadata.get("season_number"),
+                generate_with_gemini=bool(metadata.get("viewer_brief_generate_with_gemini", True)),
             )
         elif artifact_type == "run_summary":
             generate_and_record_run_summary(

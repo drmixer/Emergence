@@ -830,7 +830,8 @@ def _viewer_brief_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
         "You write The Emergence Brief: an accessible, news-style recap for public viewers. "
         "Use only the supplied run context, metrics, selected moments, and evidence links. "
         "Do not invent events, quotes, motives, agent labels, coalitions, or conclusions. "
-        "Keep exploratory canaries clearly non-claim-bearing. Do not use provider/model fallback."
+        "Call participants agents, not entities. Keep exploratory canaries clearly non-claim-bearing. "
+        "Do not use provider/model fallback."
     )
     user_prompt = (
         "Generate a markdown viewer brief using these exact section headings:\n"
@@ -838,9 +839,13 @@ def _viewer_brief_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
         f"{declared_question_block}"
         "Style constraints:\n"
         "- Read like a concise news story, not a research paper and not fictional roleplay.\n"
+        "- If there is a mandatory run question, The Lead must answer it before summarizing survival or governance.\n"
         "- Make it accessible for regular viewers who want to know what happened and why to come back.\n"
         "- Use only the mandatory counts below and the selected moments in the context JSON.\n"
         "- If a detail is not in the context, omit it.\n"
+        "- Use the word agents for participants; do not call them entities.\n"
+        "- For a completed run, say next run or future run, not next cycle or upcoming cycle.\n"
+        "- Do not imply newly passed laws will affect a future run unless the context explicitly says they carry over.\n"
         "- Do not name agents unless they appear in selected moments.\n"
         "- Do not add markdown links; the system will attach evidence links separately.\n"
         "- Keep each section short.\n\n"
