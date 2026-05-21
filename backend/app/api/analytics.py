@@ -171,6 +171,39 @@ REPLAY_STORY_SIGNAL_EVENT_TYPES = {
     "resources_seized",
     "agent_exiled",
 }
+WATCH_SIGNAL_EVENT_TYPES = {
+    "agent_died",
+    "became_dormant",
+    "agent_revived",
+    "awakened",
+    "law_passed",
+    "proposal_resolved",
+    "create_proposal",
+    "world_event",
+    "trade",
+    "request_aid",
+    "aid_request_received",
+    "refuse_aid",
+    "aid_refusal_received",
+    "reserve_aid",
+    "public_accusation",
+    "contest_proposal",
+    "initiate_sanction",
+    "initiate_seizure",
+    "initiate_exile",
+    "vote_enforcement",
+    "enforcement_initiated",
+    "agent_sanctioned",
+    "resources_seized",
+    "agent_exiled",
+}
+WATCH_LANE_LABELS = {
+    "survival": "Survival",
+    "governance": "Governance",
+    "aid_trade": "Aid / Trade",
+    "public_order": "Public Order",
+    "system": "System Shocks",
+}
 REPLAY_STORY_CATEGORY_PRIORITY = {
     "crisis": 6,
     "conflict": 5,
@@ -726,6 +759,128 @@ def _replay_story_why_this_matters(payload: dict[str, Any]) -> str:
     if category in {"alliance", "cooperation"}:
         return "Coordination and alliances change who can execute strategy, absorb shocks, and control governance outcomes."
     return "This high-salience event changed momentum and helps explain why subsequent actions unfolded the way they did."
+
+
+def _watch_lane_for_payload(payload: dict[str, Any]) -> str | None:
+    event_type = str(payload.get("event_type") or "").strip()
+    category = str(payload.get("category") or "").strip()
+    if event_type in {"agent_died", "became_dormant", "agent_revived", "awakened"}:
+        return "survival"
+    if event_type in {"law_passed", "proposal_resolved", "create_proposal", "vote_enforcement"} or category == "governance":
+        return "governance"
+    if event_type in {"trade", "request_aid", "aid_request_received", "refuse_aid", "aid_refusal_received", "reserve_aid"}:
+        return "aid_trade"
+    if event_type in PUBLIC_ORDER_EVENT_TYPES or category == "conflict":
+        return "public_order"
+    if event_type == "world_event" or category == "crisis":
+        return "system"
+    return None
+
+
+def _serialize_watch_moment(event: Event) -> dict[str, Any] | None:
+    payload = _serialize_playback_event(event)
+    event_type = str(payload.get("event_type") or "").strip()
+    if event_type not in WATCH_SIGNAL_EVENT_TYPES:
+        return None
+    lane = _watch_lane_for_payload(payload)
+    if lane is None:
+        return None
+    event_id = int(payload.get("event_id") or 0)
+    return {
+        **payload,
+        "lane": lane,
+        "lane_label": WATCH_LANE_LABELS.get(lane, "Other Signals"),
+        "why_this_matters": _replay_story_why_this_matters(payload),
+        "replay_url": f"/runs/{payload.get('run_id')}/replay?mode=timeline&event={event_id}" if payload.get("run_id") else None,
+        "evidence_url": f"/runs/{payload.get('run_id')}?event={event_id}" if payload.get("run_id") else None,
+    }
+
+
+def _build_watch_activity(rows: list[Event]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        event_type = str(row.event_type or "")
+        counts[event_type] = int(counts.get(event_type, 0)) + 1
+    public_order_events = sum(int(counts.get(event_type, 0)) for event_type in PUBLIC_ORDER_EVENT_TYPES)
+    conflict_events = sum(int(counts.get(event_type, 0)) for event_type in CONFLICT_EVENT_TYPES)
+    cooperation_events = sum(int(counts.get(event_type, 0)) for event_type in COOPERATION_EVENT_TYPES)
+    return {
+        "total_events": len(rows),
+        "proposal_actions": int(counts.get("create_proposal", 0)),
+        "vote_actions": int(counts.get("vote", 0)),
+        "forum_actions": int(counts.get("forum_post", 0)) + int(counts.get("forum_reply", 0)),
+        "direct_messages": int(counts.get("direct_message", 0)),
+        "aid_requests": int(counts.get("request_aid", 0)),
+        "aid_refusals": int(counts.get("refuse_aid", 0)),
+        "trade_actions": int(counts.get("trade", 0)),
+        "laws_passed": int(counts.get("law_passed", 0)),
+        "deaths": int(counts.get("agent_died", 0)),
+        "became_dormant": int(counts.get("became_dormant", 0)),
+        "agent_revived": int(counts.get("agent_revived", 0)),
+        "public_order_events": int(public_order_events),
+        "conflict_events": int(conflict_events),
+        "cooperation_events": int(cooperation_events),
+    }
+
+
+def _build_watch_buckets(
+    *,
+    moments: list[dict[str, Any]],
+    window_start: datetime,
+    window_end: datetime,
+    bucket_minutes: int,
+) -> list[dict[str, Any]]:
+    bucket_seconds = max(60, int(bucket_minutes * 60))
+    total_seconds = max(1, int((window_end - window_start).total_seconds()))
+    bucket_count = max(1, (total_seconds + bucket_seconds - 1) // bucket_seconds)
+    buckets: list[dict[str, Any]] = []
+    for idx in range(bucket_count):
+        bucket_start = window_start + timedelta(seconds=idx * bucket_seconds)
+        bucket_end = min(window_end, bucket_start + timedelta(seconds=bucket_seconds))
+        buckets.append(
+            {
+                "index": idx,
+                "bucket_start": bucket_start.isoformat(),
+                "bucket_end": bucket_end.isoformat(),
+                "label": bucket_start.strftime("%H:%M"),
+                "event_count": 0,
+                "linked_moment_count": 0,
+                "max_salience": 0,
+                "dominant_category": None,
+                "dominant_lane": None,
+                "category_counts": {},
+                "linked_category_counts": {},
+                "representative": None,
+            }
+        )
+
+    for moment in moments:
+        created_at = _coerce_utc_datetime(moment.get("created_at"))
+        if created_at is None:
+            continue
+        offset = int((created_at - window_start).total_seconds())
+        idx = max(0, min(bucket_count - 1, offset // bucket_seconds))
+        bucket = buckets[idx]
+        lane = str(moment.get("lane") or "").strip() or "other"
+        category = str(moment.get("category") or lane).strip() or lane
+        salience = int(moment.get("salience") or 0)
+        bucket["event_count"] = int(bucket["event_count"]) + 1
+        bucket["linked_moment_count"] = int(bucket["linked_moment_count"]) + 1
+        bucket["max_salience"] = max(int(bucket["max_salience"]), salience)
+        bucket["category_counts"][category] = int(bucket["category_counts"].get(category, 0)) + 1
+        bucket["linked_category_counts"][lane] = int(bucket["linked_category_counts"].get(lane, 0)) + 1
+        bucket["dominant_category"] = max(
+            bucket["category_counts"],
+            key=lambda key: int(bucket["category_counts"].get(key, 0)),
+        )
+        bucket["dominant_lane"] = max(
+            bucket["linked_category_counts"],
+            key=lambda key: int(bucket["linked_category_counts"].get(key, 0)),
+        )
+        representative = bucket.get("representative")
+        if not representative or salience > int(representative.get("salience") or 0):
+            bucket["representative"] = moment
+    return buckets
 
 
 def _replay_story_state_deltas(payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -1780,6 +1935,104 @@ def best_moments(
             "run_id": effective_run_id,
             "count": len(moments),
             "items": moments,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/runs/{run_id}/watch")
+def run_watch_board(
+    run_id: str = Path(..., max_length=64, pattern=r"^[A-Za-z0-9:_-]+$"),
+    bucket_minutes: int = Query(60, ge=10, le=180),
+    limit: int = Query(240, ge=20, le=500),
+):
+    """
+    Run-scoped watch board view model for the visual replay surface.
+
+    This endpoint intentionally promotes only explicit watch-signal event types.
+    Generic communication remains available in Replay/Evidence, but it does not
+    become an Aid / Trade spike merely because it is categorized as cooperation.
+    """
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        raise HTTPException(status_code=400, detail="run_id is required")
+
+    now = now_utc()
+    db = SessionLocal()
+    try:
+        run_row = (
+            db.query(SimulationRun)
+            .filter(SimulationRun.run_id == clean_run_id)
+            .first()
+        )
+        if run_row is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        run_window = get_run_window(db, clean_run_id)
+        run_started_at = ensure_utc(run_window.started_at)
+        if run_started_at is None:
+            raise HTTPException(status_code=409, detail="Run window is incomplete for watch replay")
+
+        run_ended_at = ensure_utc(run_window.ended_at)
+        if run_ended_at is None or run_ended_at > now:
+            run_ended_at = now
+        if run_ended_at < run_started_at:
+            run_ended_at = run_started_at
+
+        ordered_rows = (
+            db.query(Event)
+            .filter(Event.created_at >= run_started_at, Event.created_at <= run_ended_at)
+            .order_by(Event.created_at.asc(), Event.id.asc())
+            .all()
+        )
+        scoped_rows = [row for row in ordered_rows if _event_runtime_run_id(row) == clean_run_id]
+        moments = [moment for row in scoped_rows if (moment := _serialize_watch_moment(row)) is not None]
+        if len(moments) > limit:
+            moments = sorted(moments, key=lambda item: (int(item.get("salience") or 0), str(item.get("created_at") or "")), reverse=True)[:limit]
+            moments = sorted(moments, key=lambda item: (_plot_turn_created_at_ms(item), int(item.get("event_id") or 0)))
+
+        buckets = _build_watch_buckets(
+            moments=moments,
+            window_start=run_started_at,
+            window_end=run_ended_at,
+            bucket_minutes=bucket_minutes,
+        )
+        lanes = []
+        for lane_key, lane_label in WATCH_LANE_LABELS.items():
+            lane_count = sum(1 for moment in moments if str(moment.get("lane") or "") == lane_key)
+            lanes.append({"key": lane_key, "label": lane_label, "count": lane_count})
+
+        return {
+            "run_id": clean_run_id,
+            "run_metadata": _serialize_run_registry_metadata(run_row),
+            "contract": {
+                "source_type": "watch_replay_board",
+                "ordering": "created_at_asc_id_asc",
+                "run_scope": "event_metadata.runtime.run_id",
+                "moment_policy": "explicit_watch_signal_event_types",
+                "excluded_generic_event_types": ["direct_message", "forum_post", "forum_reply", "work", "idle", "vote", "processing_error"],
+            },
+            "time_window": {
+                "start_utc": run_started_at.isoformat(),
+                "end_utc": run_ended_at.isoformat(),
+                "source": "simulation_runs_registry",
+            },
+            "provenance": {
+                "run_id": clean_run_id,
+                "time_window": {
+                    "start_utc": run_started_at.isoformat(),
+                    "end_utc": run_ended_at.isoformat(),
+                },
+                "verification_state": "verified" if scoped_rows else "partial",
+                "verification_source": "event_metadata_runtime_run_id",
+            },
+            "activity": _build_watch_activity(scoped_rows),
+            "bucket_minutes": bucket_minutes,
+            "bucket_count": len(buckets),
+            "count": len(moments),
+            "lanes": lanes,
+            "items": moments,
+            "buckets": buckets,
         }
     finally:
         db.close()

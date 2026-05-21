@@ -131,6 +131,8 @@ function getBriefHref(runId) {
 }
 
 function getEventLane(item) {
+  const explicitLane = cleanString(item?.lane)
+  if (LANE_META[explicitLane]) return explicitLane
   const eventType = cleanString(item?.event_type)
   const category = cleanString(item?.category)
 
@@ -361,10 +363,7 @@ export default function WatchReplay() {
   const [runId, setRunId] = useState(initialRunId)
   const archiveDefaultApplied = useRef(false)
   const [archive, setArchive] = useState(null)
-  const [runDetail, setRunDetail] = useState(null)
-  const [playback, setPlayback] = useState(null)
-  const [density, setDensity] = useState(null)
-  const [story, setStory] = useState(null)
+  const [watchData, setWatchData] = useState(null)
   const [loading, setLoading] = useState(Boolean(initialRunId))
   const [error, setError] = useState('')
 
@@ -401,25 +400,11 @@ export default function WatchReplay() {
     async function loadRun() {
       setLoading(true)
       setError('')
-      const [detailResult, playbackResult, densityResult, storyResult] = await Promise.allSettled([
-        api.getRunDetail(runId, 96, 24, 45),
-        api.getRunPlayback(runId, 120, 420),
-        api.getPlotTurnReplay(96, 45, 60, 240, runId),
-        api.getReplayStory(96, 45, 10, runId),
-      ])
+      const payload = await api.getRunWatch(runId, 60, 240).catch(() => null)
       if (cancelled) return
 
-      const detailPayload = detailResult.status === 'fulfilled' ? detailResult.value : null
-      const playbackPayload = playbackResult.status === 'fulfilled' ? playbackResult.value : null
-      const densityPayload = densityResult.status === 'fulfilled' ? densityResult.value : null
-      const storyPayload = storyResult.status === 'fulfilled' ? storyResult.value : null
-
-      setRunDetail(detailPayload && typeof detailPayload === 'object' ? detailPayload : null)
-      setPlayback(playbackPayload && typeof playbackPayload === 'object' ? playbackPayload : null)
-      setDensity(densityPayload && typeof densityPayload === 'object' ? densityPayload : null)
-      setStory(storyPayload && typeof storyPayload === 'object' ? storyPayload : null)
-
-      if (!detailPayload && !playbackPayload && !densityPayload && !storyPayload) {
+      setWatchData(payload && typeof payload === 'object' ? payload : null)
+      if (!payload || typeof payload !== 'object') {
         setError('Watch replay data could not be loaded.')
       }
       setLoading(false)
@@ -433,17 +418,15 @@ export default function WatchReplay() {
 
   const archiveItems = Array.isArray(archive?.items) ? archive.items : []
   const runSchedule = getScheduleEntryForRunId(runId) || scheduledRun
-  const playbackItems = useMemo(() => Array.isArray(playback?.items) ? playback.items : [], [playback])
-  const densityItems = useMemo(() => Array.isArray(density?.items) ? density.items : [], [density])
-  const storyItems = useMemo(() => Array.isArray(story?.items) ? story.items : [], [story])
+  const watchItems = useMemo(() => Array.isArray(watchData?.items) ? watchData.items : [], [watchData])
   const visibleMoments = useMemo(
-    () => uniqueMoments([...storyItems, ...densityItems, ...playbackItems].filter(isVisibleMoment)),
-    [densityItems, playbackItems, storyItems],
+    () => uniqueMoments(watchItems.filter(isVisibleMoment)),
+    [watchItems],
   )
-  const window = useMemo(() => getRunWindow(runDetail, playback, density), [density, playback, runDetail])
+  const window = useMemo(() => getRunWindow(watchData, null, watchData), [watchData])
   const densityBuckets = useMemo(
-    () => buildDensityBuckets(density, visibleMoments, window),
-    [density, visibleMoments, window],
+    () => buildDensityBuckets(watchData, visibleMoments, window),
+    [visibleMoments, watchData, window],
   )
   const selectedBucket = useMemo(() => {
     let linkedBucket = null
@@ -463,7 +446,7 @@ export default function WatchReplay() {
   )
   const laneRows = useMemo(() => buildLaneRows(visibleMoments), [visibleMoments])
   const maxBucketCount = Math.max(1, ...densityBuckets.map((bucket) => Number(bucket.linked_moment_count || 0)))
-  const activity = runDetail?.activity || {}
+  const activity = watchData?.activity || {}
   const cleanRunId = cleanString(runId)
   const unavailableError = cleanRunId ? '' : 'No completed public run is available for the watch board.'
 

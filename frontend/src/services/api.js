@@ -300,6 +300,17 @@ class APIService {
         }
     }
 
+    async getRunWatch(runId, bucketMinutes = 60, limit = 240) {
+        const cleanRunId = String(runId || '').trim()
+        if (!cleanRunId) {
+            throw new Error('runId is required')
+        }
+        const params = new URLSearchParams()
+        params.append('bucket_minutes', String(bucketMinutes))
+        params.append('limit', String(limit))
+        return this.fetch(`/api/analytics/runs/${encodeURIComponent(cleanRunId)}/watch?${params.toString()}`)
+    }
+
     async getLatestSummary(runId = '') {
         const params = new URLSearchParams()
         const cleanRunId = String(runId || '').trim()

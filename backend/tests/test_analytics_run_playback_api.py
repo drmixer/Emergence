@@ -331,6 +331,103 @@ def test_replay_story_excludes_routine_work_even_when_salient(playback_session_f
     assert [item["chapter"] for item in body["items"]] == ["Trigger", "Escalation", "Outcome"]
 
 
+def test_run_watch_board_returns_explicit_signal_lanes(playback_session_factory, monkeypatch):
+    session = playback_session_factory()
+    run_started_at = datetime(2026, 4, 20, 10, 0, 0, tzinfo=timezone.utc)
+    run_ended_at = run_started_at + timedelta(hours=3)
+
+    agent = Agent(
+        agent_number=8,
+        display_name="Agent #8",
+        model_type="or_gpt_oss_20b_free",
+        tier=1,
+        personality_type="neutral",
+        status="active",
+        system_prompt="{}",
+    )
+    session.add(agent)
+    session.flush()
+
+    session.add(
+        SimulationRun(
+            run_id="run-watch-board",
+            run_mode="real",
+            protocol_version="protocol_v1",
+            run_class="special_exploratory",
+            started_at=run_started_at,
+            ended_at=run_ended_at,
+        )
+    )
+
+    def event_row(event_type: str, minutes: int, description: str, metadata: dict | None = None) -> Event:
+        payload = {"runtime": {"run_id": "run-watch-board"}}
+        if metadata:
+            payload.update(metadata)
+        return Event(
+            agent_id=agent.id,
+            event_type=event_type,
+            description=description,
+            created_at=run_started_at + timedelta(minutes=minutes),
+            event_metadata=payload,
+        )
+
+    session.add_all(
+        [
+            event_row("direct_message", 2, "Generic private coordination"),
+            event_row("forum_reply", 3, "Generic reply pile-on"),
+            event_row("work", 4, "Routine work"),
+            event_row("create_proposal", 15, "Agent #8 created proposal: Aid Floor"),
+            event_row("trade", 35, "Agent #8 traded 5 food to Agent #9"),
+            event_row("request_aid", 70, "Agent #9 requested 2 food from Agent #8"),
+            event_row("law_passed", 110, "Law passed", {"title": "Aid Floor"}),
+            event_row("agent_died", 150, "Agent #4 died"),
+            Event(
+                agent_id=agent.id,
+                event_type="law_passed",
+                description="Other run law",
+                created_at=run_started_at + timedelta(minutes=120),
+                event_metadata={"runtime": {"run_id": "other-run"}, "title": "Other Law"},
+            ),
+        ]
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(analytics_api, "SessionLocal", playback_session_factory)
+
+    with _make_client() as client:
+        response = client.get("/api/analytics/runs/run-watch-board/watch?bucket_minutes=60")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["contract"]["source_type"] == "watch_replay_board"
+    assert body["contract"]["moment_policy"] == "explicit_watch_signal_event_types"
+    assert body["activity"]["total_events"] == 8
+    assert body["activity"]["direct_messages"] == 1
+    assert body["activity"]["forum_actions"] == 1
+    assert body["activity"]["laws_passed"] == 1
+    assert body["activity"]["deaths"] == 1
+
+    event_types = [item["event_type"] for item in body["items"]]
+    assert event_types == ["create_proposal", "trade", "request_aid", "law_passed", "agent_died"]
+    assert "direct_message" not in event_types
+    assert "forum_reply" not in event_types
+    assert [item["lane"] for item in body["items"]] == [
+        "governance",
+        "aid_trade",
+        "aid_trade",
+        "governance",
+        "survival",
+    ]
+    assert body["bucket_count"] == 3
+    assert [bucket["linked_moment_count"] for bucket in body["buckets"]] == [2, 2, 1]
+    assert body["buckets"][0]["representative"]["event_type"] == "create_proposal"
+    lane_counts = {lane["key"]: lane["count"] for lane in body["lanes"]}
+    assert lane_counts["governance"] == 2
+    assert lane_counts["aid_trade"] == 2
+    assert lane_counts["survival"] == 1
+
+
 def test_run_detail_is_strictly_run_scoped_and_end_clamped(playback_session_factory, monkeypatch):
     session = playback_session_factory()
     run_started_at = datetime(2026, 4, 20, 2, 0, 0, tzinfo=timezone.utc)

@@ -6,10 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const { api, trackKpiEventOnce } = vi.hoisted(() => ({
   api: {
     getRunsArchive: vi.fn(),
-    getRunDetail: vi.fn(),
-    getRunPlayback: vi.fn(),
-    getPlotTurnReplay: vi.fn(),
-    getReplayStory: vi.fn(),
+    getRunWatch: vi.fn(),
   },
   trackKpiEventOnce: vi.fn(),
 }))
@@ -60,7 +57,7 @@ beforeEach(() => {
   api.getRunsArchive.mockResolvedValue({
     items: [{ run_id: 'real-20260519T063000Z' }],
   })
-  api.getRunDetail.mockResolvedValue({
+  api.getRunWatch.mockResolvedValue({
     run_id: 'real-20260519T063000Z',
     run_metadata: { run_class: 'special_exploratory' },
     activity: {
@@ -80,8 +77,6 @@ beforeEach(() => {
         end_utc: '2026-05-20T04:32:21.000Z',
       },
     },
-  })
-  api.getRunPlayback.mockResolvedValue({
     items: [
       makeMoment({
         event_id: 1,
@@ -102,10 +97,6 @@ beforeEach(() => {
         created_at: '2026-05-19T07:30:00.000Z',
       }),
       makeMoment(),
-    ],
-  })
-  api.getPlotTurnReplay.mockResolvedValue({
-    items: [
       makeMoment(),
       makeMoment({
         event_id: 3,
@@ -115,6 +106,15 @@ beforeEach(() => {
         description: 'An agent asked for food support.',
         salience: 80,
         created_at: '2026-05-19T11:30:00.000Z',
+      }),
+      makeMoment({
+        event_id: 4,
+        event_type: 'agent_died',
+        category: 'crisis',
+        title: 'Permanent Death',
+        description: 'An agent died after depletion.',
+        salience: 95,
+        created_at: '2026-05-19T13:30:00.000Z',
       }),
     ],
     buckets: [
@@ -134,20 +134,6 @@ beforeEach(() => {
       },
     ],
   })
-  api.getReplayStory.mockResolvedValue({
-    items: [
-      makeMoment(),
-      makeMoment({
-        event_id: 4,
-        event_type: 'agent_died',
-        category: 'crisis',
-        title: 'Permanent Death',
-        description: 'An agent died after depletion.',
-        salience: 95,
-        created_at: '2026-05-19T13:30:00.000Z',
-      }),
-    ],
-  })
 })
 
 afterEach(() => {
@@ -164,8 +150,7 @@ describe('WatchReplay', () => {
     expect(screen.getByText(/15,538/i)).toBeInTheDocument()
     expect(screen.getByText(/7 dormancy events/i)).toBeInTheDocument()
 
-    expect(api.getRunDetail).toHaveBeenCalledWith('real-20260519T063000Z', 96, 24, 45)
-    expect(api.getPlotTurnReplay).toHaveBeenCalledWith(96, 45, 60, 240, 'real-20260519T063000Z')
+    expect(api.getRunWatch).toHaveBeenCalledWith('real-20260519T063000Z', 60, 240)
 
     const spike = screen.getAllByRole('button', { name: /Select 1 event timeline bucket/i })[0]
     fireEvent.click(spike)
@@ -220,7 +205,14 @@ describe('WatchReplay', () => {
   })
 
   it('uses linked visible moments for density counts and disables true-empty buckets', async () => {
-    api.getPlotTurnReplay.mockResolvedValue({
+    api.getRunWatch.mockResolvedValue({
+      activity: {},
+      provenance: {
+        time_window: {
+          start_utc: '2026-05-19T06:30:00.000Z',
+          end_utc: '2026-05-19T12:30:00.000Z',
+        },
+      },
       items: [
         makeMoment(),
         makeMoment({
@@ -281,7 +273,14 @@ describe('WatchReplay', () => {
   })
 
   it('renders selected lane moments even when they fall outside the default lane preview', async () => {
-    api.getPlotTurnReplay.mockResolvedValue({
+    api.getRunWatch.mockResolvedValue({
+      activity: {},
+      provenance: {
+        time_window: {
+          start_utc: '2026-05-19T06:30:00.000Z',
+          end_utc: '2026-05-19T12:30:00.000Z',
+        },
+      },
       items: [
         makeMoment({
           event_id: 30,
