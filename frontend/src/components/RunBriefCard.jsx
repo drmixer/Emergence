@@ -26,6 +26,11 @@ function RunStatusIcon({ status }) {
   return <Icon size={18} />
 }
 
+function getReportLinkLabel(run) {
+  const reportHref = String(run?.links?.report || '')
+  return reportHref.includes('/viewer_brief') ? 'Emergence Brief' : 'Story Report'
+}
+
 function trackRunPathClick(run, surface, target, href) {
   trackKpiEvent('run_path_click', {
     runId: run?.runId || run?.id || run?.label,
@@ -90,6 +95,7 @@ function RunBriefActions({ run, mode, analyticsSurface }) {
   }
 
   if (run.status === 'Completed') {
+    const reportLabel = getReportLinkLabel(run)
     return (
       <div className="run-brief-actions">
         <ScheduleLink to={run.links?.recap} run={run} surface={analyticsSurface} target="recap" primary>
@@ -102,7 +108,7 @@ function RunBriefActions({ run, mode, analyticsSurface }) {
         </ScheduleLink>
         <ScheduleLink to={run.links?.report} run={run} surface={analyticsSurface} target="story_report">
           <FileSearch size={14} />
-          Story Report
+          {reportLabel}
         </ScheduleLink>
       </div>
     )

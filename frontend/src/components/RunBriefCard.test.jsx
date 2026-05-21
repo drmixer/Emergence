@@ -55,6 +55,10 @@ describe('RunBriefCard', () => {
       '/runs/real-20260517T220144Z'
     )
     expect(screen.getByText(/Start with recap/i)).toBeInTheDocument()
+    expect(within(actions).getByRole('link', { name: /Story Report/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260517T220144Z/reports/approachable_report?format=markdown'
+    )
     expect(screen.getByText(/Read the story report/i)).toBeInTheDocument()
     expect(screen.getAllByText(/not finished research/i).length).toBeGreaterThan(0)
   })

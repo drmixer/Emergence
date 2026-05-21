@@ -21,6 +21,7 @@ describe('run schedule', () => {
       track: 'Public Canary',
       runClass: 'special_exploratory',
       status: 'Upcoming',
+      declaredCondition: 'real_governance_readability_canary_k13',
       claimBoundary: 'Exploratory public canary; non-claim-bearing.',
     })
     expect(nextRun.declaredQuestion).toMatch(/proposal discussion/i)
@@ -102,6 +103,7 @@ describe('run schedule', () => {
       claimBoundary: 'Exploratory public canary; non-claim-bearing.',
     })
     expect(run.links.evidence).toBe('/runs/real-20260522T063000Z')
+    expect(run.links.report).toBe('/runs/real-20260522T063000Z/reports/viewer_brief?format=markdown')
   })
 
   it('promotes the matching scheduled card when the current run metadata names K13', () => {
@@ -122,6 +124,7 @@ describe('run schedule', () => {
       runId: 'real-20260522T063000Z',
       declaredQuestion: 'Can proposal discussion, voting, and passed laws stay readable without collapsing into agreement pile-on noise?',
     })
+    expect(activeRun.links.report).toBe('/runs/real-20260522T063000Z/reports/viewer_brief?format=markdown')
 
     const summary = getCalendarSummaryRuns({ activeRun })
     expect(summary.primaryLabel).toBe('Current live run')

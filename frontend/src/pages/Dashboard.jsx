@@ -400,7 +400,6 @@ export default function Dashboard() {
                     title="No active run"
                     message="No simulation is live right now. Check the run calendar for upcoming runs; completed-run evidence stays in the archive."
                     lastCompletedRunId={lastCompletedRunId}
-                    showCompletedRunHandoff={false}
                 />
             )}
 
