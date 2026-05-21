@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +25,7 @@ from app.services.report_artifacts import (
 from app.services.runtime_config import runtime_config_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 RUN_ARTIFACT_TYPES = (
     "technical_report",
@@ -153,6 +156,28 @@ def _viewer_brief_archive_teaser(payload: Any) -> dict[str, str]:
     return teaser
 
 
+def _load_archive_json_artifact(row: RunReportArtifact) -> dict[str, Any] | None:
+    """Read archive-list JSON without regenerating stale artifacts on the request path."""
+    try:
+        artifact_path = resolve_registered_artifact_path(str(row.artifact_path or ""))
+    except ValueError:
+        return None
+    if not artifact_path.exists() or not artifact_path.is_file():
+        return None
+    try:
+        payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(
+            "Unable to parse archive artifact JSON run_id=%s type=%s path=%s: %s",
+            str(row.run_id or ""),
+            str(row.artifact_type or ""),
+            str(artifact_path),
+            exc,
+        )
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _resolve_download_path(raw_path: str) -> Path:
     try:
         artifact_path = resolve_registered_artifact_path(str(raw_path or ""))
@@ -269,7 +294,7 @@ def list_archived_runs(
         clean_run_id = str(row.run_id or "").strip()
         if not clean_run_id or clean_run_id == active_run_id or clean_run_id in summary_by_run:
             continue
-        payload = load_json_artifact(db, row)
+        payload = _load_archive_json_artifact(row)
         if not isinstance(payload, dict):
             continue
         metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
@@ -353,7 +378,7 @@ def list_archived_runs(
         if str(row.artifact_type) == "viewer_brief" and artifact_format == "json":
             summary = summary_by_run.get(str(row.run_id))
             if summary is not None:
-                teaser = _viewer_brief_archive_teaser(load_json_artifact(db, row))
+                teaser = _viewer_brief_archive_teaser(_load_archive_json_artifact(row))
                 if teaser:
                     summary.update(teaser)
 

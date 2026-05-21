@@ -457,6 +457,73 @@ def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_cl
     assert payload["items"][0]["artifacts"]["viewer_brief"]["formats"] == ["json"]
 
 
+def test_list_archived_runs_skips_missing_summary_without_regeneration(reports_client, monkeypatch):
+    client, db_session, tmp_dir = reports_client
+
+    good_summary_file = tmp_dir / "runs" / "run-good" / "run_report_summary.json"
+    good_summary_file.parent.mkdir(parents=True, exist_ok=True)
+    good_summary_file.write_text(
+        """
+{
+  "run_id": "run-good",
+  "condition_name": "baseline_v2",
+  "generated_at_utc": "2026-04-08T03:30:00+00:00",
+  "run_started_at": "2026-04-08T01:00:00+00:00",
+  "run_ended_at": "2026-04-08T03:00:00+00:00",
+  "metrics": {
+    "total_events": 420,
+    "llm_calls": 88,
+    "deaths": 4,
+    "laws_passed": 3,
+    "estimated_cost_usd": 1.2345
+  }
+}
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    missing_summary_file = tmp_dir / "runs" / "run-missing" / "run_report_summary.json"
+
+    db_session.add_all(
+        [
+            RunReportArtifact(
+                run_id="run-good",
+                artifact_type="run_summary",
+                artifact_format="json",
+                artifact_path=str(good_summary_file),
+                status="completed",
+            ),
+            RunReportArtifact(
+                run_id="run-missing",
+                artifact_type="run_summary",
+                artifact_format="json",
+                artifact_path=str(missing_summary_file),
+                status="completed",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        reports_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: (False if key == "SIMULATION_ACTIVE" else (True if key == "SIMULATION_PAUSED" else None)),
+    )
+    monkeypatch.setattr(
+        reports_api,
+        "load_json_artifact",
+        lambda *_args, **_kwargs: pytest.fail("archive listing must not regenerate artifacts"),
+    )
+
+    with client:
+        response = client.get("/api/reports/archive/runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["items"][0]["run_id"] == "run-good"
+
+
 def test_list_archived_runs_hides_tuning_runs_by_default(reports_client, monkeypatch):
     client, db_session, tmp_dir = reports_client
 
