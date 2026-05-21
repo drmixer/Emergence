@@ -3010,6 +3010,11 @@ def _build_viewer_brief_sections(
         description = str(moment.get("description") or "").strip()
         if description:
             moment_lines.append(f"{event_type}: {description}")
+    lead_moment_text = (
+        moment_lines[0].split(": ", 1)[1]
+        if moment_lines and ": " in moment_lines[0]
+        else (moment_lines[0] if moment_lines else "No non-routine lead moment was selected for this run brief.")
+    )
     lead_moment = moment_lines[0] if moment_lines else "No non-routine lead moment was selected for this run brief."
     headline = (
         f"Run {run_id}: {pressure_text.title()} And {laws:,} Passed Law(s)"
@@ -3020,9 +3025,12 @@ def _build_viewer_brief_sections(
         f"No schedule-declared public question was found for run `{run_id}`; keep this brief bounded to observed run evidence."
     )
     lead_claim = (
-        f"For the declared viewer-comprehension question, the run is easiest to follow through {pressure_text}, "
-        f"{_format_count_phrase(proposals, 'proposal')}, {_format_count_phrase(votes, 'vote')}, "
-        f"and {_format_count_phrase(laws, 'passed law')}. {lead_moment}"
+        f"For the declared viewer-comprehension question, the run is easiest to follow through survival pressure "
+        f"({_format_count_phrase(deaths, 'death')}, {_format_count_phrase(dormant, 'dormancy event')}, "
+        f"and {_format_count_phrase(revived, 'revival')}), governance activity "
+        f"({_format_count_phrase(proposals, 'proposal')}, {_format_count_phrase(votes, 'vote')}, "
+        f"and {_format_count_phrase(laws, 'passed law')}), and selected evidence moments. "
+        f"One lead moment: {lead_moment_text}"
         if declared_question
         else f"The run's accessible story starts with {pressure_text}. {lead_moment}"
     )
