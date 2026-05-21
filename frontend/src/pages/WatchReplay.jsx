@@ -9,6 +9,7 @@ import {
   Handshake,
   Hash,
   Map as MapIcon,
+  Newspaper,
   Radio,
   Scale,
   ShieldAlert,
@@ -125,13 +126,17 @@ function getEvidenceHref(runId, eventId = 0) {
   return `/runs/${safeRunId}${eventId > 0 ? `?event=${encodeURIComponent(String(eventId))}` : ''}`
 }
 
+function getBriefHref(runId) {
+  return `/runs/${encodeURIComponent(runId)}/reports/viewer_brief?format=markdown`
+}
+
 function getEventLane(item) {
   const eventType = cleanString(item?.event_type)
   const category = cleanString(item?.category)
 
   if (['agent_died', 'became_dormant', 'agent_revived', 'awakened'].includes(eventType)) return 'survival'
   if (['law_passed', 'proposal_resolved', 'create_proposal', 'vote_enforcement'].includes(eventType) || category === 'governance') return 'governance'
-  if (['trade', 'request_aid', 'refuse_aid'].includes(eventType) || ['cooperation', 'alliance'].includes(category)) return 'aid_trade'
+  if (['trade', 'request_aid', 'aid_request_received', 'refuse_aid', 'aid_refusal_received', 'reserve_aid'].includes(eventType)) return 'aid_trade'
   if (
     category === 'conflict'
     || [
@@ -164,7 +169,7 @@ function isVisibleMoment(item) {
   const category = cleanString(item?.category)
   if (ROUTINE_EVENT_TYPES.has(eventType)) return false
   if (['survival', 'governance', 'aid_trade', 'public_order', 'system'].includes(getEventLane(item))) return true
-  if (['crisis', 'conflict', 'governance', 'cooperation', 'alliance'].includes(category)) return true
+  if (['crisis', 'conflict', 'governance'].includes(category)) return true
   return Number(item?.salience || 0) >= 70
 }
 
@@ -536,6 +541,10 @@ export default function WatchReplay() {
           <Link className="btn btn-secondary" to="/archive">Archive</Link>
           {cleanRunId && (
             <>
+              <Link className="btn btn-secondary" to={getBriefHref(cleanRunId)}>
+                <Newspaper size={14} />
+                Brief
+              </Link>
               <Link className="btn btn-secondary" to={getReplayHref(cleanRunId)}>
                 <TimerReset size={14} />
                 Replay
@@ -598,7 +607,10 @@ export default function WatchReplay() {
               </div>
               <p>{densityBuckets.length} buckets · {visibleMoments.length} linked moments</p>
             </div>
-            <div className="watch-density-bars">
+            <div
+              className="watch-density-bars"
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, densityBuckets.length)}, minmax(10px, 1fr))` }}
+            >
               {densityBuckets.map((bucket) => {
                 const count = Number(bucket.linked_moment_count || 0)
                 const representative = bucket.representative

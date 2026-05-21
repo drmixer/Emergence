@@ -184,6 +184,10 @@ describe('WatchReplay', () => {
       'href',
       '/runs/real-20260519T063000Z?event=2',
     )
+    expect(screen.getByRole('link', { name: /Brief/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
+    )
 
     expect(screen.getByText(/Moments inside the selected window/i)).toBeInTheDocument()
     expect(screen.getAllByText(/0 in selected window \/ 1 total/i).length).toBeGreaterThan(0)
@@ -202,6 +206,7 @@ describe('WatchReplay', () => {
     expect(within(lanes).getByText(/Aid \/ Trade/i)).toBeInTheDocument()
     expect(within(lanes).queryByText(/^Work$/i)).not.toBeInTheDocument()
     expect(within(lanes).queryByText(/^Vote$/i)).not.toBeInTheDocument()
+    expect(within(lanes).queryByText(/^Direct Message$/i)).not.toBeInTheDocument()
 
     const lawMoment = within(lanes).getByText(/Law Passed/i).closest('.watch-moment')
     expect(within(lawMoment).getByRole('link', { name: /Replay/i })).toHaveAttribute(
@@ -216,7 +221,18 @@ describe('WatchReplay', () => {
 
   it('uses linked visible moments for density counts and disables true-empty buckets', async () => {
     api.getPlotTurnReplay.mockResolvedValue({
-      items: [makeMoment()],
+      items: [
+        makeMoment(),
+        makeMoment({
+          event_id: 9,
+          event_type: 'direct_message',
+          category: 'cooperation',
+          title: 'Direct Message',
+          description: 'A generic private message should not become an Aid / Trade watch spike.',
+          salience: 39,
+          created_at: '2026-05-19T10:30:00.000Z',
+        }),
+      ],
       buckets: [
         {
           index: 0,
@@ -239,10 +255,13 @@ describe('WatchReplay', () => {
 
     const linkedBucket = await screen.findByRole('button', { name: /Select 1 event timeline bucket/i })
     const emptyBuckets = screen.getAllByRole('button', { name: /Select 0 event timeline bucket/i })
+    const densityBars = linkedBucket.closest('.watch-density-bars')
 
     expect(linkedBucket).not.toBeDisabled()
+    expect(densityBars).toHaveStyle({ gridTemplateColumns: 'repeat(2, minmax(10px, 1fr))' })
     expect(emptyBuckets[0]).toBeDisabled()
     expect(screen.queryByRole('button', { name: /Select 12 event timeline bucket/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Direct Message$/i)).not.toBeInTheDocument()
   })
 
   it('selects a watch window from an event deep link', async () => {
