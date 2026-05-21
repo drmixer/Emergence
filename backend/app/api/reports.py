@@ -156,6 +156,31 @@ def _viewer_brief_archive_teaser(payload: Any) -> dict[str, str]:
     return teaser
 
 
+def _fallback_archive_summary(row: RunReportArtifact) -> dict[str, Any]:
+    metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+    updated_at = row.updated_at.isoformat() if row.updated_at else None
+    return {
+        "run_id": str(row.run_id or "").strip(),
+        "condition_name": str(metadata.get("condition_name") or "").strip() or None,
+        "season_number": metadata.get("season_number"),
+        "run_class": None,
+        "replicate_count": int(metadata.get("replicate_count") or 1),
+        "generated_at_utc": updated_at,
+        "run_started_at": None,
+        "run_ended_at": updated_at,
+        "duration_hours": None,
+        "metrics": {
+            "total_events": 0,
+            "llm_calls": 0,
+            "deaths": 0,
+            "laws_passed": 0,
+            "estimated_cost_usd": 0.0,
+        },
+        "sort_key": row.updated_at.timestamp() if row.updated_at else 0,
+        "artifact_summary_missing": True,
+    }
+
+
 def _load_archive_json_artifact(row: RunReportArtifact) -> dict[str, Any] | None:
     """Read archive-list JSON without regenerating stale artifacts on the request path."""
     try:
@@ -296,6 +321,7 @@ def list_archived_runs(
             continue
         payload = _load_archive_json_artifact(row)
         if not isinstance(payload, dict):
+            summary_by_run[clean_run_id] = _fallback_archive_summary(row)
             continue
         metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
         run_ended_at = payload.get("run_ended_at") or payload.get("generated_at_utc") or (

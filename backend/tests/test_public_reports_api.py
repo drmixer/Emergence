@@ -457,7 +457,7 @@ def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_cl
     assert payload["items"][0]["artifacts"]["viewer_brief"]["formats"] == ["json"]
 
 
-def test_list_archived_runs_skips_missing_summary_without_regeneration(reports_client, monkeypatch):
+def test_list_archived_runs_falls_back_for_missing_summary_without_regeneration(reports_client, monkeypatch):
     client, db_session, tmp_dir = reports_client
 
     good_summary_file = tmp_dir / "runs" / "run-good" / "run_report_summary.json"
@@ -499,6 +499,7 @@ def test_list_archived_runs_skips_missing_summary_without_regeneration(reports_c
                 artifact_format="json",
                 artifact_path=str(missing_summary_file),
                 status="completed",
+                metadata_json={"condition_name": "fallback_condition", "replicate_count": 2},
             ),
         ]
     )
@@ -520,8 +521,13 @@ def test_list_archived_runs_skips_missing_summary_without_regeneration(reports_c
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["count"] == 1
-    assert payload["items"][0]["run_id"] == "run-good"
+    assert payload["count"] == 2
+    rows = {item["run_id"]: item for item in payload["items"]}
+    assert rows["run-good"]["summary"]["metrics"]["total_events"] == 420
+    assert rows["run-missing"]["summary"]["artifact_summary_missing"] is True
+    assert rows["run-missing"]["summary"]["condition_name"] == "fallback_condition"
+    assert rows["run-missing"]["summary"]["replicate_count"] == 2
+    assert rows["run-missing"]["summary"]["metrics"]["total_events"] == 0
 
 
 def test_list_archived_runs_hides_tuning_runs_by_default(reports_client, monkeypatch):
