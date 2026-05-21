@@ -434,7 +434,7 @@ The brief reports only supplied aid, trade, and conflict counts.
 Repeated proposal/forum waves became one grouped pattern.
 
 ## What To Watch Next
-Watch whether newly passed laws shape the next run.
+Watch whether a future run remains readable live.
 """.strip()
 
     payload = run_reports._build_viewer_brief_payload(
@@ -499,6 +499,48 @@ The section keeps watchpoints concrete.
     with pytest.raises(ValueError, match="different declared question"):
         run_reports._build_viewer_brief_payload(
             snapshot=snapshot,
+            status_label=run_reports.STATUS_OBSERVATIONAL,
+            evidence_completeness=run_reports.EVIDENCE_FULL,
+            condition_name="viewer_canary_v1",
+            season_number=None,
+            replicate_count=1,
+            generated_brief_markdown=generated_markdown,
+        )
+
+
+def test_viewer_brief_rejects_unsupported_comparative_wording():
+    generated_markdown = """
+## Headline
+Scarcity pressure shaped the run.
+
+## Run Question
+Can viewers follow the run?
+
+## The Lead
+The run showed a significant increase in clarity for viewers.
+
+## What Changed
+There was an increase in aid requests during the run.
+
+## Who Fell
+The section uses supplied survival counts.
+
+## Governance Desk
+The section uses supplied governance counts.
+
+## Aid, Trade, and Conflict
+The section uses supplied social counts.
+
+## Strange But True
+The section names only supplied repeated-wave evidence.
+
+## What To Watch Next
+Watch whether the next run remains readable.
+""".strip()
+
+    with pytest.raises(ValueError, match="unsupported comparative"):
+        run_reports._build_viewer_brief_payload(
+            snapshot=_sample_snapshot(),
             status_label=run_reports.STATUS_OBSERVATIONAL,
             evidence_completeness=run_reports.EVIDENCE_FULL,
             condition_name="viewer_canary_v1",

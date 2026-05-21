@@ -843,6 +843,7 @@ def _viewer_brief_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
         "- Make it accessible for regular viewers who want to know what happened and why to come back.\n"
         "- Use only the mandatory counts below and the selected moments in the context JSON.\n"
         "- If a detail is not in the context, omit it.\n"
+        "- Do not say increased, decreased, improved, or streamlined unless the context gives a direct comparison.\n"
         "- Use the word agents for participants; do not call them entities.\n"
         "- For a completed run, say next run or future run, not next cycle or upcoming cycle.\n"
         "- Do not imply newly passed laws will affect a future run unless the context explicitly says they carry over.\n"
@@ -986,6 +987,20 @@ def _validate_generated_viewer_brief(*, markdown: str, declared_question: str) -
     ]
     if missing:
         raise ValueError(f"Gemini viewer brief generation missed required sections: {', '.join(missing)}")
+
+    normalized_body = _normalize_question_for_validation(markdown)
+    unsupported_phrases = [
+        "significant increase",
+        "increase in aid requests",
+        "streamlined narrative",
+        "newly passed laws impact",
+        "newly passed laws shape",
+        "remaining agents adapt",
+        "continued resource constraints",
+    ]
+    for phrase in unsupported_phrases:
+        if _normalize_question_for_validation(phrase) in normalized_body:
+            raise ValueError("Gemini viewer brief generation used unsupported comparative or carryover wording.")
 
     clean_declared = str(declared_question or "").strip()
     if not clean_declared:
