@@ -844,6 +844,7 @@ def _viewer_brief_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
         "- Use only the mandatory counts below and the selected moments in the context JSON.\n"
         "- If a detail is not in the context, omit it.\n"
         "- Do not say increased, decreased, improved, or streamlined unless the context gives a direct comparison.\n"
+        "- Say agents died when reporting deaths; do not euphemize this as ceased to function.\n"
         "- Use the word agents for participants; do not call them entities.\n"
         "- For a completed run, say next run or future run, not next cycle or upcoming cycle.\n"
         "- Do not imply newly passed laws will affect a future run unless the context explicitly says they carry over.\n"
@@ -993,6 +994,11 @@ def _validate_generated_viewer_brief(*, markdown: str, declared_question: str) -
         "significant increase",
         "increase in aid requests",
         "streamlined narrative",
+        "improved accessibility",
+        "improved the accessibility",
+        "cease to function",
+        "ceased to function",
+        "ceasing to function",
         "newly passed laws impact",
         "newly passed laws shape",
         "remaining agents adapt",

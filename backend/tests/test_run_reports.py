@@ -523,7 +523,7 @@ The run showed a significant increase in clarity for viewers.
 There was an increase in aid requests during the run.
 
 ## Who Fell
-The section uses supplied survival counts.
+Four agents ceased to function.
 
 ## Governance Desk
 The section uses supplied governance counts.
