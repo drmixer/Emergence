@@ -16,9 +16,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.models import RunReportArtifact, SimulationRun
+from app.services.condition_reports import (
+    _event_counts_for_run,
+    _llm_totals_for_run,
+    _resolve_run_window,
+)
 from app.services.report_artifacts import (
     ensure_artifact_path,
-    load_json_artifact,
     reports_root,
     resolve_registered_artifact_path,
 )
@@ -181,6 +185,29 @@ def _fallback_archive_summary(row: RunReportArtifact) -> dict[str, Any]:
     }
 
 
+def _fallback_archive_metrics(db: Session, *, run_id: str, run_row: SimulationRun | None) -> dict[str, Any]:
+    try:
+        started_at, ended_at = _resolve_run_window(db, run_id=run_id, run_row=run_row)
+        llm = _llm_totals_for_run(db, run_id=run_id, started_at=started_at, ended_at=ended_at)
+        events = _event_counts_for_run(db, run_id=run_id, started_at=started_at, ended_at=ended_at)
+    except Exception as exc:
+        logger.warning("Unable to collect archive fallback metrics for run_id=%s: %s", run_id, exc)
+        return {
+            "total_events": 0,
+            "llm_calls": 0,
+            "deaths": 0,
+            "laws_passed": 0,
+            "estimated_cost_usd": 0.0,
+        }
+    return {
+        "total_events": int(sum(events.values())),
+        "llm_calls": int(llm.get("calls") or 0),
+        "deaths": int(events.get("agent_died", 0)),
+        "laws_passed": int(events.get("law_passed", 0)),
+        "estimated_cost_usd": float(llm.get("estimated_cost_usd") or 0.0),
+    }
+
+
 def _merge_run_metadata_into_archive_summary(summary: dict[str, Any], row: SimulationRun | None) -> None:
     if row is None or not summary.get("artifact_summary_missing"):
         return
@@ -194,6 +221,18 @@ def _merge_run_metadata_into_archive_summary(summary: dict[str, Any], row: Simul
         summary["sort_key"] = row.ended_at.timestamp()
     elif row.started_at:
         summary["sort_key"] = row.started_at.timestamp()
+
+
+def _merge_db_metrics_into_archive_summary(
+    db: Session,
+    *,
+    summary: dict[str, Any],
+    run_id: str,
+    run_row: SimulationRun | None,
+) -> None:
+    if not summary.get("artifact_summary_missing"):
+        return
+    summary["metrics"] = _fallback_archive_metrics(db, run_id=run_id, run_row=run_row)
 
 
 def _load_archive_json_artifact(row: RunReportArtifact) -> dict[str, Any] | None:
@@ -428,6 +467,7 @@ def list_archived_runs(
     for run_id, summary in summary_by_run.items():
         run_row = run_registry.get(run_id)
         _merge_run_metadata_into_archive_summary(summary, run_row)
+        _merge_db_metrics_into_archive_summary(db, summary=summary, run_id=run_id, run_row=run_row)
         is_tuning = bool(
             run_row
             and bool(run_row.protocol_deviation)

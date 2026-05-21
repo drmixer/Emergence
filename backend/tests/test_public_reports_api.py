@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.models.models import RunReportArtifact, SimulationRun
+from app.models.models import Event, RunReportArtifact, SimulationRun
 
 reports_api = importlib.import_module("app.api.reports")
 report_artifacts = importlib.import_module("app.services.report_artifacts")
@@ -525,7 +525,7 @@ def test_list_archived_runs_falls_back_for_missing_summary_without_regeneration(
     )
     monkeypatch.setattr(
         reports_api,
-        "load_json_artifact",
+        "ensure_artifact_path",
         lambda *_args, **_kwargs: pytest.fail("archive listing must not regenerate artifacts"),
     )
 
@@ -543,6 +543,117 @@ def test_list_archived_runs_falls_back_for_missing_summary_without_regeneration(
     assert rows["run-missing"]["summary"]["duration_hours"] == 3.0
     assert rows["run-missing"]["summary"]["replicate_count"] == 2
     assert rows["run-missing"]["summary"]["metrics"]["total_events"] == 0
+
+
+def test_list_archived_runs_uses_db_metrics_when_summary_artifact_is_missing(reports_client, monkeypatch):
+    client, db_session, tmp_dir = reports_client
+    bind = db_session.get_bind()
+    Event.__table__.create(bind=bind, checkfirst=True)
+    db_session.execute(
+        text(
+            """
+            CREATE TABLE llm_usage (
+              id INTEGER PRIMARY KEY,
+              run_id TEXT,
+              agent_id INTEGER,
+              provider TEXT,
+              success BOOLEAN,
+              fallback_used BOOLEAN,
+              total_tokens INTEGER,
+              estimated_cost_usd REAL,
+              error_type TEXT,
+              created_at TIMESTAMP
+            )
+            """
+        )
+    )
+
+    run_id = "run-db-fallback"
+    missing_summary_file = tmp_dir / "runs" / run_id / "run_report_summary.json"
+    started_at = datetime.fromisoformat("2026-04-10T01:00:00+00:00")
+    ended_at = datetime.fromisoformat("2026-04-10T04:00:00+00:00")
+    db_session.add_all(
+        [
+            SimulationRun(
+                run_id=run_id,
+                run_mode="real",
+                protocol_version="phase-2",
+                condition_name="registry_condition",
+                season_number=3,
+                run_class="standard_72h",
+                carryover_agent_count=0,
+                fresh_agent_count=50,
+                protocol_deviation=False,
+                started_at=started_at,
+                ended_at=ended_at,
+            ),
+            RunReportArtifact(
+                run_id=run_id,
+                artifact_type="run_summary",
+                artifact_format="json",
+                artifact_path=str(missing_summary_file),
+                status="completed",
+                metadata_json={"condition_name": "registry_condition"},
+            ),
+            Event(
+                event_type="law_passed",
+                description="Law passed",
+                event_metadata={"runtime": {"run_id": run_id}},
+                created_at=datetime.fromisoformat("2026-04-10T02:00:00+00:00"),
+            ),
+            Event(
+                event_type="agent_died",
+                description="Agent died",
+                event_metadata={"runtime": {"run_id": run_id}},
+                created_at=datetime.fromisoformat("2026-04-10T02:10:00+00:00"),
+            ),
+            Event(
+                event_type="work",
+                description="Work event",
+                event_metadata={"runtime": {"run_id": run_id}},
+                created_at=datetime.fromisoformat("2026-04-10T02:20:00+00:00"),
+            ),
+        ]
+    )
+    db_session.execute(
+        text(
+            """
+            INSERT INTO llm_usage (
+              run_id, agent_id, provider, success, fallback_used,
+              total_tokens, estimated_cost_usd, error_type, created_at
+            )
+            VALUES
+              (:run_id, 1, 'openai', 1, 0, 100, 0.10, NULL, :first_call_at),
+              (:run_id, 2, 'openai', 1, 0, 50, 0.05, NULL, :second_call_at)
+            """
+        ),
+        {
+            "run_id": run_id,
+            "first_call_at": datetime.fromisoformat("2026-04-10T02:00:00+00:00"),
+            "second_call_at": datetime.fromisoformat("2026-04-10T03:00:00+00:00"),
+        },
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        reports_api.runtime_config_service,
+        "get_effective_value_cached",
+        lambda key: (False if key == "SIMULATION_ACTIVE" else (True if key == "SIMULATION_PAUSED" else None)),
+    )
+
+    with client:
+        response = client.get("/api/reports/archive/runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    row = payload["items"][0]
+    assert row["run_id"] == run_id
+    assert row["summary"]["artifact_summary_missing"] is True
+    assert row["summary"]["metrics"]["total_events"] == 3
+    assert row["summary"]["metrics"]["llm_calls"] == 2
+    assert row["summary"]["metrics"]["deaths"] == 1
+    assert row["summary"]["metrics"]["laws_passed"] == 1
+    assert row["summary"]["metrics"]["estimated_cost_usd"] == pytest.approx(0.15)
 
 
 def test_list_archived_runs_hides_tuning_runs_by_default(reports_client, monkeypatch):
