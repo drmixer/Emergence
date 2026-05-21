@@ -404,6 +404,151 @@ def test_generate_post_run_story_markdown_uses_configured_gemini_route(monkeypat
     assert calls[0]["max_retries"] == 2
 
 
+def test_viewer_brief_payload_requires_news_sections_and_declared_question():
+    snapshot = _sample_snapshot()
+    snapshot["declared_question"] = "Do the new viewer/story/evidence changes make a live run easier to follow?"
+
+    generated_markdown = """
+## Headline
+Emergence run turns on readable evidence.
+
+## Run Question
+Do the new viewer/story/evidence changes make a live run easier to follow?
+
+## The Lead
+The run gave viewers a compact story to follow.
+
+## What Changed
+Proposal discussion and evidence links shaped the public recap.
+
+## Who Fell
+No deaths or dormancy events were listed in the supplied context.
+
+## Governance Desk
+The brief sticks to provided proposal, vote, and law counts.
+
+## Aid, Trade, and Conflict
+The brief reports only supplied aid, trade, and conflict counts.
+
+## Strange But True
+Repeated proposal/forum waves became one grouped pattern.
+
+## What To Watch Next
+Watch whether the next run stays readable live.
+""".strip()
+
+    payload = run_reports._build_viewer_brief_payload(
+        snapshot=snapshot,
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="viewer_canary_v1",
+        season_number=None,
+        replicate_count=1,
+        generated_brief_markdown=generated_markdown,
+    )
+
+    generation = payload["gemini_viewer_brief_generation"]
+    assert payload["viewer_brief_template_version"] == run_reports.VIEWER_BRIEF_TEMPLATE_VERSION
+    assert generation["provider"] == "gemini"
+    assert generation["fallback_allowed"] is False
+    assert "accessible public news brief" in generation["context"]["style_contract"]["format"]
+    assert "Do not invent events" in generation["system_prompt"]
+    assert "Run Question" in generation["user_prompt"]
+    assert payload["sections"][1]["paragraphs"] == [snapshot["declared_question"]]
+    assert payload["sections"][2]["generated_by"] == run_reports.VIEWER_BRIEF_LLM_GENERATOR_VERSION
+
+
+def test_viewer_brief_rejects_wrong_declared_question():
+    snapshot = _sample_snapshot()
+    snapshot["declared_question"] = "Do the new viewer/story/evidence changes make a live run easier to follow?"
+    generated_markdown = """
+## Headline
+Scarcity dominates the run.
+
+## Run Question
+Did scarcity pressure create durable governance?
+
+## The Lead
+The lead is grounded in the supplied context.
+
+## What Changed
+The reported changes are constrained to supplied evidence.
+
+## Who Fell
+The section repeats supplied survival counts.
+
+## Governance Desk
+The section uses supplied governance counts.
+
+## Aid, Trade, and Conflict
+The section uses supplied social counts.
+
+## Strange But True
+The section names only supplied repeated-wave evidence.
+
+## What To Watch Next
+The section keeps watchpoints concrete.
+""".strip()
+
+    with pytest.raises(ValueError, match="different declared question"):
+        run_reports._build_viewer_brief_payload(
+            snapshot=snapshot,
+            status_label=run_reports.STATUS_OBSERVATIONAL,
+            evidence_completeness=run_reports.EVIDENCE_FULL,
+            condition_name="viewer_canary_v1",
+            season_number=None,
+            replicate_count=1,
+            generated_brief_markdown=generated_markdown,
+        )
+
+
+def test_viewer_brief_markdown_reads_as_brief_with_evidence_links():
+    payload = run_reports._build_viewer_brief_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="viewer_canary_v1",
+        season_number=None,
+        replicate_count=1,
+    )
+
+    markdown = run_reports._viewer_brief_markdown(payload)
+
+    assert markdown.startswith("# The Emergence Brief:")
+    assert "## The Lead" in markdown
+    assert "## Strange But True" in markdown
+    assert "Evidence:" in markdown
+
+
+def test_generate_viewer_brief_markdown_uses_configured_gemini_route(monkeypatch):
+    payload = run_reports._build_viewer_brief_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="viewer_canary_v1",
+        season_number=None,
+        replicate_count=1,
+    )
+    calls: list[dict[str, object]] = []
+
+    class FakeClient:
+        async def get_completion(self, **kwargs):
+            calls.append(kwargs)
+            return "```markdown\n## Headline\nA grounded brief.\n```"
+
+    import app.services.llm_client as llm_client_module
+
+    monkeypatch.setattr(llm_client_module, "llm_client", FakeClient())
+    monkeypatch.setattr(run_reports.settings, "RUN_REPORT_STORY_LLM_MODEL_TYPE", "gm_gemini_2_5_flash", raising=False)
+
+    markdown = asyncio.run(run_reports.generate_viewer_brief_markdown_with_gemini(payload))
+
+    assert markdown == "## Headline\nA grounded brief."
+    assert calls[0]["model_type"] == "gm_gemini_2_5_flash"
+    assert calls[0]["usage_run_id"] == "run-20260210T120000Z"
+    assert calls[0]["max_retries"] == 2
+
+
 def test_merge_generated_tags_preserves_custom_tags_only():
     merged = run_reports._merge_generated_tags(
         existing_tags=[

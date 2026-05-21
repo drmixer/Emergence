@@ -40,6 +40,8 @@ REPORT_TEMPLATE_VERSION = "run-report-v1"
 POST_RUN_STORY_TEMPLATE_VERSION = "post-run-story-template-v1"
 POST_RUN_STORY_GEMINI_MODEL_TYPE = "gm_gemini_2_5_flash"
 POST_RUN_STORY_LLM_GENERATOR_VERSION = "post-run-story-gemini-v1"
+VIEWER_BRIEF_TEMPLATE_VERSION = "viewer-brief-template-v1"
+VIEWER_BRIEF_LLM_GENERATOR_VERSION = "viewer-brief-gemini-v1"
 
 CONTENT_TYPE_TECHNICAL = "technical_report"
 CONTENT_TYPE_APPROACHABLE = "approachable_article"
@@ -97,6 +99,54 @@ POST_RUN_STORY_TEMPLATE_SECTIONS = (
         "key": "next_run_watchpoints",
         "heading": "Next Run Watchpoints",
         "purpose": "Turn unresolved questions into specific things to watch in the next run.",
+    },
+)
+
+VIEWER_BRIEF_TEMPLATE_SECTIONS = (
+    {
+        "key": "headline",
+        "heading": "Headline",
+        "purpose": "Write one news-style headline grounded in the run evidence.",
+    },
+    {
+        "key": "run_question",
+        "heading": "Run Question",
+        "purpose": "Render the declared run question exactly when one exists.",
+    },
+    {
+        "key": "the_lead",
+        "heading": "The Lead",
+        "purpose": "Give the accessible news-story opening in two short paragraphs.",
+    },
+    {
+        "key": "what_changed",
+        "heading": "What Changed",
+        "purpose": "Summarize the major events and turning points without raw event-list narration.",
+    },
+    {
+        "key": "who_fell",
+        "heading": "Who Fell",
+        "purpose": "Summarize deaths, dormancy, and recovery using only provided counts and moments.",
+    },
+    {
+        "key": "governance_desk",
+        "heading": "Governance Desk",
+        "purpose": "Explain proposal, law, vote, pile-on, and public-order developments in plain language.",
+    },
+    {
+        "key": "aid_trade_and_conflict",
+        "heading": "Aid, Trade, and Conflict",
+        "purpose": "Summarize aid requests, trades, refusals, accusations, and conflict signals.",
+    },
+    {
+        "key": "strange_but_true",
+        "heading": "Strange But True",
+        "purpose": "Name the oddest or most revealing evidence-backed moment without inventing color.",
+    },
+    {
+        "key": "what_to_watch_next",
+        "heading": "What To Watch Next",
+        "purpose": "Give concrete viewer watchpoints for the next run.",
     },
 )
 
@@ -565,6 +615,10 @@ def _story_template_section_list() -> list[dict[str, str]]:
     return [dict(section) for section in POST_RUN_STORY_TEMPLATE_SECTIONS]
 
 
+def _viewer_brief_template_section_list() -> list[dict[str, str]]:
+    return [dict(section) for section in VIEWER_BRIEF_TEMPLATE_SECTIONS]
+
+
 def _run_claim_boundary_text(*, run_class: str | None, status_label: str, condition_name: str, replicate_count: int) -> str:
     clean_run_class = str(run_class or "").strip().lower()
     if clean_run_class == RUN_CLASS_SPECIAL_EXPLORATORY:
@@ -707,6 +761,97 @@ def _story_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
     return {"system_prompt": system_prompt, "user_prompt": user_prompt}
 
 
+def _viewer_brief_generation_context(
+    *,
+    snapshot: dict[str, Any],
+    status_label: str,
+    evidence_completeness: str,
+    condition_name: str,
+    season_number: int | None,
+    replicate_count: int,
+) -> dict[str, Any]:
+    context = _story_generation_context(
+        snapshot=snapshot,
+        status_label=status_label,
+        evidence_completeness=evidence_completeness,
+        condition_name=condition_name,
+        season_number=season_number,
+        replicate_count=replicate_count,
+    )
+    context["template_version"] = VIEWER_BRIEF_TEMPLATE_VERSION
+    context["required_sections"] = _viewer_brief_template_section_list()
+    context["style_contract"] = {
+        "format": "accessible public news brief",
+        "voice": "plainspoken, story-first, evidence-grounded",
+        "avoid": [
+            "fictional roleplay",
+            "invented quotes",
+            "invented agent motives",
+            "new claims beyond provided evidence",
+            "model-family stereotypes",
+        ],
+    }
+    return context
+
+
+def _viewer_brief_generation_prompt(context: dict[str, Any]) -> dict[str, str]:
+    section_headings = "\n".join(
+        f"- {section['heading']}: {section['purpose']}"
+        for section in _viewer_brief_template_section_list()
+    )
+    metrics = context.get("metrics") if isinstance(context, dict) else {}
+    run_framing = context.get("run_framing") if isinstance(context, dict) else {}
+    declared_question = str((run_framing or {}).get("declared_question") or "").strip()
+    declared_question_block = (
+        "Mandatory run question:\n"
+        f"{declared_question}\n\n"
+        "The Run Question section must render that question exactly.\n\n"
+        if declared_question
+        else ""
+    )
+    count_constraints = "\n".join(
+        [
+            f"- Total scoped events: {int((metrics or {}).get('total_events') or 0)}",
+            f"- Viewer-visible events: {int((metrics or {}).get('viewer_visible_events_default') or 0)}",
+            f"- Deaths: {int((metrics or {}).get('deaths') or 0)}",
+            f"- Dormancy events: {int((metrics or {}).get('became_dormant') or 0)}",
+            f"- Revivals: {int((metrics or {}).get('agent_revived') or 0)}",
+            f"- Proposals: {int((metrics or {}).get('proposal_actions') or 0)}",
+            f"- Votes: {int((metrics or {}).get('vote_actions') or 0)}",
+            f"- Passed laws: {int((metrics or {}).get('laws_passed') or 0)}",
+            f"- Aid requests: {int((metrics or {}).get('aid_requests') or 0)}",
+            f"- Answered aid requests: {int((metrics or {}).get('aid_answered') or 0)}",
+            f"- Trades: {int((metrics or {}).get('trade_actions') or 0)}",
+            f"- Conflict signals: {int((metrics or {}).get('conflict_events') or 0)}",
+            f"- Repeated proposal/forum waves: {int((metrics or {}).get('duplicate_wave_count') or 0)}",
+        ]
+    )
+    system_prompt = (
+        "You write The Emergence Brief: an accessible, news-style recap for public viewers. "
+        "Use only the supplied run context, metrics, selected moments, and evidence links. "
+        "Do not invent events, quotes, motives, agent labels, coalitions, or conclusions. "
+        "Keep exploratory canaries clearly non-claim-bearing. Do not use provider/model fallback."
+    )
+    user_prompt = (
+        "Generate a markdown viewer brief using these exact section headings:\n"
+        f"{section_headings}\n\n"
+        f"{declared_question_block}"
+        "Style constraints:\n"
+        "- Read like a concise news story, not a research paper and not fictional roleplay.\n"
+        "- Make it accessible for regular viewers who want to know what happened and why to come back.\n"
+        "- Use only the mandatory counts below and the selected moments in the context JSON.\n"
+        "- If a detail is not in the context, omit it.\n"
+        "- Do not name agents unless they appear in selected moments.\n"
+        "- Do not add markdown links; the system will attach evidence links separately.\n"
+        "- Keep each section short.\n\n"
+        "Mandatory count constraints:\n"
+        f"{count_constraints}\n\n"
+        "Run context JSON:\n"
+        f"{json.dumps(context, indent=2, sort_keys=True)}"
+    )
+    return {"system_prompt": system_prompt, "user_prompt": user_prompt}
+
+
 def _story_llm_model_type() -> str:
     configured = str(getattr(settings, "RUN_REPORT_STORY_LLM_MODEL_TYPE", "") or "").strip()
     return configured or POST_RUN_STORY_GEMINI_MODEL_TYPE
@@ -729,9 +874,8 @@ def _sanitize_generated_story_paragraph(paragraph: str) -> str:
     return re.sub(r"\s+", " ", clean).strip()
 
 
-def _split_generated_story_markdown(markdown: str) -> dict[str, list[str]]:
+def _split_generated_markdown_sections(markdown: str, *, section_headings: set[str]) -> dict[str, list[str]]:
     text_value = _strip_markdown_code_fence(markdown)
-    section_headings = {str(section["heading"]).strip() for section in _story_template_section_list()}
     sections: dict[str, list[str]] = {}
     current_heading: str | None = None
     current_lines: list[str] = []
@@ -794,6 +938,20 @@ def _split_generated_story_markdown(markdown: str) -> dict[str, list[str]]:
     return sections
 
 
+def _split_generated_story_markdown(markdown: str) -> dict[str, list[str]]:
+    return _split_generated_markdown_sections(
+        markdown,
+        section_headings={str(section["heading"]).strip() for section in _story_template_section_list()},
+    )
+
+
+def _split_generated_viewer_brief_markdown(markdown: str) -> dict[str, list[str]]:
+    return _split_generated_markdown_sections(
+        markdown,
+        section_headings={str(section["heading"]).strip() for section in _viewer_brief_template_section_list()},
+    )
+
+
 def _normalize_question_for_validation(value: str) -> str:
     text_value = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower())
     return re.sub(r"\s+", " ", text_value).strip()
@@ -812,6 +970,26 @@ def _validate_generated_story_declared_question(*, markdown: str, declared_quest
     normalized_generated = _normalize_question_for_validation(generated_declared)
     if normalized_declared not in normalized_generated:
         raise ValueError("Gemini story generation answered a different declared question.")
+
+
+def _validate_generated_viewer_brief(*, markdown: str, declared_question: str) -> None:
+    sections = _split_generated_viewer_brief_markdown(markdown)
+    missing = [
+        section["heading"]
+        for section in _viewer_brief_template_section_list()
+        if not sections.get(str(section["heading"]))
+    ]
+    if missing:
+        raise ValueError(f"Gemini viewer brief generation missed required sections: {', '.join(missing)}")
+
+    clean_declared = str(declared_question or "").strip()
+    if not clean_declared:
+        return
+    question_text = " ".join(
+        str(item or "").strip() for item in sections.get("Run Question", []) if str(item or "").strip()
+    )
+    if _normalize_question_for_validation(clean_declared) not in _normalize_question_for_validation(question_text):
+        raise ValueError("Gemini viewer brief generation answered a different declared question.")
 
 
 def _sections_from_generated_story_markdown(
@@ -849,6 +1027,41 @@ def _sections_from_generated_story_markdown(
     return sections
 
 
+def _viewer_brief_sections_from_generated_markdown(
+    *,
+    markdown: str,
+    fallback_sections: list[dict[str, Any]],
+    declared_question: str | None = None,
+) -> list[dict[str, Any]]:
+    generated_by_heading = _split_generated_viewer_brief_markdown(markdown)
+    if not generated_by_heading:
+        return fallback_sections
+
+    sections: list[dict[str, Any]] = []
+    fallback_by_heading = {
+        str(section.get("heading") or "").strip(): section
+        for section in fallback_sections
+        if isinstance(section, dict)
+    }
+    for template_section in _viewer_brief_template_section_list():
+        heading = str(template_section["heading"]).strip()
+        fallback = fallback_by_heading.get(heading) or {}
+        if heading == "Run Question" and str(declared_question or "").strip():
+            paragraphs = list(fallback.get("paragraphs") or [])
+        else:
+            paragraphs = generated_by_heading.get(heading) or list(fallback.get("paragraphs") or [])
+        sections.append(
+            {
+                "heading": heading,
+                "paragraphs": paragraphs,
+                "references": _normalize_links(fallback.get("references") or []),
+                "template_version": VIEWER_BRIEF_TEMPLATE_VERSION,
+                "generated_by": VIEWER_BRIEF_LLM_GENERATOR_VERSION,
+            }
+        )
+    return sections
+
+
 async def generate_post_run_story_markdown_with_gemini(payload: dict[str, Any]) -> str:
     generation = payload.get("gemini_story_generation") if isinstance(payload, dict) else {}
     if not isinstance(generation, dict):
@@ -871,12 +1084,42 @@ async def generate_post_run_story_markdown_with_gemini(payload: dict[str, Any]) 
     return _strip_markdown_code_fence(response)
 
 
+async def generate_viewer_brief_markdown_with_gemini(payload: dict[str, Any]) -> str:
+    generation = payload.get("gemini_viewer_brief_generation") if isinstance(payload, dict) else {}
+    if not isinstance(generation, dict):
+        raise ValueError("viewer brief payload is missing gemini_viewer_brief_generation")
+
+    from app.services.llm_client import llm_client
+
+    model_type = _story_llm_model_type()
+    response = await llm_client.get_completion(
+        model_type=model_type,
+        system_prompt=str(generation.get("system_prompt") or ""),
+        user_prompt=str(generation.get("user_prompt") or ""),
+        usage_run_id=str(payload.get("run_id") or ""),
+        max_tokens=max(700, int(getattr(settings, "RUN_REPORT_STORY_LLM_MAX_TOKENS", 3200) or 3200)),
+        temperature=0.45,
+        max_retries=2,
+    )
+    if not response:
+        raise RuntimeError("Gemini viewer brief generation returned no content")
+    return _strip_markdown_code_fence(response)
+
+
 def _run_story_generation_blocking(payload: dict[str, Any]) -> str:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(generate_post_run_story_markdown_with_gemini(payload))
     raise RuntimeError("Gemini story generation cannot run inside an active event loop; use the CLI target")
+
+
+def _run_viewer_brief_generation_blocking(payload: dict[str, Any]) -> str:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(generate_viewer_brief_markdown_with_gemini(payload))
+    raise RuntimeError("Gemini viewer brief generation cannot run inside an active event loop; use the CLI target")
 
 
 def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -> tuple[Any, Any, str]:
@@ -2014,6 +2257,43 @@ def _story_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(rows).strip() + "\n"
 
 
+def _viewer_brief_markdown(payload: dict[str, Any]) -> str:
+    rows = [
+        f"# The Emergence Brief: Run {payload.get('run_id')}",
+        "",
+        f"- Generated at (UTC): {payload.get('generated_at_utc')}",
+        f"- Run class: {payload.get('run_class')}",
+        f"- Exploratory label: {payload.get('exploratory_label')}",
+        f"- Status label: {payload.get('status_label')}",
+        f"- Evidence completeness: {payload.get('evidence_completeness')}",
+        f"- Condition: {payload.get('condition_name')}",
+        "",
+    ]
+    if str(payload.get("run_class") or "").strip().lower() == RUN_CLASS_SPECIAL_EXPLORATORY:
+        rows.extend(
+            [
+                "> Viewer brief boundary: this is a public-facing recap of an exploratory canary, not a research claim.",
+                "",
+            ]
+        )
+    for section in payload.get("sections") or []:
+        heading = str(section.get("heading") or "").strip()
+        if not heading:
+            continue
+        rows.extend([f"## {heading}", ""])
+        for paragraph in section.get("paragraphs") or []:
+            text = str(paragraph).strip()
+            if text:
+                rows.extend([text, ""])
+        references = section.get("references") or []
+        if references:
+            rows.append("Evidence:")
+            for reference in references:
+                rows.append(f"- [{reference.get('label')}]({reference.get('href')})")
+            rows.append("")
+    return "\n".join(rows).strip() + "\n"
+
+
 def _planner_markdown(payload: dict[str, Any]) -> str:
     recommendation = payload.get("recommended_next_condition") or {}
     rows = [
@@ -2599,6 +2879,239 @@ def _build_story_payload(
     }
 
 
+def _build_viewer_brief_sections(
+    *,
+    snapshot: dict[str, Any],
+    status_label: str,
+    condition_name: str,
+    replicate_count: int,
+) -> list[dict[str, Any]]:
+    run_id = str(snapshot.get("run_id") or "")
+    activity = snapshot.get("activity") if isinstance(snapshot, dict) else {}
+    social_followthrough = snapshot.get("social_followthrough") if isinstance(snapshot, dict) else {}
+    duplicate_summary = ((snapshot.get("duplicate_waves") or {}).get("summary") or {}) if isinstance(snapshot, dict) else {}
+    key_moments = list(snapshot.get("key_moments") or [])
+    evidence_links = _base_evidence_links(run_id)
+    declared_question = str(snapshot.get("declared_question") or "").strip()
+    declared_watch_for = str(snapshot.get("declared_watch_for") or "").strip()
+    run_class = str(snapshot.get("run_class") or "").strip().lower()
+
+    deaths = int((activity or {}).get("deaths") or 0)
+    dormant = int((activity or {}).get("became_dormant") or 0)
+    revived = int((activity or {}).get("agent_revived") or 0)
+    proposals = int((activity or {}).get("proposal_actions") or 0)
+    votes = int((activity or {}).get("vote_actions") or 0)
+    laws = int((activity or {}).get("laws_passed") or 0)
+    aid_requests = int((social_followthrough or {}).get("aid_requests") or 0)
+    aid_answered = int((social_followthrough or {}).get("answered") or 0)
+    trades = int((activity or {}).get("trade_actions") or 0)
+    conflict = int((activity or {}).get("conflict_events") or 0)
+    cooperation = int((activity or {}).get("cooperation_events") or 0)
+    duplicate_waves = int((duplicate_summary or {}).get("wave_count") or 0)
+    proposal_waves = int((duplicate_summary or {}).get("proposal_wave_count") or 0)
+    forum_waves = int((duplicate_summary or {}).get("forum_wave_count") or 0)
+
+    pressure_parts = []
+    if deaths > 0:
+        pressure_parts.append(_format_count_phrase(deaths, "death"))
+    if dormant > 0:
+        pressure_parts.append(_format_count_phrase(dormant, "dormancy event"))
+    if revived > 0:
+        pressure_parts.append(_format_count_phrase(revived, "revival"))
+    pressure_text = _sentence_join(pressure_parts) or "no deaths, dormancy events, or revivals in the selected run window"
+
+    moment_lines = []
+    for moment in key_moments[:3]:
+        event_type = str(moment.get("event_type") or "event").replace("_", " ").strip()
+        description = str(moment.get("description") or "").strip()
+        if description:
+            moment_lines.append(f"{event_type}: {description}")
+    lead_moment = moment_lines[0] if moment_lines else "No non-routine lead moment was selected for this run brief."
+    headline = (
+        f"Run {run_id}: {pressure_text.title()} And {laws:,} Passed Law(s)"
+        if laws or deaths or dormant or revived
+        else f"Run {run_id}: Viewer Brief"
+    )
+    question_text = declared_question or (
+        f"No schedule-declared public question was found for run `{run_id}`; keep this brief bounded to observed run evidence."
+    )
+    boundary_text = _run_claim_boundary_text(
+        run_class=run_class,
+        status_label=status_label,
+        condition_name=condition_name,
+        replicate_count=replicate_count,
+    )
+
+    return [
+        _claims_to_section(
+            heading="Headline",
+            claims=[_build_claim_block(claim=headline, evidence_links=evidence_links)],
+        ),
+        _claims_to_section(
+            heading="Run Question",
+            claims=[_build_claim_block(claim=question_text, evidence_links=evidence_links)],
+        ),
+        _claims_to_section(
+            heading="The Lead",
+            claims=[
+                _build_claim_block(
+                    claim=(
+                        f"The run's accessible story starts with {pressure_text}. "
+                        f"{lead_moment}"
+                    ),
+                    evidence_links=evidence_links,
+                ),
+                _build_claim_block(claim=boundary_text, evidence_links=evidence_links),
+            ],
+        ),
+        _claims_to_section(
+            heading="What Changed",
+            claims=[
+                _build_claim_block(
+                    claim=(
+                        "Major changes: "
+                        + ("; ".join(moment_lines) if moment_lines else "no non-routine story moments were selected.")
+                    ),
+                    evidence_links=evidence_links,
+                )
+            ],
+            extra_references=[_reference_for_event(event, label_prefix="Brief Moment") for event in key_moments[:3]],
+        ),
+        _claims_to_section(
+            heading="Who Fell",
+            claims=[_build_claim_block(claim=f"Who fell: {pressure_text}.", evidence_links=evidence_links)],
+        ),
+        _claims_to_section(
+            heading="Governance Desk",
+            claims=[
+                _build_claim_block(
+                    claim=(
+                        f"Governance produced {_format_count_phrase(proposals, 'proposal')}, "
+                        f"{_format_count_phrase(votes, 'vote')}, and {_format_count_phrase(laws, 'passed law')}. "
+                        f"Repeated proposal/forum diagnostics grouped {duplicate_waves:,} wave(s): "
+                        f"{proposal_waves:,} proposal and {forum_waves:,} forum."
+                    ),
+                    evidence_links=evidence_links,
+                )
+            ],
+        ),
+        _claims_to_section(
+            heading="Aid, Trade, and Conflict",
+            claims=[
+                _build_claim_block(
+                    claim=(
+                        f"Aid and exchange signals included {_format_count_phrase(aid_requests, 'aid request')}, "
+                        f"{_format_count_phrase(aid_answered, 'answered aid request')}, {_format_count_phrase(trades, 'trade')}, "
+                        f"{_format_count_phrase(conflict, 'conflict signal')}, and {_format_count_phrase(cooperation, 'cooperation signal')}."
+                    ),
+                    evidence_links=evidence_links,
+                )
+            ],
+        ),
+        _claims_to_section(
+            heading="Strange But True",
+            claims=[
+                _build_claim_block(
+                    claim=(
+                        moment_lines[-1]
+                        if moment_lines
+                        else "No odd non-routine moment was selected; this brief should not invent one."
+                    ),
+                    evidence_links=evidence_links,
+                )
+            ],
+        ),
+        _claims_to_section(
+            heading="What To Watch Next",
+            claims=[
+                _build_claim_block(
+                    claim=declared_watch_for
+                    or "Watch whether the next run stays readable live and whether the post-run evidence links explain the biggest events.",
+                    evidence_links=evidence_links,
+                )
+            ],
+        ),
+    ]
+
+
+def _build_viewer_brief_payload(
+    *,
+    snapshot: dict[str, Any],
+    status_label: str,
+    evidence_completeness: str,
+    condition_name: str,
+    season_number: int | None,
+    replicate_count: int,
+    generated_brief_markdown: str | None = None,
+    generation_error: str | None = None,
+) -> dict[str, Any]:
+    generation_context = _viewer_brief_generation_context(
+        snapshot=snapshot,
+        status_label=status_label,
+        evidence_completeness=evidence_completeness,
+        condition_name=condition_name,
+        season_number=season_number,
+        replicate_count=replicate_count,
+    )
+    generation_prompt = _viewer_brief_generation_prompt(generation_context)
+    deterministic_sections = _build_viewer_brief_sections(
+        snapshot=snapshot,
+        status_label=status_label,
+        condition_name=condition_name,
+        replicate_count=replicate_count,
+    )
+    clean_generated_brief = _strip_markdown_code_fence(generated_brief_markdown or "")
+    declared_question = str(snapshot.get("declared_question") or "").strip()
+    if clean_generated_brief:
+        _validate_generated_viewer_brief(markdown=clean_generated_brief, declared_question=declared_question)
+    sections = (
+        _viewer_brief_sections_from_generated_markdown(
+            markdown=clean_generated_brief,
+            fallback_sections=deterministic_sections,
+            declared_question=declared_question,
+        )
+        if clean_generated_brief
+        else deterministic_sections
+    )
+    generation_status = "template_ready"
+    if clean_generated_brief:
+        generation_status = "generated"
+    elif generation_error:
+        generation_status = "failed"
+    return {
+        "run_id": snapshot.get("run_id"),
+        "generated_at_utc": snapshot.get("generated_at_utc"),
+        "run_class": snapshot.get("run_class"),
+        "declared_question": declared_question or None,
+        "viewer_brief_template_version": VIEWER_BRIEF_TEMPLATE_VERSION,
+        "viewer_brief_template_sections": _viewer_brief_template_section_list(),
+        "gemini_viewer_brief_generation": {
+            "status": generation_status,
+            "provider": "gemini",
+            "model_type": _story_llm_model_type(),
+            "fallback_allowed": False,
+            "generator_version": VIEWER_BRIEF_LLM_GENERATOR_VERSION,
+            "system_prompt": generation_prompt["system_prompt"],
+            "user_prompt": generation_prompt["user_prompt"],
+            "context": generation_context,
+            "generated_markdown": clean_generated_brief or None,
+            "error": str(generation_error or "").strip() or None,
+        },
+        "exploratory_label": (
+            "exploratory"
+            if str(snapshot.get("run_class") or "").strip().lower() == RUN_CLASS_SPECIAL_EXPLORATORY
+            else "standard"
+        ),
+        "status_label": status_label,
+        "evidence_completeness": evidence_completeness,
+        "condition_name": condition_name,
+        "season_number": season_number,
+        "replicate_count": replicate_count,
+        "sections": sections,
+        "deterministic_sections": deterministic_sections,
+    }
+
+
 def _build_planner_payload(
     *,
     current_snapshot: dict[str, Any],
@@ -2991,6 +3504,102 @@ def generate_run_story_artifact(
         db,
         run_id=clean_run_id,
         artifact_type="approachable_report",
+        artifact_format="markdown",
+        artifact_path=markdown_path,
+        metadata_json={"run_id": clean_run_id, "generator_version": REPORT_GENERATOR_VERSION},
+    )
+    return payload
+
+
+def generate_run_viewer_brief_artifact(
+    db: Session,
+    *,
+    run_id: str,
+    condition_name: str | None = None,
+    season_number: int | None = None,
+    generate_with_gemini: bool = True,
+) -> dict[str, Any]:
+    clean_run_id = _coerce_run_id(run_id)
+    snapshot = _collect_run_snapshot(db, run_id=clean_run_id)
+    _assert_snapshot_has_run_data(snapshot, run_id=clean_run_id)
+    clean_condition, clean_season_number = _resolve_report_context(
+        snapshot=snapshot,
+        condition_name=condition_name,
+        season_number=season_number,
+    )
+    replicate_count, run_class, claim_gate = _count_condition_replicates(
+        db,
+        condition_name=clean_condition,
+        run_id=clean_run_id,
+    )
+    evidence_completeness = _evaluate_evidence_completeness(snapshot)
+    status_label = _resolve_status_label(
+        condition_name=clean_condition,
+        replicate_count=replicate_count,
+        run_class=run_class,
+    )
+
+    payload = _build_viewer_brief_payload(
+        snapshot=snapshot,
+        status_label=status_label,
+        evidence_completeness=evidence_completeness,
+        condition_name=clean_condition,
+        season_number=clean_season_number,
+        replicate_count=replicate_count,
+    )
+    if generate_with_gemini:
+        try:
+            generated_brief_markdown = _run_viewer_brief_generation_blocking(payload)
+            payload = _build_viewer_brief_payload(
+                snapshot=snapshot,
+                status_label=status_label,
+                evidence_completeness=evidence_completeness,
+                condition_name=clean_condition,
+                season_number=clean_season_number,
+                replicate_count=replicate_count,
+                generated_brief_markdown=generated_brief_markdown,
+            )
+        except Exception as exc:
+            payload = _build_viewer_brief_payload(
+                snapshot=snapshot,
+                status_label=status_label,
+                evidence_completeness=evidence_completeness,
+                condition_name=clean_condition,
+                season_number=clean_season_number,
+                replicate_count=replicate_count,
+                generation_error=str(exc),
+            )
+            raise
+    if claim_gate:
+        payload["claim_gate"] = claim_gate
+    outdir = _artifact_dir_for_run(clean_run_id)
+    json_path = outdir / "viewer_brief.json"
+    markdown_path = outdir / "viewer_brief.md"
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    markdown_path.write_text(_viewer_brief_markdown(payload), encoding="utf-8")
+
+    _record_artifact(
+        db,
+        run_id=clean_run_id,
+        artifact_type="viewer_brief",
+        artifact_format="json",
+        artifact_path=json_path,
+        metadata_json={
+            "run_id": clean_run_id,
+            "condition_name": clean_condition,
+            "season_number": clean_season_number,
+            "status_label": status_label,
+            "evidence_completeness": evidence_completeness,
+            "claim_gate": claim_gate,
+            "generator_version": REPORT_GENERATOR_VERSION,
+            "viewer_brief_generate_with_gemini": bool(generate_with_gemini),
+            "viewer_brief_generation_status": (payload.get("gemini_viewer_brief_generation") or {}).get("status"),
+        },
+    )
+    _record_artifact(
+        db,
+        run_id=clean_run_id,
+        artifact_type="viewer_brief",
         artifact_format="markdown",
         artifact_path=markdown_path,
         metadata_json={"run_id": clean_run_id, "generator_version": REPORT_GENERATOR_VERSION},

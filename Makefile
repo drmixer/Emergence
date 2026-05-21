@@ -74,6 +74,11 @@ report-story-gemini:
 		$(if $(CONDITION),--condition "$(CONDITION)",) \
 		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
 
+report-viewer-brief:
+	@cd backend && railway run -s backend -- venv/bin/python scripts/generate_run_viewer_brief.py --run-id "$(RUN_ID)" \
+		$(if $(CONDITION),--condition "$(CONDITION)",) \
+		$(if $(SEASON_NUMBER),--season-number "$(SEASON_NUMBER)",)
+
 report-plan:
 	@cd backend && railway run -s backend -- venv/bin/python scripts/generate_next_run_plan.py --run-id "$(RUN_ID)" \
 		$(if $(CONDITION),--condition "$(CONDITION)",)

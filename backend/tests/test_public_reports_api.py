@@ -47,16 +47,28 @@ def test_list_and_download_run_reports(reports_client):
     artifact_file = tmp_dir / "runs" / "run-1" / "run_report_summary.json"
     artifact_file.parent.mkdir(parents=True, exist_ok=True)
     artifact_file.write_text('{"ok":true}\n', encoding="utf-8")
+    viewer_file = tmp_dir / "runs" / "run-1" / "viewer_brief.md"
+    viewer_file.write_text("# The Emergence Brief\n", encoding="utf-8")
 
-    db_session.add(
-        RunReportArtifact(
-            run_id="run-1",
-            artifact_type="run_summary",
-            artifact_format="json",
-            artifact_path=str(artifact_file),
-            status="completed",
-            metadata_json={"condition_name": "baseline_v1"},
-        )
+    db_session.add_all(
+        [
+            RunReportArtifact(
+                run_id="run-1",
+                artifact_type="run_summary",
+                artifact_format="json",
+                artifact_path=str(artifact_file),
+                status="completed",
+                metadata_json={"condition_name": "baseline_v1"},
+            ),
+            RunReportArtifact(
+                run_id="run-1",
+                artifact_type="viewer_brief",
+                artifact_format="markdown",
+                artifact_path=str(viewer_file),
+                status="completed",
+                metadata_json={"condition_name": "baseline_v1"},
+            ),
+        ]
     )
     db_session.commit()
 
@@ -70,12 +82,16 @@ def test_list_and_download_run_reports(reports_client):
             "/api/reports/runs/run-1/view",
             params={"artifact_type": "run_summary", "format": "json"},
         )
+        viewer_response = client.get(
+            "/api/reports/runs/run-1/view",
+            params={"artifact_type": "viewer_brief", "format": "markdown"},
+        )
 
     assert list_response.status_code == 200
     body = list_response.json()
     assert body["run_id"] == "run-1"
-    assert body["count"] == 1
-    assert body["items"][0]["artifact_type"] == "run_summary"
+    assert body["count"] == 2
+    assert {item["artifact_type"] for item in body["items"]} == {"run_summary", "viewer_brief"}
 
     assert download_response.status_code == 200
     assert download_response.headers["content-disposition"].startswith("attachment;")
@@ -85,6 +101,8 @@ def test_list_and_download_run_reports(reports_client):
     assert view_response.headers["content-disposition"].startswith("inline;")
     assert view_response.headers["content-type"].startswith("application/json")
     assert '"ok":true' in view_response.text
+    assert viewer_response.status_code == 200
+    assert "The Emergence Brief" in viewer_response.text
 
 
 def test_missing_story_artifact_regenerates_with_gemini_flag(reports_client, monkeypatch):

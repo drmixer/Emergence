@@ -27,6 +27,7 @@ router = APIRouter()
 RUN_ARTIFACT_TYPES = (
     "technical_report",
     "approachable_report",
+    "viewer_brief",
     "planner_report",
     "run_summary",
 )
