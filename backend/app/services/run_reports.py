@@ -1111,6 +1111,45 @@ async def generate_viewer_brief_markdown_with_gemini(payload: dict[str, Any]) ->
     return _strip_markdown_code_fence(response)
 
 
+async def repair_viewer_brief_markdown_with_gemini(
+    payload: dict[str, Any],
+    *,
+    invalid_markdown: str,
+    validation_error: str,
+) -> str:
+    generation = payload.get("gemini_viewer_brief_generation") if isinstance(payload, dict) else {}
+    if not isinstance(generation, dict):
+        raise ValueError("viewer brief payload is missing gemini_viewer_brief_generation")
+
+    from app.services.llm_client import llm_client
+
+    required_headings = "\n".join(
+        f"## {section['heading']}" for section in _viewer_brief_template_section_list()
+    )
+    model_type = _story_llm_model_type()
+    response = await llm_client.get_completion(
+        model_type=model_type,
+        system_prompt=str(generation.get("system_prompt") or ""),
+        user_prompt=(
+            "Repair the invalid viewer brief markdown below. Use the same source constraints and run context "
+            "from the original prompt. Return markdown only, with these exact headings in this exact order:\n"
+            f"{required_headings}\n\n"
+            f"Validation error: {validation_error}\n\n"
+            "Original prompt and context:\n"
+            f"{str(generation.get('user_prompt') or '')}\n\n"
+            "Invalid markdown to repair:\n"
+            f"{_strip_markdown_code_fence(invalid_markdown)}"
+        ),
+        usage_run_id=str(payload.get("run_id") or ""),
+        max_tokens=max(700, int(getattr(settings, "RUN_REPORT_STORY_LLM_MAX_TOKENS", 3200) or 3200)),
+        temperature=0.25,
+        max_retries=2,
+    )
+    if not response:
+        raise RuntimeError("Gemini viewer brief repair returned no content")
+    return _strip_markdown_code_fence(response)
+
+
 def _run_story_generation_blocking(payload: dict[str, Any]) -> str:
     try:
         asyncio.get_running_loop()
@@ -1125,6 +1164,25 @@ def _run_viewer_brief_generation_blocking(payload: dict[str, Any]) -> str:
     except RuntimeError:
         return asyncio.run(generate_viewer_brief_markdown_with_gemini(payload))
     raise RuntimeError("Gemini viewer brief generation cannot run inside an active event loop; use the CLI target")
+
+
+def _run_viewer_brief_repair_blocking(
+    payload: dict[str, Any],
+    *,
+    invalid_markdown: str,
+    validation_error: str,
+) -> str:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            repair_viewer_brief_markdown_with_gemini(
+                payload,
+                invalid_markdown=invalid_markdown,
+                validation_error=validation_error,
+            )
+        )
+    raise RuntimeError("Gemini viewer brief repair cannot run inside an active event loop; use the CLI target")
 
 
 def _resolve_run_window(db: Session, *, run_id: str, fallback_hours: int = 72) -> tuple[Any, Any, str]:
@@ -3555,15 +3613,31 @@ def generate_run_viewer_brief_artifact(
     if generate_with_gemini:
         try:
             generated_brief_markdown = _run_viewer_brief_generation_blocking(payload)
-            payload = _build_viewer_brief_payload(
-                snapshot=snapshot,
-                status_label=status_label,
-                evidence_completeness=evidence_completeness,
-                condition_name=clean_condition,
-                season_number=clean_season_number,
-                replicate_count=replicate_count,
-                generated_brief_markdown=generated_brief_markdown,
-            )
+            try:
+                payload = _build_viewer_brief_payload(
+                    snapshot=snapshot,
+                    status_label=status_label,
+                    evidence_completeness=evidence_completeness,
+                    condition_name=clean_condition,
+                    season_number=clean_season_number,
+                    replicate_count=replicate_count,
+                    generated_brief_markdown=generated_brief_markdown,
+                )
+            except ValueError as validation_exc:
+                repaired_brief_markdown = _run_viewer_brief_repair_blocking(
+                    payload,
+                    invalid_markdown=generated_brief_markdown,
+                    validation_error=str(validation_exc),
+                )
+                payload = _build_viewer_brief_payload(
+                    snapshot=snapshot,
+                    status_label=status_label,
+                    evidence_completeness=evidence_completeness,
+                    condition_name=clean_condition,
+                    season_number=clean_season_number,
+                    replicate_count=replicate_count,
+                    generated_brief_markdown=repaired_brief_markdown,
+                )
         except Exception as exc:
             payload = _build_viewer_brief_payload(
                 snapshot=snapshot,

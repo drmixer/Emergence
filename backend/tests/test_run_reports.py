@@ -552,6 +552,134 @@ def test_generate_viewer_brief_markdown_uses_configured_gemini_route(monkeypatch
     assert calls[0]["max_retries"] == 2
 
 
+def test_repair_viewer_brief_markdown_uses_same_gemini_route(monkeypatch):
+    payload = run_reports._build_viewer_brief_payload(
+        snapshot=_sample_snapshot(),
+        status_label=run_reports.STATUS_OBSERVATIONAL,
+        evidence_completeness=run_reports.EVIDENCE_FULL,
+        condition_name="viewer_canary_v1",
+        season_number=None,
+        replicate_count=1,
+    )
+    calls: list[dict[str, object]] = []
+
+    class FakeClient:
+        async def get_completion(self, **kwargs):
+            calls.append(kwargs)
+            return "```markdown\n## Headline\nA repaired brief.\n```"
+
+    import app.services.llm_client as llm_client_module
+
+    monkeypatch.setattr(llm_client_module, "llm_client", FakeClient())
+    monkeypatch.setattr(run_reports.settings, "RUN_REPORT_STORY_LLM_MODEL_TYPE", "gm_gemini_2_5_flash", raising=False)
+
+    markdown = asyncio.run(
+        run_reports.repair_viewer_brief_markdown_with_gemini(
+            payload,
+            invalid_markdown="The run had a story, but no required headings.",
+            validation_error="missed required sections: Headline, Run Question",
+        )
+    )
+
+    assert markdown == "## Headline\nA repaired brief."
+    assert calls[0]["model_type"] == "gm_gemini_2_5_flash"
+    assert calls[0]["usage_run_id"] == "run-20260210T120000Z"
+    assert "## Headline" in calls[0]["user_prompt"]
+    assert "## Run Question" in calls[0]["user_prompt"]
+    assert "missed required sections: Headline, Run Question" in calls[0]["user_prompt"]
+    assert "The run had a story, but no required headings." in calls[0]["user_prompt"]
+
+
+def test_generate_viewer_brief_artifact_repairs_invalid_gemini_markdown(monkeypatch, tmp_path):
+    snapshot = _sample_snapshot()
+    snapshot["declared_question"] = "Do the new viewer/story/evidence changes make a live run easier to follow?"
+    invalid_markdown = """
+## The Lead
+The first draft missed two required headings.
+""".strip()
+    repaired_markdown = """
+## Headline
+Viewer evidence gets clearer.
+
+## Run Question
+Do the new viewer/story/evidence changes make a live run easier to follow?
+
+## The Lead
+The repaired brief answers the declared viewer question first.
+
+## What Changed
+Evidence links and repeated proposal grouping changed the public read.
+
+## Who Fell
+The supplied context does not list a specific death.
+
+## Governance Desk
+The brief reports only supplied proposal and vote counts.
+
+## Aid, Trade, and Conflict
+The brief reports only supplied aid, trade, and conflict counts.
+
+## Strange But True
+Repeated proposal/forum waves became one grouped pattern.
+
+## What To Watch Next
+Watch whether the next run remains easier to follow live.
+""".strip()
+    repair_calls: list[dict[str, object]] = []
+    recorded: list[dict[str, object]] = []
+
+    monkeypatch.setattr(run_reports, "_collect_run_snapshot", lambda _db, *, run_id: snapshot)
+    monkeypatch.setattr(run_reports, "_assert_snapshot_has_run_data", lambda _snapshot, *, run_id: None)
+    monkeypatch.setattr(
+        run_reports,
+        "_resolve_report_context",
+        lambda *, snapshot, condition_name, season_number: ("viewer_canary_v1", 0),
+    )
+    monkeypatch.setattr(
+        run_reports,
+        "_count_condition_replicates",
+        lambda _db, *, condition_name, run_id: (1, run_reports.RUN_CLASS_SPECIAL_EXPLORATORY, None),
+    )
+    def _fake_artifact_dir(run_id):
+        outdir = tmp_path / run_id
+        outdir.mkdir(parents=True, exist_ok=True)
+        return outdir
+
+    monkeypatch.setattr(run_reports, "_artifact_dir_for_run", _fake_artifact_dir)
+    monkeypatch.setattr(run_reports, "_run_viewer_brief_generation_blocking", lambda payload: invalid_markdown)
+
+    def _fake_repair(payload, *, invalid_markdown, validation_error):
+        repair_calls.append(
+            {
+                "invalid_markdown": invalid_markdown,
+                "validation_error": validation_error,
+            }
+        )
+        return repaired_markdown
+
+    def _fake_record_artifact(_db, **kwargs):
+        recorded.append(kwargs)
+        return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(run_reports, "_run_viewer_brief_repair_blocking", _fake_repair)
+    monkeypatch.setattr(run_reports, "_record_artifact", _fake_record_artifact)
+
+    payload = run_reports.generate_run_viewer_brief_artifact(
+        SimpleNamespace(),
+        run_id="run-20260210T120000Z",
+        condition_name="viewer_canary_v1",
+        season_number=0,
+        generate_with_gemini=True,
+    )
+
+    assert repair_calls
+    assert "Headline, Run Question" in repair_calls[0]["validation_error"]
+    assert payload["gemini_viewer_brief_generation"]["status"] == "generated"
+    assert payload["gemini_viewer_brief_generation"]["generated_markdown"] == repaired_markdown
+    assert payload["sections"][1]["paragraphs"] == [snapshot["declared_question"]]
+    assert {item["artifact_type"] for item in recorded} == {"viewer_brief"}
+
+
 def test_merge_generated_tags_preserves_custom_tags_only():
     merged = run_reports._merge_generated_tags(
         existing_tags=[
