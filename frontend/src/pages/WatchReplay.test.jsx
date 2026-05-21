@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -141,13 +141,30 @@ afterEach(() => {
 })
 
 describe('WatchReplay', () => {
+  it('uses the archive latest completed run for the default watch route', async () => {
+    api.getRunsArchive.mockResolvedValue({
+      items: [{ run_id: 'real-20990101T000000Z' }],
+    })
+
+    renderWatch()
+
+    expect((await screen.findAllByText(/real-20990101T000000Z/i)).length).toBeGreaterThan(0)
+    await waitFor(() => {
+      expect(api.getRunWatch).toHaveBeenCalledTimes(1)
+    })
+    expect(api.getRunWatch).toHaveBeenCalledWith('real-20990101T000000Z', 60, 240)
+    expect(api.getRunWatch).not.toHaveBeenCalledWith('real-20260519T063000Z', 60, 240)
+    expect(screen.getByText(/Completed run map/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Do the new viewer\/story\/evidence changes/i)).not.toBeInTheDocument()
+  })
+
   it('defaults to the latest completed run and lets density spikes select a replay window', async () => {
     renderWatch()
 
     expect(await screen.findByText(/Watch Replay/i)).toBeInTheDocument()
     expect(screen.getAllByText(/real-20260519T063000Z/i).length).toBeGreaterThan(0)
     expect(screen.getByText(/Do the new viewer\/story\/evidence changes/i)).toBeInTheDocument()
-    expect(screen.getByText(/15,538/i)).toBeInTheDocument()
+    expect(await screen.findByText(/15,538/i)).toBeInTheDocument()
     expect(screen.getByText(/7 dormancy events/i)).toBeInTheDocument()
 
     expect(api.getRunWatch).toHaveBeenCalledWith('real-20260519T063000Z', 60, 240)

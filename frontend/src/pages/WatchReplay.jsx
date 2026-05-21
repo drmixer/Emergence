@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Activity,
@@ -17,10 +17,7 @@ import {
   Users,
 } from 'lucide-react'
 import { api } from '../services/api'
-import {
-  getLatestCompletedScheduledRun,
-  getScheduleEntryForRunId,
-} from '../data/runSchedule'
+import { getScheduleEntryForRunId } from '../data/runSchedule'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
 const ROUTINE_EVENT_TYPES = new Set(['work', 'idle', 'vote', 'processing_error'])
@@ -358,36 +355,43 @@ export default function WatchReplay() {
   const requestedRunId = cleanString(searchParams.get('run'))
   const requestedEventId = Number(searchParams.get('event') || 0)
   const requestedBucketIndex = Number(searchParams.get('bucket') || -1)
-  const scheduledRun = getLatestCompletedScheduledRun()
-  const initialRunId = requestedRunId || scheduledRun?.runId || ''
+  const initialRunId = requestedRunId
   const [runId, setRunId] = useState(initialRunId)
-  const archiveDefaultApplied = useRef(false)
   const [archive, setArchive] = useState(null)
   const [watchData, setWatchData] = useState(null)
+  const [archiveLoading, setArchiveLoading] = useState(!requestedRunId)
   const [loading, setLoading] = useState(Boolean(initialRunId))
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    setRunId((currentRunId) => {
+      if (requestedRunId) {
+        return requestedRunId !== currentRunId ? requestedRunId : currentRunId
+      }
+      return currentRunId ? '' : currentRunId
+    })
+  }, [requestedRunId])
 
   useEffect(() => {
     let cancelled = false
 
     async function loadArchive() {
+      setArchiveLoading(true)
       const payload = await api.getRunsArchive(12, false).catch(() => null)
       if (cancelled) return
       setArchive(payload && typeof payload === 'object' ? payload : null)
       const archiveRunId = getArchiveRunId(payload)
-      if (!requestedRunId && !archiveDefaultApplied.current) {
-        archiveDefaultApplied.current = true
-        if (archiveRunId && archiveRunId !== runId) {
-          setRunId(archiveRunId)
-        }
+      if (!requestedRunId && archiveRunId) {
+        setRunId((currentRunId) => (archiveRunId !== currentRunId ? archiveRunId : currentRunId))
       }
+      setArchiveLoading(false)
     }
 
     void loadArchive()
     return () => {
       cancelled = true
     }
-  }, [requestedRunId, runId])
+  }, [requestedRunId])
 
   useEffect(() => {
     let cancelled = false
@@ -417,7 +421,7 @@ export default function WatchReplay() {
   }, [runId])
 
   const archiveItems = Array.isArray(archive?.items) ? archive.items : []
-  const runSchedule = getScheduleEntryForRunId(runId) || scheduledRun
+  const runSchedule = getScheduleEntryForRunId(runId)
   const watchItems = useMemo(() => Array.isArray(watchData?.items) ? watchData.items : [], [watchData])
   const visibleMoments = useMemo(
     () => uniqueMoments(watchItems.filter(isVisibleMoment)),
@@ -448,7 +452,7 @@ export default function WatchReplay() {
   const maxBucketCount = Math.max(1, ...densityBuckets.map((bucket) => Number(bucket.linked_moment_count || 0)))
   const activity = watchData?.activity || {}
   const cleanRunId = cleanString(runId)
-  const unavailableError = cleanRunId ? '' : 'No completed public run is available for the watch board.'
+  const unavailableError = cleanRunId || archiveLoading ? '' : 'No completed public run is available for the watch board.'
 
   useEffect(() => {
     if (!cleanRunId || loading || error) return
@@ -546,6 +550,7 @@ export default function WatchReplay() {
       </div>
 
       {unavailableError && <div className="feed-notice">{unavailableError}</div>}
+      {!cleanRunId && archiveLoading && <div className="empty-state">Loading completed runs...</div>}
       {cleanRunId && loading && <div className="empty-state">Loading watch replay...</div>}
       {cleanRunId && !loading && error && <div className="feed-notice">{error}</div>}
 
