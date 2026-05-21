@@ -11,16 +11,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from sqlalchemy import String, cast, or_
+from sqlalchemy import String, bindparam, cast, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.models import RunReportArtifact, SimulationRun
-from app.services.condition_reports import (
-    _event_counts_for_run,
-    _llm_totals_for_run,
-    _resolve_run_window,
-)
 from app.services.report_artifacts import (
     ensure_artifact_path,
     reports_root,
@@ -185,27 +180,77 @@ def _fallback_archive_summary(row: RunReportArtifact) -> dict[str, Any]:
     }
 
 
-def _fallback_archive_metrics(db: Session, *, run_id: str, run_row: SimulationRun | None) -> dict[str, Any]:
-    try:
-        started_at, ended_at = _resolve_run_window(db, run_id=run_id, run_row=run_row)
-        llm = _llm_totals_for_run(db, run_id=run_id, started_at=started_at, ended_at=ended_at)
-        events = _event_counts_for_run(db, run_id=run_id, started_at=started_at, ended_at=ended_at)
-    except Exception as exc:
-        logger.warning("Unable to collect archive fallback metrics for run_id=%s: %s", run_id, exc)
-        return {
-            "total_events": 0,
-            "llm_calls": 0,
-            "deaths": 0,
-            "laws_passed": 0,
-            "estimated_cost_usd": 0.0,
-        }
+def _empty_archive_metrics() -> dict[str, Any]:
     return {
-        "total_events": int(sum(events.values())),
-        "llm_calls": int(llm.get("calls") or 0),
-        "deaths": int(events.get("agent_died", 0)),
-        "laws_passed": int(events.get("law_passed", 0)),
-        "estimated_cost_usd": float(llm.get("estimated_cost_usd") or 0.0),
+        "total_events": 0,
+        "llm_calls": 0,
+        "deaths": 0,
+        "laws_passed": 0,
+        "estimated_cost_usd": 0.0,
     }
+
+
+def _fallback_archive_metrics_by_run(db: Session, run_ids: list[str]) -> dict[str, dict[str, Any]]:
+    clean_run_ids = [str(run_id or "").strip() for run_id in run_ids if str(run_id or "").strip()]
+    metrics_by_run = {run_id: _empty_archive_metrics() for run_id in clean_run_ids}
+    if not clean_run_ids:
+        return metrics_by_run
+
+    try:
+        llm_rows = db.execute(
+            text(
+                """
+                SELECT
+                  run_id,
+                  COUNT(*) AS calls,
+                  COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+                FROM llm_usage
+                WHERE run_id IN :run_ids
+                GROUP BY run_id
+                """
+            ).bindparams(bindparam("run_ids", expanding=True)),
+            {"run_ids": clean_run_ids},
+        ).fetchall()
+    except Exception as exc:
+        logger.warning("Unable to collect archive fallback LLM metrics: %s", exc)
+        llm_rows = []
+    for row in llm_rows:
+        run_id = str(row.run_id or "").strip()
+        if run_id not in metrics_by_run:
+            continue
+        metrics_by_run[run_id]["llm_calls"] = int(row.calls or 0)
+        metrics_by_run[run_id]["estimated_cost_usd"] = float(row.estimated_cost_usd or 0.0)
+
+    try:
+        event_rows = db.execute(
+            text(
+                """
+                SELECT
+                  (event_metadata -> 'runtime' ->> 'run_id') AS run_id,
+                  event_type,
+                  COUNT(*) AS count
+                FROM events
+                WHERE (event_metadata -> 'runtime' ->> 'run_id') IN :run_ids
+                GROUP BY run_id, event_type
+                """
+            ).bindparams(bindparam("run_ids", expanding=True)),
+            {"run_ids": clean_run_ids},
+        ).fetchall()
+    except Exception as exc:
+        logger.warning("Unable to collect archive fallback event metrics: %s", exc)
+        event_rows = []
+    for row in event_rows:
+        run_id = str(row.run_id or "").strip()
+        event_type = str(row.event_type or "").strip()
+        if run_id not in metrics_by_run:
+            continue
+        count = int(row.count or 0)
+        metrics_by_run[run_id]["total_events"] += count
+        if event_type == "agent_died":
+            metrics_by_run[run_id]["deaths"] += count
+        elif event_type == "law_passed":
+            metrics_by_run[run_id]["laws_passed"] += count
+    return metrics_by_run
 
 
 def _merge_run_metadata_into_archive_summary(summary: dict[str, Any], row: SimulationRun | None) -> None:
@@ -224,15 +269,14 @@ def _merge_run_metadata_into_archive_summary(summary: dict[str, Any], row: Simul
 
 
 def _merge_db_metrics_into_archive_summary(
-    db: Session,
     *,
     summary: dict[str, Any],
     run_id: str,
-    run_row: SimulationRun | None,
+    metrics_by_run: dict[str, dict[str, Any]],
 ) -> None:
     if not summary.get("artifact_summary_missing"):
         return
-    summary["metrics"] = _fallback_archive_metrics(db, run_id=run_id, run_row=run_row)
+    summary["metrics"] = metrics_by_run.get(run_id, summary.get("metrics") or _empty_archive_metrics())
 
 
 def _load_archive_json_artifact(row: RunReportArtifact) -> dict[str, Any] | None:
@@ -442,6 +486,12 @@ def list_archived_runs(
         .all()
     )
     run_registry = {str(row.run_id): row for row in run_rows}
+    fallback_metric_run_ids = [
+        run_id
+        for run_id, summary in summary_by_run.items()
+        if summary.get("artifact_summary_missing")
+    ]
+    fallback_metrics_by_run = _fallback_archive_metrics_by_run(db, fallback_metric_run_ids)
 
     artifacts_by_run: dict[str, dict[str, dict[str, Any]]] = {}
     for row in artifact_rows:
@@ -467,7 +517,11 @@ def list_archived_runs(
     for run_id, summary in summary_by_run.items():
         run_row = run_registry.get(run_id)
         _merge_run_metadata_into_archive_summary(summary, run_row)
-        _merge_db_metrics_into_archive_summary(db, summary=summary, run_id=run_id, run_row=run_row)
+        _merge_db_metrics_into_archive_summary(
+            summary=summary,
+            run_id=run_id,
+            metrics_by_run=fallback_metrics_by_run,
+        )
         is_tuning = bool(
             run_row
             and bool(run_row.protocol_deviation)
