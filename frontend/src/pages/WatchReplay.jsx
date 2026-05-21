@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import {
   Activity,
   AlertTriangle,
+  CircleX,
   Eye,
   FileSearch,
   Handshake,
@@ -251,6 +252,57 @@ function buildDensityBuckets(density, moments, window) {
   return attachRepresentativeMoments(sourceBuckets, moments)
 }
 
+function getBucketKey(bucket) {
+  return `${Number(bucket?.index || 0)}:${cleanString(bucket?.bucket_start)}`
+}
+
+function isMomentInBucket(moment, bucket) {
+  if (!moment || !bucket) return false
+  const eventMs = Date.parse(getEventTime(moment))
+  const startMs = Date.parse(bucket.bucket_start || '')
+  const endMs = Date.parse(bucket.bucket_end || '')
+  return Number.isFinite(eventMs)
+    && Number.isFinite(startMs)
+    && Number.isFinite(endMs)
+    && eventMs >= startMs
+    && eventMs <= endMs
+}
+
+function getMomentsInBucket(moments, bucket) {
+  return uniqueMoments(moments)
+    .filter((moment) => isMomentInBucket(moment, bucket))
+    .sort((a, b) => {
+      const salienceDelta = Number(b?.salience || 0) - Number(a?.salience || 0)
+      if (salienceDelta !== 0) return salienceDelta
+      return (Date.parse(getEventTime(a)) || 0) - (Date.parse(getEventTime(b)) || 0)
+    })
+}
+
+function buildSelectedWindow(bucket, moments) {
+  if (!bucket) return null
+  const windowMoments = getMomentsInBucket(moments, bucket)
+  const laneCounts = windowMoments.reduce((counts, moment) => {
+    const lane = getEventLane(moment)
+    counts[lane] = Number(counts[lane] || 0) + 1
+    return counts
+  }, {})
+  const dominantLane = Object.entries(laneCounts)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0]
+    || normalizeLaneKey(bucket.dominant_category)
+
+  return {
+    key: getBucketKey(bucket),
+    bucket,
+    start: bucket.bucket_start,
+    end: bucket.bucket_end,
+    count: windowMoments.length || Number(bucket.event_count || 0),
+    dominantLane,
+    laneCounts,
+    moments: windowMoments,
+    topMoments: windowMoments.slice(0, 3),
+  }
+}
+
 function buildLaneRows(moments) {
   const grouped = new Map()
   uniqueMoments(moments).forEach((item) => {
@@ -293,6 +345,7 @@ export default function WatchReplay() {
   const [story, setStory] = useState(null)
   const [loading, setLoading] = useState(Boolean(initialRunId))
   const [error, setError] = useState('')
+  const [selectedBucketKey, setSelectedBucketKey] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -371,6 +424,14 @@ export default function WatchReplay() {
     () => buildDensityBuckets(density, visibleMoments, window),
     [density, visibleMoments, window],
   )
+  const selectedBucket = useMemo(
+    () => densityBuckets.find((bucket) => getBucketKey(bucket) === selectedBucketKey) || null,
+    [densityBuckets, selectedBucketKey],
+  )
+  const selectedWindow = useMemo(
+    () => buildSelectedWindow(selectedBucket, visibleMoments),
+    [selectedBucket, visibleMoments],
+  )
   const laneRows = useMemo(() => buildLaneRows(visibleMoments), [visibleMoments])
   const maxBucketCount = Math.max(1, ...densityBuckets.map((bucket) => Number(bucket.event_count || 0)))
   const activity = runDetail?.activity || {}
@@ -393,7 +454,19 @@ export default function WatchReplay() {
 
   function handleRunSelect(event) {
     const nextRunId = cleanString(event.target.value)
-    if (nextRunId) setRunId(nextRunId)
+    if (nextRunId) {
+      setSelectedBucketKey('')
+      setRunId(nextRunId)
+    }
+  }
+
+  function handleBucketSelect(bucket) {
+    const key = getBucketKey(bucket)
+    setSelectedBucketKey((current) => current === key ? '' : key)
+  }
+
+  function clearSelectedWindow() {
+    setSelectedBucketKey('')
   }
 
   return (
@@ -501,18 +574,20 @@ export default function WatchReplay() {
                   ? getEventLane(representative)
                   : normalizeLaneKey(bucket.dominant_category)
                 const height = count > 0 ? Math.max(16, Math.round((count / maxBucketCount) * 110)) : 4
-                const href = cleanRunId ? getReplayHref(cleanRunId, eventId) : '#'
                 return (
-                  <Link
+                  <button
                     key={`${bucket.index}-${bucket.bucket_start}`}
-                    className={`watch-density-bar lane-${lane}`}
-                    to={href}
+                    type="button"
+                    className={`watch-density-bar lane-${lane} ${selectedWindow?.key === getBucketKey(bucket) ? 'active' : ''}`}
+                    onClick={() => handleBucketSelect(bucket)}
+                    aria-pressed={selectedWindow?.key === getBucketKey(bucket)}
                     title={`${count} moment${count === 1 ? '' : 's'} near ${formatTimeOnly(bucket.bucket_start)}`}
-                    aria-label={`${count} event timeline bucket near ${formatTimeOnly(bucket.bucket_start)}`}
+                    aria-label={`Select ${count} event timeline bucket near ${formatTimeOnly(bucket.bucket_start)}`}
+                    disabled={count <= 0 && eventId <= 0 && !bucket.dominant_category}
                   >
                     <span style={{ height: `${height}px` }} />
                     <em>{count > 0 ? count : ''}</em>
-                  </Link>
+                  </button>
                 )
               })}
             </div>
@@ -522,30 +597,95 @@ export default function WatchReplay() {
             </div>
           </section>
 
+          {selectedWindow && (
+            <section className="watch-selected-window" aria-label="Selected window">
+              <div className="watch-selected-window-head">
+                <div>
+                  <span>Selected window</span>
+                  <strong>{formatTimestamp(selectedWindow.start)} to {formatTimestamp(selectedWindow.end)}</strong>
+                </div>
+                <button type="button" className="btn btn-secondary" onClick={clearSelectedWindow}>
+                  <CircleX size={14} />
+                  Clear selection
+                </button>
+              </div>
+              <div className="watch-selected-window-meta">
+                <div>
+                  <span>Dominant lane</span>
+                  <strong>{LANE_META[selectedWindow.dominantLane]?.label || 'Other Signals'}</strong>
+                </div>
+                <div>
+                  <span>Linked moments</span>
+                  <strong>{formatNumber(selectedWindow.count)}</strong>
+                </div>
+                <div>
+                  <span>Replay target</span>
+                  <strong>{selectedWindow.topMoments[0] ? formatEventTitle(selectedWindow.topMoments[0]) : 'Window overview'}</strong>
+                </div>
+              </div>
+              <div className="watch-selected-moments">
+                {selectedWindow.topMoments.length === 0 && (
+                  <p>No linked non-routine moments in this selected window.</p>
+                )}
+                {selectedWindow.topMoments.map((moment) => {
+                  const eventId = getEventId(moment)
+                  return (
+                    <div key={eventId} className="watch-selected-moment">
+                      <span>{LANE_META[getEventLane(moment)]?.label || 'Other Signals'} · {formatTimestamp(getEventTime(moment))}</span>
+                      <strong>{formatEventTitle(moment)}</strong>
+                      <div>
+                        <Link className="btn btn-secondary" to={getReplayHref(cleanRunId, eventId)}>
+                          <TimerReset size={14} />
+                          Replay
+                        </Link>
+                        <Link className="btn btn-secondary" to={getEvidenceHref(cleanRunId, eventId)}>
+                          <FileSearch size={14} />
+                          Evidence
+                        </Link>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
           <section className="watch-lanes" aria-label="Major category lanes">
             <div className="watch-section-head">
               <div>
                 <span>Category lanes</span>
-                <h3>Open the spikes, then inspect the source trail</h3>
+                <h3>{selectedWindow ? 'Moments inside the selected window' : 'Open the spikes, then inspect the source trail'}</h3>
               </div>
             </div>
             {laneRows.map((lane) => {
               const LaneIcon = lane.icon || Radio
+              const visibleLaneMoments = selectedWindow
+                ? lane.moments.filter((moment) => isMomentInBucket(moment, selectedWindow.bucket))
+                : lane.moments
+              const selectedLaneCount = selectedWindow
+                ? Number(selectedWindow.laneCounts[lane.key] || 0)
+                : lane.count
               return (
-                <article key={lane.key} className={`watch-lane lane-${lane.key}`}>
+                <article key={lane.key} className={`watch-lane lane-${lane.key} ${selectedWindow && selectedLaneCount === 0 ? 'dimmed' : ''}`}>
                   <div className="watch-lane-head">
                     <LaneIcon size={18} />
                     <div>
                       <strong>{lane.label}</strong>
-                      <span>{lane.count} linked moment{lane.count === 1 ? '' : 's'}</span>
+                      <span>
+                        {selectedWindow
+                          ? `${selectedLaneCount} in selected window / ${lane.count} total`
+                          : `${lane.count} linked moment${lane.count === 1 ? '' : 's'}`}
+                      </span>
                     </div>
                     <p>{lane.description}</p>
                   </div>
                   <div className="watch-lane-moments">
-                    {lane.moments.length === 0 && (
-                      <div className="watch-lane-empty">No linked non-routine moments in this lane.</div>
+                    {visibleLaneMoments.length === 0 && (
+                      <div className="watch-lane-empty">
+                        {selectedWindow ? 'No linked moments in the selected window.' : 'No linked non-routine moments in this lane.'}
+                      </div>
                     )}
-                    {lane.moments.map((moment) => {
+                    {visibleLaneMoments.map((moment) => {
                       const eventId = getEventId(moment)
                       return (
                         <div key={eventId} className="watch-moment">

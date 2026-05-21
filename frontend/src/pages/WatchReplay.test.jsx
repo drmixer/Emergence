@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -149,7 +149,7 @@ afterEach(() => {
 })
 
 describe('WatchReplay', () => {
-  it('defaults to the latest completed run and links density spikes into replay', async () => {
+  it('defaults to the latest completed run and lets density spikes select a replay window', async () => {
     renderWatch()
 
     expect(await screen.findByText(/Watch Replay/i)).toBeInTheDocument()
@@ -161,11 +161,28 @@ describe('WatchReplay', () => {
     expect(api.getRunDetail).toHaveBeenCalledWith('real-20260519T063000Z', 96, 24, 45)
     expect(api.getPlotTurnReplay).toHaveBeenCalledWith(96, 45, 60, 240, 'real-20260519T063000Z')
 
-    const spike = screen.getByLabelText(/3 event timeline bucket/i)
-    expect(spike).toHaveAttribute(
+    const spike = screen.getByRole('button', { name: /Select 3 event timeline bucket/i })
+    fireEvent.click(spike)
+
+    expect(spike).toHaveAttribute('aria-pressed', 'true')
+    const selectedWindow = screen.getByLabelText(/Selected window/i)
+    expect(within(selectedWindow).getByText(/Dominant lane/i)).toBeInTheDocument()
+    expect(within(selectedWindow).getAllByText(/Governance/i).length).toBeGreaterThan(0)
+    expect(within(selectedWindow).getAllByText(/Law Passed/i).length).toBeGreaterThan(0)
+    expect(within(selectedWindow).getByRole('link', { name: /Replay/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/replay?mode=timeline&event=2',
     )
+    expect(within(selectedWindow).getByRole('link', { name: /Evidence/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260519T063000Z?event=2',
+    )
+
+    expect(screen.getByText(/Moments inside the selected window/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/0 in selected window \/ 1 total/i).length).toBeGreaterThan(0)
+
+    fireEvent.click(within(selectedWindow).getByRole('button', { name: /Clear selection/i }))
+    expect(screen.queryByLabelText(/Selected window/i)).not.toBeInTheDocument()
   })
 
   it('shows major lanes with replay and evidence links but keeps routine work out', async () => {

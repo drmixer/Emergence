@@ -3139,6 +3139,7 @@ a.archive-run-brief-teaser:hover strong {
 }
 
 .watch-density,
+.watch-selected-window,
 .watch-lanes {
   display: flex;
   flex-direction: column;
@@ -3185,7 +3186,12 @@ a.archive-run-brief-teaser:hover strong {
   align-items: center;
   gap: 0.25rem;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
   text-decoration: none;
 }
 
@@ -3200,6 +3206,26 @@ a.archive-run-brief-teaser:hover strong {
 .watch-density-bar:hover span {
   opacity: 0.8;
   transform: translateY(-2px);
+}
+
+.watch-density-bar:focus-visible {
+  outline: 2px solid rgba(147, 197, 253, 0.82);
+  outline-offset: 4px;
+}
+
+.watch-density-bar.active span {
+  opacity: 1;
+  transform: translateY(-3px);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.78), 0 12px 24px rgba(15, 23, 42, 0.34);
+}
+
+.watch-density-bar:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.watch-density-bar:disabled span {
+  transform: none;
 }
 
 .watch-density-bar em {
@@ -3241,6 +3267,82 @@ a.archive-run-brief-teaser:hover strong {
   font-size: 0.78rem;
 }
 
+.watch-selected-window {
+  padding: var(--spacing-lg);
+  border: 1px solid rgba(147, 197, 253, 0.22);
+  border-radius: var(--radius-lg);
+  background: rgba(96, 165, 250, 0.055);
+}
+
+.watch-selected-window-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  min-width: 0;
+}
+
+.watch-selected-window-head span,
+.watch-selected-window-meta span,
+.watch-selected-moment span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.watch-selected-window-head strong,
+.watch-selected-window-meta strong,
+.watch-selected-moment strong {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.watch-selected-window-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.watch-selected-window-meta > div {
+  min-width: 0;
+  padding: var(--spacing-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.028);
+}
+
+.watch-selected-moments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.watch-selected-moments > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.watch-selected-moment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  min-width: 0;
+  padding: var(--spacing-md);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-md);
+  background: rgba(8, 13, 23, 0.38);
+}
+
+.watch-selected-moment > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-top: auto;
+}
+
 .watch-lane {
   display: grid;
   grid-template-columns: minmax(220px, 0.25fr) minmax(0, 1fr);
@@ -3250,6 +3352,12 @@ a.archive-run-brief-teaser:hover strong {
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.022);
   min-width: 0;
+  transition: opacity var(--transition-fast), border-color var(--transition-fast);
+}
+
+.watch-lane.dimmed {
+  opacity: 0.58;
+  border-color: rgba(255, 255, 255, 0.05);
 }
 
 .watch-lane-head {
@@ -3815,6 +3923,8 @@ a.archive-run-brief-teaser:hover strong {
   .archive-comparison-row,
   .archive-comparison-runs,
   .watch-hero,
+  .watch-selected-window-meta,
+  .watch-selected-moments,
   .watch-lane {
     grid-template-columns: 1fr;
   }
@@ -3829,6 +3939,10 @@ a.archive-run-brief-teaser:hover strong {
 
   .watch-moment-actions {
     justify-content: flex-start;
+  }
+
+  .watch-selected-window-head {
+    flex-direction: column;
   }
 
   .run-outcome-grid {
