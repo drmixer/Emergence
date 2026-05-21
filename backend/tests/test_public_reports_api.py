@@ -501,6 +501,19 @@ def test_list_archived_runs_falls_back_for_missing_summary_without_regeneration(
                 status="completed",
                 metadata_json={"condition_name": "fallback_condition", "replicate_count": 2},
             ),
+            SimulationRun(
+                run_id="run-missing",
+                run_mode="real",
+                protocol_version="phase-2",
+                condition_name="registry_condition",
+                season_number=3,
+                run_class="standard_72h",
+                carryover_agent_count=0,
+                fresh_agent_count=50,
+                protocol_deviation=False,
+                started_at=datetime.fromisoformat("2026-04-09T01:00:00+00:00"),
+                ended_at=datetime.fromisoformat("2026-04-09T04:00:00+00:00"),
+            ),
         ]
     )
     db_session.commit()
@@ -525,7 +538,9 @@ def test_list_archived_runs_falls_back_for_missing_summary_without_regeneration(
     rows = {item["run_id"]: item for item in payload["items"]}
     assert rows["run-good"]["summary"]["metrics"]["total_events"] == 420
     assert rows["run-missing"]["summary"]["artifact_summary_missing"] is True
-    assert rows["run-missing"]["summary"]["condition_name"] == "fallback_condition"
+    assert rows["run-missing"]["summary"]["condition_name"] == "registry_condition"
+    assert rows["run-missing"]["summary"]["run_class"] == "standard_72h"
+    assert rows["run-missing"]["summary"]["duration_hours"] == 3.0
     assert rows["run-missing"]["summary"]["replicate_count"] == 2
     assert rows["run-missing"]["summary"]["metrics"]["total_events"] == 0
 

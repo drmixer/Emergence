@@ -181,6 +181,21 @@ def _fallback_archive_summary(row: RunReportArtifact) -> dict[str, Any]:
     }
 
 
+def _merge_run_metadata_into_archive_summary(summary: dict[str, Any], row: SimulationRun | None) -> None:
+    if row is None or not summary.get("artifact_summary_missing"):
+        return
+    summary["condition_name"] = str(row.condition_name or "").strip() or summary.get("condition_name")
+    summary["season_number"] = int(row.season_number) if row.season_number is not None else summary.get("season_number")
+    summary["run_class"] = str(row.run_class or "").strip() or summary.get("run_class")
+    summary["run_started_at"] = row.started_at.isoformat() if row.started_at else summary.get("run_started_at")
+    summary["run_ended_at"] = row.ended_at.isoformat() if row.ended_at else summary.get("run_ended_at")
+    summary["duration_hours"] = _duration_hours(summary.get("run_started_at"), summary.get("run_ended_at"))
+    if row.ended_at:
+        summary["sort_key"] = row.ended_at.timestamp()
+    elif row.started_at:
+        summary["sort_key"] = row.started_at.timestamp()
+
+
 def _load_archive_json_artifact(row: RunReportArtifact) -> dict[str, Any] | None:
     """Read archive-list JSON without regenerating stale artifacts on the request path."""
     try:
@@ -412,6 +427,7 @@ def list_archived_runs(
     items = []
     for run_id, summary in summary_by_run.items():
         run_row = run_registry.get(run_id)
+        _merge_run_metadata_into_archive_summary(summary, run_row)
         is_tuning = bool(
             run_row
             and bool(run_row.protocol_deviation)
