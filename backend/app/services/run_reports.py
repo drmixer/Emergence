@@ -1051,7 +1051,7 @@ def _viewer_brief_sections_from_generated_markdown(
     for template_section in _viewer_brief_template_section_list():
         heading = str(template_section["heading"]).strip()
         fallback = fallback_by_heading.get(heading) or {}
-        if heading == "Run Question" and str(declared_question or "").strip():
+        if heading in {"Run Question", "What To Watch Next"} and str(declared_question or "").strip():
             paragraphs = list(fallback.get("paragraphs") or [])
         else:
             paragraphs = generated_by_heading.get(heading) or list(fallback.get("paragraphs") or [])

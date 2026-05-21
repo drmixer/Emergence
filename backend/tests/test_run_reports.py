@@ -434,7 +434,7 @@ The brief reports only supplied aid, trade, and conflict counts.
 Repeated proposal/forum waves became one grouped pattern.
 
 ## What To Watch Next
-Watch whether the next run stays readable live.
+Watch whether newly passed laws shape the next run.
 """.strip()
 
     payload = run_reports._build_viewer_brief_payload(
@@ -458,6 +458,9 @@ Watch whether the next run stays readable live.
     assert "The Lead must answer it" in generation["user_prompt"]
     assert "next run or future run" in generation["user_prompt"]
     assert payload["sections"][1]["paragraphs"] == [snapshot["declared_question"]]
+    assert payload["sections"][8]["paragraphs"] == [
+        "Watch whether the next run stays readable live and whether the post-run evidence links explain the biggest events."
+    ]
     assert payload["sections"][2]["generated_by"] == run_reports.VIEWER_BRIEF_LLM_GENERATOR_VERSION
 
 
@@ -677,6 +680,9 @@ Watch whether the next run remains easier to follow live.
     assert payload["gemini_viewer_brief_generation"]["status"] == "generated"
     assert payload["gemini_viewer_brief_generation"]["generated_markdown"] == repaired_markdown
     assert payload["sections"][1]["paragraphs"] == [snapshot["declared_question"]]
+    assert payload["sections"][8]["paragraphs"] == [
+        "Watch whether the next run stays readable live and whether the post-run evidence links explain the biggest events."
+    ]
     assert {item["artifact_type"] for item in recorded} == {"viewer_brief"}
 
 
