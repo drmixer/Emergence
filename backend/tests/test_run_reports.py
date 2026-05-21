@@ -458,6 +458,9 @@ Watch whether a future run remains readable live.
     assert "The Lead must answer it" in generation["user_prompt"]
     assert "next run or future run" in generation["user_prompt"]
     assert payload["sections"][1]["paragraphs"] == [snapshot["declared_question"]]
+    assert payload["sections"][2]["paragraphs"][0].startswith(
+        "For the declared viewer-comprehension question, the run is easiest to follow through"
+    )
     assert payload["sections"][8]["paragraphs"] == [
         "Watch whether the next run stays readable live and whether the post-run evidence links explain the biggest events."
     ]

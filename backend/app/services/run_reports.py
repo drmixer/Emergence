@@ -1072,7 +1072,7 @@ def _viewer_brief_sections_from_generated_markdown(
     for template_section in _viewer_brief_template_section_list():
         heading = str(template_section["heading"]).strip()
         fallback = fallback_by_heading.get(heading) or {}
-        if heading in {"Run Question", "What To Watch Next"} and str(declared_question or "").strip():
+        if heading in {"Run Question", "The Lead", "What To Watch Next"} and str(declared_question or "").strip():
             paragraphs = list(fallback.get("paragraphs") or [])
         else:
             paragraphs = generated_by_heading.get(heading) or list(fallback.get("paragraphs") or [])
@@ -3019,6 +3019,13 @@ def _build_viewer_brief_sections(
     question_text = declared_question or (
         f"No schedule-declared public question was found for run `{run_id}`; keep this brief bounded to observed run evidence."
     )
+    lead_claim = (
+        f"For the declared viewer-comprehension question, the run is easiest to follow through {pressure_text}, "
+        f"{_format_count_phrase(proposals, 'proposal')}, {_format_count_phrase(votes, 'vote')}, "
+        f"and {_format_count_phrase(laws, 'passed law')}. {lead_moment}"
+        if declared_question
+        else f"The run's accessible story starts with {pressure_text}. {lead_moment}"
+    )
     boundary_text = _run_claim_boundary_text(
         run_class=run_class,
         status_label=status_label,
@@ -3039,10 +3046,7 @@ def _build_viewer_brief_sections(
             heading="The Lead",
             claims=[
                 _build_claim_block(
-                    claim=(
-                        f"The run's accessible story starts with {pressure_text}. "
-                        f"{lead_moment}"
-                    ),
+                    claim=lead_claim,
                     evidence_links=evidence_links,
                 ),
                 _build_claim_block(claim=boundary_text, evidence_links=evidence_links),
