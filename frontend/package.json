@@ -17,7 +17,8 @@
     "test": "vitest run",
     "preview": "next start",
     "smoke:share-metadata": "node scripts/smoke-share-metadata.mjs",
-    "smoke:dashboard-api": "node scripts/smoke-dashboard-api.mjs"
+    "smoke:dashboard-api": "node scripts/smoke-dashboard-api.mjs",
+    "smoke:watch-replay": "node scripts/smoke-watch-replay.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
