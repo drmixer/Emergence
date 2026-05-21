@@ -21,7 +21,7 @@ import {
 } from '../data/runSchedule'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
-const ROUTINE_EVENT_TYPES = new Set(['work', 'idle', 'processing_error'])
+const ROUTINE_EVENT_TYPES = new Set(['work', 'idle', 'vote', 'processing_error'])
 const TIMELINE_BUCKET_COUNT = 18
 
 const LANE_ORDER = ['survival', 'governance', 'aid_trade', 'public_order', 'system']

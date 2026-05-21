@@ -86,6 +86,15 @@ beforeEach(() => {
         salience: 100,
         created_at: '2026-05-19T07:00:00.000Z',
       }),
+      makeMoment({
+        event_id: 5,
+        event_type: 'vote',
+        category: 'cooperation',
+        title: 'Vote',
+        description: 'A routine yes vote should not lead a watch lane.',
+        salience: 100,
+        created_at: '2026-05-19T07:30:00.000Z',
+      }),
       makeMoment(),
     ],
   })
@@ -167,6 +176,7 @@ describe('WatchReplay', () => {
     expect(within(lanes).getByText(/Survival/i)).toBeInTheDocument()
     expect(within(lanes).getByText(/Aid \/ Trade/i)).toBeInTheDocument()
     expect(within(lanes).queryByText(/^Work$/i)).not.toBeInTheDocument()
+    expect(within(lanes).queryByText(/^Vote$/i)).not.toBeInTheDocument()
 
     const lawMoment = within(lanes).getByText(/Law Passed/i).closest('.watch-moment')
     expect(within(lawMoment).getByRole('link', { name: /Replay/i })).toHaveAttribute(
