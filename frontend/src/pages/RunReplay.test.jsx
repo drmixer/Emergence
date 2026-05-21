@@ -286,4 +286,31 @@ describe('RunReplay', () => {
     expect(screen.getAllByText(/Request Aid/i).length).toBeGreaterThan(1)
     expect(screen.getAllByRole('link', { name: /Raw Log/i }).map((link) => link.getAttribute('href'))).toContain('/timeline?event=22')
   })
+
+  it('shows the viewer brief as a named report artifact', async () => {
+    api.getRunReports.mockResolvedValueOnce({
+      items: [
+        {
+          artifact_type: 'viewer_brief',
+          artifact_format: 'markdown',
+          updated_at: '2026-05-21T00:00:00.000Z',
+        },
+        {
+          artifact_type: 'approachable_report',
+          artifact_format: 'markdown',
+          updated_at: '2026-05-21T00:00:00.000Z',
+        },
+      ],
+    })
+
+    renderRunReplay('/runs/run-1/replay?tab=reports')
+
+    expect(await screen.findByText(/Report Artifacts/i)).toBeInTheDocument()
+    expect(screen.getByText('Emergence Brief')).toBeInTheDocument()
+    expect(screen.getByText('Approachable Story')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /Open/i })[0]).toHaveAttribute(
+      'href',
+      '/runs/run-1/reports/viewer_brief?format=markdown',
+    )
+  })
 })

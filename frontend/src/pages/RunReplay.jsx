@@ -113,11 +113,14 @@ const NARRATIVE_BEAT_RULES = [
 ]
 
 const REPORT_LABELS = {
+  viewer_brief: 'Emergence Brief',
   approachable_report: 'Approachable Story',
   technical_report: 'Technical Report',
   planner_report: 'Next-Run Plan',
   run_summary: 'Run Summary',
 }
+
+const REPORT_ORDER = ['viewer_brief', 'approachable_report', 'technical_report', 'planner_report', 'run_summary']
 
 const EVIDENCE_DEFAULT_LIMIT = 80
 
@@ -419,6 +422,13 @@ function getReportRows(reports) {
     byType.set(type, existing)
   })
   return Array.from(byType.values()).sort((a, b) => {
+    const aRank = REPORT_ORDER.indexOf(a.type)
+    const bRank = REPORT_ORDER.indexOf(b.type)
+    if (aRank !== bRank) {
+      if (aRank === -1) return 1
+      if (bRank === -1) return -1
+      return aRank - bRank
+    }
     const aLabel = REPORT_LABELS[a.type] || a.type
     const bLabel = REPORT_LABELS[b.type] || b.type
     return aLabel.localeCompare(bLabel)

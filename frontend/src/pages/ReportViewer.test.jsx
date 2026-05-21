@@ -19,9 +19,9 @@ vi.mock('../services/kpiAnalytics', () => ({ trackKpiEventOnce }))
 
 import ReportViewer from './ReportViewer'
 
-function renderReportViewer() {
+function renderReportViewer(initialEntry = '/runs/real-1/reports/approachable_report?format=markdown') {
   return render(
-    <MemoryRouter initialEntries={['/runs/real-1/reports/approachable_report?format=markdown']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route
           path="/runs/:runId/reports/:artifactType"
@@ -96,5 +96,16 @@ describe('ReportViewer', () => {
     expect(screen.getByRole('link', { name: /Run Recap/i })).toHaveAttribute('href', '/runs/real-1/replay?tab=overview')
     expect(screen.getByRole('link', { name: /Evidence Detail/i })).toHaveAttribute('href', '/runs/real-1')
     expect(api.getRunReportText).toHaveBeenCalledWith('real-1', 'approachable_report', 'markdown')
+  })
+
+  it('labels the news-style viewer brief without loading the extra story recap', async () => {
+    renderReportViewer('/runs/real-1/reports/viewer_brief?format=markdown')
+
+    expect(await screen.findByRole('heading', { name: 'Emergence Brief' })).toBeInTheDocument()
+    expect(screen.getByText(/News-style recap/i)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Plain-English Recap' })).not.toBeInTheDocument()
+    expect(api.getRunReportText).toHaveBeenCalledWith('real-1', 'viewer_brief', 'markdown')
+    expect(api.getRunDetail).not.toHaveBeenCalled()
+    expect(api.getReplayStory).not.toHaveBeenCalled()
   })
 })

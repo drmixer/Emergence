@@ -64,7 +64,7 @@ export const RUN_SCHEDULE = [
     links: {
       recap: '/runs/real-20260519T063000Z/replay?tab=overview',
       evidence: '/runs/real-20260519T063000Z',
-      report: '/runs/real-20260519T063000Z/reports/approachable_report?format=markdown',
+      report: '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
       archive: '/archive',
     },
     viewerPath: PUBLIC_CANARY_VIEWER_PATH,

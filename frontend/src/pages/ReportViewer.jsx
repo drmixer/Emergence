@@ -5,10 +5,19 @@ import { api } from '../services/api'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
 const REPORT_LABELS = {
+  viewer_brief: 'Emergence Brief',
   approachable_report: 'Approachable Story',
   technical_report: 'Technical Report',
   planner_report: 'Next-Run Plan',
   run_summary: 'Run Summary',
+}
+
+const REPORT_DESCRIPTIONS = {
+  viewer_brief: 'News-style recap for completed-run viewing, bounded to observed evidence and declared run framing.',
+  approachable_report: 'Accessible story report with research boundaries and evidence links.',
+  technical_report: 'Technical report for audit and implementation review.',
+  planner_report: 'Next-run planning report for operators.',
+  run_summary: 'Structured summary data for this completed run.',
 }
 
 function formatLabel(value) {
@@ -142,6 +151,7 @@ export default function ReportViewer() {
   const cleanRunId = String(runId || '').trim()
   const cleanArtifactType = String(artifactType || '').trim()
   const label = REPORT_LABELS[cleanArtifactType] || formatLabel(cleanArtifactType)
+  const description = REPORT_DESCRIPTIONS[cleanArtifactType] || `In-browser report view for completed run ${cleanRunId || 'unknown-run'}.`
 
   useEffect(() => {
     if (!cleanRunId || !cleanArtifactType) return
@@ -206,7 +216,7 @@ export default function ReportViewer() {
           {label}
         </h1>
         <p className="page-description">
-          In-browser report view for completed run {cleanRunId || 'unknown-run'}.
+          {description}
         </p>
       </div>
 

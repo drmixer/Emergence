@@ -56,6 +56,7 @@ function preferredFormat(artifact) {
 }
 
 const ARCHIVE_REPORT_ARTIFACTS = [
+  ['viewer_brief', 'Emergence Brief'],
   ['approachable_report', 'Approachable Story'],
   ['technical_report', 'Technical Report'],
   ['planner_report', 'Next-Run Plan'],
