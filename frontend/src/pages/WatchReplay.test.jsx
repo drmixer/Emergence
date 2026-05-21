@@ -205,4 +205,82 @@ describe('WatchReplay', () => {
       '/runs/real-20260519T063000Z?event=2',
     )
   })
+
+  it('renders selected lane moments even when they fall outside the default lane preview', async () => {
+    api.getPlotTurnReplay.mockResolvedValue({
+      items: [
+        makeMoment({
+          event_id: 30,
+          event_type: 'request_aid',
+          category: 'cooperation',
+          title: 'Early Aid One',
+          description: 'Earlier aid signal.',
+          salience: 78,
+          created_at: '2026-05-19T07:10:00.000Z',
+        }),
+        makeMoment({
+          event_id: 31,
+          event_type: 'request_aid',
+          category: 'cooperation',
+          title: 'Early Aid Two',
+          description: 'Earlier aid signal.',
+          salience: 77,
+          created_at: '2026-05-19T07:20:00.000Z',
+        }),
+        makeMoment({
+          event_id: 32,
+          event_type: 'request_aid',
+          category: 'cooperation',
+          title: 'Early Aid Three',
+          description: 'Earlier aid signal.',
+          salience: 76,
+          created_at: '2026-05-19T07:30:00.000Z',
+        }),
+        makeMoment({
+          event_id: 33,
+          event_type: 'request_aid',
+          category: 'cooperation',
+          title: 'Early Aid Four',
+          description: 'Earlier aid signal.',
+          salience: 75,
+          created_at: '2026-05-19T07:40:00.000Z',
+        }),
+        makeMoment({
+          event_id: 3,
+          event_type: 'request_aid',
+          category: 'cooperation',
+          title: 'Late Aid Requested',
+          description: 'An agent asked for food support after the early lane preview.',
+          salience: 80,
+          created_at: '2026-05-19T11:30:00.000Z',
+        }),
+      ],
+      buckets: [
+        {
+          index: 0,
+          bucket_start: '2026-05-19T06:30:00.000Z',
+          bucket_end: '2026-05-19T09:30:00.000Z',
+          event_count: 4,
+          dominant_category: 'cooperation',
+        },
+        {
+          index: 1,
+          bucket_start: '2026-05-19T09:30:00.000Z',
+          bucket_end: '2026-05-19T12:30:00.000Z',
+          event_count: 1,
+          dominant_category: 'cooperation',
+        },
+      ],
+    })
+
+    renderWatch()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Select 1 event timeline bucket/i }))
+
+    const lanes = screen.getByLabelText(/Major category lanes/i)
+    const aidLane = within(lanes).getByText(/Aid \/ Trade/i).closest('.watch-lane')
+    expect(within(aidLane).getByText(/1 in selected window \/ 5 total/i)).toBeInTheDocument()
+    expect(within(aidLane).getByText(/Late Aid Requested/i)).toBeInTheDocument()
+    expect(within(aidLane).queryByText(/No linked moments in the selected window/i)).not.toBeInTheDocument()
+  })
 })

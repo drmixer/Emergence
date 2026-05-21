@@ -320,7 +320,7 @@ function buildLaneRows(moments) {
         key: lane,
         ...meta,
         count: items.length,
-        moments: items.slice(0, 4),
+        moments: items,
       }
     })
     .filter((lane) => lane.count > 0 || lane.key !== 'other')
@@ -661,7 +661,7 @@ export default function WatchReplay() {
               const LaneIcon = lane.icon || Radio
               const visibleLaneMoments = selectedWindow
                 ? lane.moments.filter((moment) => isMomentInBucket(moment, selectedWindow.bucket))
-                : lane.moments
+                : lane.moments.slice(0, 4)
               const selectedLaneCount = selectedWindow
                 ? Number(selectedWindow.laneCounts[lane.key] || 0)
                 : lane.count
