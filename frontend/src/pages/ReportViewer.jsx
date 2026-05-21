@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { Download, ExternalLink, FileText } from 'lucide-react'
+import { Download, ExternalLink, FileSearch, FileText, TimerReset } from 'lucide-react'
 import { api } from '../services/api'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 
@@ -152,6 +152,9 @@ export default function ReportViewer() {
   const cleanArtifactType = String(artifactType || '').trim()
   const label = REPORT_LABELS[cleanArtifactType] || formatLabel(cleanArtifactType)
   const description = REPORT_DESCRIPTIONS[cleanArtifactType] || `In-browser report view for completed run ${cleanRunId || 'unknown-run'}.`
+  const replayHref = cleanRunId ? `/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview` : ''
+  const evidenceHref = cleanRunId ? `/runs/${encodeURIComponent(cleanRunId)}` : ''
+  const showReaderPath = cleanArtifactType === 'viewer_brief' && cleanRunId
 
   useEffect(() => {
     if (!cleanRunId || !cleanArtifactType) return
@@ -225,10 +228,10 @@ export default function ReportViewer() {
           <span>{cleanRunId || 'unknown-run'}</span>
         </div>
         <div className="run-topbar-actions">
-          <Link className="btn btn-secondary" to={`/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`}>
+          <Link className="btn btn-secondary" to={replayHref}>
             Run Recap
           </Link>
-          <Link className="btn btn-secondary" to={`/runs/${encodeURIComponent(cleanRunId)}`}>
+          <Link className="btn btn-secondary" to={evidenceHref}>
             Evidence Detail
           </Link>
           {rawUrl && (
@@ -276,6 +279,23 @@ export default function ReportViewer() {
               <pre>{reportText}</pre>
             ) : (
               renderMarkdown(reportText)
+            )}
+            {showReaderPath && (
+              <nav className="report-viewer-reader-path" aria-label="Brief reader path">
+                <span>Next views</span>
+                <div>
+                  <Link to={replayHref} aria-label="Replay: Key moments">
+                    <TimerReset size={14} />
+                    <strong>Replay</strong>
+                    <small>Key moments</small>
+                  </Link>
+                  <Link to={evidenceHref} aria-label="Evidence: Source trail">
+                    <FileSearch size={14} />
+                    <strong>Evidence</strong>
+                    <small>Source trail</small>
+                  </Link>
+                </div>
+              </nav>
             )}
           </div>
         </article>

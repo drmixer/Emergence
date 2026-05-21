@@ -1950,6 +1950,82 @@ a.archive-run-brief-teaser:hover strong {
   color: var(--accent-orange);
 }
 
+.archive-run-path,
+.report-viewer-reader-path {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.archive-run-path > span,
+.report-viewer-reader-path > span {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.archive-run-path > div,
+.report-viewer-reader-path > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+}
+
+.report-viewer-reader-path > div {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.archive-run-path-link,
+.report-viewer-reader-path a {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.55rem;
+  row-gap: 0.2rem;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text-primary);
+  text-decoration: none;
+  min-width: 0;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.archive-run-path-link:hover,
+.report-viewer-reader-path a:hover {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(245, 158, 11, 0.07);
+  transform: translateY(-1px);
+}
+
+.archive-run-path-link svg,
+.report-viewer-reader-path a svg {
+  grid-row: 1 / span 2;
+  color: var(--accent-orange);
+}
+
+.archive-run-path-link strong,
+.report-viewer-reader-path a strong {
+  font-size: 0.92rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.archive-run-path-link small,
+.report-viewer-reader-path a small {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
 .archive-run-schedule-context {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3378,7 +3454,9 @@ a.archive-run-brief-teaser:hover strong {
   }
 
   .archive-run-stats,
+  .archive-run-path > div,
   .archive-run-schedule-context,
+  .report-viewer-reader-path > div,
   .run-calendar-summary,
   .run-calendar-detail-grid,
   .run-brief-detail-grid,
@@ -3461,7 +3539,9 @@ a.archive-run-brief-teaser:hover strong {
   }
 
   .archive-run-stats,
+  .archive-run-path > div,
   .archive-run-schedule-context,
+  .report-viewer-reader-path > div,
   .run-calendar-summary,
   .run-calendar-detail-grid,
   .run-brief-detail-grid,

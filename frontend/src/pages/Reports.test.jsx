@@ -100,11 +100,16 @@ describe('Reports archive', () => {
       '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
     )
     expect(within(card).getByText(/Four agents died, several dormancy events accumulated/i)).toBeInTheDocument()
-    expect(within(card).getByRole('link', { name: /^Replay$/i })).toHaveAttribute(
+    expect(within(card).getByLabelText(/Latest run path/i)).toBeInTheDocument()
+    expect(within(card).getByRole('link', { name: /Brief: News recap/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
+    )
+    expect(within(card).getByRole('link', { name: /Replay: Key moments/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/replay?mode=story60',
     )
-    expect(within(card).getByRole('link', { name: /Latest Run Details/i })).toHaveAttribute(
+    expect(within(card).getByRole('link', { name: /Evidence: Source trail/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z',
     )

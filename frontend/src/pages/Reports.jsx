@@ -461,6 +461,33 @@ export default function Reports() {
                   ? 'Read The Brief'
                   : (isLatestPublicRun ? 'Start With Latest Recap' : 'Open Recap')
                 const primaryActionTarget = latestViewerBriefAvailable ? 'report:viewer_brief:primary' : 'recap'
+                const replayPath = getStoryReplayHref(runId)
+                const evidencePath = `/runs/${encodeURIComponent(runId)}`
+                const latestRunPathItems = isLatestPublicRun
+                  ? [
+                      viewerBriefTeaserPath && {
+                        label: 'Brief',
+                        meta: 'News recap',
+                        icon: <FileSearch size={14} />,
+                        to: viewerBriefTeaserPath,
+                        target: 'report:viewer_brief:path',
+                      },
+                      {
+                        label: 'Replay',
+                        meta: 'Key moments',
+                        icon: <TimerReset size={14} />,
+                        to: replayPath,
+                        target: 'replay:path',
+                      },
+                      {
+                        label: 'Evidence',
+                        meta: 'Source trail',
+                        icon: <FileSearch size={14} />,
+                        to: evidencePath,
+                        target: 'evidence:path',
+                      },
+                    ].filter(Boolean)
+                  : []
                 const visibleReportLinks = latestViewerBriefAvailable
                   ? reportLinks.filter(({ artifactType }) => artifactType !== 'viewer_brief')
                   : reportLinks
@@ -507,6 +534,27 @@ export default function Reports() {
                           {viewerBriefLead && <span>{viewerBriefLead}</span>}
                         </div>
                       )
+                    )}
+
+                    {latestRunPathItems.length > 0 && (
+                      <nav className="archive-run-path" aria-label="Latest run path">
+                        <span>Latest run path</span>
+                        <div>
+                          {latestRunPathItems.map((pathItem) => (
+                            <Link
+                              key={pathItem.label}
+                              className="archive-run-path-link"
+                              to={pathItem.to}
+                              aria-label={`${pathItem.label}: ${pathItem.meta}`}
+                              onClick={() => trackArchivePathClick(runId, pathItem.target)}
+                            >
+                              {pathItem.icon}
+                              <strong>{pathItem.label}</strong>
+                              <small>{pathItem.meta}</small>
+                            </Link>
+                          ))}
+                        </div>
+                      </nav>
                     )}
 
                     {scheduledRun && (
@@ -557,22 +605,26 @@ export default function Reports() {
                     </div>
 
                     <div className="archive-run-actions">
-                      <Link
-                        className="btn btn-secondary"
-                        to={getStoryReplayHref(runId)}
-                        onClick={() => trackArchivePathClick(runId, 'replay')}
-                      >
-                        <TimerReset size={14} />
-                        Replay
-                      </Link>
-                      <Link
-                        className="btn btn-secondary"
-                        to={`/runs/${encodeURIComponent(runId)}`}
-                        onClick={() => trackArchivePathClick(runId, 'evidence', { latest: isLatestPublicRun })}
-                      >
-                        <FileSearch size={14} />
-                        {isLatestPublicRun ? 'Latest Run Details' : 'Evidence'}
-                      </Link>
+                      {!isLatestPublicRun && (
+                        <>
+                          <Link
+                            className="btn btn-secondary"
+                            to={replayPath}
+                            onClick={() => trackArchivePathClick(runId, 'replay')}
+                          >
+                            <TimerReset size={14} />
+                            Replay
+                          </Link>
+                          <Link
+                            className="btn btn-secondary"
+                            to={evidencePath}
+                            onClick={() => trackArchivePathClick(runId, 'evidence')}
+                          >
+                            <FileSearch size={14} />
+                            Evidence
+                          </Link>
+                        </>
+                      )}
                       {visibleReportLinks.map(({ artifactType, label, artifact }) => (
                         <div key={artifactType} className="archive-report-action">
                           <Link
