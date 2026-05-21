@@ -188,3 +188,19 @@ jobs:
             fi
             sleep 45
           done
+
+      - name: Smoke watch replay (retry)
+        working-directory: frontend
+        env:
+          SMOKE_SITE_BASE: https://www.emergence.quest
+          SMOKE_API_BASE: https://api.emergence.quest
+          SMOKE_TIMEOUT_MS: "20000"
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            npm run smoke:watch-replay && exit 0
+            echo "watch replay smoke attempt ${attempt} failed"
+            if [ "${attempt}" -eq 6 ]; then
+              exit 1
+            fi
+            sleep 45
+          done

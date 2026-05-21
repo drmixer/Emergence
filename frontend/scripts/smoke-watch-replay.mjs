@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawn } from "node:child_process"
 import { resolveConfiguredApiBase } from "../lib/api-base.js"
 
 const SITE_BASE = String(
@@ -11,7 +12,18 @@ const API_BASE = String(
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS || 20000)
 const RUN_ID = String(process.env.SMOKE_RUN_ID || "").trim()
 const SKIP_SITE_CHECK = String(process.env.SMOKE_SKIP_SITE_CHECK || "").toLowerCase() === "true"
+const SKIP_RENDER_CHECK = String(process.env.SMOKE_SKIP_RENDER_CHECK || "").toLowerCase() === "true"
 const GENERIC_EVENT_TYPES = new Set(["direct_message", "forum_post", "forum_reply", "work", "idle", "vote"])
+
+const BROWSER_CANDIDATES = [
+  process.env.SMOKE_BROWSER_BIN,
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "google-chrome",
+  "google-chrome-stable",
+  "chromium",
+  "chromium-browser",
+].filter(Boolean)
 
 function fail(message) {
   throw new Error(message)
@@ -38,6 +50,75 @@ async function fetchJson(url) {
   const contentType = String(response.headers.get("content-type") || "").toLowerCase()
   ensure(contentType.includes("application/json"), `Expected JSON for ${url}, got ${contentType || "n/a"}`)
   return response.json()
+}
+
+function runCommand(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const timeoutMs = Number(options.timeoutMs || TIMEOUT_MS)
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...options,
+      timeoutMs: undefined,
+    })
+    let settled = false
+    let stdout = ""
+    let stderr = ""
+    const timer = setTimeout(() => {
+      if (settled) return
+      child.kill("SIGKILL")
+      settled = true
+      resolve({ code: null, stdout, stderr: `${stderr}\nCommand timed out after ${timeoutMs}ms` })
+    }, timeoutMs)
+    child.stdout?.setEncoding("utf8")
+    child.stderr?.setEncoding("utf8")
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk
+    })
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk
+    })
+    child.on("error", (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on("close", (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({ code, stdout, stderr })
+    })
+  })
+}
+
+async function findBrowserBin() {
+  for (const candidate of BROWSER_CANDIDATES) {
+    const result = candidate.includes("/")
+      ? await runCommand(candidate, ["--version"]).catch(() => null)
+      : await runCommand("which", [candidate]).catch(() => null)
+    if (result?.code === 0) return candidate
+  }
+  return ""
+}
+
+async function dumpRenderedDom(url) {
+  const browserBin = await findBrowserBin()
+  ensure(browserBin, "Could not find Chrome/Chromium for rendered watch smoke; set SMOKE_BROWSER_BIN or SMOKE_SKIP_RENDER_CHECK=true")
+  const result = await runCommand(browserBin, [
+    "--headless=new",
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--no-sandbox",
+    `--virtual-time-budget=${Math.max(TIMEOUT_MS, 12000)}`,
+    "--dump-dom",
+    url,
+  ], { timeoutMs: Math.max(TIMEOUT_MS + 5000, 25000) })
+  ensure(result.code === 0, `Rendered watch page check failed with exit ${result.code ?? "timeout"}: ${result.stderr.slice(0, 400)}`)
+  return result.stdout
 }
 
 async function resolveRunId() {
@@ -67,6 +148,20 @@ function validateWatchPayload(payload, runId) {
   }
 }
 
+function validateRenderedDefaultWatch(dom, runId, pageUrl) {
+  ensure(dom && typeof dom === "string", "Rendered default watch DOM is empty")
+  ensure(!dom.includes("__next_error__"), "Default watch route rendered a Next error page")
+  ensure(!dom.includes("Application error"), "Default watch route rendered an application error")
+  ensure(dom.includes("Watch Replay"), "Default watch route missing Watch Replay heading")
+  ensure(dom.includes(runId), `Default watch route did not render latest archived run ${runId}`)
+  ensure(dom.includes("Timeline density"), "Default watch route missing timeline density section")
+  ensure(dom.includes("Category lanes"), "Default watch route missing category lanes")
+  ensure(dom.includes("watch-density-bar"), "Default watch route missing rendered density bars")
+  ensure(dom.includes("watch-lane"), "Default watch route missing rendered lanes")
+  ensure(!dom.includes("latest-completed-run"), "Default watch route did not resolve beyond the placeholder run id")
+  console.log(`[ok] default watch route rendered: ${pageUrl}`)
+}
+
 async function main() {
   ensure(API_BASE.length > 0, "Resolved API base is empty")
   const runId = await resolveRunId()
@@ -80,6 +175,12 @@ async function main() {
     const pageUrl = `${SITE_BASE}/watch?run=${encodeURIComponent(runId)}`
     await fetchWithTimeout(pageUrl)
     console.log(`[ok] watch page reachable: ${pageUrl}`)
+
+    if (!SKIP_RENDER_CHECK) {
+      const defaultPageUrl = `${SITE_BASE}/watch?smoke=default-route`
+      const dom = await dumpRenderedDom(defaultPageUrl)
+      validateRenderedDefaultWatch(dom, runId, defaultPageUrl)
+    }
   }
 
   console.log("")
