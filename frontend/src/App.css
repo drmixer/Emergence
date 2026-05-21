@@ -1923,6 +1923,33 @@ tr:last-child td {
   line-height: 1.55;
 }
 
+.archive-run-brief-teaser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-left: var(--spacing-md);
+  border-left: 2px solid rgba(245, 158, 11, 0.72);
+  color: var(--text-primary);
+  text-decoration: none;
+  min-width: 0;
+}
+
+.archive-run-brief-teaser strong {
+  font-size: 1rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.archive-run-brief-teaser span {
+  color: var(--text-secondary);
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+a.archive-run-brief-teaser:hover strong {
+  color: var(--accent-orange);
+}
+
 .archive-run-schedule-context {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

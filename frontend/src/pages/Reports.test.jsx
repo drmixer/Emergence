@@ -55,6 +55,8 @@ beforeEach(() => {
           season_number: 0,
           replicate_count: 1,
           generated_at_utc: '2026-05-21T00:00:00.000Z',
+          viewer_brief_headline: 'Deaths, Dormancy, and Four New Laws Closed the K-Series Test',
+          viewer_brief_lead: 'Four agents died, several dormancy events accumulated, and the run still produced four laws before closeout.',
           metrics: {
             total_events: 15538,
             llm_calls: 2434,
@@ -93,6 +95,11 @@ describe('Reports archive', () => {
       'href',
       '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
     )
+    expect(within(card).getByRole('link', { name: /Deaths, Dormancy, and Four New Laws/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
+    )
+    expect(within(card).getByText(/Four agents died, several dormancy events accumulated/i)).toBeInTheDocument()
     expect(within(card).getByRole('link', { name: /^Replay$/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/replay?mode=story60',

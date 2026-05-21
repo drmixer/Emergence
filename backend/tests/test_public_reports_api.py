@@ -338,6 +338,29 @@ def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_cl
     technical_file.write_text("# technical\n", encoding="utf-8")
     approachable_file = tmp_dir / "runs" / "run-archive-1" / "approachable_report.md"
     approachable_file.write_text("# approachable\n", encoding="utf-8")
+    viewer_brief_file = tmp_dir / "runs" / "run-archive-1" / "viewer_brief.json"
+    viewer_brief_file.write_text(
+        """
+{
+  "sections": [
+    {
+      "heading": "Headline",
+      "paragraphs": ["Deaths, Dormancy, and Four New Laws Closed the K-Series Test"]
+    },
+    {
+      "heading": "Run Question",
+      "paragraphs": ["Can viewers understand what happened after the run?"]
+    },
+    {
+      "heading": "The Lead",
+      "paragraphs": ["Four agents died, several dormancy events accumulated, and the run still produced four laws before closeout."]
+    }
+  ]
+}
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
     active_summary_file = tmp_dir / "runs" / "run-live-1" / "run_report_summary.json"
     active_summary_file.parent.mkdir(parents=True, exist_ok=True)
@@ -380,6 +403,13 @@ def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_cl
                 status="completed",
             ),
             RunReportArtifact(
+                run_id="run-archive-1",
+                artifact_type="viewer_brief",
+                artifact_format="json",
+                artifact_path=str(viewer_brief_file),
+                status="completed",
+            ),
+            RunReportArtifact(
                 run_id="run-live-1",
                 artifact_type="run_summary",
                 artifact_format="json",
@@ -414,9 +444,17 @@ def test_list_archived_runs_excludes_active_run_and_exposes_artifacts(reports_cl
     assert payload["stats"]["estimated_cost_usd"] == 1.2345
     assert payload["items"][0]["run_id"] == "run-archive-1"
     assert payload["items"][0]["summary"]["duration_hours"] == 2.0
+    assert (
+        payload["items"][0]["summary"]["viewer_brief_headline"]
+        == "Deaths, Dormancy, and Four New Laws Closed the K-Series Test"
+    )
+    assert payload["items"][0]["summary"]["viewer_brief_lead"] == (
+        "Four agents died, several dormancy events accumulated, and the run still produced four laws before closeout."
+    )
     assert payload["items"][0]["run_metadata"]["condition_name"] == "baseline_v2"
     assert payload["items"][0]["artifacts"]["technical_report"]["formats"] == ["markdown"]
     assert payload["items"][0]["artifacts"]["approachable_report"]["formats"] == ["markdown"]
+    assert payload["items"][0]["artifacts"]["viewer_brief"]["formats"] == ["json"]
 
 
 def test_list_archived_runs_hides_tuning_runs_by_default(reports_client, monkeypatch):

@@ -112,6 +112,47 @@ def _is_public_canary_run(row: SimulationRun | None) -> bool:
     return has_public_marker or has_k_series_marker
 
 
+def _clean_archive_teaser_text(value: Any, *, max_length: int) -> str:
+    text_value = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text_value) <= max_length:
+        return text_value
+    truncated = text_value[: max_length + 1].rsplit(" ", 1)[0].strip()
+    return f"{truncated}..." if truncated else text_value[:max_length].strip()
+
+
+def _first_viewer_brief_section_paragraph(payload: dict[str, Any], heading: str) -> str:
+    sections = payload.get("sections")
+    if not isinstance(sections, list):
+        return ""
+    normalized_heading = heading.strip().lower()
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        if str(section.get("heading") or "").strip().lower() != normalized_heading:
+            continue
+        paragraphs = section.get("paragraphs")
+        if not isinstance(paragraphs, list):
+            return ""
+        for paragraph in paragraphs:
+            clean_paragraph = _clean_archive_teaser_text(paragraph, max_length=360)
+            if clean_paragraph:
+                return clean_paragraph
+    return ""
+
+
+def _viewer_brief_archive_teaser(payload: Any) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        return {}
+    headline = _first_viewer_brief_section_paragraph(payload, "Headline")
+    lead = _first_viewer_brief_section_paragraph(payload, "The Lead")
+    teaser: dict[str, str] = {}
+    if headline:
+        teaser["viewer_brief_headline"] = _clean_archive_teaser_text(headline, max_length=140)
+    if lead:
+        teaser["viewer_brief_lead"] = lead
+    return teaser
+
+
 def _resolve_download_path(raw_path: str) -> Path:
     try:
         artifact_path = resolve_registered_artifact_path(str(raw_path or ""))
@@ -309,6 +350,12 @@ def list_archived_runs(
             artifact_bucket["formats"].append(artifact_format)
         if artifact_bucket["updated_at"] is None and row.updated_at:
             artifact_bucket["updated_at"] = row.updated_at.isoformat()
+        if str(row.artifact_type) == "viewer_brief" and artifact_format == "json":
+            summary = summary_by_run.get(str(row.run_id))
+            if summary is not None:
+                teaser = _viewer_brief_archive_teaser(load_json_artifact(db, row))
+                if teaser:
+                    summary.update(teaser)
 
     hidden_tuning_count = 0
     items = []

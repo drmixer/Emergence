@@ -436,6 +436,8 @@ export default function Reports() {
                 const runMetadata = item?.run_metadata || {}
                 const artifacts = item?.artifacts || {}
                 const takeaway = getRunTakeaway(item)
+                const viewerBriefHeadline = String(summary.viewer_brief_headline || '').trim()
+                const viewerBriefLead = String(summary.viewer_brief_lead || '').trim()
                 const isLatestPublicRun = !includeTuning && index === 0
                 const scheduledRun = getScheduleEntryForRunId(runId)
                 const reportLinks = ARCHIVE_REPORT_ARTIFACTS
@@ -451,8 +453,9 @@ export default function Reports() {
                   && latestViewerBriefArtifact?.available
                   && preferredFormat(latestViewerBriefArtifact),
                 )
+                const viewerBriefTeaserPath = getArtifactViewPath(runId, 'viewer_brief', latestViewerBriefArtifact)
                 const primaryActionPath = latestViewerBriefAvailable
-                  ? getArtifactViewPath(runId, 'viewer_brief', latestViewerBriefArtifact)
+                  ? viewerBriefTeaserPath
                   : `/runs/${encodeURIComponent(runId)}/replay?tab=overview`
                 const primaryActionLabel = latestViewerBriefAvailable
                   ? 'Read The Brief'
@@ -486,6 +489,24 @@ export default function Reports() {
 
                     {takeaway && (
                       <p className="archive-run-takeaway">{takeaway}</p>
+                    )}
+
+                    {(viewerBriefHeadline || viewerBriefLead) && (
+                      viewerBriefTeaserPath ? (
+                        <Link
+                          className="archive-run-brief-teaser"
+                          to={viewerBriefTeaserPath}
+                          onClick={() => trackArchivePathClick(runId, 'report:viewer_brief:teaser')}
+                        >
+                          {viewerBriefHeadline && <strong>{viewerBriefHeadline}</strong>}
+                          {viewerBriefLead && <span>{viewerBriefLead}</span>}
+                        </Link>
+                      ) : (
+                        <div className="archive-run-brief-teaser" aria-label="Viewer brief teaser">
+                          {viewerBriefHeadline && <strong>{viewerBriefHeadline}</strong>}
+                          {viewerBriefLead && <span>{viewerBriefLead}</span>}
+                        </div>
+                      )
                     )}
 
                     {scheduledRun && (
