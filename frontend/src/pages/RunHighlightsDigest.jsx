@@ -167,8 +167,8 @@ export default function RunHighlightsDigest() {
       setLoading(true)
       setError('')
       const [detailResult, storyResult] = await Promise.allSettled([
-        api.getRunDetail(cleanRunId, 96, 40, 45),
-        api.getReplayStory(96, 45, 12, cleanRunId),
+        api.getRunDetail(cleanRunId, 96, 30, 45),
+        api.getReplayStory(96, 45, 10, cleanRunId),
       ])
       if (cancelled) return
 

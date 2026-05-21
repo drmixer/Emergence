@@ -122,8 +122,8 @@ describe('RunHighlightsDigest', () => {
     renderDigest()
 
     expect(await screen.findByText(/Run Highlights/i)).toBeInTheDocument()
-    expect(api.getRunDetail).toHaveBeenCalledWith('run-1', 96, 40, 45)
-    expect(api.getReplayStory).toHaveBeenCalledWith(96, 45, 12, 'run-1')
+    expect(api.getRunDetail).toHaveBeenCalledWith('run-1', 96, 30, 45)
+    expect(api.getReplayStory).toHaveBeenCalledWith(96, 45, 10, 'run-1')
 
     const topbar = screen.getByText('run-1').closest('.run-detail-topbar')
     expect(within(topbar).getByRole('link', { name: /Watch/i })).toHaveAttribute('href', '/watch?run=run-1')
