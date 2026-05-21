@@ -6,6 +6,7 @@ import {
   BarChart3,
   CircleCheck,
   Download,
+  Eye,
   ExternalLink,
   FileSearch,
   FileText,
@@ -22,6 +23,7 @@ import {
   EVIDENCE_CATEGORY_META,
   filterEvidenceByCategory,
 } from '../utils/evidenceCategories'
+import { getWatchReplayHref } from '../utils/bestMoments'
 
 const VALID_TABS = new Set(['overview', 'replay', 'evidence', 'reports'])
 const ROUTINE_REPLAY_EVENT_TYPES = new Set(['work', 'idle', 'vote', 'processing_error'])
@@ -672,6 +674,12 @@ export default function RunReplay() {
           <span>{cleanRunId || 'unknown-run'}</span>
         </div>
         <div className="run-topbar-actions">
+          {requestedEventId > 0 && (
+            <Link className="btn btn-secondary" to={getWatchReplayHref(cleanRunId, requestedEventId)}>
+              <Eye size={14} />
+              Back to Watch
+            </Link>
+          )}
           <Link className="btn btn-secondary" to={`/runs/${encodeURIComponent(cleanRunId)}`}>
             Evidence Detail
           </Link>
@@ -937,6 +945,9 @@ export default function RunReplay() {
                                   <Link className="btn btn-secondary" to={`/runs/${encodeURIComponent(cleanRunId)}?event=${getEventId(activeStoryItem)}`}>
                                     Evidence
                                   </Link>
+                                  <Link className="btn btn-secondary" to={getWatchReplayHref(cleanRunId, getEventId(activeStoryItem))}>
+                                    Watch Board
+                                  </Link>
                                   <Link className="btn btn-secondary" to={`/timeline?event=${getEventId(activeStoryItem)}`}>
                                     Raw Event Log
                                   </Link>
@@ -1082,6 +1093,9 @@ export default function RunReplay() {
                                           <Link to={`/runs/${encodeURIComponent(cleanRunId)}?event=${traceEventId}`} className="btn btn-secondary">
                                             Detail
                                           </Link>
+                                          <Link to={getWatchReplayHref(cleanRunId, traceEventId)} className="btn btn-secondary">
+                                            Watch
+                                          </Link>
                                           <Link to={`/timeline?event=${traceEventId}`} className="btn btn-secondary">
                                             Raw Log
                                           </Link>
@@ -1105,6 +1119,9 @@ export default function RunReplay() {
                           <>
                             <Link to={`/runs/${encodeURIComponent(cleanRunId)}?event=${eventId}`} className="btn btn-secondary">
                               Detail
+                            </Link>
+                            <Link to={getWatchReplayHref(cleanRunId, eventId)} className="btn btn-secondary">
+                              Watch
                             </Link>
                             <Link to={`/timeline?event=${eventId}`} className="btn btn-secondary">
                               Raw Log

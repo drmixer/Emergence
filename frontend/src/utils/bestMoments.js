@@ -44,3 +44,13 @@ export function getTimelineReplayHref(runId = '') {
   params.set('mode', 'timeline')
   return `/highlights?${params.toString()}`
 }
+
+export function getWatchReplayHref(runId = '', eventId = 0) {
+  const cleanRunId = String(runId || '').trim()
+  const cleanEventId = Number(eventId || 0)
+  const params = new URLSearchParams()
+  if (cleanRunId) params.set('run', cleanRunId)
+  if (cleanEventId > 0) params.set('event', String(cleanEventId))
+  const query = params.toString()
+  return query ? `/watch?${query}` : '/watch'
+}

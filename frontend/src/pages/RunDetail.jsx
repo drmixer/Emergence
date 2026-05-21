@@ -10,6 +10,7 @@ import {
   CircleCheck,
   CircleAlert,
   CircleDashed,
+  Eye,
   Users,
   Scale,
   Package,
@@ -18,7 +19,7 @@ import { api } from '../services/api'
 import { trackShareAction } from '../services/shareAnalytics'
 import { trackKpiEventOnce } from '../services/kpiAnalytics'
 import GlossaryTooltip from '../components/GlossaryTooltip'
-import { getStoryReplayHref, getTimelineReplayHref } from '../utils/bestMoments'
+import { getStoryReplayHref, getTimelineReplayHref, getWatchReplayHref } from '../utils/bestMoments'
 import {
   buildEvidenceCategoryFilters,
   EVIDENCE_CATEGORY_META,
@@ -513,6 +514,12 @@ export default function RunDetail() {
           )}
         </div>
         <div className="run-topbar-actions">
+          {requestedEventId > 0 && (
+            <Link className="btn btn-secondary" to={getWatchReplayHref(runId, requestedEventId)}>
+              <Eye size={14} />
+              Back to Watch
+            </Link>
+          )}
           <Link className="btn btn-secondary" to={getStoryReplayHref(runId)}>
             Replay
           </Link>
@@ -731,6 +738,9 @@ export default function RunDetail() {
                   <Link to={`/timeline?event=${focusedEvent.id}`} className="btn btn-secondary">
                     Raw Event Log
                   </Link>
+                  <Link to={getWatchReplayHref(runId, focusedEvent.id)} className="btn btn-secondary">
+                    Watch Board
+                  </Link>
                 </div>
               </div>
             </div>
@@ -811,6 +821,9 @@ export default function RunDetail() {
                       </a>
                       <Link to={`/timeline?event=${trace.event_id}`} className="btn btn-secondary">
                         Raw Event Log
+                      </Link>
+                      <Link to={getWatchReplayHref(runId, trace.event_id)} className="btn btn-secondary">
+                        Watch
                       </Link>
                       <button type="button" className="btn btn-secondary" onClick={() => shareMoment(trace.event_id)}>
                         <Share2 size={14} />

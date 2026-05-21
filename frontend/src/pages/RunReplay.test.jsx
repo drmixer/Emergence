@@ -155,6 +155,22 @@ describe('RunReplay', () => {
     expect(within(narrativeBeats).getByText(/Governance Response/i)).toBeInTheDocument()
     expect(within(narrativeBeats).getByText(/Pressure Point/i)).toBeInTheDocument()
     expect(within(narrativeBeats).queryByText(/^Work$/i)).not.toBeInTheDocument()
+
+    const selectedMoment = screen.getByText(/Selected moment/i).closest('.run-replay-featured')
+    expect(within(selectedMoment).getByRole('link', { name: /Watch Board/i })).toHaveAttribute(
+      'href',
+      '/watch?run=run-1&event=10',
+    )
+  })
+
+  it('links event-scoped replay back to the matching watch board window', async () => {
+    renderRunReplay('/runs/run-1/replay?mode=timeline&event=12')
+
+    expect(await screen.findByText(/Story Evidence/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Back to Watch/i })).toHaveAttribute(
+      'href',
+      '/watch?run=run-1&event=12',
+    )
   })
 
   it('does not promote routine playback into replay threads when curated story is empty', async () => {
@@ -285,6 +301,7 @@ describe('RunReplay', () => {
 
     expect(screen.getAllByText(/Request Aid/i).length).toBeGreaterThan(1)
     expect(screen.getAllByRole('link', { name: /Raw Log/i }).map((link) => link.getAttribute('href'))).toContain('/timeline?event=22')
+    expect(screen.getAllByRole('link', { name: /^Watch$/i }).map((link) => link.getAttribute('href'))).toContain('/watch?run=run-1&event=22')
   })
 
   it('shows the viewer brief as a named report artifact', async () => {

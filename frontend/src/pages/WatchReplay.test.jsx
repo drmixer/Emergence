@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { api, trackKpiEventOnce } = vi.hoisted(() => ({
@@ -19,9 +19,15 @@ vi.mock('../services/kpiAnalytics', () => ({ trackKpiEventOnce }))
 
 import WatchReplay from './WatchReplay'
 
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="location-probe">{location.pathname}{location.search}</div>
+}
+
 function renderWatch(initialEntry = '/watch') {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
+      <LocationProbe />
       <Routes>
         <Route
           path="/watch"
@@ -161,10 +167,11 @@ describe('WatchReplay', () => {
     expect(api.getRunDetail).toHaveBeenCalledWith('real-20260519T063000Z', 96, 24, 45)
     expect(api.getPlotTurnReplay).toHaveBeenCalledWith(96, 45, 60, 240, 'real-20260519T063000Z')
 
-    const spike = screen.getByRole('button', { name: /Select 3 event timeline bucket/i })
+    const spike = screen.getAllByRole('button', { name: /Select 1 event timeline bucket/i })[0]
     fireEvent.click(spike)
 
     expect(spike).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&event=2')
     const selectedWindow = screen.getByLabelText(/Selected window/i)
     expect(within(selectedWindow).getByText(/Dominant lane/i)).toBeInTheDocument()
     expect(within(selectedWindow).getAllByText(/Governance/i).length).toBeGreaterThan(0)
@@ -183,6 +190,7 @@ describe('WatchReplay', () => {
 
     fireEvent.click(within(selectedWindow).getByRole('button', { name: /Clear selection/i }))
     expect(screen.queryByLabelText(/Selected window/i)).not.toBeInTheDocument()
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z')
   })
 
   it('shows major lanes with replay and evidence links but keeps routine work out', async () => {
@@ -204,6 +212,53 @@ describe('WatchReplay', () => {
       'href',
       '/runs/real-20260519T063000Z?event=2',
     )
+  })
+
+  it('uses linked visible moments for density counts and disables true-empty buckets', async () => {
+    api.getPlotTurnReplay.mockResolvedValue({
+      items: [makeMoment()],
+      buckets: [
+        {
+          index: 0,
+          bucket_start: '2026-05-19T06:30:00.000Z',
+          bucket_end: '2026-05-19T09:30:00.000Z',
+          event_count: 0,
+          dominant_category: null,
+        },
+        {
+          index: 1,
+          bucket_start: '2026-05-19T09:30:00.000Z',
+          bucket_end: '2026-05-19T12:30:00.000Z',
+          event_count: 12,
+          dominant_category: 'cooperation',
+        },
+      ],
+    })
+
+    renderWatch()
+
+    const linkedBucket = await screen.findByRole('button', { name: /Select 1 event timeline bucket/i })
+    const emptyBuckets = screen.getAllByRole('button', { name: /Select 0 event timeline bucket/i })
+
+    expect(linkedBucket).not.toBeDisabled()
+    expect(emptyBuckets[0]).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /Select 12 event timeline bucket/i })).not.toBeInTheDocument()
+  })
+
+  it('selects a watch window from an event deep link', async () => {
+    renderWatch('/watch?run=real-20260519T063000Z&event=3')
+
+    const selectedWindow = await screen.findByLabelText(/Selected window/i)
+    expect(within(selectedWindow).getAllByText(/Aid \/ Trade/i).length).toBeGreaterThan(0)
+    expect(within(selectedWindow).getAllByText(/Aid Requested/i).length).toBeGreaterThan(0)
+    expect(within(selectedWindow).getByRole('link', { name: /Replay/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260519T063000Z/replay?mode=timeline&event=3',
+    )
+
+    const lanes = screen.getByLabelText(/Major category lanes/i)
+    const aidLane = within(lanes).getByText(/Aid \/ Trade/i).closest('.watch-lane')
+    expect(within(aidLane).getByText(/1 in selected window \/ 1 total/i)).toBeInTheDocument()
   })
 
   it('renders selected lane moments even when they fall outside the default lane preview', async () => {
@@ -275,7 +330,8 @@ describe('WatchReplay', () => {
 
     renderWatch()
 
-    fireEvent.click(await screen.findByRole('button', { name: /Select 1 event timeline bucket/i }))
+    const buckets = await screen.findAllByRole('button', { name: /Select 1 event timeline bucket/i })
+    fireEvent.click(buckets[buckets.length - 1])
 
     const lanes = screen.getByLabelText(/Major category lanes/i)
     const aidLane = within(lanes).getByText(/Aid \/ Trade/i).closest('.watch-lane')

@@ -236,13 +236,28 @@ function attachRepresentativeMoments(buckets, moments) {
   return buckets.map((bucket) => {
     const startMs = Date.parse(bucket.bucket_start || '')
     const endMs = Date.parse(bucket.bucket_end || '')
-    const candidates = moments.filter((item) => {
+    const candidates = uniqueMoments(moments.filter((item) => {
       const eventMs = Date.parse(getEventTime(item))
       return Number.isFinite(eventMs) && eventMs >= startMs && eventMs <= endMs
-    })
+    }))
     const representative = candidates
       .sort((a, b) => Number(b?.salience || 0) - Number(a?.salience || 0))[0] || null
-    return { ...bucket, representative }
+    const categoryCounts = candidates.reduce((counts, item) => {
+      const lane = getEventLane(item)
+      counts[lane] = Number(counts[lane] || 0) + 1
+      return counts
+    }, {})
+    const dominantCategory = Object.entries(categoryCounts)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0]
+      || bucket.dominant_category
+      || null
+    return {
+      ...bucket,
+      representative,
+      linked_moment_count: candidates.length,
+      linked_category_counts: categoryCounts,
+      dominant_category: dominantCategory,
+    }
   })
 }
 
@@ -295,7 +310,7 @@ function buildSelectedWindow(bucket, moments) {
     bucket,
     start: bucket.bucket_start,
     end: bucket.bucket_end,
-    count: windowMoments.length || Number(bucket.event_count || 0),
+    count: windowMoments.length,
     dominantLane,
     laneCounts,
     moments: windowMoments,
@@ -332,8 +347,10 @@ function getArchiveRunId(archive) {
 }
 
 export default function WatchReplay() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const requestedRunId = cleanString(searchParams.get('run'))
+  const requestedEventId = Number(searchParams.get('event') || 0)
+  const requestedBucketIndex = Number(searchParams.get('bucket') || -1)
   const scheduledRun = getLatestCompletedScheduledRun()
   const initialRunId = requestedRunId || scheduledRun?.runId || ''
   const [runId, setRunId] = useState(initialRunId)
@@ -345,7 +362,6 @@ export default function WatchReplay() {
   const [story, setStory] = useState(null)
   const [loading, setLoading] = useState(Boolean(initialRunId))
   const [error, setError] = useState('')
-  const [selectedBucketKey, setSelectedBucketKey] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -424,16 +440,24 @@ export default function WatchReplay() {
     () => buildDensityBuckets(density, visibleMoments, window),
     [density, visibleMoments, window],
   )
-  const selectedBucket = useMemo(
-    () => densityBuckets.find((bucket) => getBucketKey(bucket) === selectedBucketKey) || null,
-    [densityBuckets, selectedBucketKey],
-  )
+  const selectedBucket = useMemo(() => {
+    let linkedBucket = null
+    if (requestedEventId > 0) {
+      const linkedMoment = visibleMoments.find((moment) => getEventId(moment) === requestedEventId)
+      linkedBucket = linkedMoment
+        ? densityBuckets.find((bucket) => isMomentInBucket(linkedMoment, bucket))
+        : null
+    } else if (Number.isFinite(requestedBucketIndex) && requestedBucketIndex >= 0) {
+      linkedBucket = densityBuckets.find((bucket) => Number(bucket.index) === requestedBucketIndex) || null
+    }
+    return linkedBucket && Number(linkedBucket.linked_moment_count || 0) > 0 ? linkedBucket : null
+  }, [densityBuckets, requestedBucketIndex, requestedEventId, visibleMoments])
   const selectedWindow = useMemo(
     () => buildSelectedWindow(selectedBucket, visibleMoments),
     [selectedBucket, visibleMoments],
   )
   const laneRows = useMemo(() => buildLaneRows(visibleMoments), [visibleMoments])
-  const maxBucketCount = Math.max(1, ...densityBuckets.map((bucket) => Number(bucket.event_count || 0)))
+  const maxBucketCount = Math.max(1, ...densityBuckets.map((bucket) => Number(bucket.linked_moment_count || 0)))
   const activity = runDetail?.activity || {}
   const cleanRunId = cleanString(runId)
   const unavailableError = cleanRunId ? '' : 'No completed public run is available for the watch board.'
@@ -455,18 +479,27 @@ export default function WatchReplay() {
   function handleRunSelect(event) {
     const nextRunId = cleanString(event.target.value)
     if (nextRunId) {
-      setSelectedBucketKey('')
       setRunId(nextRunId)
+      setSearchParams({ run: nextRunId })
     }
   }
 
   function handleBucketSelect(bucket) {
     const key = getBucketKey(bucket)
-    setSelectedBucketKey((current) => current === key ? '' : key)
+    const eventId = getEventId(bucket?.representative)
+    if (selectedWindow?.key === key) {
+      setSearchParams({ run: cleanRunId })
+      return
+    }
+    setSearchParams(eventId > 0
+      ? { run: cleanRunId, event: String(eventId) }
+      : { run: cleanRunId, bucket: String(bucket.index) })
   }
 
   function clearSelectedWindow() {
-    setSelectedBucketKey('')
+    if (cleanRunId) {
+      setSearchParams({ run: cleanRunId })
+    }
   }
 
   return (
@@ -567,9 +600,8 @@ export default function WatchReplay() {
             </div>
             <div className="watch-density-bars">
               {densityBuckets.map((bucket) => {
-                const count = Number(bucket.event_count || 0)
+                const count = Number(bucket.linked_moment_count || 0)
                 const representative = bucket.representative
-                const eventId = getEventId(representative)
                 const lane = representative
                   ? getEventLane(representative)
                   : normalizeLaneKey(bucket.dominant_category)
@@ -583,7 +615,7 @@ export default function WatchReplay() {
                     aria-pressed={selectedWindow?.key === getBucketKey(bucket)}
                     title={`${count} moment${count === 1 ? '' : 's'} near ${formatTimeOnly(bucket.bucket_start)}`}
                     aria-label={`Select ${count} event timeline bucket near ${formatTimeOnly(bucket.bucket_start)}`}
-                    disabled={count <= 0 && eventId <= 0 && !bucket.dominant_category}
+                    disabled={count <= 0}
                   >
                     <span style={{ height: `${height}px` }} />
                     <em>{count > 0 ? count : ''}</em>
