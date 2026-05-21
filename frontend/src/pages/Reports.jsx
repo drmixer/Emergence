@@ -445,6 +445,22 @@ export default function Reports() {
                     artifact: artifacts[artifactType],
                   }))
                   .filter(({ artifact }) => artifact?.available && preferredFormat(artifact))
+                const latestViewerBriefArtifact = artifacts.viewer_brief
+                const latestViewerBriefAvailable = Boolean(
+                  isLatestPublicRun
+                  && latestViewerBriefArtifact?.available
+                  && preferredFormat(latestViewerBriefArtifact),
+                )
+                const primaryActionPath = latestViewerBriefAvailable
+                  ? getArtifactViewPath(runId, 'viewer_brief', latestViewerBriefArtifact)
+                  : `/runs/${encodeURIComponent(runId)}/replay?tab=overview`
+                const primaryActionLabel = latestViewerBriefAvailable
+                  ? 'Read The Brief'
+                  : (isLatestPublicRun ? 'Start With Latest Recap' : 'Open Recap')
+                const primaryActionTarget = latestViewerBriefAvailable ? 'report:viewer_brief:primary' : 'recap'
+                const visibleReportLinks = latestViewerBriefAvailable
+                  ? reportLinks.filter(({ artifactType }) => artifactType !== 'viewer_brief')
+                  : reportLinks
 
                 return (
                   <article key={runId} className={`archive-run-card ${isLatestPublicRun ? 'latest' : ''}`}>
@@ -459,12 +475,12 @@ export default function Reports() {
                         </p>
                       </div>
                       <Link
-                        to={`/runs/${encodeURIComponent(runId)}/replay?tab=overview`}
+                        to={primaryActionPath}
                         className="btn btn-primary"
-                        onClick={() => trackArchivePathClick(runId, 'recap', { latest: isLatestPublicRun })}
+                        onClick={() => trackArchivePathClick(runId, primaryActionTarget, { latest: isLatestPublicRun })}
                       >
-                        <TimerReset size={14} />
-                        {isLatestPublicRun ? 'Start With Latest Recap' : 'Open Recap'}
+                        {latestViewerBriefAvailable ? <FileSearch size={14} /> : <TimerReset size={14} />}
+                        {primaryActionLabel}
                       </Link>
                     </div>
 
@@ -536,7 +552,7 @@ export default function Reports() {
                         <FileSearch size={14} />
                         {isLatestPublicRun ? 'Latest Run Details' : 'Evidence'}
                       </Link>
-                      {reportLinks.map(({ artifactType, label, artifact }) => (
+                      {visibleReportLinks.map(({ artifactType, label, artifact }) => (
                         <div key={artifactType} className="archive-report-action">
                           <Link
                             className="btn btn-secondary"
