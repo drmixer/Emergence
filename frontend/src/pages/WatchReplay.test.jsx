@@ -3,16 +3,17 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { api, trackKpiEventOnce } = vi.hoisted(() => ({
+const { api, trackKpiEvent, trackKpiEventOnce } = vi.hoisted(() => ({
   api: {
     getRunsArchive: vi.fn(),
     getRunWatch: vi.fn(),
   },
+  trackKpiEvent: vi.fn(),
   trackKpiEventOnce: vi.fn(),
 }))
 
 vi.mock('../services/api', () => ({ api }))
-vi.mock('../services/kpiAnalytics', () => ({ trackKpiEventOnce }))
+vi.mock('../services/kpiAnalytics', () => ({ trackKpiEvent, trackKpiEventOnce }))
 
 import WatchReplay from './WatchReplay'
 
@@ -34,6 +35,8 @@ function renderWatch(initialEntry = '/watch') {
             </Suspense>
           )}
         />
+        <Route path="/runs/:runId/replay" element={<div>Replay route</div>} />
+        <Route path="/runs/:runId" element={<div>Evidence route</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -199,12 +202,31 @@ describe('WatchReplay', () => {
 
     fireEvent.click(within(selectedWindow).getByRole('button', { name: /Next spike/i }))
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&event=3')
+    expect(trackKpiEvent).toHaveBeenCalledWith('watch_spike_step', expect.objectContaining({
+      runId: 'real-20260519T063000Z',
+      eventId: 3,
+      surface: 'watch_replay',
+      target: 'next_spike',
+      metadata: expect.objectContaining({
+        lane_filter: 'all',
+        from_spike_index: 1,
+        to_spike_index: 2,
+      }),
+    }))
     const nextWindow = screen.getByLabelText(/Selected window/i)
     expect(within(nextWindow).getByText(/Spike 2 of 2/i)).toBeInTheDocument()
     expect(within(nextWindow).getAllByText(/Aid Requested/i).length).toBeGreaterThan(0)
 
     fireEvent.click(within(nextWindow).getByRole('button', { name: /Previous spike/i }))
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&event=2')
+    expect(trackKpiEvent).toHaveBeenCalledWith('watch_spike_step', expect.objectContaining({
+      target: 'previous_spike',
+      eventId: 2,
+      metadata: expect.objectContaining({
+        from_spike_index: 2,
+        to_spike_index: 1,
+      }),
+    }))
 
     fireEvent.click(within(screen.getByLabelText(/Selected window/i)).getByRole('button', { name: /Clear selection/i }))
     expect(screen.queryByLabelText(/Selected window/i)).not.toBeInTheDocument()
@@ -273,6 +295,17 @@ describe('WatchReplay', () => {
     fireEvent.click(jumpButton)
 
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&event=21')
+    expect(trackKpiEvent).toHaveBeenCalledWith('watch_spike_jump', expect.objectContaining({
+      runId: 'real-20260519T063000Z',
+      eventId: 21,
+      surface: 'watch_replay',
+      target: 'largest_spike',
+      metadata: expect.objectContaining({
+        lane_filter: 'all',
+        bucket_index: 1,
+        bucket_moment_count: 2,
+      }),
+    }))
     const selectedWindow = screen.getByLabelText(/Selected window/i)
     expect(within(selectedWindow).getByText(/Spike 2 of 2/i)).toBeInTheDocument()
     expect(within(selectedWindow).getByText(/Linked moments/i)).toBeInTheDocument()
@@ -288,6 +321,16 @@ describe('WatchReplay', () => {
     fireEvent.click(aidFocus)
 
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&lane=aid_trade')
+    expect(trackKpiEvent).toHaveBeenCalledWith('watch_lane_focus', expect.objectContaining({
+      runId: 'real-20260519T063000Z',
+      surface: 'watch_replay',
+      target: 'aid_trade',
+      metadata: expect.objectContaining({
+        previous_lane_filter: 'all',
+        focused_lane: 'aid_trade',
+        focused_moments: 1,
+      }),
+    }))
     expect(aidFocus).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText(/2 buckets · 1 Aid \/ Trade moments/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Select 0 Aid \/ Trade event timeline bucket/i })).toBeDisabled()
@@ -304,6 +347,13 @@ describe('WatchReplay', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^All lanes$/i }))
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z')
+    expect(trackKpiEvent).toHaveBeenCalledWith('watch_lane_focus', expect.objectContaining({
+      target: 'all_lanes',
+      metadata: expect.objectContaining({
+        previous_lane_filter: 'aid_trade',
+        focused_lane: 'all',
+      }),
+    }))
   })
 
   it('shows major lanes with replay and evidence links but keeps routine work out', async () => {
@@ -327,6 +377,40 @@ describe('WatchReplay', () => {
       'href',
       '/runs/real-20260519T063000Z?event=2',
     )
+  })
+
+  it('tracks Replay and Evidence clicks from selected window moments', async () => {
+    renderWatch('/watch?run=real-20260519T063000Z&event=3')
+
+    const selectedWindow = await screen.findByLabelText(/Selected window/i)
+    const replayLink = within(selectedWindow).getByRole('link', { name: /Replay/i })
+
+    fireEvent.click(replayLink)
+    expect(trackKpiEvent).toHaveBeenCalledWith('watch_selected_moment_click', expect.objectContaining({
+      runId: 'real-20260519T063000Z',
+      eventId: 3,
+      surface: 'watch_replay',
+      target: 'replay',
+      metadata: expect.objectContaining({
+        lane_filter: 'all',
+        moment_lane: 'aid_trade',
+        moment_title: 'Aid Requested',
+      }),
+    }))
+
+    cleanup()
+    renderWatch('/watch?run=real-20260519T063000Z&event=3')
+    const rerenderedWindow = await screen.findByLabelText(/Selected window/i)
+    const rerenderedEvidenceLink = within(rerenderedWindow).getByRole('link', { name: /Evidence/i })
+
+    fireEvent.click(rerenderedEvidenceLink)
+    expect(trackKpiEvent).toHaveBeenCalledWith('watch_selected_moment_click', expect.objectContaining({
+      eventId: 3,
+      target: 'evidence',
+      metadata: expect.objectContaining({
+        moment_lane: 'aid_trade',
+      }),
+    }))
   })
 
   it('uses linked visible moments for density counts and disables true-empty buckets', async () => {

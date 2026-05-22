@@ -66,6 +66,11 @@ def test_normalize_kpi_event_accepts_viewer_journey_events():
         "evidence_filter_used",
         "raw_evidence_toggle",
         "report_opened",
+        "watch_replay_view",
+        "watch_lane_focus",
+        "watch_spike_jump",
+        "watch_spike_step",
+        "watch_selected_moment_click",
     ):
         normalized = kpi_rollups.normalize_kpi_event(
             {

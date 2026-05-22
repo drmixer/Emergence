@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { getScheduleEntryForRunId } from '../data/runSchedule'
-import { trackKpiEventOnce } from '../services/kpiAnalytics'
+import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 
 const ROUTINE_EVENT_TYPES = new Set(['work', 'idle', 'vote', 'processing_error'])
 const TIMELINE_BUCKET_COUNT = 18
@@ -536,6 +536,23 @@ export default function WatchReplay() {
     return params
   }
 
+  function trackWatchInteraction(eventName, target, metadata = {}, eventId = 0) {
+    if (!cleanRunId) return
+    trackKpiEvent(eventName, {
+      runId: cleanRunId,
+      eventId,
+      surface: 'watch_replay',
+      target,
+      metadata: {
+        lane_filter: selectedLaneFilter || 'all',
+        selected_bucket_index: selectedBucket ? Number(selectedBucket.index) : null,
+        selected_spike_index: selectedSpikeIndex >= 0 ? selectedSpikeIndex + 1 : null,
+        spike_count: spikeBuckets.length,
+        ...metadata,
+      },
+    })
+  }
+
   function selectBucket(bucket) {
     if (!bucket) return
     const eventId = getBucketRepresentativeEventId(bucket)
@@ -555,10 +572,24 @@ export default function WatchReplay() {
 
   function selectLaneFilter(laneKey) {
     const nextLane = getLaneFilter(laneKey)
+    trackWatchInteraction('watch_lane_focus', nextLane || 'all_lanes', {
+      previous_lane_filter: selectedLaneFilter || 'all',
+      focused_lane: nextLane || 'all',
+      focused_moments: nextLane
+        ? visibleMoments.filter((moment) => getEventLane(moment) === nextLane).length
+        : visibleMoments.length,
+    })
     setSearchParams(nextLane ? { run: cleanRunId, lane: nextLane } : { run: cleanRunId })
   }
 
   function jumpToLargestSpike() {
+    if (largestSpikeBucket) {
+      trackWatchInteraction('watch_spike_jump', 'largest_spike', {
+        bucket_index: Number(largestSpikeBucket.index),
+        bucket_start: cleanString(largestSpikeBucket.bucket_start),
+        bucket_moment_count: getBucketMomentCount(largestSpikeBucket),
+      }, getBucketRepresentativeEventId(largestSpikeBucket))
+    }
     selectBucket(largestSpikeBucket)
   }
 
@@ -566,6 +597,14 @@ export default function WatchReplay() {
     if (selectedSpikeIndex < 0) return
     const nextIndex = selectedSpikeIndex + direction
     if (nextIndex < 0 || nextIndex >= spikeBuckets.length) return
+    const nextBucket = spikeBuckets[nextIndex]
+    trackWatchInteraction('watch_spike_step', direction < 0 ? 'previous_spike' : 'next_spike', {
+      from_spike_index: selectedSpikeIndex + 1,
+      to_spike_index: nextIndex + 1,
+      bucket_index: Number(nextBucket.index),
+      bucket_start: cleanString(nextBucket.bucket_start),
+      bucket_moment_count: getBucketMomentCount(nextBucket),
+    }, getBucketRepresentativeEventId(nextBucket))
     selectBucket(spikeBuckets[nextIndex])
   }
 
@@ -573,6 +612,16 @@ export default function WatchReplay() {
     if (cleanRunId) {
       setSearchParams(getBaseSearchParams())
     }
+  }
+
+  function trackSelectedMomentClick(target, moment) {
+    const eventId = getEventId(moment)
+    trackWatchInteraction('watch_selected_moment_click', target, {
+      moment_lane: getEventLane(moment),
+      moment_title: formatEventTitle(moment),
+      bucket_index: selectedBucket ? Number(selectedBucket.index) : null,
+      bucket_start: selectedBucket ? cleanString(selectedBucket.bucket_start) : '',
+    }, eventId)
   }
 
   return (
@@ -821,11 +870,19 @@ export default function WatchReplay() {
                       <span>{LANE_META[getEventLane(moment)]?.label || 'Other Signals'} · {formatTimestamp(getEventTime(moment))}</span>
                       <strong>{formatEventTitle(moment)}</strong>
                       <div>
-                        <Link className="btn btn-secondary" to={getReplayHref(cleanRunId, eventId)}>
+                        <Link
+                          className="btn btn-secondary"
+                          to={getReplayHref(cleanRunId, eventId)}
+                          onClick={() => trackSelectedMomentClick('replay', moment)}
+                        >
                           <TimerReset size={14} />
                           Replay
                         </Link>
-                        <Link className="btn btn-secondary" to={getEvidenceHref(cleanRunId, eventId)}>
+                        <Link
+                          className="btn btn-secondary"
+                          to={getEvidenceHref(cleanRunId, eventId)}
+                          onClick={() => trackSelectedMomentClick('evidence', moment)}
+                        >
                           <FileSearch size={14} />
                           Evidence
                         </Link>
