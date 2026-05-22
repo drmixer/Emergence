@@ -262,6 +262,14 @@ function formatConditionName(value) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+function formatDurationHours(value) {
+  const hours = Number(value)
+  if (!Number.isFinite(hours) || hours <= 0) return ''
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m`
+  if (hours < 10) return `${hours.toFixed(1).replace(/\.0$/, '')}h`
+  return `${Math.round(hours)}h`
+}
+
 function inferRunLabel(metadata = {}) {
   const explicit = pickString(
     metadata?.public_label,
@@ -418,17 +426,102 @@ export function getRunBriefForCurrentRun(metadata = {}, scope = {}) {
   return buildRunBriefFromMetadata(source, { status: 'Live' })
 }
 
-export function mergeRunScheduleWithActiveRun(activeRun) {
+function reportHrefForArchivedRun(runId, artifacts = {}) {
+  if (!runId) return ''
+  if (artifacts?.viewer_brief?.available) {
+    return `/runs/${encodeURIComponent(runId)}/reports/viewer_brief?format=markdown`
+  }
+  if (artifacts?.approachable_report?.available) {
+    return `/runs/${encodeURIComponent(runId)}/reports/approachable_report?format=markdown`
+  }
+  if (artifacts?.run_summary?.available) {
+    return `/runs/${encodeURIComponent(runId)}/reports/run_summary?format=markdown`
+  }
+  return `/runs/${encodeURIComponent(runId)}/reports/viewer_brief?format=markdown`
+}
+
+export function getRunBriefForArchivedRun(archiveItem = {}) {
+  const summary = archiveItem?.summary && typeof archiveItem.summary === 'object' ? archiveItem.summary : {}
+  const metadata = archiveItem?.run_metadata && typeof archiveItem.run_metadata === 'object' ? archiveItem.run_metadata : {}
+  const runId = pickString(archiveItem.run_id, summary.run_id, metadata.run_id)
+  if (!runId) return null
+
+  const source = {
+    ...summary,
+    ...metadata,
+    run_id: runId,
+    condition_name: pickString(summary.condition_name, metadata.condition_name),
+    run_class: pickString(summary.run_class, metadata.run_class),
+    started_at: pickString(summary.run_started_at, metadata.started_at),
+    ended_at: pickString(summary.run_ended_at, metadata.ended_at),
+  }
+  const scheduled = getScheduleEntryForRunMetadata(source)
+  const fallback = buildRunBriefFromMetadata(source, { status: 'Completed' })
+  const duration = formatDurationHours(summary.duration_hours)
+  const reportHref = reportHrefForArchivedRun(runId, archiveItem.artifacts)
+
+  return {
+    ...(scheduled || fallback),
+    id: `${scheduled?.id || fallback.id || runId}-completed`,
+    status: 'Completed',
+    planningState: 'Completed',
+    runId,
+    plannedStartLabel: pickString(
+      formatDateLabel(source.started_at) ? `Started ${formatDateLabel(source.started_at)}` : '',
+      scheduled?.plannedStartLabel,
+      fallback.plannedStartLabel,
+    ),
+    completedAt: source.ended_at || scheduled?.completedAt || fallback.completedAt,
+    expectedDuration: duration ? `Stopped after ${duration}` : pickString(fallback.expectedDuration, scheduled?.expectedDuration),
+    resultNote: pickString(
+      summary.status_label === 'observational' ? 'Closed as an observational public canary.' : '',
+      scheduled?.resultNote,
+      fallback.resultNote,
+    ),
+    links: {
+      ...(scheduled?.links || fallback.links || {}),
+      recap: `/runs/${encodeURIComponent(runId)}/replay?tab=overview`,
+      watch: `/watch?run=${encodeURIComponent(runId)}`,
+      evidence: `/runs/${encodeURIComponent(runId)}`,
+      report: reportHref,
+      archive: '/archive',
+    },
+  }
+}
+
+export function mergeRunScheduleWithRuntime({ activeRun = null, completedRuns = [] } = {}) {
   const runs = getRunSchedule()
-  if (!activeRun) return runs
-  const activeRunId = cleanString(activeRun.runId)
-  const activeLabel = cleanString(activeRun.label).toLowerCase()
+  const runtimeRuns = [
+    activeRun,
+    ...completedRuns,
+  ].filter(Boolean)
+  if (runtimeRuns.length === 0) return runs
+
+  const runtimeRunIds = new Set(runtimeRuns.map((run) => cleanString(run.runId)).filter(Boolean))
+  const runtimeLabels = new Set(runtimeRuns.map((run) => cleanString(run.label).toLowerCase()).filter(Boolean))
   const rest = runs.filter((run) => {
-    const sameRunId = activeRunId && cleanString(run.runId) === activeRunId
-    const sameLabel = activeLabel && cleanString(run.label).toLowerCase() === activeLabel
+    const sameRunId = cleanString(run.runId) && runtimeRunIds.has(cleanString(run.runId))
+    const sameLabel = cleanString(run.label) && runtimeLabels.has(cleanString(run.label).toLowerCase())
     return !sameRunId && !sameLabel
   })
-  return [activeRun, ...rest]
+  return [...runtimeRuns, ...rest].sort((a, b) => {
+    const statusDelta = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)
+    if (statusDelta !== 0) return statusDelta
+    if (a.status === 'Completed' && b.status === 'Completed') {
+      const completedDelta = (Date.parse(b.completedAt || '') || 0) - (Date.parse(a.completedAt || '') || 0)
+      if (completedDelta !== 0) return completedDelta
+    }
+    return String(a.label || '').localeCompare(String(b.label || ''), undefined, { numeric: true })
+  })
+}
+
+export function mergeRunScheduleWithActiveRun(activeRun) {
+  if (!activeRun) return getRunSchedule()
+  return mergeRunScheduleWithRuntime({ activeRun })
+}
+
+export function mergeRunScheduleWithCompletedRuns(completedRuns = []) {
+  return mergeRunScheduleWithRuntime({ completedRuns })
 }
 
 export function getRunSchedule() {
@@ -459,19 +552,25 @@ export function getLatestCompletedScheduledRun() {
   return getRunSchedule().find((run) => run.status === 'Completed') || null
 }
 
-export function getCalendarSummaryRuns({ activeRun = null } = {}) {
-  const currentLive = activeRun || getCurrentLiveScheduledRun()
-  const nextUpcoming = getNextUpcomingScheduledRun()
-  const latestCompleted = getLatestCompletedScheduledRun()
-  const primaryRun = currentLive || nextUpcoming || latestCompleted
+function getNextPlannedRun(runs) {
+  return runs.find((run) => ['Upcoming', 'Tentative', 'Candidate'].includes(run.status)) || null
+}
+
+export function getCalendarSummaryRuns({ activeRun = null, completedRuns = [] } = {}) {
+  const runs = mergeRunScheduleWithRuntime({ activeRun, completedRuns })
+  const currentLive = runs.find((run) => run.status === 'Live') || null
+  const nextPlanned = getNextPlannedRun(runs)
+  const latestCompleted = runs.find((run) => run.status === 'Completed') || null
+  const primaryRun = currentLive || nextPlanned || latestCompleted
   return {
     primaryRun,
     primaryLabel: currentLive
       ? 'Current live run'
-      : nextUpcoming
-      ? 'Next scheduled run'
+      : nextPlanned
+      ? (nextPlanned.status === 'Tentative' ? 'Next tentative run' : 'Next scheduled run')
       : 'Latest completed canary',
     latestCompleted,
+    nextPlanned,
   }
 }
 

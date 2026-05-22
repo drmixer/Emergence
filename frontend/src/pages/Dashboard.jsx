@@ -25,7 +25,11 @@ import NoActiveRunNotice from '../components/NoActiveRunNotice'
 import RunBriefCard from '../components/RunBriefCard'
 import { formatAgentDisplayLabel } from '../utils/agentIdentity'
 import { getPublicRunFraming } from '../../lib/public-run-framing'
-import { getNextScheduledRun, getRunBriefForCurrentRun } from '../data/runSchedule'
+import {
+    getCalendarSummaryRuns,
+    getRunBriefForArchivedRun,
+    getRunBriefForCurrentRun,
+} from '../data/runSchedule'
 
 const DashboardSocialDynamicsChart = lazy(() => import('../components/DashboardSocialDynamicsChart'))
 
@@ -66,6 +70,8 @@ export default function Dashboard() {
     const [socialDeltas, setSocialDeltas] = useState(null)
     const [classMobility, setClassMobility] = useState(null)
     const [runMetadata, setRunMetadata] = useState(null)
+    const [completedRuns, setCompletedRuns] = useState([])
+    const [runArchiveResolved, setRunArchiveResolved] = useState(false)
     const [loading, setLoading] = useState(true)
     const [secondaryLoading, setSecondaryLoading] = useState(true)
     const [isLive, setIsLive] = useState(true)
@@ -86,7 +92,7 @@ export default function Dashboard() {
             setClassMobility(null)
         }
 
-        const applyOverviewAndResources = (overview, resources) => {
+        const applyOverviewAndResources = (overview, resources, archive) => {
             setIsLive(Boolean(overview?.scope?.simulation_active))
 
             const capacity = overview?.resources?.capacity_estimate || {}
@@ -116,6 +122,9 @@ export default function Dashboard() {
             })
             setScope(overview?.scope && typeof overview.scope === 'object' ? overview.scope : null)
             setRunMetadata(overview?.run_metadata && typeof overview.run_metadata === 'object' ? overview.run_metadata : null)
+            const archiveItems = Array.isArray(archive?.items) ? archive.items : []
+            setCompletedRuns(archiveItems.map(getRunBriefForArchivedRun).filter(Boolean))
+            setRunArchiveResolved(true)
         }
 
         const fetchPrimary = async ({ showLoading = false } = {}) => {
@@ -124,12 +133,13 @@ export default function Dashboard() {
                     setLoading(true)
                     setError(null)
                 }
-                const [overview, resources] = await Promise.all([
+                const [overview, resources, archive] = await Promise.all([
                     api.getAnalyticsOverview(),
                     api.getResources(),
+                    api.getRunsArchive(12, false).catch(() => null),
                 ])
                 if (cancelled) return
-                applyOverviewAndResources(overview, resources)
+                applyOverviewAndResources(overview, resources, archive)
             } catch (_error) {
                 if (cancelled) return
                 if (showLoading) {
@@ -137,6 +147,8 @@ export default function Dashboard() {
                     setStats(null)
                     setScope(null)
                     setRunMetadata(null)
+                    setCompletedRuns([])
+                    setRunArchiveResolved(false)
                     resetSecondaryState()
                 }
             } finally {
@@ -230,16 +242,17 @@ export default function Dashboard() {
 
         const refreshLiveSnapshot = async () => {
             try {
-                const [overview, resources, activeProposals, crisisPayload] = await Promise.all([
+                const [overview, resources, activeProposals, crisisPayload, archive] = await Promise.all([
                     api.getAnalyticsOverview(),
                     api.getResources(),
                     api.fetch('/api/proposals?status=active&limit=5'),
                     api.getCrisisStrip(6),
+                    api.getRunsArchive(12, false).catch(() => null),
                 ])
                 if (cancelled) return
 
                 startTransition(() => {
-                    applyOverviewAndResources(overview, resources)
+                    applyOverviewAndResources(overview, resources, archive)
                     setProposals(Array.isArray(activeProposals) ? activeProposals : [])
                     setCrises(Array.isArray(crisisPayload?.items) ? crisisPayload.items : [])
                 })
@@ -301,8 +314,12 @@ export default function Dashboard() {
     const mobility = classMobility?.mobility || {}
     const inequality = classMobility?.inequality || {}
     const publicRunFraming = getPublicRunFraming(runMetadata)
-    const nextScheduledRun = getNextScheduledRun()
     const activeScheduledRun = hasActiveRun ? getRunBriefForCurrentRun(runMetadata, scope) : null
+    const calendarSummary = getCalendarSummaryRuns({
+        activeRun: activeScheduledRun,
+        completedRuns: runArchiveResolved ? completedRuns : [],
+    })
+    const nextScheduledRun = runArchiveResolved ? calendarSummary.nextPlanned : null
 
     return (
         <div className="dashboard">
@@ -403,11 +420,20 @@ export default function Dashboard() {
                 />
             )}
 
-            {idleDashboard && nextScheduledRun && (
+            {idleDashboard && !runArchiveResolved && (
+                <div className="card trust-note-card">
+                    <div className="card-body trust-note-body">
+                        <ShieldCheck size={16} />
+                        <p>Resolving archived closeout state before showing the next scheduled run.</p>
+                    </div>
+                </div>
+            )}
+
+            {idleDashboard && runArchiveResolved && nextScheduledRun && (
                 <RunBriefCard
                     run={nextScheduledRun}
                     variant="compact"
-                    heading="Next scheduled run"
+                    heading={nextScheduledRun.status === 'Tentative' ? 'Next tentative run' : 'Next scheduled run'}
                     actionMode="calendar"
                     analyticsSurface="dashboard_idle"
                 />

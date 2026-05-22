@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   buildRunBriefFromMetadata,
   getCalendarSummaryRuns,
+  getRunBriefForArchivedRun,
   getLatestCompletedScheduledRun,
   getRunBriefForCurrentRun,
   getNextScheduledRun,
   getScheduleEntryForRunId,
   getRunSchedule,
   mergeRunScheduleWithActiveRun,
+  mergeRunScheduleWithCompletedRuns,
 } from './runSchedule'
 
 describe('run schedule', () => {
@@ -71,6 +73,54 @@ describe('run schedule', () => {
     expect(summary.primaryLabel).toBe('Next scheduled run')
     expect(summary.primaryRun?.label).toBe('K13')
     expect(summary.latestCompleted?.label).toBe('K12')
+  })
+
+  it('promotes archived K13 metadata over the stale upcoming schedule card', () => {
+    const archivedK13 = getRunBriefForArchivedRun({
+      run_id: 'real-20260522T014909Z',
+      summary: {
+        run_id: 'real-20260522T014909Z',
+        condition_name: 'real_governance_readability_canary_k13',
+        run_class: 'special_exploratory',
+        run_started_at: '2026-05-22T01:49:10Z',
+        run_ended_at: '2026-05-22T09:20:38Z',
+        duration_hours: 7.52,
+        status_label: 'observational',
+      },
+      run_metadata: {
+        run_id: 'real-20260522T014909Z',
+        condition_name: 'real_governance_readability_canary_k13',
+        run_class: 'special_exploratory',
+        started_at: '2026-05-22T01:49:10Z',
+        ended_at: '2026-05-22T09:20:38Z',
+      },
+      artifacts: {
+        approachable_report: { available: true },
+        run_summary: { available: true },
+      },
+    })
+
+    expect(archivedK13).toMatchObject({
+      label: 'K13',
+      status: 'Completed',
+      planningState: 'Completed',
+      runId: 'real-20260522T014909Z',
+      expectedDuration: 'Stopped after 7.5h',
+    })
+    expect(archivedK13.links.watch).toBe('/watch?run=real-20260522T014909Z')
+    expect(archivedK13.links.report).toBe('/runs/real-20260522T014909Z/reports/approachable_report?format=markdown')
+
+    const merged = mergeRunScheduleWithCompletedRuns([archivedK13])
+    expect(merged.filter((run) => run.label === 'K13')).toHaveLength(1)
+    expect(merged.find((run) => run.label === 'K13')).toMatchObject({
+      status: 'Completed',
+      runId: 'real-20260522T014909Z',
+    })
+
+    const summary = getCalendarSummaryRuns({ completedRuns: [archivedK13] })
+    expect(summary.primaryLabel).toBe('Next tentative run')
+    expect(summary.primaryRun?.label).toBe('K14')
+    expect(summary.latestCompleted?.label).toBe('K13')
   })
 
   it('can look up schedule context for archived run cards', () => {
