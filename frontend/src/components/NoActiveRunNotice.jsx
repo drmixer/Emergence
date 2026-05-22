@@ -73,6 +73,7 @@ export default function NoActiveRunNotice({
     message = 'No simulation is live right now. Open the latest completed run for the recap, replay, metrics, and source evidence.',
     lastCompletedRunId = '',
     showCompletedRunHandoff = true,
+    chrome = 'card',
 }) {
     const cleanRunId = String(lastCompletedRunId || '').trim()
     const [latestRunState, setLatestRunState] = useState({
@@ -131,8 +132,12 @@ export default function NoActiveRunNotice({
     const viewerBriefHref = cleanRunId
         ? `/runs/${encodeURIComponent(cleanRunId)}/reports/viewer_brief?format=markdown`
         : ''
+    const rootClassName = chrome === 'inline'
+        ? 'no-active-run-card no-active-run-inline'
+        : 'card no-active-run-card'
+
     return (
-        <div className="card no-active-run-card">
+        <div className={rootClassName}>
             <div className="card-body">
                 <div className="no-active-run-state">
                     <Activity size={28} />

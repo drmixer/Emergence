@@ -114,6 +114,10 @@ describe('Dashboard', () => {
 
     expect(await screen.findByText(/Latest completed run: real-20260522T014909Z/i)).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'K14' })).toBeInTheDocument()
+    const idleConsole = screen.getByLabelText(/Idle run console/i)
+    expect(idleConsole).toBeInTheDocument()
+    expect(within(idleConsole).getByText(/^Latest closeout$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Next declared run/i)).toBeInTheDocument()
 
     const nextRunCard = screen.getByRole('heading', { name: 'K14' }).closest('article')
     expect(within(nextRunCard).getByText(/Next tentative run/i)).toBeInTheDocument()

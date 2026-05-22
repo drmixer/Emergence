@@ -1,4 +1,4 @@
-import { Suspense, lazy, startTransition, useEffect, useRef, useState } from 'react'
+import { startTransition, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
     Users,
@@ -11,9 +11,6 @@ import {
     Apple,
     Battery,
     Box,
-    ArrowUpRight,
-    ArrowDownRight,
-    Equal,
     TrendingUp
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
@@ -30,8 +27,6 @@ import {
     getRunBriefForArchivedRun,
     getRunBriefForCurrentRun,
 } from '../data/runSchedule'
-
-const DashboardSocialDynamicsChart = lazy(() => import('../components/DashboardSocialDynamicsChart'))
 
 function sumWorldResource(resources, key) {
     const totals = resources?.totals || {}
@@ -298,19 +293,11 @@ export default function Dashboard() {
     const idleDashboard = scopeKnown && scope?.simulation_active === false
     const liveDashboardVisible = scopeKnown && !idleDashboard
     const lastCompletedRunId = String(scope?.last_completed_run_id || '').trim()
-    const socialChartData = socialSeries.map((row) => ({
-        day: row.day_label,
-        conflict: Number(row.conflict_events || 0),
-        publicOrder: Number(row.public_order_events || 0),
-        cooperation: Number(row.cooperation_events || 0),
-        alliances: Number(row.alliance_signals || 0),
-    }))
     const latestSocialRow = socialSeries.length > 0 ? socialSeries[socialSeries.length - 1] : null
     const publicOrderLatest = Number(latestSocialRow?.public_order_events || 0)
     const publicOrderDelta = Number(socialDeltas?.public_order_events_delta || 0)
     const conflictDelta = Number(socialDeltas?.conflict_events_delta || 0)
     const allianceDelta = Number(socialDeltas?.alliance_signals_delta || 0)
-    const tiers = Array.isArray(classMobility?.tiers) ? classMobility.tiers : []
     const mobility = classMobility?.mobility || {}
     const inequality = classMobility?.inequality || {}
     const publicRunFraming = getPublicRunFraming(runMetadata)
@@ -331,7 +318,7 @@ export default function Dashboard() {
                 </h1>
                 <p className="page-description">
                     {idleDashboard
-                        ? 'No simulation is live right now. Check the run calendar for upcoming runs.'
+                        ? 'Run console is idle. Latest closeout context and the next declared run are below.'
                         : scopeResolving
                         ? 'Loading current run state before showing live or archived context.'
                         : scopeUnavailable
@@ -413,30 +400,41 @@ export default function Dashboard() {
             )}
 
             {idleDashboard && (
-                <NoActiveRunNotice
-                    title="No active run"
-                    message="No simulation is live right now. Check the run calendar for upcoming runs; completed-run evidence stays in the archive."
-                    lastCompletedRunId={lastCompletedRunId}
-                />
-            )}
-
-            {idleDashboard && !runArchiveResolved && (
-                <div className="card trust-note-card">
-                    <div className="card-body trust-note-body">
-                        <ShieldCheck size={16} />
-                        <p>Resolving archived closeout state before showing the next scheduled run.</p>
+                <section className="dashboard-idle-console" aria-label="Idle run console">
+                    <div className="dashboard-idle-current">
+                        <span className="dashboard-section-label">Latest closeout</span>
+                        <NoActiveRunNotice
+                            title="No active run"
+                            message="No simulation is live. Use the latest run paths for recap, watch replay, and source evidence."
+                            lastCompletedRunId={lastCompletedRunId}
+                            chrome="inline"
+                        />
                     </div>
-                </div>
-            )}
 
-            {idleDashboard && runArchiveResolved && nextScheduledRun && (
-                <RunBriefCard
-                    run={nextScheduledRun}
-                    variant="compact"
-                    heading={nextScheduledRun.status === 'Tentative' ? 'Next tentative run' : 'Next scheduled run'}
-                    actionMode="calendar"
-                    analyticsSurface="dashboard_idle"
-                />
+                    <aside className="dashboard-idle-next" aria-label="Next declared run">
+                        <span className="dashboard-section-label">Next declared run</span>
+                        {!runArchiveResolved && (
+                            <div className="dashboard-idle-resolving">
+                                <ShieldCheck size={16} />
+                                <p>Resolving archived closeout state before choosing the next scheduled run.</p>
+                            </div>
+                        )}
+                        {runArchiveResolved && nextScheduledRun && (
+                            <RunBriefCard
+                                run={nextScheduledRun}
+                                variant="compact"
+                                heading={nextScheduledRun.status === 'Tentative' ? 'Next tentative run' : 'Next scheduled run'}
+                                actionMode="calendar"
+                                analyticsSurface="dashboard_idle"
+                            />
+                        )}
+                        {runArchiveResolved && !nextScheduledRun && (
+                            <div className="dashboard-idle-resolving">
+                                <p>No upcoming run is currently declared.</p>
+                            </div>
+                        )}
+                    </aside>
+                </section>
             )}
 
             {!loading && error && (
@@ -702,175 +700,91 @@ export default function Dashboard() {
                 </div>
             </div>}
 
-            {liveDashboardVisible && <div className="content-grid">
-                <div className="card">
-                    <div className="card-header">
-                        <h3>
-                            <Flame size={18} />
-                            Plot Turns
-                        </h3>
-                        <Link to="/archive" className="btn btn-secondary">Archive</Link>
+            {liveDashboardVisible && (
+                <section className="dashboard-signal-panel" aria-label="Supporting run signals">
+                    <div className="dashboard-signal-panel-head">
+                        <div>
+                            <span className="dashboard-section-label">Supporting signals</span>
+                            <p>Lower-priority telemetry stays visible here, with dedicated pages for deeper inspection.</p>
+                        </div>
                     </div>
-                    <div className="card-body">
-                        {loading || secondaryLoading ? (
-                            <SkeletonTable rows={4} cols={3} />
-                        ) : plotTurns.length === 0 ? (
-                            <div className="empty-state compact">No high-salience turns in the last 48h.</div>
-                        ) : (
-                            <div className="plot-turn-list">
-                                {plotTurns.map((turn) => (
-                                    <div key={turn.event_id} className={`plot-turn-item category-${turn.category || 'notable'}`}>
-                                        <div className="plot-turn-head">
-                                            <span className="plot-turn-title">{turn.title}</span>
-                                            <span className="plot-turn-score">{turn.salience}</span>
-                                        </div>
-                                        <p className="plot-turn-description">{turn.description}</p>
-                                        <div className="plot-turn-foot">
-                                            <span className="plot-turn-category">{(turn.category || 'notable').replace(/_/g, ' ')}</span>
-                                            <span className="plot-turn-time">
-                                                {turn.created_at
-                                                    ? formatDistanceToNow(new Date(turn.created_at), { addSuffix: true })
-                                                    : ''}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
 
-                <div className="card">
-                    <div className="card-header">
-                        <h3>
-                            <TrendingUp size={18} />
-                            Prediction Hooks
-                        </h3>
-                        <Link to="/predictions" className="btn btn-secondary">Open Markets</Link>
-                    </div>
-                    <div className="card-body">
-                        {loading || secondaryLoading ? (
-                            <SkeletonTable rows={3} cols={2} />
-                        ) : predictionMarkets.length === 0 ? (
-                            <div className="empty-state compact">No open prediction hooks for the current run.</div>
-                        ) : (
-                            <div className="prediction-hook-list">
-                                {predictionMarkets.map((market) => (
-                                    <Link key={market.id} to="/predictions" className="prediction-hook-item">
-                                        <strong>{market.title}</strong>
-                                        <span>{market.why_this_matters || market.resolution_basis || 'Resolves from public run evidence.'}</span>
-                                    </Link>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
+                    <div className="dashboard-signal-grid">
+                        <Link to="/archive" className="dashboard-signal-row">
+                            <span>
+                                <Flame size={16} />
+                                Plot turns
+                            </span>
+                            {loading || secondaryLoading ? (
+                                <strong>Loading</strong>
+                            ) : plotTurns.length > 0 ? (
+                                <>
+                                    <strong>{plotTurns[0].title || 'Latest notable turn'}</strong>
+                                    <em>
+                                        {plotTurns.length} in 48h
+                                        {plotTurns[0].created_at
+                                            ? ` · ${formatDistanceToNow(new Date(plotTurns[0].created_at), { addSuffix: true })}`
+                                            : ''}
+                                    </em>
+                                </>
+                            ) : (
+                                <strong>No high-salience turns in 48h</strong>
+                            )}
+                        </Link>
 
-                <div className="card">
-                    <div className="card-header">
-                        <h3>Social Dynamics (7d)</h3>
-                        {socialDeltas && (
-                            <div className="deltas-inline">
-                                <span className={publicOrderDelta > 0 ? 'delta-up' : 'delta-down'}>
-                                    Public Order {publicOrderDelta > 0 ? '+' : ''}{publicOrderDelta}
-                                </span>
-                                <span className={conflictDelta > 0 ? 'delta-up' : 'delta-down'}>
-                                    Conflict {conflictDelta > 0 ? '+' : ''}{conflictDelta}
-                                </span>
-                                <span className={allianceDelta >= 0 ? 'delta-up' : 'delta-down'}>
-                                    Alliances {allianceDelta > 0 ? '+' : ''}{allianceDelta}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                    <div className="card-body social-body">
-                        {loading || secondaryLoading ? (
-                            <SkeletonTable rows={4} cols={3} />
-                        ) : socialChartData.length === 0 ? (
-                            <div className="empty-state compact">No social dynamics history yet.</div>
-                        ) : (
-                            <Suspense fallback={<SkeletonTable rows={4} cols={3} />}>
-                                <DashboardSocialDynamicsChart data={socialChartData} />
-                            </Suspense>
-                        )}
-                    </div>
-                </div>
-            </div>}
+                        <Link to="/predictions" className="dashboard-signal-row">
+                            <span>
+                                <TrendingUp size={16} />
+                                Prediction hooks
+                            </span>
+                            {loading || secondaryLoading ? (
+                                <strong>Loading</strong>
+                            ) : predictionMarkets.length > 0 ? (
+                                <>
+                                    <strong>{predictionMarkets.length} open</strong>
+                                    <em>{predictionMarkets[0].title}</em>
+                                </>
+                            ) : (
+                                <strong>No open prediction hooks</strong>
+                            )}
+                        </Link>
 
-            {liveDashboardVisible && <div className="content-grid">
-                <div className="card">
-                    <div className="card-header">
-                        <h3>Inequality</h3>
-                    </div>
-                    <div className="card-body inequality-grid">
-                        {loading || secondaryLoading ? (
-                            <SkeletonTable rows={2} cols={2} />
-                        ) : (
-                            <>
-                                <div className="inequality-main">
-                                    <div className="inequality-value">{Number(inequality.gini || 0).toFixed(3)}</div>
-                                    <div className="inequality-label">Gini coefficient</div>
-                                </div>
-                                <div className="inequality-stats">
-                                    <div><span>P25</span><strong>{Number(inequality.p25 || 0).toFixed(1)}</strong></div>
-                                    <div><span>Median</span><strong>{Number(inequality.median || 0).toFixed(1)}</strong></div>
-                                    <div><span>P75</span><strong>{Number(inequality.p75 || 0).toFixed(1)}</strong></div>
-                                    <div>
-                                        <span>Trend</span>
-                                        <strong className={(inequality.trend || 0) > 0 ? 'delta-up' : 'delta-down'}>
-                                            {(Number(inequality.trend || 0) > 0 ? '+' : '') + Number(inequality.trend || 0).toFixed(3)}
-                                        </strong>
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
+                        <Link to="/timeline" className="dashboard-signal-row">
+                            <span>Social dynamics</span>
+                            {loading || secondaryLoading ? (
+                                <strong>Loading</strong>
+                            ) : (
+                                <>
+                                    <strong>{publicOrderLatest} public-order signals</strong>
+                                    <em>
+                                        Public order {publicOrderDelta > 0 ? '+' : ''}{publicOrderDelta}
+                                        {' · '}Conflict {conflictDelta > 0 ? '+' : ''}{conflictDelta}
+                                        {' · '}Alliances {allianceDelta > 0 ? '+' : ''}{allianceDelta}
+                                    </em>
+                                </>
+                            )}
+                        </Link>
 
-                <div className="card">
-                    <div className="card-header">
-                        <h3>Class Mobility</h3>
-                    </div>
-                    <div className="card-body">
-                        {loading || secondaryLoading ? (
-                            <SkeletonTable rows={3} cols={3} />
-                        ) : !classMobility ? (
-                            <div className="empty-state compact">No mobility data yet.</div>
-                        ) : (
-                            <>
-                                <div className="mobility-signals">
-                                    <div className="mobility-chip up">
-                                        <ArrowUpRight size={16} />
+                        <Link to="/agents" className="dashboard-signal-row">
+                            <span>Class pressure</span>
+                            {loading || secondaryLoading ? (
+                                <strong>Loading</strong>
+                            ) : !classMobility ? (
+                                <strong>No mobility data yet</strong>
+                            ) : (
+                                <>
+                                    <strong>Gini {Number(inequality.gini || 0).toFixed(3)}</strong>
+                                    <em>
                                         Upward {mobility.upward_signals || 0}
-                                    </div>
-                                    <div className="mobility-chip down">
-                                        <ArrowDownRight size={16} />
-                                        Downward {mobility.downward_signals || 0}
-                                    </div>
-                                    <div className="mobility-chip neutral">
-                                        <Equal size={16} />
-                                        Flux {formatPct(mobility.signal_flux_rate || 0)}
-                                    </div>
-                                </div>
-                                <div className="tier-wealth-list">
-                                    {tiers.map((tier) => (
-                                        <div key={tier.tier} className="tier-wealth-row">
-                                            <div className="tier-label">Tier {tier.tier}</div>
-                                            <div className="tier-bar-wrap">
-                                                <div
-                                                    className="tier-bar-fill"
-                                                    style={{ width: `${Math.max(4, Math.round(Number(tier.wealth_share || 0) * 100))}%` }}
-                                                />
-                                            </div>
-                                            <div className="tier-value">{formatPct(tier.wealth_share || 0)}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </>
-                        )}
+                                        {' · '}Downward {mobility.downward_signals || 0}
+                                        {' · '}Flux {formatPct(mobility.signal_flux_rate || 0)}
+                                    </em>
+                                </>
+                            )}
+                        </Link>
                     </div>
-                </div>
-            </div>}
+                </section>
+            )}
 
             <style>{`
                 .resource-grid {
@@ -951,176 +865,6 @@ export default function Dashboard() {
                     margin-top: var(--spacing-xs);
                     color: var(--text-secondary);
                     font-size: 0.85rem;
-                }
-
-                .plot-turn-list {
-                    display: flex;
-                    flex-direction: column;
-                    gap: var(--spacing-sm);
-                }
-
-                .plot-turn-item {
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                    border-left-width: 4px;
-                    border-radius: var(--radius-md);
-                    padding: var(--spacing-md);
-                    background: rgba(255, 255, 255, 0.02);
-                }
-
-                .plot-turn-item.category-crisis { border-left-color: #f97316; }
-                .plot-turn-item.category-conflict { border-left-color: #ef4444; }
-                .plot-turn-item.category-alliance { border-left-color: #3b82f6; }
-                .plot-turn-item.category-governance { border-left-color: #a78bfa; }
-                .plot-turn-item.category-cooperation { border-left-color: #22c55e; }
-                .plot-turn-item.category-notable { border-left-color: #94a3b8; }
-
-                .plot-turn-head {
-                    display: flex;
-                    justify-content: space-between;
-                    gap: var(--spacing-sm);
-                    align-items: baseline;
-                }
-
-                .plot-turn-title {
-                    font-weight: 600;
-                }
-
-                .plot-turn-score {
-                    font-size: 0.8rem;
-                    color: var(--text-muted);
-                }
-
-                .plot-turn-description {
-                    margin: var(--spacing-xs) 0;
-                    color: var(--text-secondary);
-                    font-size: 0.9rem;
-                }
-
-                .plot-turn-foot {
-                    display: flex;
-                    justify-content: space-between;
-                    gap: var(--spacing-sm);
-                    font-size: 0.78rem;
-                    color: var(--text-muted);
-                    text-transform: capitalize;
-                }
-
-                .deltas-inline {
-                    display: inline-flex;
-                    gap: var(--spacing-sm);
-                    font-size: 0.78rem;
-                }
-
-                .social-body {
-                    min-height: 260px;
-                }
-
-                .inequality-grid {
-                    display: grid;
-                    grid-template-columns: 180px 1fr;
-                    gap: var(--spacing-lg);
-                }
-
-                .inequality-main {
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: center;
-                    align-items: center;
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                    border-radius: var(--radius-lg);
-                    padding: var(--spacing-md);
-                }
-
-                .inequality-value {
-                    font-size: 2rem;
-                    font-weight: 700;
-                }
-
-                .inequality-label {
-                    color: var(--text-muted);
-                    font-size: 0.8rem;
-                }
-
-                .inequality-stats {
-                    display: grid;
-                    grid-template-columns: repeat(2, minmax(0, 1fr));
-                    gap: var(--spacing-sm);
-                }
-
-                .inequality-stats div {
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                    border-radius: var(--radius-md);
-                    padding: var(--spacing-sm);
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    gap: var(--spacing-sm);
-                    font-size: 0.85rem;
-                }
-
-                .mobility-signals {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: var(--spacing-sm);
-                    margin-bottom: var(--spacing-md);
-                }
-
-                .mobility-chip {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 0.3rem;
-                    padding: 0.3rem 0.55rem;
-                    border-radius: 999px;
-                    border: 1px solid rgba(255, 255, 255, 0.12);
-                    font-size: 0.78rem;
-                }
-
-                .mobility-chip.up { color: #86efac; border-color: rgba(34, 197, 94, 0.3); }
-                .mobility-chip.down { color: #fca5a5; border-color: rgba(239, 68, 68, 0.3); }
-                .mobility-chip.neutral { color: #bfdbfe; border-color: rgba(59, 130, 246, 0.3); }
-
-                .tier-wealth-list {
-                    display: flex;
-                    flex-direction: column;
-                    gap: var(--spacing-sm);
-                }
-
-                .tier-wealth-row {
-                    display: grid;
-                    grid-template-columns: 56px 1fr 64px;
-                    gap: var(--spacing-sm);
-                    align-items: center;
-                }
-
-                .tier-label {
-                    font-size: 0.8rem;
-                    color: var(--text-muted);
-                }
-
-                .tier-bar-wrap {
-                    height: 8px;
-                    border-radius: 999px;
-                    background: rgba(255, 255, 255, 0.08);
-                    overflow: hidden;
-                }
-
-                .tier-bar-fill {
-                    height: 100%;
-                    background: linear-gradient(90deg, #60a5fa, #c084fc);
-                }
-
-                .tier-value {
-                    text-align: right;
-                    font-size: 0.8rem;
-                    color: var(--text-secondary);
-                }
-
-                .delta-up {
-                    color: #86efac;
-                }
-
-                .delta-down {
-                    color: #fca5a5;
                 }
 
                 .empty-state.compact {
@@ -1245,10 +989,6 @@ export default function Dashboard() {
                 
                 @media (max-width: 768px) {
                     .resource-grid {
-                        grid-template-columns: 1fr;
-                    }
-
-                    .inequality-grid {
                         grid-template-columns: 1fr;
                     }
 
