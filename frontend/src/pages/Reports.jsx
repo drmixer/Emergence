@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import { getNextScheduledRun, getScheduleEntryForRunId } from '../data/runSchedule'
-import { getStoryReplayHref } from '../utils/bestMoments'
+import { getStoryReplayHref, getWatchReplayHref } from '../utils/bestMoments'
 import RunBriefCard from '../components/RunBriefCard'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 
@@ -464,7 +464,7 @@ export default function Reports() {
                   : (isLatestPublicRun ? 'Start With Latest Recap' : 'Open Recap')
                 const primaryActionTarget = latestViewerBriefAvailable ? 'report:viewer_brief:primary' : 'recap'
                 const replayPath = getStoryReplayHref(runId)
-                const watchPath = `/watch?run=${encodeURIComponent(runId)}`
+                const watchPath = getWatchReplayHref(runId, 0, { focus: 'largest' })
                 const highlightsPath = `/runs/${encodeURIComponent(runId)}/highlights`
                 const evidencePath = `/runs/${encodeURIComponent(runId)}`
                 const latestRunPathItems = isLatestPublicRun
@@ -485,10 +485,10 @@ export default function Reports() {
                       },
                       {
                         label: 'Watch',
-                        meta: 'Run map',
+                        meta: 'Largest spike',
                         icon: <Eye size={14} />,
                         to: watchPath,
-                        target: 'watch:path',
+                        target: 'watch:largest_spike:path',
                       },
                       {
                         label: 'Replay',
@@ -636,7 +636,7 @@ export default function Reports() {
                           <Link
                             className="btn btn-secondary"
                             to={watchPath}
-                            onClick={() => trackArchivePathClick(runId, 'watch_replay')}
+                            onClick={() => trackArchivePathClick(runId, 'watch_largest_spike')}
                           >
                             <Eye size={14} />
                             Watch Replay

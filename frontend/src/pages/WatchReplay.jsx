@@ -172,6 +172,11 @@ function getLaneFilter(value) {
   return LANE_ORDER.includes(lane) ? lane : ''
 }
 
+function getWatchFocus(value) {
+  const clean = cleanString(value).toLowerCase()
+  return clean === 'largest' ? clean : ''
+}
+
 function isVisibleMoment(item) {
   if (!item || getEventId(item) <= 0) return false
   const eventType = cleanString(item?.event_type)
@@ -408,6 +413,7 @@ export default function WatchReplay() {
   const requestedEventId = Number(searchParams.get('event') || 0)
   const requestedBucketIndex = Number(searchParams.get('bucket') || -1)
   const selectedLaneFilter = getLaneFilter(searchParams.get('lane'))
+  const requestedFocus = getWatchFocus(searchParams.get('focus'))
   const [archive, setArchive] = useState(null)
   const [watchData, setWatchData] = useState(null)
   const [archiveLoading, setArchiveLoading] = useState(true)
@@ -487,9 +493,11 @@ export default function WatchReplay() {
         : null
     } else if (Number.isFinite(requestedBucketIndex) && requestedBucketIndex >= 0) {
       linkedBucket = displayBuckets.find((bucket) => Number(bucket.index) === requestedBucketIndex) || null
+    } else if (requestedFocus === 'largest') {
+      linkedBucket = findLargestSpikeBucket(displayBuckets.filter((bucket) => getBucketMomentCount(bucket) > 0))
     }
     return linkedBucket && getBucketMomentCount(linkedBucket) > 0 ? linkedBucket : null
-  }, [displayBuckets, requestedBucketIndex, requestedEventId, selectedLaneFilter, visibleMoments])
+  }, [displayBuckets, requestedBucketIndex, requestedEventId, requestedFocus, selectedLaneFilter, visibleMoments])
   const selectedWindow = useMemo(
     () => buildSelectedWindow(selectedBucket, visibleMoments, selectedLaneFilter),
     [selectedBucket, selectedLaneFilter, visibleMoments],

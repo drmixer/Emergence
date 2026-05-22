@@ -109,6 +109,10 @@ describe('Reports archive', () => {
       'href',
       '/runs/real-20260519T063000Z/highlights',
     )
+    expect(within(card).getByRole('link', { name: /Watch: Largest spike/i })).toHaveAttribute(
+      'href',
+      '/watch?run=real-20260519T063000Z&focus=largest',
+    )
     expect(within(card).getByRole('link', { name: /Replay: Key moments/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/replay?mode=story60',

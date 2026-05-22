@@ -312,6 +312,69 @@ describe('WatchReplay', () => {
     expect(within(selectedWindow).getAllByText(/Largest Spike Aid/i).length).toBeGreaterThan(0)
   })
 
+  it('opens the largest spike from an archive focus link without recording a jump click', async () => {
+    api.getRunWatch.mockResolvedValue({
+      activity: {},
+      provenance: {
+        time_window: {
+          start_utc: '2026-05-19T06:30:00.000Z',
+          end_utc: '2026-05-19T12:30:00.000Z',
+        },
+      },
+      items: [
+        makeMoment({
+          event_id: 20,
+          event_type: 'law_passed',
+          category: 'governance',
+          title: 'Early Law',
+          salience: 82,
+          created_at: '2026-05-19T07:00:00.000Z',
+        }),
+        makeMoment({
+          event_id: 21,
+          event_type: 'request_aid',
+          category: 'cooperation',
+          title: 'Archive Entry Aid',
+          salience: 91,
+          created_at: '2026-05-19T10:00:00.000Z',
+        }),
+        makeMoment({
+          event_id: 22,
+          event_type: 'agent_died',
+          category: 'crisis',
+          title: 'Archive Entry Death',
+          salience: 90,
+          created_at: '2026-05-19T10:10:00.000Z',
+        }),
+      ],
+      buckets: [
+        {
+          index: 0,
+          bucket_start: '2026-05-19T06:30:00.000Z',
+          bucket_end: '2026-05-19T09:30:00.000Z',
+          event_count: 1,
+          dominant_category: 'governance',
+        },
+        {
+          index: 1,
+          bucket_start: '2026-05-19T09:30:00.000Z',
+          bucket_end: '2026-05-19T12:30:00.000Z',
+          event_count: 2,
+          dominant_category: 'cooperation',
+        },
+      ],
+    })
+
+    renderWatch('/watch?run=real-20260519T063000Z&focus=largest')
+
+    const selectedWindow = await screen.findByLabelText(/Selected window/i)
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&focus=largest')
+    expect(within(selectedWindow).getByText(/Spike 2 of 2/i)).toBeInTheDocument()
+    expect(within(selectedWindow).getAllByText(/Archive Entry Aid/i).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /Jump to largest spike/i })).toBeDisabled()
+    expect(trackKpiEvent).not.toHaveBeenCalledWith('watch_spike_jump', expect.anything())
+  })
+
   it('focuses the density timeline by lane without hiding lane context', async () => {
     renderWatch()
 
