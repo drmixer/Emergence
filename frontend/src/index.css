@@ -89,12 +89,12 @@
   --spacing-xl: 2rem;
   --spacing-2xl: 3rem;
 
-  /* Border Radius */
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.25rem;
-  --radius-2xl: 1.5rem;
+  /* Border Radius - compact app surfaces */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.5rem;
+  --radius-2xl: 0.5rem;
   --radius-full: 9999px;
 
   /* Transitions */
@@ -279,13 +279,12 @@ a:hover {
 }
 
 .btn-primary {
-  background: var(--gradient-primary);
-  color: white;
+  background: var(--accent-primary);
+  color: var(--bg-primary);
 }
 
 .btn-primary:hover {
-  box-shadow: var(--shadow-glow);
-  transform: translateY(-1px);
+  background: var(--accent-secondary);
 }
 
 .btn-secondary {

@@ -3,7 +3,6 @@
     inset: 0;
     z-index: 1200;
     background: rgba(3, 4, 8, 0.72);
-    backdrop-filter: blur(3px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -13,13 +12,9 @@
 .onboarding-card {
     width: min(640px, 100%);
     position: relative;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-xl);
-    background:
-        radial-gradient(circle at 90% -20%, rgba(94, 234, 212, 0.12), transparent 45%),
-        radial-gradient(circle at 0% 120%, rgba(96, 165, 250, 0.14), transparent 50%),
-        rgba(9, 10, 16, 0.97);
-    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+    background: var(--bg-tertiary);
     padding: var(--spacing-xl);
 }
 
@@ -48,7 +43,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--spacing-sm);
-    color: #7dd3fc;
+    color: var(--text-secondary);
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -107,11 +102,11 @@
 }
 
 .onboarding-footnote a {
-    color: #7dd3fc;
+    color: var(--text-secondary);
 }
 
 .onboarding-footnote a:hover {
-    color: #bae6fd;
+    color: var(--text-primary);
 }
 
 @media (max-width: 768px) {
@@ -131,4 +126,3 @@
         text-align: left;
     }
 }
-

@@ -1,24 +1,24 @@
-/* Resource Bar - Cinematic Monochrome Style */
+/* Resource Bar */
 
 .resource-bar-container {
     padding: var(--spacing-lg);
-    background: var(--gradient-card);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     transition: all var(--transition-normal);
 }
 
 .resource-bar-container.warning {
-    border-color: rgba(255, 255, 255, 0.12);
+    border-color: var(--border-light);
 }
 
 .resource-bar-container.danger {
-    border-color: rgba(255, 255, 255, 0.15);
+    border-color: var(--border-light);
     background: rgba(255, 255, 255, 0.02);
 }
 
 .resource-bar-container.critical {
-    border-color: rgba(255, 255, 255, 0.2);
+    border-color: var(--border-glow);
     background: rgba(255, 255, 255, 0.03);
 }
 
@@ -34,7 +34,7 @@
     }
 
     50% {
-        box-shadow: 0 0 20px 2px rgba(255, 255, 255, 0.08);
+        border-color: var(--border-glow);
     }
 }
 
@@ -91,59 +91,53 @@
     overflow: hidden;
 }
 
-/* Resource type colors - Monochrome with subtle glow */
+/* Resource state colors */
 .resource-bar-fill.food.healthy {
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.8) 100%);
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+    background: var(--text-primary);
 }
 
 .resource-bar-fill.food.warning {
-    background: linear-gradient(90deg, rgba(200, 200, 200, 0.5) 0%, rgba(200, 200, 200, 0.7) 100%);
-    box-shadow: 0 0 8px rgba(200, 200, 200, 0.15);
+    background: var(--accent-secondary);
 }
 
 .resource-bar-fill.food.danger {
-    background: linear-gradient(90deg, rgba(160, 160, 160, 0.4) 0%, rgba(160, 160, 160, 0.6) 100%);
-    box-shadow: 0 0 6px rgba(160, 160, 160, 0.1);
+    background: var(--status-warning);
 }
 
 .resource-bar-fill.food.critical {
-    background: linear-gradient(90deg, rgba(120, 120, 120, 0.3) 0%, rgba(120, 120, 120, 0.5) 100%);
+    background: var(--text-muted);
 }
 
 .resource-bar-fill.energy.healthy {
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.8) 100%);
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+    background: var(--text-primary);
 }
 
 .resource-bar-fill.energy.warning {
-    background: linear-gradient(90deg, rgba(200, 200, 200, 0.5) 0%, rgba(200, 200, 200, 0.7) 100%);
-    box-shadow: 0 0 8px rgba(200, 200, 200, 0.15);
+    background: var(--accent-secondary);
 }
 
 .resource-bar-fill.energy.danger {
-    background: linear-gradient(90deg, rgba(160, 160, 160, 0.4) 0%, rgba(160, 160, 160, 0.6) 100%);
+    background: var(--status-warning);
 }
 
 .resource-bar-fill.energy.critical {
-    background: linear-gradient(90deg, rgba(120, 120, 120, 0.3) 0%, rgba(120, 120, 120, 0.5) 100%);
+    background: var(--text-muted);
 }
 
 .resource-bar-fill.materials.healthy {
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.8) 100%);
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+    background: var(--text-primary);
 }
 
 .resource-bar-fill.materials.warning {
-    background: linear-gradient(90deg, rgba(200, 200, 200, 0.5) 0%, rgba(200, 200, 200, 0.7) 100%);
+    background: var(--accent-secondary);
 }
 
 .resource-bar-fill.materials.danger {
-    background: linear-gradient(90deg, rgba(160, 160, 160, 0.4) 0%, rgba(160, 160, 160, 0.6) 100%);
+    background: var(--status-warning);
 }
 
 .resource-bar-fill.materials.critical {
-    background: linear-gradient(90deg, rgba(120, 120, 120, 0.3) 0%, rgba(120, 120, 120, 0.5) 100%);
+    background: var(--text-muted);
 }
 
 /* Pulsing bar for critical state */
@@ -155,7 +149,7 @@
     bottom: 0;
     background: linear-gradient(90deg,
             transparent 0%,
-            rgba(255, 255, 255, 0.4) 50%,
+            rgba(255, 255, 255, 0.18) 50%,
             transparent 100%);
     animation: barPulse 1.5s ease-in-out infinite;
 }
@@ -193,8 +187,8 @@
 }
 
 .critical-banner-link:hover .critical-banner {
-    border-color: rgba(255, 255, 255, 0.24);
-    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--border-light);
+    background: var(--bg-card-hover);
 }
 
 .critical-banner {
@@ -202,8 +196,8 @@
     align-items: center;
     gap: var(--spacing-md);
     padding: var(--spacing-lg);
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
     color: var(--text-secondary);
     font-size: 0.9rem;

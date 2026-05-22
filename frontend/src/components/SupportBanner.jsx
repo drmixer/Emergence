@@ -45,8 +45,8 @@ export default function SupportBanner() {
           align-items: center;
           justify-content: space-between;
           padding: var(--spacing-sm) var(--spacing-md);
-          background: rgba(139, 92, 246, 0.1);
-          border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+          background: var(--bg-secondary);
+          border-bottom: 1px solid var(--border-color);
           font-size: 0.8125rem;
           color: var(--text-secondary);
         }
@@ -58,12 +58,12 @@ export default function SupportBanner() {
         }
         
         .support-icon {
-          color: #ec4899;
+          color: var(--text-muted);
           flex-shrink: 0;
         }
         
         .support-banner a {
-          color: var(--accent-purple);
+          color: var(--text-primary);
           display: inline-flex;
           align-items: center;
           gap: 4px;

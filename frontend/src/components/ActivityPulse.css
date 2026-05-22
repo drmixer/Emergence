@@ -1,31 +1,24 @@
-/* Activity Pulse - Cinematic Monochrome Style */
+/* Activity Pulse */
 
 .activity-pulse {
     display: flex;
     align-items: center;
     gap: var(--spacing-xl);
     padding: var(--spacing-lg) var(--spacing-xl);
-    background: var(--gradient-card);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: var(--radius-xl);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
     margin-bottom: var(--spacing-2xl);
     position: relative;
     overflow: hidden;
 }
 
 .activity-pulse::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    display: none;
 }
 
 .activity-pulse.live {
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 0 30px rgba(255, 255, 255, 0.04);
+    border-color: var(--border-light);
 }
 
 .pulse-indicator {
@@ -120,7 +113,7 @@
 .pulse-divider {
     width: 1px;
     height: 24px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--border-color);
 }
 
 .pulse-stat.day {

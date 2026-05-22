@@ -5,7 +5,7 @@
   height: 100vh;
   min-height: 0;
   overflow: hidden;
-  background: #05050a;
+  background: var(--bg-primary);
 }
 
 .app {
@@ -22,11 +22,10 @@
   grid-template-columns: 260px 1fr;
 }
 
-/* Sidebar - Glassmorphism */
+/* Sidebar */
 .sidebar {
-  background: rgba(10, 10, 16, 0.8);
-  backdrop-filter: blur(20px);
-  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -38,7 +37,7 @@
 
 .sidebar-header {
   padding: var(--spacing-xl);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .logo {
@@ -52,7 +51,6 @@
   height: 44px;
   border-radius: var(--radius-md);
   object-fit: contain;
-  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.2));
 }
 
 .logo-text {
@@ -87,7 +85,7 @@
   align-items: center;
   gap: var(--spacing-md);
   padding: var(--spacing-md) var(--spacing-lg);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
   font-size: 0.9rem;
   font-weight: 500;
@@ -96,16 +94,15 @@
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-hover);
   color: var(--text-primary);
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: var(--border-color);
 }
 
 .nav-item.active {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-card-hover);
   color: var(--text-primary);
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 0 20px rgba(255, 255, 255, 0.03);
+  border-color: var(--border-light);
 }
 
 .external-icon {
@@ -115,7 +112,7 @@
 
 .sidebar-footer {
   padding: var(--spacing-lg);
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
@@ -128,14 +125,13 @@
   overflow-x: hidden;
   min-height: 0;
   min-width: 0;
-  background: linear-gradient(180deg, #05050a 0%, #08080e 100%);
+  background: var(--bg-primary);
 }
 
-/* Feed Sidebar - Glassmorphism */
+/* Feed Sidebar */
 .feed-sidebar {
-  background: rgba(10, 10, 16, 0.8);
-  backdrop-filter: blur(20px);
-  border-left: 1px solid rgba(255, 255, 255, 0.04);
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
   position: sticky;
   top: 0;
   height: 100%;
@@ -169,7 +165,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Stats Grid - Glassmorphism Cards */
+/* Stats Grid */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -178,9 +174,9 @@
 }
 
 .stat-card {
-  background: var(--gradient-card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   padding: var(--spacing-xl);
   transition: all var(--transition-normal);
   position: relative;
@@ -188,19 +184,12 @@
 }
 
 .stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  display: none;
 }
 
 .stat-card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-glow);
+  border-color: var(--border-light);
+  background: var(--bg-card-hover);
 }
 
 .stat-header {
@@ -285,9 +274,9 @@
 }
 
 .agent-card {
-  background: var(--gradient-card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   padding: var(--spacing-xl);
   transition: all var(--transition-normal);
   cursor: pointer;
@@ -296,25 +285,16 @@
 }
 
 .agent-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
-  opacity: 0;
-  transition: opacity var(--transition-normal);
+  display: none;
 }
 
 .agent-card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-glow);
+  border-color: var(--border-light);
+  background: var(--bg-card-hover);
 }
 
 .agent-card:hover::before {
-  opacity: 1;
+  display: none;
 }
 
 .agent-header {
@@ -344,7 +324,6 @@
 .agent-avatar.tier-1 {
   background: rgba(255, 255, 255, 0.12);
   color: var(--text-primary);
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.08);
 }
 
 .agent-avatar.tier-2 {
@@ -432,9 +411,9 @@
 .table-container {
   overflow-x: auto;
   max-width: 100%;
-  background: var(--gradient-card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   padding: var(--spacing-md);
 }
 
@@ -1494,16 +1473,16 @@ tr:last-child td {
   flex-direction: column;
   gap: 0.35rem;
   padding: var(--spacing-md);
-  border: 1px solid rgba(96, 165, 250, 0.24);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  background: rgba(96, 165, 250, 0.08);
+  background: var(--bg-card);
   color: var(--text-primary);
   text-decoration: none;
 }
 
 .no-active-run-brief-link:hover {
-  border-color: rgba(96, 165, 250, 0.42);
-  background: rgba(96, 165, 250, 0.12);
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
 }
 
 .no-active-run-brief-link span {
@@ -2275,17 +2254,15 @@ a.archive-run-brief-teaser:hover strong {
   flex-direction: column;
   gap: var(--spacing-lg);
   padding: var(--spacing-xl);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.018);
+  background: var(--bg-card);
 }
 
 .run-brief-card.featured,
 .run-brief-card.status-upcoming {
-  border-color: rgba(255, 255, 255, 0.16);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.016)),
-    rgba(255, 255, 255, 0.012);
+  border-color: var(--border-light);
+  background: var(--bg-card-hover);
 }
 
 .run-brief-compact {
@@ -2383,7 +2360,7 @@ a.archive-run-brief-teaser:hover strong {
 .run-brief-question svg {
   flex: 0 0 auto;
   margin-top: 0.2rem;
-  color: var(--accent-blue);
+  color: var(--text-secondary);
 }
 
 .run-brief-question span,
@@ -2449,9 +2426,9 @@ a.archive-run-brief-teaser:hover strong {
 .run-brief-viewer-step {
   min-width: 0;
   padding: var(--spacing-md);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .run-brief-viewer-step strong {
@@ -3447,8 +3424,9 @@ a.archive-run-brief-teaser:hover strong {
 
 .watch-density-bar.active span {
   opacity: 1;
-  transform: translateY(-3px);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.78), 0 12px 24px rgba(15, 23, 42, 0.34);
+  transform: translateY(-1px);
+  outline: 2px solid rgba(255, 255, 255, 0.78);
+  outline-offset: 2px;
 }
 
 .watch-density-bar.active em {
@@ -3894,11 +3872,11 @@ a.archive-run-brief-teaser:hover strong {
   display: inline-flex;
   margin-bottom: var(--spacing-sm);
   padding: 3px 8px;
-  border: 1px solid rgba(139, 92, 246, 0.32);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-full);
-  color: var(--accent-purple);
+  color: var(--text-secondary);
   font-size: 0.75rem;
-  background: rgba(139, 92, 246, 0.08);
+  background: var(--bg-card);
 }
 
 .reserve-semantics-note {
@@ -3907,9 +3885,9 @@ a.archive-run-brief-teaser:hover strong {
   gap: 6px;
   margin: 0 0 var(--spacing-md);
   padding: var(--spacing-sm) var(--spacing-md);
-  border: 1px solid rgba(59, 130, 246, 0.28);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  background: rgba(59, 130, 246, 0.08);
+  background: var(--bg-card);
   color: var(--text-secondary);
   font-size: 0.82rem;
   line-height: 1.45;
@@ -3928,7 +3906,7 @@ a.archive-run-brief-teaser:hover strong {
 }
 
 .duplicate-waves-card {
-  border-left: 3px solid var(--accent-blue);
+  border-left: 3px solid var(--border-light);
 }
 
 .duplicate-wave-summary,
