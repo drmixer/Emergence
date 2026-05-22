@@ -35,6 +35,37 @@ function renderArchive() {
   )
 }
 
+function archivedK13() {
+  return {
+    run_id: 'real-20260522T014909Z',
+    summary: {
+      run_id: 'real-20260522T014909Z',
+      condition_name: 'real_governance_readability_canary_k13',
+      run_class: 'special_exploratory',
+      run_started_at: '2026-05-22T01:49:10Z',
+      run_ended_at: '2026-05-22T09:20:38Z',
+      duration_hours: 7.52,
+      status_label: 'observational',
+      metrics: {
+        total_events: 5424,
+        laws_passed: 1,
+        deaths: 0,
+      },
+    },
+    run_metadata: {
+      run_id: 'real-20260522T014909Z',
+      condition_name: 'real_governance_readability_canary_k13',
+      run_class: 'special_exploratory',
+      started_at: '2026-05-22T01:49:10Z',
+      ended_at: '2026-05-22T09:20:38Z',
+    },
+    artifacts: {
+      approachable_report: { available: true, formats: ['markdown'] },
+      run_summary: { available: true, formats: ['markdown'] },
+    },
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   api.getRunsArchive.mockResolvedValue({
@@ -86,6 +117,22 @@ afterEach(() => {
 })
 
 describe('Reports archive', () => {
+  it('uses archived closeout state before choosing the next scheduled run card', async () => {
+    api.getRunsArchive.mockResolvedValue({
+      stats: {},
+      items: [archivedK13()],
+    })
+
+    renderArchive()
+
+    expect(await screen.findByRole('heading', { name: 'K14' })).toBeInTheDocument()
+
+    const nextRunCard = screen.getByRole('heading', { name: 'K14' }).closest('article')
+    expect(within(nextRunCard).getByText(/Next tentative run/i)).toBeInTheDocument()
+    expect(within(nextRunCard).getByText(/Under visible scarcity/i)).toBeInTheDocument()
+    expect(screen.queryByText(/NEXT SCHEDULED RUN/i)).not.toBeInTheDocument()
+  })
+
   it('promotes the latest viewer brief while keeping recap and evidence actions adjacent', async () => {
     renderArchive()
 

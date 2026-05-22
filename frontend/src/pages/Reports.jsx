@@ -9,7 +9,11 @@ import {
   TimerReset,
 } from 'lucide-react'
 import { api } from '../services/api'
-import { getNextScheduledRun, getScheduleEntryForRunId } from '../data/runSchedule'
+import {
+  getCalendarSummaryRuns,
+  getRunBriefForArchivedRun,
+  getScheduleEntryForRunId,
+} from '../data/runSchedule'
 import { getStoryReplayHref, getWatchReplayHref } from '../utils/bestMoments'
 import RunBriefCard from '../components/RunBriefCard'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
@@ -265,7 +269,8 @@ export default function Reports() {
   const legacyReportsRoute = String(location.pathname || '').trim() === '/reports'
   const comparisonGroups = buildComparisonGroups(items)
   const archiveModeLabel = includeTuning ? 'All Archived Runs' : 'Public Archive'
-  const nextScheduledRun = getNextScheduledRun()
+  const completedRuns = items.map(getRunBriefForArchivedRun).filter(Boolean)
+  const nextScheduledRun = archive ? getCalendarSummaryRuns({ completedRuns }).nextPlanned : null
 
   return (
     <div className="reports-page archive-page">
@@ -300,7 +305,7 @@ export default function Reports() {
         <RunBriefCard
           run={nextScheduledRun}
           variant="compact"
-          heading="Next scheduled run"
+          heading={nextScheduledRun.status === 'Tentative' ? 'Next tentative run' : 'Next scheduled run'}
           actionMode="calendar"
           analyticsSurface="archive_next_run"
         />

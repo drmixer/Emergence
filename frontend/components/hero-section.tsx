@@ -8,7 +8,11 @@ import { BitmapChevron } from "@/components/bitmap-chevron"
 import { resolveApiBase } from "@/lib/api-base"
 import { trackKpiEvent, trackKpiEventOnce } from "@/lib/kpi-client"
 import { Activity, ArrowUpRight, CalendarDays, Network, Play, Radio, Scale, Skull } from "lucide-react"
-import { getNextScheduledRun } from "@/src/data/runSchedule"
+import {
+  getCalendarSummaryRuns,
+  getRunBriefForArchivedRun,
+  getRunBriefForCurrentRun,
+} from "@/src/data/runSchedule"
 import gsap from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 
@@ -19,6 +23,29 @@ type LandingStats = {
   deaths: number
   laws: number
   coalitions: number
+}
+
+type RunBrief = {
+  label?: string
+  declaredQuestion?: string
+  claimBoundary?: string
+  status?: string
+  runId?: string
+  completedAt?: string
+  [key: string]: unknown
+} | null
+
+type RuntimeScheduleSummary = {
+  nextPlanned: RunBrief
+}
+
+const getRuntimeCalendarSummary = getCalendarSummaryRuns as (input: {
+  activeRun?: RunBrief
+  completedRuns?: NonNullable<RunBrief>[]
+}) => RuntimeScheduleSummary
+
+function isRunBrief(run: RunBrief): run is NonNullable<RunBrief> {
+  return Boolean(run)
 }
 
 const FALLBACK_QUOTES = [
@@ -45,6 +72,7 @@ export function HeroSection() {
   })
   const [simulationActive, setSimulationActive] = useState(false)
   const [lastCompletedRunId, setLastCompletedRunId] = useState("")
+  const [nextRun, setNextRun] = useState<RunBrief>(null)
   const [quotes, setQuotes] = useState<string[]>([])
   const [quoteIndex, setQuoteIndex] = useState(0)
 
@@ -85,15 +113,26 @@ export function HeroSection() {
       }
 
       try {
-        const overview = await fetch(`${apiBase}/api/analytics/overview`)
-          .then((response) => (response.ok ? response.json() : null))
-          .catch(() => null)
+        const [overview, archive] = await Promise.all([
+          fetch(`${apiBase}/api/analytics/overview`)
+            .then((response) => (response.ok ? response.json() : null))
+            .catch(() => null),
+          fetch(`${apiBase}/api/reports/archive/runs?limit=12`)
+            .then((response) => (response.ok ? response.json() : null))
+            .catch(() => null),
+        ])
         if (cancelled) return
 
         const isLive = overview?.scope?.simulation_active === true
         const completedRunId = String(overview?.scope?.last_completed_run_id || "").trim()
+        const activeRun = isLive ? getRunBriefForCurrentRun(overview?.run_metadata || {}, overview?.scope || {}) : null
+        const completedRuns = Array.isArray(archive?.items)
+          ? archive.items.map(getRunBriefForArchivedRun).filter(Boolean)
+          : []
+        const runtimeSummary = getRuntimeCalendarSummary({ activeRun, completedRuns: completedRuns.filter(isRunBrief) })
         setSimulationActive(isLive)
         setLastCompletedRunId(completedRunId)
+        setNextRun(archive || activeRun ? runtimeSummary.nextPlanned : null)
 
         if (!isLive) {
           setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
@@ -128,6 +167,7 @@ export function HeroSection() {
         if (!cancelled) {
           setSimulationActive(false)
           setStats({ day: 0, deaths: 0, laws: 0, coalitions: 0 })
+          setNextRun(null)
           setQuotes([])
         }
       } finally {
@@ -156,7 +196,6 @@ export function HeroSection() {
   }, [quoteIndex, quotes, simulationActive])
 
   const isIdle = !simulationActive
-  const nextRun = getNextScheduledRun()
 
   return (
     <section
