@@ -163,7 +163,7 @@ describe('WatchReplay', () => {
 
     expect(await screen.findByText(/Watch Replay/i)).toBeInTheDocument()
     expect(screen.getAllByText(/real-20260519T063000Z/i).length).toBeGreaterThan(0)
-    expect(screen.getByText(/Do the new viewer\/story\/evidence changes/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Do the new viewer\/story\/evidence changes/i)).toBeInTheDocument()
     expect(await screen.findByText(/15,538/i)).toBeInTheDocument()
     expect(screen.getByText(/7 dormancy events/i)).toBeInTheDocument()
 
@@ -176,8 +176,11 @@ describe('WatchReplay', () => {
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&event=2')
     const selectedWindow = screen.getByLabelText(/Selected window/i)
     expect(within(selectedWindow).getByText(/Dominant lane/i)).toBeInTheDocument()
+    expect(within(selectedWindow).getByText(/Spike 1 of 2/i)).toBeInTheDocument()
     expect(within(selectedWindow).getAllByText(/Governance/i).length).toBeGreaterThan(0)
     expect(within(selectedWindow).getAllByText(/Law Passed/i).length).toBeGreaterThan(0)
+    expect(within(selectedWindow).getByRole('button', { name: /Previous spike/i })).toBeDisabled()
+    expect(within(selectedWindow).getByRole('button', { name: /Next spike/i })).not.toBeDisabled()
     expect(within(selectedWindow).getByRole('link', { name: /Replay/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/replay?mode=timeline&event=2',
@@ -194,14 +197,119 @@ describe('WatchReplay', () => {
     expect(screen.getByText(/Moments inside the selected window/i)).toBeInTheDocument()
     expect(screen.getAllByText(/0 in selected window \/ 1 total/i).length).toBeGreaterThan(0)
 
-    fireEvent.click(within(selectedWindow).getByRole('button', { name: /Clear selection/i }))
+    fireEvent.click(within(selectedWindow).getByRole('button', { name: /Next spike/i }))
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&event=3')
+    const nextWindow = screen.getByLabelText(/Selected window/i)
+    expect(within(nextWindow).getByText(/Spike 2 of 2/i)).toBeInTheDocument()
+    expect(within(nextWindow).getAllByText(/Aid Requested/i).length).toBeGreaterThan(0)
+
+    fireEvent.click(within(nextWindow).getByRole('button', { name: /Previous spike/i }))
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&event=2')
+
+    fireEvent.click(within(screen.getByLabelText(/Selected window/i)).getByRole('button', { name: /Clear selection/i }))
     expect(screen.queryByLabelText(/Selected window/i)).not.toBeInTheDocument()
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z')
+  })
+
+  it('jumps directly to the largest density spike', async () => {
+    api.getRunWatch.mockResolvedValue({
+      activity: {},
+      provenance: {
+        time_window: {
+          start_utc: '2026-05-19T06:30:00.000Z',
+          end_utc: '2026-05-19T12:30:00.000Z',
+        },
+      },
+      items: [
+        makeMoment({
+          event_id: 20,
+          event_type: 'law_passed',
+          category: 'governance',
+          title: 'Early Law',
+          salience: 82,
+          created_at: '2026-05-19T07:00:00.000Z',
+        }),
+        makeMoment({
+          event_id: 21,
+          event_type: 'request_aid',
+          category: 'cooperation',
+          title: 'Largest Spike Aid',
+          salience: 91,
+          created_at: '2026-05-19T10:00:00.000Z',
+        }),
+        makeMoment({
+          event_id: 22,
+          event_type: 'agent_died',
+          category: 'crisis',
+          title: 'Largest Spike Death',
+          salience: 90,
+          created_at: '2026-05-19T10:10:00.000Z',
+        }),
+      ],
+      buckets: [
+        {
+          index: 0,
+          bucket_start: '2026-05-19T06:30:00.000Z',
+          bucket_end: '2026-05-19T09:30:00.000Z',
+          event_count: 1,
+          dominant_category: 'governance',
+        },
+        {
+          index: 1,
+          bucket_start: '2026-05-19T09:30:00.000Z',
+          bucket_end: '2026-05-19T12:30:00.000Z',
+          event_count: 2,
+          dominant_category: 'cooperation',
+        },
+      ],
+    })
+
+    renderWatch()
+
+    const jumpButton = await screen.findByRole('button', { name: /Jump to largest spike/i })
+    await waitFor(() => {
+      expect(jumpButton).not.toBeDisabled()
+    })
+    fireEvent.click(jumpButton)
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&event=21')
+    const selectedWindow = screen.getByLabelText(/Selected window/i)
+    expect(within(selectedWindow).getByText(/Spike 2 of 2/i)).toBeInTheDocument()
+    expect(within(selectedWindow).getByText(/Linked moments/i)).toBeInTheDocument()
+    expect(within(selectedWindow).getAllByText(/Largest Spike Aid/i).length).toBeGreaterThan(0)
+  })
+
+  it('focuses the density timeline by lane without hiding lane context', async () => {
+    renderWatch()
+
+    await screen.findByText(/Law Passed/i)
+    const laneFocus = screen.getByRole('group', { name: /Timeline lane focus/i })
+    const aidFocus = within(laneFocus).getByText(/Aid \/ Trade/i).closest('button')
+    fireEvent.click(aidFocus)
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&lane=aid_trade')
+    expect(aidFocus).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(/2 buckets · 1 Aid \/ Trade moments/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Select 0 Aid \/ Trade event timeline bucket/i })).toBeDisabled()
+
+    const jumpButton = screen.getByRole('button', { name: /Jump to largest spike with 1 linked moments/i })
+    fireEvent.click(jumpButton)
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z&lane=aid_trade&event=3')
+    const selectedWindow = screen.getByLabelText(/Selected window/i)
+    expect(within(selectedWindow).getByText(/Spike 1 of 1 · Aid \/ Trade/i)).toBeInTheDocument()
+    expect(within(selectedWindow).getAllByText(/Aid Requested/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Timeline focused on Aid \/ Trade; lane rows remain visible for context/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Governance/i).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: /^All lanes$/i }))
     expect(screen.getByTestId('location-probe')).toHaveTextContent('/watch?run=real-20260519T063000Z')
   })
 
   it('shows major lanes with replay and evidence links but keeps routine work out', async () => {
     renderWatch()
 
+    await screen.findByText(/Law Passed/i)
     const lanes = await screen.findByLabelText(/Major category lanes/i)
     expect(within(lanes).getByText(/Governance/i)).toBeInTheDocument()
     expect(within(lanes).getByText(/Survival/i)).toBeInTheDocument()

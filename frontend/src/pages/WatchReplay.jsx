@@ -3,6 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  BarChart3,
   CircleX,
   Eye,
   FileSearch,
@@ -162,6 +165,13 @@ function normalizeLaneKey(value) {
   return getEventLane({ category: clean })
 }
 
+function getLaneFilter(value) {
+  const clean = cleanString(value)
+  if (!clean || clean === 'all') return ''
+  const lane = normalizeLaneKey(clean)
+  return LANE_ORDER.includes(lane) ? lane : ''
+}
+
 function isVisibleMoment(item) {
   if (!item || getEventId(item) <= 0) return false
   const eventType = cleanString(item?.event_type)
@@ -275,6 +285,29 @@ function getBucketKey(bucket) {
   return `${Number(bucket?.index || 0)}:${cleanString(bucket?.bucket_start)}`
 }
 
+function getBucketMomentCount(bucket) {
+  if (Number.isFinite(Number(bucket?.display_moment_count))) {
+    return Number(bucket.display_moment_count)
+  }
+  return Number(bucket?.linked_moment_count || 0)
+}
+
+function getBucketRepresentativeEventId(bucket) {
+  return getEventId(bucket?.display_representative || bucket?.representative)
+}
+
+function findLargestSpikeBucket(buckets) {
+  return [...buckets]
+    .sort((a, b) => {
+      const countDelta = getBucketMomentCount(b) - getBucketMomentCount(a)
+      if (countDelta !== 0) return countDelta
+      const salienceDelta = Number(b?.max_salience || b?.display_representative?.salience || b?.representative?.salience || 0)
+        - Number(a?.max_salience || a?.display_representative?.salience || a?.representative?.salience || 0)
+      if (salienceDelta !== 0) return salienceDelta
+      return Number(a?.index || 0) - Number(b?.index || 0)
+    })[0] || null
+}
+
 function isMomentInBucket(moment, bucket) {
   if (!moment || !bucket) return false
   const eventMs = Date.parse(getEventTime(moment))
@@ -287,9 +320,10 @@ function isMomentInBucket(moment, bucket) {
     && eventMs <= endMs
 }
 
-function getMomentsInBucket(moments, bucket) {
+function getMomentsInBucket(moments, bucket, laneFilter = '') {
   return uniqueMoments(moments)
     .filter((moment) => isMomentInBucket(moment, bucket))
+    .filter((moment) => !laneFilter || getEventLane(moment) === laneFilter)
     .sort((a, b) => {
       const salienceDelta = Number(b?.salience || 0) - Number(a?.salience || 0)
       if (salienceDelta !== 0) return salienceDelta
@@ -297,9 +331,27 @@ function getMomentsInBucket(moments, bucket) {
     })
 }
 
-function buildSelectedWindow(bucket, moments) {
+function buildDisplayBuckets(buckets, moments, laneFilter = '') {
+  return buckets.map((bucket) => {
+    const displayMoments = getMomentsInBucket(moments, bucket, laneFilter)
+    const displayRepresentative = displayMoments[0] || null
+    const displayLane = laneFilter
+      || (displayRepresentative ? getEventLane(displayRepresentative) : normalizeLaneKey(bucket.dominant_category))
+    return {
+      ...bucket,
+      display_moment_count: displayMoments.length,
+      display_representative: displayRepresentative,
+      display_lane: displayLane,
+    }
+  })
+}
+
+function buildSelectedWindow(bucket, moments, focusLane = '') {
   if (!bucket) return null
   const windowMoments = getMomentsInBucket(moments, bucket)
+  const focusedMoments = focusLane
+    ? windowMoments.filter((moment) => getEventLane(moment) === focusLane)
+    : windowMoments
   const laneCounts = windowMoments.reduce((counts, moment) => {
     const lane = getEventLane(moment)
     counts[lane] = Number(counts[lane] || 0) + 1
@@ -314,11 +366,11 @@ function buildSelectedWindow(bucket, moments) {
     bucket,
     start: bucket.bucket_start,
     end: bucket.bucket_end,
-    count: windowMoments.length,
-    dominantLane,
+    count: focusedMoments.length,
+    dominantLane: focusLane || dominantLane,
     laneCounts,
     moments: windowMoments,
-    topMoments: windowMoments.slice(0, 3),
+    topMoments: focusedMoments.slice(0, 3),
   }
 }
 
@@ -355,6 +407,7 @@ export default function WatchReplay() {
   const requestedRunId = cleanString(searchParams.get('run'))
   const requestedEventId = Number(searchParams.get('event') || 0)
   const requestedBucketIndex = Number(searchParams.get('bucket') || -1)
+  const selectedLaneFilter = getLaneFilter(searchParams.get('lane'))
   const [archive, setArchive] = useState(null)
   const [watchData, setWatchData] = useState(null)
   const [archiveLoading, setArchiveLoading] = useState(true)
@@ -420,24 +473,39 @@ export default function WatchReplay() {
     () => buildDensityBuckets(watchData, visibleMoments, window),
     [visibleMoments, watchData, window],
   )
+  const displayBuckets = useMemo(
+    () => buildDisplayBuckets(densityBuckets, visibleMoments, selectedLaneFilter),
+    [densityBuckets, selectedLaneFilter, visibleMoments],
+  )
   const selectedBucket = useMemo(() => {
     let linkedBucket = null
     if (requestedEventId > 0) {
       const linkedMoment = visibleMoments.find((moment) => getEventId(moment) === requestedEventId)
+      if (selectedLaneFilter && linkedMoment && getEventLane(linkedMoment) !== selectedLaneFilter) return null
       linkedBucket = linkedMoment
-        ? densityBuckets.find((bucket) => isMomentInBucket(linkedMoment, bucket))
+        ? displayBuckets.find((bucket) => isMomentInBucket(linkedMoment, bucket))
         : null
     } else if (Number.isFinite(requestedBucketIndex) && requestedBucketIndex >= 0) {
-      linkedBucket = densityBuckets.find((bucket) => Number(bucket.index) === requestedBucketIndex) || null
+      linkedBucket = displayBuckets.find((bucket) => Number(bucket.index) === requestedBucketIndex) || null
     }
-    return linkedBucket && Number(linkedBucket.linked_moment_count || 0) > 0 ? linkedBucket : null
-  }, [densityBuckets, requestedBucketIndex, requestedEventId, visibleMoments])
+    return linkedBucket && getBucketMomentCount(linkedBucket) > 0 ? linkedBucket : null
+  }, [displayBuckets, requestedBucketIndex, requestedEventId, selectedLaneFilter, visibleMoments])
   const selectedWindow = useMemo(
-    () => buildSelectedWindow(selectedBucket, visibleMoments),
-    [selectedBucket, visibleMoments],
+    () => buildSelectedWindow(selectedBucket, visibleMoments, selectedLaneFilter),
+    [selectedBucket, selectedLaneFilter, visibleMoments],
   )
+  const spikeBuckets = useMemo(
+    () => displayBuckets.filter((bucket) => getBucketMomentCount(bucket) > 0),
+    [displayBuckets],
+  )
+  const selectedSpikeIndex = useMemo(() => {
+    if (!selectedWindow) return -1
+    return spikeBuckets.findIndex((bucket) => getBucketKey(bucket) === selectedWindow.key)
+  }, [selectedWindow, spikeBuckets])
+  const largestSpikeBucket = useMemo(() => findLargestSpikeBucket(spikeBuckets), [spikeBuckets])
+  const largestSpikeCount = getBucketMomentCount(largestSpikeBucket)
   const laneRows = useMemo(() => buildLaneRows(visibleMoments), [visibleMoments])
-  const maxBucketCount = Math.max(1, ...densityBuckets.map((bucket) => Number(bucket.linked_moment_count || 0)))
+  const maxBucketCount = Math.max(1, ...displayBuckets.map((bucket) => getBucketMomentCount(bucket)))
   const activity = watchData?.activity || {}
   const unavailableError = cleanRunId || archiveLoading ? '' : 'No completed public run is available for the watch board.'
 
@@ -462,21 +530,48 @@ export default function WatchReplay() {
     }
   }
 
+  function getBaseSearchParams() {
+    const params = { run: cleanRunId }
+    if (selectedLaneFilter) params.lane = selectedLaneFilter
+    return params
+  }
+
+  function selectBucket(bucket) {
+    if (!bucket) return
+    const eventId = getBucketRepresentativeEventId(bucket)
+    setSearchParams(eventId > 0
+      ? { ...getBaseSearchParams(), event: String(eventId) }
+      : { ...getBaseSearchParams(), bucket: String(bucket.index) })
+  }
+
   function handleBucketSelect(bucket) {
     const key = getBucketKey(bucket)
-    const eventId = getEventId(bucket?.representative)
     if (selectedWindow?.key === key) {
-      setSearchParams({ run: cleanRunId })
+      setSearchParams(getBaseSearchParams())
       return
     }
-    setSearchParams(eventId > 0
-      ? { run: cleanRunId, event: String(eventId) }
-      : { run: cleanRunId, bucket: String(bucket.index) })
+    selectBucket(bucket)
+  }
+
+  function selectLaneFilter(laneKey) {
+    const nextLane = getLaneFilter(laneKey)
+    setSearchParams(nextLane ? { run: cleanRunId, lane: nextLane } : { run: cleanRunId })
+  }
+
+  function jumpToLargestSpike() {
+    selectBucket(largestSpikeBucket)
+  }
+
+  function selectAdjacentSpike(direction) {
+    if (selectedSpikeIndex < 0) return
+    const nextIndex = selectedSpikeIndex + direction
+    if (nextIndex < 0 || nextIndex >= spikeBuckets.length) return
+    selectBucket(spikeBuckets[nextIndex])
   }
 
   function clearSelectedWindow() {
     if (cleanRunId) {
-      setSearchParams({ run: cleanRunId })
+      setSearchParams(getBaseSearchParams())
     }
   }
 
@@ -540,7 +635,7 @@ export default function WatchReplay() {
       {cleanRunId && loading && <div className="empty-state">Loading watch replay...</div>}
       {cleanRunId && !loading && error && <div className="feed-notice">{error}</div>}
 
-      {cleanRunId && !loading && !error && (
+      {cleanRunId && !loading && !error && watchData && (
         <>
           <section className="watch-hero" aria-label="Watch replay run summary">
             <div className="watch-hero-copy">
@@ -579,18 +674,68 @@ export default function WatchReplay() {
                 <span>Timeline density</span>
                 <h3>Where the run got interesting</h3>
               </div>
-              <p>{densityBuckets.length} buckets · {visibleMoments.length} linked moments</p>
+              <div className="watch-section-actions">
+                <p>
+                  {densityBuckets.length} buckets · {selectedLaneFilter
+                    ? `${spikeBuckets.reduce((sum, bucket) => sum + getBucketMomentCount(bucket), 0)} ${LANE_META[selectedLaneFilter]?.label || 'focused'} moments`
+                    : `${visibleMoments.length} linked moments`}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={jumpToLargestSpike}
+                  disabled={!largestSpikeBucket || selectedWindow?.key === getBucketKey(largestSpikeBucket)}
+                  aria-label={largestSpikeBucket
+                    ? `Jump to largest spike with ${largestSpikeCount} linked moments near ${formatTimeOnly(largestSpikeBucket.bucket_start)}`
+                    : 'Jump to largest spike'}
+                  title={largestSpikeBucket
+                    ? `${largestSpikeCount} linked moment${largestSpikeCount === 1 ? '' : 's'} near ${formatTimeOnly(largestSpikeBucket.bucket_start)}`
+                    : 'No linked spikes available'}
+                >
+                  <BarChart3 size={14} />
+                  Jump to largest spike
+                </button>
+              </div>
+            </div>
+            <div className="watch-lane-filters" role="group" aria-label="Timeline lane focus">
+              <button
+                type="button"
+                className={`watch-lane-filter ${!selectedLaneFilter ? 'active' : ''}`}
+                onClick={() => selectLaneFilter('')}
+                aria-pressed={!selectedLaneFilter}
+              >
+                All lanes
+              </button>
+              {laneRows
+                .filter((lane) => LANE_ORDER.includes(lane.key))
+                .map((lane) => {
+                  const LaneIcon = lane.icon || Radio
+                  return (
+                    <button
+                      key={lane.key}
+                      type="button"
+                      className={`watch-lane-filter lane-${lane.key} ${selectedLaneFilter === lane.key ? 'active' : ''}`}
+                      onClick={() => selectLaneFilter(lane.key)}
+                      aria-pressed={selectedLaneFilter === lane.key}
+                      aria-label={`${lane.label} lane, ${formatNumber(lane.count)} linked moments`}
+                    >
+                      <LaneIcon size={14} />
+                      {lane.label}
+                      <span>{formatNumber(lane.count)}</span>
+                    </button>
+                  )
+                })}
             </div>
             <div
               className="watch-density-bars"
-              style={{ gridTemplateColumns: `repeat(${Math.max(1, densityBuckets.length)}, minmax(10px, 1fr))` }}
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, displayBuckets.length)}, minmax(10px, 1fr))` }}
             >
-              {densityBuckets.map((bucket) => {
-                const count = Number(bucket.linked_moment_count || 0)
-                const representative = bucket.representative
-                const lane = representative
+              {displayBuckets.map((bucket) => {
+                const count = getBucketMomentCount(bucket)
+                const representative = bucket.display_representative || bucket.representative
+                const lane = bucket.display_lane || (representative
                   ? getEventLane(representative)
-                  : normalizeLaneKey(bucket.dominant_category)
+                  : normalizeLaneKey(bucket.dominant_category))
                 const height = count > 0 ? Math.max(16, Math.round((count / maxBucketCount) * 110)) : 4
                 return (
                   <button
@@ -599,8 +744,8 @@ export default function WatchReplay() {
                     className={`watch-density-bar lane-${lane} ${selectedWindow?.key === getBucketKey(bucket) ? 'active' : ''}`}
                     onClick={() => handleBucketSelect(bucket)}
                     aria-pressed={selectedWindow?.key === getBucketKey(bucket)}
-                    title={`${count} moment${count === 1 ? '' : 's'} near ${formatTimeOnly(bucket.bucket_start)}`}
-                    aria-label={`Select ${count} event timeline bucket near ${formatTimeOnly(bucket.bucket_start)}`}
+                    title={`${count} ${selectedLaneFilter ? `${LANE_META[selectedLaneFilter]?.label || 'focused'} ` : ''}moment${count === 1 ? '' : 's'} near ${formatTimeOnly(bucket.bucket_start)}`}
+                    aria-label={`Select ${count} ${selectedLaneFilter ? `${LANE_META[selectedLaneFilter]?.label || 'focused'} ` : ''}event timeline bucket near ${formatTimeOnly(bucket.bucket_start)}`}
                     disabled={count <= 0}
                   >
                     <span style={{ height: `${height}px` }} />
@@ -621,11 +766,35 @@ export default function WatchReplay() {
                 <div>
                   <span>Selected window</span>
                   <strong>{formatTimestamp(selectedWindow.start)} to {formatTimestamp(selectedWindow.end)}</strong>
+                  <em>
+                    Spike {selectedSpikeIndex >= 0 ? selectedSpikeIndex + 1 : '?'} of {spikeBuckets.length}
+                    {selectedLaneFilter ? ` · ${LANE_META[selectedLaneFilter]?.label || 'Focused lane'}` : ''}
+                  </em>
                 </div>
-                <button type="button" className="btn btn-secondary" onClick={clearSelectedWindow}>
-                  <CircleX size={14} />
-                  Clear selection
-                </button>
+                <div className="watch-window-controls" role="group" aria-label="Selected spike navigation">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => selectAdjacentSpike(-1)}
+                    disabled={selectedSpikeIndex <= 0}
+                  >
+                    <ArrowLeft size={14} />
+                    Previous spike
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => selectAdjacentSpike(1)}
+                    disabled={selectedSpikeIndex < 0 || selectedSpikeIndex >= spikeBuckets.length - 1}
+                  >
+                    <ArrowRight size={14} />
+                    Next spike
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={clearSelectedWindow}>
+                    <CircleX size={14} />
+                    Clear selection
+                  </button>
+                </div>
               </div>
               <div className="watch-selected-window-meta">
                 <div>
@@ -674,6 +843,9 @@ export default function WatchReplay() {
                 <span>Category lanes</span>
                 <h3>{selectedWindow ? 'Moments inside the selected window' : 'Open the spikes, then inspect the source trail'}</h3>
               </div>
+              {selectedLaneFilter && (
+                <p>Timeline focused on {LANE_META[selectedLaneFilter]?.label || 'selected lane'}; lane rows remain visible for context.</p>
+              )}
             </div>
             {laneRows.map((lane) => {
               const LaneIcon = lane.icon || Radio
