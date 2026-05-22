@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { api, trackKpiEvent, trackKpiEventOnce } = vi.hoisted(() => ({
   api: {
+    getAnalyticsOverview: vi.fn(),
     getRunsArchive: vi.fn(),
     getRunWatch: vi.fn(),
   },
@@ -57,6 +58,13 @@ function makeMoment(overrides = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  api.getAnalyticsOverview.mockResolvedValue({
+    scope: {
+      simulation_active: false,
+      simulation_paused: true,
+      last_completed_run_id: 'real-20260519T063000Z',
+    },
+  })
   api.getRunsArchive.mockResolvedValue({
     items: [{ run_id: 'real-20260519T063000Z' }],
   })
@@ -144,6 +152,78 @@ afterEach(() => {
 })
 
 describe('WatchReplay', () => {
+  it('uses the active unpaused run for the default watch route', async () => {
+    api.getAnalyticsOverview.mockResolvedValue({
+      scope: {
+        simulation_active: true,
+        simulation_paused: false,
+        active_run_id: 'real-20260522T014909Z',
+        last_completed_run_id: 'real-20260519T063000Z',
+      },
+      run_metadata: {
+        run_id: 'real-20260522T014909Z',
+        run_class: 'special_exploratory',
+        condition_name: 'real_governance_readability_canary_k13',
+        run_declaration: {
+          declared_question: 'Can proposal discussion stay readable?',
+          claim_boundary: 'Exploratory public canary; non-claim-bearing.',
+        },
+      },
+    })
+    api.getRunsArchive.mockResolvedValue({
+      items: [{ run_id: 'real-20260519T063000Z' }],
+    })
+    api.getRunWatch.mockResolvedValue({
+      run_id: 'real-20260522T014909Z',
+      run_metadata: {
+        run_id: 'real-20260522T014909Z',
+        run_class: 'special_exploratory',
+        condition_name: 'real_governance_readability_canary_k13',
+        run_declaration: {
+          declared_question: 'Can proposal discussion stay readable?',
+          claim_boundary: 'Exploratory public canary; non-claim-bearing.',
+        },
+      },
+      activity: {},
+      provenance: {
+        time_window: {
+          start_utc: '2026-05-22T01:49:10.000Z',
+          end_utc: '2026-05-22T02:10:00.000Z',
+        },
+      },
+      items: [
+        makeMoment({
+          event_id: 40,
+          event_type: 'proposal_created',
+          category: 'governance',
+          title: 'Live Proposal',
+          description: 'Agents opened a governance proposal.',
+          created_at: '2026-05-22T02:00:00.000Z',
+        }),
+      ],
+      buckets: [
+        {
+          index: 0,
+          bucket_start: '2026-05-22T01:49:10.000Z',
+          bucket_end: '2026-05-22T02:49:10.000Z',
+          event_count: 1,
+          dominant_category: 'governance',
+        },
+      ],
+    })
+
+    renderWatch()
+
+    expect(await screen.findByText(/Live now/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/real-20260522T014909Z/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Live window through now/i)).toBeInTheDocument()
+    expect(screen.getByText(/Live Proposal/i)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(api.getRunWatch).toHaveBeenCalledWith('real-20260522T014909Z', 60, 240)
+    })
+    expect(api.getRunWatch).not.toHaveBeenCalledWith('real-20260519T063000Z', 60, 240)
+  })
+
   it('uses the archive latest completed run for the default watch route', async () => {
     api.getRunsArchive.mockResolvedValue({
       items: [{ run_id: 'real-20990101T000000Z' }],

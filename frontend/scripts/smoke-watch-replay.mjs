@@ -121,12 +121,35 @@ async function dumpRenderedDom(url) {
   return result.stdout
 }
 
-async function resolveRunId() {
-  if (RUN_ID) return RUN_ID
+async function resolveLatestArchivedRunId() {
   const archive = await fetchJson(`${API_BASE}/api/reports/archive/runs?limit=1`)
   const runId = String(archive?.items?.[0]?.run_id || "").trim()
   ensure(runId, "Could not resolve latest archived run id")
   return runId
+}
+
+async function resolveDefaultWatchRunId() {
+  if (RUN_ID) return RUN_ID
+  const overview = await fetchJson(`${API_BASE}/api/analytics/overview`).catch(() => null)
+  const scope = overview?.scope || {}
+  const activeRunId = String(scope.active_run_id || "").trim()
+  if (scope.simulation_active === true && scope.simulation_paused !== true && activeRunId) {
+    return activeRunId
+  }
+  return resolveLatestArchivedRunId()
+}
+
+async function resolveDefaultRenderRunId(explicitRunId) {
+  if (RUN_ID) return explicitRunId
+  return resolveDefaultWatchRunId()
+}
+
+async function resolveSmokeRunIds() {
+  const archive = await fetchJson(`${API_BASE}/api/reports/archive/runs?limit=1`)
+  const explicitRunId = String(archive?.items?.[0]?.run_id || "").trim()
+  ensure(explicitRunId, "Could not resolve latest archived run id")
+  const defaultRunId = await resolveDefaultRenderRunId(explicitRunId)
+  return { explicitRunId, defaultRunId }
 }
 
 function validateWatchPayload(payload, runId) {
@@ -153,7 +176,7 @@ function validateRenderedDefaultWatch(dom, runId, pageUrl) {
   ensure(!dom.includes("__next_error__"), "Default watch route rendered a Next error page")
   ensure(!dom.includes("Application error"), "Default watch route rendered an application error")
   ensure(dom.includes("Watch Replay"), "Default watch route missing Watch Replay heading")
-  ensure(dom.includes(runId), `Default watch route did not render latest archived run ${runId}`)
+  ensure(dom.includes(runId), `Default watch route did not render expected run ${runId}`)
   ensure(dom.includes("Timeline density"), "Default watch route missing timeline density section")
   ensure(dom.includes("Category lanes"), "Default watch route missing category lanes")
   ensure(dom.includes("watch-density-bar"), "Default watch route missing rendered density bars")
@@ -164,7 +187,7 @@ function validateRenderedDefaultWatch(dom, runId, pageUrl) {
 
 async function main() {
   ensure(API_BASE.length > 0, "Resolved API base is empty")
-  const runId = await resolveRunId()
+  const { explicitRunId: runId, defaultRunId } = await resolveSmokeRunIds()
   const watchUrl = `${API_BASE}/api/analytics/runs/${encodeURIComponent(runId)}/watch?bucket_minutes=60&limit=240`
   const payload = await fetchJson(watchUrl)
   validateWatchPayload(payload, runId)
@@ -179,12 +202,12 @@ async function main() {
     if (!SKIP_RENDER_CHECK) {
       const defaultPageUrl = `${SITE_BASE}/watch?smoke=default-route`
       const dom = await dumpRenderedDom(defaultPageUrl)
-      validateRenderedDefaultWatch(dom, runId, defaultPageUrl)
+      validateRenderedDefaultWatch(dom, defaultRunId, defaultPageUrl)
     }
   }
 
   console.log("")
-  console.log(`[done] Watch replay smoke passed for site=${SITE_BASE}, api=${API_BASE}, run=${runId}`)
+  console.log(`[done] Watch replay smoke passed for site=${SITE_BASE}, api=${API_BASE}, run=${runId}, default=${defaultRunId}`)
 }
 
 main().catch((error) => {

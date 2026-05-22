@@ -20,7 +20,7 @@ import {
   Users,
 } from 'lucide-react'
 import { api } from '../services/api'
-import { getScheduleEntryForRunId } from '../data/runSchedule'
+import { getScheduleEntryForRunId, getScheduleEntryForRunMetadata } from '../data/runSchedule'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 
 const ROUTINE_EVENT_TYPES = new Set(['work', 'idle', 'vote', 'processing_error'])
@@ -407,6 +407,12 @@ function getArchiveRunId(archive) {
   return cleanString(items[0]?.run_id)
 }
 
+function getLiveRunId(overview) {
+  const scope = overview?.scope || {}
+  if (scope.simulation_active !== true || scope.simulation_paused === true) return ''
+  return cleanString(scope.active_run_id)
+}
+
 export default function WatchReplay() {
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedRunId = cleanString(searchParams.get('run'))
@@ -415,23 +421,31 @@ export default function WatchReplay() {
   const selectedLaneFilter = getLaneFilter(searchParams.get('lane'))
   const requestedFocus = getWatchFocus(searchParams.get('focus'))
   const [archive, setArchive] = useState(null)
+  const [overview, setOverview] = useState(null)
   const [watchData, setWatchData] = useState(null)
   const [archiveLoading, setArchiveLoading] = useState(true)
+  const [overviewLoading, setOverviewLoading] = useState(true)
   const [loading, setLoading] = useState(Boolean(requestedRunId))
   const [error, setError] = useState('')
 
   useEffect(() => {
     let cancelled = false
 
-    async function loadArchive() {
+    async function loadDefaults() {
       setArchiveLoading(true)
-      const payload = await api.getRunsArchive(12, false).catch(() => null)
+      setOverviewLoading(true)
+      const [overviewPayload, archivePayload] = await Promise.all([
+        api.getAnalyticsOverview().catch(() => null),
+        api.getRunsArchive(12, false).catch(() => null),
+      ])
       if (cancelled) return
-      setArchive(payload && typeof payload === 'object' ? payload : null)
+      setOverview(overviewPayload && typeof overviewPayload === 'object' ? overviewPayload : null)
+      setArchive(archivePayload && typeof archivePayload === 'object' ? archivePayload : null)
+      setOverviewLoading(false)
       setArchiveLoading(false)
     }
 
-    void loadArchive()
+    void loadDefaults()
     return () => {
       cancelled = true
     }
@@ -439,7 +453,9 @@ export default function WatchReplay() {
 
   const archiveItems = Array.isArray(archive?.items) ? archive.items : []
   const archiveLatestRunId = getArchiveRunId(archive)
-  const cleanRunId = requestedRunId || archiveLatestRunId
+  const liveRunId = getLiveRunId(overview)
+  const cleanRunId = requestedRunId || liveRunId || archiveLatestRunId
+  const selectedRunIsLive = Boolean(liveRunId && cleanRunId === liveRunId)
 
   useEffect(() => {
     let cancelled = false
@@ -468,7 +484,14 @@ export default function WatchReplay() {
     }
   }, [cleanRunId])
 
-  const runSchedule = getScheduleEntryForRunId(cleanRunId)
+  const selectedRunMetadata = selectedRunIsLive
+    ? (watchData?.run_metadata || overview?.run_metadata || {})
+    : (watchData?.run_metadata || {})
+  const baseRunSchedule = getScheduleEntryForRunId(cleanRunId)
+    || getScheduleEntryForRunMetadata({ ...selectedRunMetadata, run_id: cleanRunId })
+  const runSchedule = selectedRunIsLive && baseRunSchedule
+    ? { ...baseRunSchedule, status: 'Live', planningState: 'Live', expectedDuration: 'Live now' }
+    : baseRunSchedule
   const watchItems = useMemo(() => Array.isArray(watchData?.items) ? watchData.items : [], [watchData])
   const visibleMoments = useMemo(
     () => uniqueMoments(watchItems.filter(isVisibleMoment)),
@@ -515,7 +538,8 @@ export default function WatchReplay() {
   const laneRows = useMemo(() => buildLaneRows(visibleMoments), [visibleMoments])
   const maxBucketCount = Math.max(1, ...displayBuckets.map((bucket) => getBucketMomentCount(bucket)))
   const activity = watchData?.activity || {}
-  const unavailableError = cleanRunId || archiveLoading ? '' : 'No completed public run is available for the watch board.'
+  const runSelectionLoading = archiveLoading || overviewLoading
+  const unavailableError = cleanRunId || runSelectionLoading ? '' : 'No active or completed public run is available for the watch board.'
 
   useEffect(() => {
     if (!cleanRunId || loading || error) return
@@ -640,7 +664,7 @@ export default function WatchReplay() {
           Watch Replay
         </h1>
         <p className="page-description">
-          A run-over-time board for finding pressure, decisions, and source links in completed public runs.
+          A run-over-time board for finding pressure, decisions, and source links in the live run or latest completed public run.
         </p>
       </div>
 
@@ -650,9 +674,16 @@ export default function WatchReplay() {
           <span>{cleanRunId || 'latest-completed-run'}</span>
         </div>
         <div className="watch-run-select">
-          <label htmlFor="watch-run-select">Completed run</label>
+          <label htmlFor="watch-run-select">Run</label>
           <select id="watch-run-select" value={cleanRunId} onChange={handleRunSelect}>
-            {cleanRunId && <option value={cleanRunId}>{runSchedule?.label ? `${runSchedule.label} · ${cleanRunId}` : cleanRunId}</option>}
+            {cleanRunId && (
+              <option value={cleanRunId}>
+                {selectedRunIsLive ? 'Live · ' : ''}{runSchedule?.label ? `${runSchedule.label} · ${cleanRunId}` : cleanRunId}
+              </option>
+            )}
+            {liveRunId && liveRunId !== cleanRunId && (
+              <option value={liveRunId}>Live · {liveRunId}</option>
+            )}
             {archiveItems
               .filter((item) => cleanString(item?.run_id) && cleanString(item?.run_id) !== cleanRunId)
               .map((item) => (
@@ -688,7 +719,7 @@ export default function WatchReplay() {
       </div>
 
       {unavailableError && <div className="feed-notice">{unavailableError}</div>}
-      {!cleanRunId && archiveLoading && <div className="empty-state">Loading completed runs...</div>}
+      {!cleanRunId && runSelectionLoading && <div className="empty-state">Loading run selection...</div>}
       {cleanRunId && loading && <div className="empty-state">Loading watch replay...</div>}
       {cleanRunId && !loading && error && <div className="feed-notice">{error}</div>}
 
@@ -696,9 +727,13 @@ export default function WatchReplay() {
         <>
           <section className="watch-hero" aria-label="Watch replay run summary">
             <div className="watch-hero-copy">
-              <span>{runSchedule?.label || 'Completed run'} · {runSchedule?.track || 'Public run'}</span>
+              <span>{selectedRunIsLive ? 'Live now' : (runSchedule?.label || 'Completed run')} · {runSchedule?.track || 'Public run'}</span>
               <h2>{runSchedule?.declaredQuestion || 'Completed run map'}</h2>
-              <p>{runSchedule?.claimBoundary || 'Review this board as a navigation surface before drawing conclusions.'}</p>
+              <p>
+                {selectedRunIsLive
+                  ? 'Live window through now. Use this as a navigation surface before drawing conclusions.'
+                  : (runSchedule?.claimBoundary || 'Review this board as a navigation surface before drawing conclusions.')}
+              </p>
             </div>
             <div className="watch-window">
               <MapIcon size={18} />
