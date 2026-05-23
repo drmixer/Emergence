@@ -86,7 +86,7 @@ describe('NoActiveRunNotice', () => {
             'href',
             '/runs/real-20260517T220144Z/reports/viewer_brief?format=markdown'
         )
-        expect(screen.getByRole('link', { name: /Read The Brief/i })).toHaveAttribute(
+        expect(screen.getByRole('link', { name: /Read Brief/i })).toHaveAttribute(
             'href',
             '/runs/real-20260517T220144Z/reports/viewer_brief?format=markdown'
         )

@@ -284,10 +284,10 @@ export default function ReportViewer() {
               <nav className="report-viewer-reader-path" aria-label="Brief reader path">
                 <span>Next views</span>
                 <div>
-                  <Link to={replayHref} aria-label="Replay: Key moments">
+                  <Link to={replayHref} aria-label="Replay: Selected moments">
                     <TimerReset size={14} />
                     <strong>Replay</strong>
-                    <small>Key moments</small>
+                    <small>Selected moments</small>
                   </Link>
                   <Link to={evidenceHref} aria-label="Evidence: Source trail">
                     <FileSearch size={14} />

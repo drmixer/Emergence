@@ -50,9 +50,9 @@ const LANE_META = {
     description: 'Accusations, enforcement, sanctions, seizures, exile, and conflict.',
   },
   system: {
-    label: 'System Shocks',
+    label: 'Run-wide Events',
     icon: AlertTriangle,
-    description: 'Run-wide shocks or crisis events that changed the board.',
+    description: 'Simulation-world events or run-wide crises that changed the board.',
   },
   other: {
     label: 'Other Signals',
@@ -663,10 +663,10 @@ export default function WatchReplay() {
       <div className="page-header">
         <h1>
           <Eye size={30} />
-          Watch Replay
+          Watch Map
         </h1>
         <p className="page-description">
-          A run-over-time board for finding pressure, decisions, and source links in the live run or latest completed public run.
+          A run-over-time map for finding pressure, decisions, and source links in the live run or latest completed public run.
         </p>
       </div>
 
@@ -717,7 +717,7 @@ export default function WatchReplay() {
       </div>
 
       <div className="feed-notice">
-        Watch is a map of where to look, not a conclusion about what the run means. Use Replay, Evidence, and the Brief for interpretation and source review.
+        Watch Map shows where to look, not what to conclude. Read the Brief first, use Replay for selected moments, and open Evidence before making claims.
       </div>
 
       {unavailableError && <div className="feed-notice">{unavailableError}</div>}

@@ -22,8 +22,8 @@ export const EVIDENCE_CATEGORY_META = {
     description: 'Accusations, sanctions, seizures, exile, contests, and conflict pressure.',
   },
   system: {
-    label: 'System',
-    description: 'World events, runtime failures, and run-wide shocks or mechanics.',
+    label: 'Run-wide Events',
+    description: 'Simulation-world events plus clearly separated runtime/protocol traces.',
   },
   other: {
     label: 'Other',

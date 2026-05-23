@@ -244,7 +244,7 @@ describe('WatchReplay', () => {
   it('defaults to the latest completed run and lets density spikes select a replay window', async () => {
     renderWatch()
 
-    expect(await screen.findByText(/Watch Replay/i)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Watch Map/i })).toBeInTheDocument()
     expect(screen.getAllByText(/real-20260519T063000Z/i).length).toBeGreaterThan(0)
     expect(await screen.findByText(/Do the new viewer\/story\/evidence changes/i)).toBeInTheDocument()
     expect(await screen.findByText(/15,538/i)).toBeInTheDocument()

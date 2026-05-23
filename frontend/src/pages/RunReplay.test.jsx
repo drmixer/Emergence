@@ -156,8 +156,8 @@ describe('RunReplay', () => {
     expect(within(narrativeBeats).getByText(/Pressure Point/i)).toBeInTheDocument()
     expect(within(narrativeBeats).queryByText(/^Work$/i)).not.toBeInTheDocument()
 
-    const selectedMoment = screen.getByText(/Selected moment/i).closest('.run-replay-featured')
-    expect(within(selectedMoment).getByRole('link', { name: /Watch Board/i })).toHaveAttribute(
+    const selectedMoment = screen.getByText('Selected moment', { selector: 'span' }).closest('.run-replay-featured')
+    expect(within(selectedMoment).getByRole('link', { name: /Watch Map/i })).toHaveAttribute(
       'href',
       '/watch?run=run-1&event=10',
     )
@@ -166,8 +166,8 @@ describe('RunReplay', () => {
   it('links event-scoped replay back to the matching watch board window', async () => {
     renderRunReplay('/runs/run-1/replay?mode=timeline&event=12')
 
-    expect(await screen.findByText(/Story Evidence/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Back to Watch/i })).toHaveAttribute(
+    expect(await screen.findByText(/What Happened/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Back to Watch Map/i })).toHaveAttribute(
       'href',
       '/watch?run=run-1&event=12',
     )
@@ -208,7 +208,7 @@ describe('RunReplay', () => {
     expect(within(storyThreads).queryByText(/^Idle$/i)).not.toBeInTheDocument()
   })
 
-  it('hides routine work from evidence by default while keeping a raw audit toggle', async () => {
+  it('summarizes evidence without turning Replay into the raw evidence browser', async () => {
     api.getRunDetail.mockResolvedValueOnce({
       run_id: 'run-1',
       captured_at: '2026-05-18T05:00:00.000Z',
@@ -238,22 +238,18 @@ describe('RunReplay', () => {
 
     renderRunReplay('/runs/run-1/replay?mode=timeline')
 
-    expect(await screen.findByText(/Story Evidence/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/Create Proposal/i).length).toBeGreaterThan(0)
+    fireEvent.click(await screen.findByRole('button', { name: /Evidence Handoff/i }))
+
+    expect(await screen.findByRole('heading', { name: /Evidence Handoff/i })).toBeInTheDocument()
     expect(screen.queryByText(/^Work$/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/routine or low-signal/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /All 1/i })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Governance 1/i }))
+    expect(screen.getByText(/routine or low-signal trace/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Open Evidence Detail/i })).toHaveAttribute('href', '/runs/run-1')
+    expect(screen.getByText(/^All$/i)).toBeInTheDocument()
+    expect(screen.getByText(/^Governance$/i)).toBeInTheDocument()
     expect(screen.getByText(/Proposals, voting, laws/i)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: /Show Raw Evidence/i }))
-
-    expect(screen.getByText(/Raw Evidence Links/i)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Other 1/i }))
-    expect(screen.getAllByText(/^Work$/i).length).toBeGreaterThan(0)
   })
 
-  it('groups repeated evidence while keeping source trace details expandable', async () => {
+  it('summarizes evidence categories while handing raw source review to Evidence Detail', async () => {
     api.getRunDetail.mockResolvedValueOnce({
       run_id: 'run-1',
       captured_at: '2026-05-18T05:00:00.000Z',
@@ -291,17 +287,14 @@ describe('RunReplay', () => {
 
     renderRunReplay('/runs/run-1/replay?mode=timeline')
 
-    expect(await screen.findByText(/Story Evidence/i)).toBeInTheDocument()
-    expect(screen.getByText(/2 cards · 3 traces/i)).toBeInTheDocument()
-    expect(screen.getByText(/3 traces compressed into 2 skimmable cards/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/Cipher-3 requested 1 energy/i).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/Beacon-2 requested 2 food/i).length).toBeGreaterThan(0)
+    fireEvent.click(await screen.findByRole('button', { name: /Evidence Handoff/i }))
 
-    fireEvent.click(screen.getByText(/Show all 2 source traces/i))
-
-    expect(screen.getAllByText(/Request Aid/i).length).toBeGreaterThan(1)
-    expect(screen.getAllByRole('link', { name: /Raw Log/i }).map((link) => link.getAttribute('href'))).toContain('/timeline?event=22')
-    expect(screen.getAllByRole('link', { name: /^Watch$/i }).map((link) => link.getAttribute('href'))).toContain('/watch?run=run-1&event=22')
+    expect(await screen.findByRole('heading', { name: /Evidence Handoff/i })).toBeInTheDocument()
+    expect(screen.getByText(/3 available source traces/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Open Evidence Detail/i })).toHaveAttribute('href', '/runs/run-1')
+    expect(screen.getByText(/^Aid \/ Trade$/i)).toBeInTheDocument()
+    expect(screen.getByText(/^Governance$/i)).toBeInTheDocument()
+    expect(screen.getByText(/Aid requests, refusals, rescues/i)).toBeInTheDocument()
   })
 
   it('shows the viewer brief as a named report artifact', async () => {

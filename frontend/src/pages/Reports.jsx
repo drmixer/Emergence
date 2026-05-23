@@ -5,7 +5,6 @@ import {
   Eye,
   FileSearch,
   RefreshCw,
-  Sparkles,
   TimerReset,
 } from 'lucide-react'
 import { api } from '../services/api'
@@ -280,7 +279,7 @@ export default function Reports() {
           Archive
         </h1>
         <p className="page-description">
-          Completed runs with one path into replay, evidence, and report artifacts.
+          Completed runs with a clearer reading order: brief, watch map, replay, then evidence.
         </p>
       </div>
 
@@ -465,51 +464,47 @@ export default function Reports() {
                   ? viewerBriefTeaserPath
                   : `/runs/${encodeURIComponent(runId)}/replay?tab=overview`
                 const primaryActionLabel = latestViewerBriefAvailable
-                  ? 'Read The Brief'
-                  : (isLatestPublicRun ? 'Start With Latest Recap' : 'Open Recap')
+                  ? 'Read Brief'
+                  : 'Open Recap'
                 const primaryActionTarget = latestViewerBriefAvailable ? 'report:viewer_brief:primary' : 'recap'
                 const replayPath = getStoryReplayHref(runId)
                 const watchPath = getWatchReplayHref(runId, 0, { focus: 'largest' })
-                const highlightsPath = `/runs/${encodeURIComponent(runId)}/highlights`
                 const evidencePath = `/runs/${encodeURIComponent(runId)}`
+                const runPathItems = [
+                  {
+                    label: latestViewerBriefAvailable ? 'Brief' : 'Recap',
+                    meta: latestViewerBriefAvailable ? 'Start here' : 'Run story',
+                    icon: <FileSearch size={14} />,
+                    to: primaryActionPath,
+                    target: primaryActionTarget,
+                  },
+                  {
+                    label: 'Watch Map',
+                    meta: 'Find windows',
+                    icon: <Eye size={14} />,
+                    to: watchPath,
+                    target: 'watch:largest_spike:path',
+                  },
+                  {
+                    label: 'Replay',
+                    meta: 'Selected moments',
+                    icon: <TimerReset size={14} />,
+                    to: replayPath,
+                    target: 'replay:path',
+                  },
+                  {
+                    label: 'Evidence',
+                    meta: 'Source trail',
+                    icon: <FileSearch size={14} />,
+                    to: evidencePath,
+                    target: 'evidence:path',
+                  },
+                ]
                 const latestRunPathItems = isLatestPublicRun
                   ? [
-                      viewerBriefTeaserPath && {
-                        label: 'Brief',
-                        meta: 'News recap',
-                        icon: <FileSearch size={14} />,
-                        to: viewerBriefTeaserPath,
-                        target: 'report:viewer_brief:path',
-                      },
-                      {
-                        label: 'Highlights',
-                        meta: 'Digest',
-                        icon: <Sparkles size={14} />,
-                        to: highlightsPath,
-                        target: 'highlights:path',
-                      },
-                      {
-                        label: 'Watch',
-                        meta: 'Largest spike',
-                        icon: <Eye size={14} />,
-                        to: watchPath,
-                        target: 'watch:largest_spike:path',
-                      },
-                      {
-                        label: 'Replay',
-                        meta: 'Key moments',
-                        icon: <TimerReset size={14} />,
-                        to: replayPath,
-                        target: 'replay:path',
-                      },
-                      {
-                        label: 'Evidence',
-                        meta: 'Source trail',
-                        icon: <FileSearch size={14} />,
-                        to: evidencePath,
-                        target: 'evidence:path',
-                      },
-                    ].filter(Boolean)
+                      ...runPathItems.slice(0, 1),
+                      ...runPathItems.slice(1, 4),
+                    ]
                   : []
                 const visibleReportLinks = latestViewerBriefAvailable
                   ? reportLinks.filter(({ artifactType }) => artifactType !== 'viewer_brief')
@@ -532,8 +527,8 @@ export default function Reports() {
                         className="btn btn-primary"
                         onClick={() => trackArchivePathClick(runId, primaryActionTarget, { latest: isLatestPublicRun })}
                       >
-                        {latestViewerBriefAvailable ? <FileSearch size={14} /> : <TimerReset size={14} />}
-                        {primaryActionLabel}
+                      {latestViewerBriefAvailable ? <FileSearch size={14} /> : <TimerReset size={14} />}
+                      {primaryActionLabel}
                       </Link>
                     </div>
 
@@ -559,9 +554,9 @@ export default function Reports() {
                       )
                     )}
 
-                    {latestRunPathItems.length > 0 && (
-                      <nav className="archive-run-path" aria-label="Latest run path">
-                        <span>Latest run path</span>
+                    {isLatestPublicRun && latestRunPathItems.length > 0 && (
+                      <nav className="archive-run-path" aria-label="Latest run reading order">
+                        <span>Latest run reading order</span>
                         <div>
                           {latestRunPathItems.map((pathItem) => (
                             <Link
@@ -632,11 +627,11 @@ export default function Reports() {
                         <>
                           <Link
                             className="btn btn-secondary"
-                            to={highlightsPath}
-                            onClick={() => trackArchivePathClick(runId, 'highlights_digest')}
+                            to={primaryActionPath}
+                            onClick={() => trackArchivePathClick(runId, primaryActionTarget)}
                           >
-                            <Sparkles size={14} />
-                            Highlights
+                            {latestViewerBriefAvailable ? <FileSearch size={14} /> : <TimerReset size={14} />}
+                            {primaryActionLabel}
                           </Link>
                           <Link
                             className="btn btn-secondary"
@@ -644,15 +639,7 @@ export default function Reports() {
                             onClick={() => trackArchivePathClick(runId, 'watch_largest_spike')}
                           >
                             <Eye size={14} />
-                            Watch Replay
-                          </Link>
-                          <Link
-                            className="btn btn-secondary"
-                            to={replayPath}
-                            onClick={() => trackArchivePathClick(runId, 'replay')}
-                          >
-                            <TimerReset size={14} />
-                            Replay
+                            Watch Map
                           </Link>
                           <Link
                             className="btn btn-secondary"
@@ -664,28 +651,36 @@ export default function Reports() {
                           </Link>
                         </>
                       )}
-                      {visibleReportLinks.map(({ artifactType, label, artifact }) => (
-                        <div key={artifactType} className="archive-report-action">
-                          <Link
-                            className="btn btn-secondary"
-                            to={getArtifactViewPath(runId, artifactType, artifact)}
-                            title={`Open ${label}`}
-                            onClick={() => trackArchivePathClick(runId, `report:${artifactType}`)}
-                          >
-                            <FileSearch size={14} />
-                            {label}
-                          </Link>
-                          <a
-                            className="btn btn-secondary btn-icon-only"
-                            href={getArtifactUrl(runId, artifactType, artifact, 'download')}
-                            title={`Download ${label}`}
-                          >
-                            <Download size={14} />
-                            <span className="sr-only">Download {label}</span>
-                          </a>
-                        </div>
-                      ))}
                     </div>
+
+                    {visibleReportLinks.length > 0 && (
+                      <details className="archive-artifacts">
+                        <summary>Closeout documents</summary>
+                        <div className="archive-artifacts-list">
+                          {visibleReportLinks.map(({ artifactType, label, artifact }) => (
+                            <div key={artifactType} className="archive-report-action">
+                              <Link
+                                className="btn btn-secondary"
+                                to={getArtifactViewPath(runId, artifactType, artifact)}
+                                title={`Open ${label}`}
+                                onClick={() => trackArchivePathClick(runId, `report:${artifactType}`)}
+                              >
+                                <FileSearch size={14} />
+                                {label}
+                              </Link>
+                              <a
+                                className="btn btn-secondary btn-icon-only"
+                                href={getArtifactUrl(runId, artifactType, artifact, 'download')}
+                                title={`Download ${label}`}
+                              >
+                                <Download size={14} />
+                                <span className="sr-only">Download {label}</span>
+                              </a>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
 
                     <div className="archive-run-foot">
                       <span>Summary generated {formatDate(summary.generated_at_utc)}</span>

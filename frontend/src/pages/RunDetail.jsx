@@ -3,7 +3,6 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import {
   ShieldCheck,
-  Clock3,
   ExternalLink,
   Share2,
   Hash,
@@ -517,7 +516,7 @@ export default function RunDetail() {
           {requestedEventId > 0 && (
             <Link className="btn btn-secondary" to={getWatchReplayHref(runId, requestedEventId)}>
               <Eye size={14} />
-              Back to Watch
+              Back to Watch Map
             </Link>
           )}
           <Link className="btn btn-secondary" to={getStoryReplayHref(runId)}>
@@ -529,9 +528,6 @@ export default function RunDetail() {
           <button type="button" className="btn btn-secondary run-share-btn" onClick={shareRun}>
             <Share2 size={14} />
             Share Run
-          </button>
-          <button type="button" className="btn btn-secondary run-share-btn" onClick={copyRunOgUrl}>
-            Copy Run OG URL
           </button>
           <Link className="btn btn-secondary" to="/archive">
             Back to Archive
@@ -653,40 +649,6 @@ export default function RunDetail() {
             </div>
           </div>
 
-          <div className="stats-grid run-detail-stats">
-            <div className="stat-card">
-              <div className="stat-header">
-                <span className="stat-label">LLM Calls</span>
-              </div>
-              <div className="stat-value">{formatNumber(data?.llm?.calls)}</div>
-              <div className="stat-change">
-                <Clock3 size={14} />
-                <span>{formatRelative(data?.captured_at)}</span>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-header">
-                <span className="stat-label">Total Tokens</span>
-              </div>
-              <div className="stat-value">{formatNumber(data?.llm?.total_tokens)}</div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-header">
-                <span className="stat-label">Estimated Cost</span>
-              </div>
-              <div className="stat-value run-currency">{formatUsd(data?.llm?.estimated_cost_usd)}</div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-header">
-                <span className="stat-label">Total Events</span>
-              </div>
-              <div className="stat-value">{formatNumber(data?.activity?.total_events)}</div>
-            </div>
-          </div>
-
           {focusedEvent && (
             <div className="card focused-event-card" id={`event-${focusedEvent.id}`}>
               <div className="card-header">
@@ -739,7 +701,7 @@ export default function RunDetail() {
                     Raw Event Log
                   </Link>
                   <Link to={getWatchReplayHref(runId, focusedEvent.id)} className="btn btn-secondary">
-                    Watch Board
+                    Watch Map
                   </Link>
                 </div>
               </div>
@@ -768,6 +730,26 @@ export default function RunDetail() {
               </div>
             </div>
           </div>
+
+          <details className="card technical-provenance-card">
+            <summary>
+              <span>Technical Provenance</span>
+              <strong>Model-call, token, cost, and share diagnostics</strong>
+            </summary>
+            <div className="card-body">
+              <div className="run-activity-grid">
+                <div><span>LLM calls</span><strong>{formatNumber(data?.llm?.calls)}</strong></div>
+                <div><span>Total tokens</span><strong>{formatNumber(data?.llm?.total_tokens)}</strong></div>
+                <div><span>Estimated cost</span><strong>{formatUsd(data?.llm?.estimated_cost_usd)}</strong></div>
+                <div><span>Captured</span><strong>{formatRelative(data?.captured_at) || 'Unknown'}</strong></div>
+              </div>
+              <div className="technical-provenance-actions">
+                <button type="button" className="btn btn-secondary run-share-btn" onClick={copyRunOgUrl}>
+                  Copy Run Share URL
+                </button>
+              </div>
+            </div>
+          </details>
 
           <div className="card">
             <div className="card-header">
@@ -823,14 +805,14 @@ export default function RunDetail() {
                         Raw Event Log
                       </Link>
                       <Link to={getWatchReplayHref(runId, trace.event_id)} className="btn btn-secondary">
-                        Watch
+                        Watch Map
                       </Link>
                       <button type="button" className="btn btn-secondary" onClick={() => shareMoment(trace.event_id)}>
                         <Share2 size={14} />
                         Share Moment
                       </button>
                       <button type="button" className="btn btn-secondary" onClick={() => copyMomentOgUrl(trace.event_id)}>
-                        Copy OG URL
+                        Copy Share URL
                       </button>
                     </div>
                   </div>

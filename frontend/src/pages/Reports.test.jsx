@@ -138,7 +138,7 @@ describe('Reports archive', () => {
 
     const card = (await screen.findByText('real-20260519T063000Z')).closest('.archive-run-card')
 
-    expect(within(card).getByRole('link', { name: /Read The Brief/i })).toHaveAttribute(
+    expect(within(card).getByRole('link', { name: /Read Brief/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
     )
@@ -147,20 +147,17 @@ describe('Reports archive', () => {
       '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
     )
     expect(within(card).getByText(/Four agents died, several dormancy events accumulated/i)).toBeInTheDocument()
-    expect(within(card).getByLabelText(/Latest run path/i)).toBeInTheDocument()
-    expect(within(card).getByRole('link', { name: /Brief: News recap/i })).toHaveAttribute(
+    expect(within(card).getByLabelText(/Latest run reading order/i)).toBeInTheDocument()
+    expect(within(card).getByRole('link', { name: /Brief: Start here/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/reports/viewer_brief?format=markdown',
     )
-    expect(within(card).getByRole('link', { name: /Highlights: Digest/i })).toHaveAttribute(
-      'href',
-      '/runs/real-20260519T063000Z/highlights',
-    )
-    expect(within(card).getByRole('link', { name: /Watch: Largest spike/i })).toHaveAttribute(
+    expect(within(card).queryByRole('link', { name: /Highlights: Digest/i })).not.toBeInTheDocument()
+    expect(within(card).getByRole('link', { name: /Watch Map: Find windows/i })).toHaveAttribute(
       'href',
       '/watch?run=real-20260519T063000Z&focus=largest',
     )
-    expect(within(card).getByRole('link', { name: /Replay: Key moments/i })).toHaveAttribute(
+    expect(within(card).getByRole('link', { name: /Replay: Selected moments/i })).toHaveAttribute(
       'href',
       '/runs/real-20260519T063000Z/replay?mode=story60',
     )

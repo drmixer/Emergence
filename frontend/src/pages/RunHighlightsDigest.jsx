@@ -235,7 +235,7 @@ export default function RunHighlightsDigest() {
         <div className="run-topbar-actions">
           <Link className="btn btn-secondary" to={`/watch?run=${encodeURIComponent(cleanRunId)}`}>
             <Eye size={14} />
-            Watch
+            Watch Map
           </Link>
           <Link className="btn btn-secondary" to={getStoryReplayHref(cleanRunId)}>
             <TimerReset size={14} />

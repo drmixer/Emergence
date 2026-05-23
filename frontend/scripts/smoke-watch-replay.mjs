@@ -175,7 +175,10 @@ function validateRenderedDefaultWatch(dom, runId, pageUrl) {
   ensure(dom && typeof dom === "string", "Rendered default watch DOM is empty")
   ensure(!dom.includes("__next_error__"), "Default watch route rendered a Next error page")
   ensure(!dom.includes("Application error"), "Default watch route rendered an application error")
-  ensure(dom.includes("Watch Replay"), "Default watch route missing Watch Replay heading")
+  ensure(
+    dom.includes("Watch Map") || dom.includes("Watch Replay"),
+    "Default watch route missing Watch Map/Watch Replay heading",
+  )
   ensure(dom.includes(runId), `Default watch route did not render expected run ${runId}`)
   ensure(dom.includes("Timeline density"), "Default watch route missing timeline density section")
   ensure(dom.includes("Category lanes"), "Default watch route missing category lanes")
@@ -207,7 +210,7 @@ async function main() {
   }
 
   console.log("")
-  console.log(`[done] Watch replay smoke passed for site=${SITE_BASE}, api=${API_BASE}, run=${runId}, default=${defaultRunId}`)
+  console.log(`[done] Watch map smoke passed for site=${SITE_BASE}, api=${API_BASE}, run=${runId}, default=${defaultRunId}`)
 }
 
 main().catch((error) => {

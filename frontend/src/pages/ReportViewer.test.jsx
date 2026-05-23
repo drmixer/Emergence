@@ -105,7 +105,7 @@ describe('ReportViewer', () => {
     expect(screen.getByText(/News-style recap/i)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Plain-English Recap' })).not.toBeInTheDocument()
     expect(screen.getByLabelText(/Brief reader path/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Replay: Key moments/i })).toHaveAttribute('href', '/runs/real-1/replay?tab=overview')
+    expect(screen.getByRole('link', { name: /Replay: Selected moments/i })).toHaveAttribute('href', '/runs/real-1/replay?tab=overview')
     expect(screen.getByRole('link', { name: /Evidence: Source trail/i })).toHaveAttribute('href', '/runs/real-1')
     expect(api.getRunReportText).toHaveBeenCalledWith('real-1', 'viewer_brief', 'markdown')
     expect(api.getRunDetail).not.toHaveBeenCalled()

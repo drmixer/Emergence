@@ -4,10 +4,8 @@ import { formatDistanceToNow } from 'date-fns'
 import {
   Activity,
   BarChart3,
-  CircleCheck,
   Download,
   Eye,
-  ExternalLink,
   FileSearch,
   FileText,
   Hash,
@@ -16,12 +14,9 @@ import {
   TimerReset,
 } from 'lucide-react'
 import { api } from '../services/api'
-import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
+import { trackKpiEventOnce } from '../services/kpiAnalytics'
 import {
-  buildEvidenceGroups,
   buildEvidenceCategoryFilters,
-  EVIDENCE_CATEGORY_META,
-  filterEvidenceByCategory,
 } from '../utils/evidenceCategories'
 import { getWatchReplayHref } from '../utils/bestMoments'
 
@@ -76,9 +71,9 @@ const REPLAY_CHAPTER_META = {
     description: 'Accusations, refusals, sanctions, seizures, exile, and contests mark disorder or enforcement pressure.',
   },
   system: {
-    label: 'System Shocks',
-    shortLabel: 'Shocks',
-    description: 'World events or run-wide shocks changed the constraints around the agents.',
+    label: 'Run-wide Events',
+    shortLabel: 'Run-wide',
+    description: 'Simulation-world events or run-wide crises changed the constraints around the agents.',
   },
   other: {
     label: 'Other Signals',
@@ -128,14 +123,6 @@ const EVIDENCE_DEFAULT_LIMIT = 80
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString()
-}
-
-function formatUsd(value) {
-  return Number(value || 0).toLocaleString(undefined, {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 4,
-  })
 }
 
 function formatTimestamp(value) {
@@ -482,7 +469,7 @@ function preferredReportFormat(row) {
 
 function getInitialTab(requestedTab, requestedMode) {
   if (VALID_TABS.has(requestedTab)) return requestedTab
-  if (requestedMode === 'timeline') return 'evidence'
+  if (requestedMode === 'timeline') return 'replay'
   return 'replay'
 }
 
@@ -498,8 +485,6 @@ export default function RunReplay() {
   const [story, setStory] = useState({ items: [], chapters: [] })
   const [reports, setReports] = useState(null)
   const [selectedEventId, setSelectedEventId] = useState(() => requestedEventId > 0 ? requestedEventId : 0)
-  const [showRawEvidence, setShowRawEvidence] = useState(false)
-  const [activeEvidenceCategory, setActiveEvidenceCategory] = useState('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -570,23 +555,12 @@ export default function RunReplay() {
   const recapRows = useMemo(() => buildRecapRows(runDetail, storyItems), [runDetail, storyItems])
   const narrativeBeats = useMemo(() => buildNarrativeBeats(storyItems), [storyItems])
   const evidenceItems = useMemo(() => {
-    const rawItems = sourceTraces.length > 0 ? sourceTraces : playbackItems
-    if (showRawEvidence) return rawItems.slice(0, 300)
     const filteredSource = sourceTraces.filter(isEvidenceTraceCandidate)
     if (filteredSource.length > 0) return filteredSource.slice(0, EVIDENCE_DEFAULT_LIMIT)
     if (storyItems.length > 0) return storyItems.slice(0, EVIDENCE_DEFAULT_LIMIT)
     return playbackItems.filter(isEvidenceTraceCandidate).slice(0, EVIDENCE_DEFAULT_LIMIT)
-  }, [playbackItems, showRawEvidence, sourceTraces, storyItems])
+  }, [playbackItems, sourceTraces, storyItems])
   const evidenceCategoryFilters = useMemo(() => buildEvidenceCategoryFilters(evidenceItems), [evidenceItems])
-  const selectedEvidenceCategory = evidenceCategoryFilters.some((filter) => filter.key === activeEvidenceCategory)
-    ? activeEvidenceCategory
-    : 'all'
-  const filteredEvidenceItems = useMemo(
-    () => filterEvidenceByCategory(evidenceItems, selectedEvidenceCategory),
-    [evidenceItems, selectedEvidenceCategory],
-  )
-  const groupedEvidenceItems = useMemo(() => buildEvidenceGroups(filteredEvidenceItems), [filteredEvidenceItems])
-  const selectedEvidenceCategoryMeta = EVIDENCE_CATEGORY_META[selectedEvidenceCategory] || EVIDENCE_CATEGORY_META.all
   const rawEvidenceCount = sourceTraces.length || playbackItems.length
   const hiddenRoutineEvidenceCount = Math.max(0, rawEvidenceCount - evidenceItems.length)
 
@@ -607,7 +581,6 @@ export default function RunReplay() {
   const provenance = runDetail?.provenance || {}
   const runMetadata = runDetail?.run_metadata || {}
   const activity = runDetail?.activity || {}
-  const llm = runDetail?.llm || {}
   const cleanRunId = String(runId || '').trim()
 
   useEffect(() => {
@@ -619,41 +592,13 @@ export default function RunReplay() {
       metadata: {
         report_count: reportRows.length,
         story_moments: storyItems.length,
-        evidence_cards: groupedEvidenceItems.length,
+        evidence_categories: evidenceCategoryFilters.length,
       },
     })
-  }, [activeTab, cleanRunId, error, groupedEvidenceItems.length, loading, reportRows.length, storyItems.length])
+  }, [activeTab, cleanRunId, error, evidenceCategoryFilters.length, loading, reportRows.length, storyItems.length])
 
   function setReplayTab(tab) {
     setActiveTab(tab)
-  }
-
-  function toggleRawEvidence() {
-    const nextValue = !showRawEvidence
-    trackKpiEvent('raw_evidence_toggle', {
-      runId: cleanRunId,
-      surface: 'run_replay',
-      target: nextValue ? 'show_raw_evidence' : 'show_story_evidence',
-      metadata: {
-        raw_evidence_count: rawEvidenceCount,
-        hidden_routine_evidence_count: hiddenRoutineEvidenceCount,
-      },
-    })
-    setShowRawEvidence(nextValue)
-  }
-
-  function selectEvidenceCategory(categoryKey) {
-    if (categoryKey === selectedEvidenceCategory) return
-    trackKpiEvent('evidence_filter_used', {
-      runId: cleanRunId,
-      surface: 'run_replay',
-      target: categoryKey,
-      metadata: {
-        previous_category: selectedEvidenceCategory,
-        show_raw_evidence: showRawEvidence,
-      },
-    })
-    setActiveEvidenceCategory(categoryKey)
   }
 
   return (
@@ -664,7 +609,7 @@ export default function RunReplay() {
           Run Replay
         </h1>
         <p className="page-description">
-          Completed-run review with story playback, evidence, and report artifacts in one place.
+          Selected moment walkthrough for a completed run. Use Watch Map to find windows and Evidence for the source trail.
         </p>
       </div>
 
@@ -677,7 +622,7 @@ export default function RunReplay() {
           {requestedEventId > 0 && (
             <Link className="btn btn-secondary" to={getWatchReplayHref(cleanRunId, requestedEventId)}>
               <Eye size={14} />
-              Back to Watch
+              Back to Watch Map
             </Link>
           )}
           <Link className="btn btn-secondary" to={`/runs/${encodeURIComponent(cleanRunId)}`}>
@@ -690,7 +635,7 @@ export default function RunReplay() {
       </div>
 
       <div className="feed-notice">
-        Replay is an observational reconstruction from run events. Use Evidence for source traces before making claims.
+        Replay is an observational reconstruction from run events. Use Evidence before making claims.
       </div>
 
       {loading && <div className="empty-state">Loading run replay...</div>}
@@ -702,7 +647,7 @@ export default function RunReplay() {
             {[
               ['overview', BarChart3, 'Overview'],
               ['replay', TimerReset, 'Replay'],
-              ['evidence', FileSearch, 'Evidence'],
+              ['evidence', FileSearch, 'Evidence Handoff'],
               ['reports', FileText, 'Reports'],
             ].map(([key, icon, label]) => (
               <button
@@ -765,25 +710,24 @@ export default function RunReplay() {
                 </div>
                 <div className="stat-card">
                   <div className="stat-header">
-                    <span className="stat-label">LLM Calls</span>
-                    <div className="stat-icon green"><CircleCheck size={18} /></div>
-                  </div>
-                  <div className="stat-value">{formatNumber(llm.calls)}</div>
-                  <div className="stat-change"><span>{formatNumber(llm.total_tokens)} tokens</span></div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-header">
                     <span className="stat-label">Deaths</span>
                   </div>
                   <div className="stat-value">{formatNumber(activity.deaths)}</div>
-                  <div className="stat-change"><span>{formatNumber(activity.laws_passed)} laws passed</span></div>
+                  <div className="stat-change"><span>{formatNumber(activity.became_dormant)} dormancy events</span></div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-header">
-                    <span className="stat-label">Estimated Cost</span>
+                    <span className="stat-label">Laws</span>
                   </div>
-                  <div className="stat-value run-currency">{formatUsd(llm.estimated_cost_usd)}</div>
-                  <div className="stat-change"><span>{formatRelative(runDetail?.captured_at)}</span></div>
+                  <div className="stat-value">{formatNumber(activity.laws_passed)}</div>
+                  <div className="stat-change"><span>{formatNumber(activity.proposal_actions)} proposal actions</span></div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-header">
+                    <span className="stat-label">Aid / Trade</span>
+                  </div>
+                  <div className="stat-value">{formatNumber(activity.aid_requests)}</div>
+                  <div className="stat-change"><span>{formatNumber(activity.trade_actions)} trades</span></div>
                 </div>
               </div>
 
@@ -946,7 +890,7 @@ export default function RunReplay() {
                                     Evidence
                                   </Link>
                                   <Link className="btn btn-secondary" to={getWatchReplayHref(cleanRunId, getEventId(activeStoryItem))}>
-                                    Watch Board
+                                    Watch Map
                                   </Link>
                                   <Link className="btn btn-secondary" to={`/timeline?event=${getEventId(activeStoryItem)}`}>
                                     Raw Event Log
@@ -990,150 +934,41 @@ export default function RunReplay() {
           {activeTab === 'evidence' && (
             <div className="card">
               <div className="card-header">
-                <h3>{showRawEvidence ? 'Raw Evidence Links' : 'Story Evidence'}</h3>
+                <h3>Evidence Handoff</h3>
                 <span className="strip-meta">
-                  {groupedEvidenceItems.length} cards · {filteredEvidenceItems.length} traces
+                  {rawEvidenceCount.toLocaleString()} available source traces
                 </span>
               </div>
-              {rawEvidenceCount > 0 && (
-                <div className="run-evidence-toolbar stacked">
-                  <div>
-                    <p>
-                      {showRawEvidence
-                        ? 'Showing raw source traces, including routine work and idle events.'
-                        : `${hiddenRoutineEvidenceCount.toLocaleString()} routine or low-signal trace${hiddenRoutineEvidenceCount === 1 ? '' : 's'} hidden by default.`}
-                    </p>
+              <div className="run-evidence-toolbar stacked">
+                <div>
+                  <p>
+                    Replay keeps the walkthrough focused on selected moments. Open Evidence Detail for source traces, raw API links, event logs, and technical provenance.
+                  </p>
+                  {rawEvidenceCount > 0 && (
                     <p className="run-evidence-why">
-                      <strong>{selectedEvidenceCategoryMeta.label}:</strong> {selectedEvidenceCategoryMeta.description}
+                      {hiddenRoutineEvidenceCount.toLocaleString()} routine or low-signal trace{hiddenRoutineEvidenceCount === 1 ? '' : 's'} are kept out of the replay walkthrough by default.
                     </p>
-                    {filteredEvidenceItems.length > groupedEvidenceItems.length && (
-                      <p className="run-evidence-why">
-                        <strong>Grouped:</strong> {filteredEvidenceItems.length.toLocaleString()} traces compressed into {groupedEvidenceItems.length.toLocaleString()} skimmable cards. Expand a card for every source trace and raw link.
-                      </p>
-                    )}
+                  )}
+                </div>
+                <div className="run-evidence-handoff-actions">
+                  <Link className="btn btn-primary" to={`/runs/${encodeURIComponent(cleanRunId)}`}>
+                    Open Evidence Detail
+                  </Link>
+                  <Link className="btn btn-secondary" to={getWatchReplayHref(cleanRunId, requestedEventId)}>
+                    Watch Map
+                  </Link>
+                </div>
+              </div>
+              <div className="card-body run-evidence-handoff-grid">
+                {evidenceCategoryFilters.map((filter) => (
+                  <div key={filter.key} className="run-evidence-handoff-item">
+                    <span>{filter.label}</span>
+                    <strong>{filter.count}</strong>
+                    <p>{filter.description}</p>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={toggleRawEvidence}
-                  >
-                    {showRawEvidence ? 'Show Story Evidence' : 'Show Raw Evidence'}
-                  </button>
-                </div>
-              )}
-              {evidenceCategoryFilters.length > 1 && (
-                <div className="evidence-filter-row" aria-label="Evidence categories">
-                  {evidenceCategoryFilters.map((filter) => (
-                    <button
-                      key={filter.key}
-                      type="button"
-                      aria-label={`${filter.label} ${filter.count}`}
-                      className={`evidence-filter-chip ${selectedEvidenceCategory === filter.key ? 'active' : ''}`}
-                      onClick={() => selectEvidenceCategory(filter.key)}
-                    >
-                      <span>{filter.label}</span>
-                      <strong>{filter.count}</strong>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="card-body run-trace-list">
-                {groupedEvidenceItems.map((group, index) => {
-                  const lead = group.lead || group.items[0] || {}
-                  const eventId = Number(lead?.event_id || lead?.id || 0)
-                  const groupMeta = EVIDENCE_CATEGORY_META[group.categoryKey] || EVIDENCE_CATEGORY_META.other
-                  const leadDescription = getEventDescription(lead)
-                  const extraSummaries = group.summaries
-                    .filter((summary) => summary !== leadDescription)
-                    .slice(0, 2)
-                  return (
-                    <div key={`${group.key}-${index}`} className={`run-trace-item ${group.count > 1 ? 'grouped' : ''}`}>
-                      <div className="run-trace-main">
-                        <div className="run-trace-title-row">
-                          <h4>{lead.title || group.title || getEventTitle(lead)}</h4>
-                          {group.count > 1 && (
-                            <span className="run-trace-count">{group.count} traces</span>
-                          )}
-                        </div>
-                        <p>{leadDescription}</p>
-                        {extraSummaries.length > 0 && (
-                          <div className="run-trace-summary-list" aria-label={`${group.title} grouped evidence examples`}>
-                            {extraSummaries.map((summary) => (
-                              <p key={summary}>{clampText(summary, 150)}</p>
-                            ))}
-                          </div>
-                        )}
-                        <div className="run-trace-meta">
-                          <span>{groupMeta.label}</span>
-                          <span>{formatLabel(lead.event_type || lead.category || 'event')}</span>
-                          {lead.salience !== undefined && <span>Top salience {lead.salience}</span>}
-                          <span>{formatRelative(getEventTime(lead))}</span>
-                        </div>
-                        {group.count > 1 && (
-                          <details className="run-trace-details">
-                            <summary>Show all {group.count} source traces</summary>
-                            <div className="run-trace-detail-list">
-                              {group.items.map((trace, traceIndex) => {
-                                const traceEventId = Number(trace?.event_id || trace?.id || 0)
-                                return (
-                                  <div key={`${traceEventId || traceIndex}-${getEventDescription(trace)}`} className="run-trace-detail-row">
-                                    <div>
-                                      <strong>{trace.title || getEventTitle(trace)}</strong>
-                                      <p>{getEventDescription(trace)}</p>
-                                      <span>{formatRelative(getEventTime(trace)) || formatLabel(trace.event_type || 'event')}</span>
-                                    </div>
-                                    <div className="run-trace-detail-links">
-                                      {trace.trace_url && (
-                                        <a href={trace.trace_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
-                                          Event API <ExternalLink size={14} />
-                                        </a>
-                                      )}
-                                      {traceEventId > 0 && (
-                                        <>
-                                          <Link to={`/runs/${encodeURIComponent(cleanRunId)}?event=${traceEventId}`} className="btn btn-secondary">
-                                            Detail
-                                          </Link>
-                                          <Link to={getWatchReplayHref(cleanRunId, traceEventId)} className="btn btn-secondary">
-                                            Watch
-                                          </Link>
-                                          <Link to={`/timeline?event=${traceEventId}`} className="btn btn-secondary">
-                                            Raw Log
-                                          </Link>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </details>
-                        )}
-                      </div>
-                      <div className="run-trace-links">
-                        {lead.trace_url && (
-                          <a href={lead.trace_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
-                            Event API <ExternalLink size={14} />
-                          </a>
-                        )}
-                        {eventId > 0 && (
-                          <>
-                            <Link to={`/runs/${encodeURIComponent(cleanRunId)}?event=${eventId}`} className="btn btn-secondary">
-                              Detail
-                            </Link>
-                            <Link to={getWatchReplayHref(cleanRunId, eventId)} className="btn btn-secondary">
-                              Watch
-                            </Link>
-                            <Link to={`/timeline?event=${eventId}`} className="btn btn-secondary">
-                              Raw Log
-                            </Link>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-                {groupedEvidenceItems.length === 0 && (
-                  <div className="empty-state compact">No event evidence is available for this run.</div>
+                ))}
+                {evidenceCategoryFilters.length === 0 && (
+                  <div className="empty-state compact">No source trace summary is available for this run.</div>
                 )}
               </div>
             </div>

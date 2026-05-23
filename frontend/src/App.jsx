@@ -119,7 +119,7 @@ function App() {
     { path: '/governance', icon: Scale, label: 'Governance' },
     { path: '/resources', icon: Package, label: 'Resources' },
     { path: '/calendar', icon: CalendarDays, label: 'Calendar' },
-    { path: '/watch', icon: Eye, label: 'Watch' },
+    { path: '/watch', icon: Eye, label: 'Watch Map' },
     { path: '/archive', icon: FileSearch, label: 'Archive' },
     { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
     { path: '/glossary', icon: BookOpen, label: 'Glossary' },

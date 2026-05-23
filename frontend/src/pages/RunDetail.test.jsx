@@ -119,19 +119,19 @@ describe('RunDetail', () => {
     expect(await screen.findByText(/Run Recap/i)).toBeInTheDocument()
     expect(await screen.findByText(/Focused event #42/i)).toBeInTheDocument()
 
-    expect(screen.getByRole('link', { name: /Back to Watch/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Back to Watch Map/i })).toHaveAttribute(
       'href',
       '/watch?run=run-1&event=42',
     )
 
     const focusedEvent = screen.getByText(/Focused event #42/i).closest('.focused-event-card')
-    expect(within(focusedEvent).getByRole('link', { name: /Watch Board/i })).toHaveAttribute(
+    expect(within(focusedEvent).getByRole('link', { name: /Watch Map/i })).toHaveAttribute(
       'href',
       '/watch?run=run-1&event=42',
     )
 
     const sourceTrace = screen.getByText(/Permanent Death/i).closest('.run-trace-item')
-    expect(within(sourceTrace).getByRole('link', { name: /^Watch$/i })).toHaveAttribute(
+    expect(within(sourceTrace).getByRole('link', { name: /^Watch Map$/i })).toHaveAttribute(
       'href',
       '/watch?run=run-1&event=42',
     )

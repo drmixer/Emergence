@@ -189,25 +189,25 @@ export default function NoActiveRunNotice({
                                     <>
                                         <Link to={hasViewerBrief ? viewerBriefHref : `/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-primary">
                                             {hasViewerBrief ? <FileText size={14} /> : <TimerReset size={14} />}
-                                            {hasViewerBrief ? 'Read The Brief' : 'Run Recap'}
+                                            {hasViewerBrief ? 'Read Brief' : 'Open Recap'}
                                         </Link>
                                         {hasViewerBrief && (
                                             <Link to={`/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-secondary">
                                                 <TimerReset size={14} />
-                                                Run Recap
+                                                Open Recap
                                             </Link>
                                         )}
                                     </>
                                 ) : (
                                     <Link to={`/watch?run=${encodeURIComponent(cleanRunId)}`} className="btn btn-primary">
                                         <Eye size={14} />
-                                        Watch
+                                        Watch Map
                                     </Link>
                                 )}
                                 {richHandoff && (
                                     <Link to={`/watch?run=${encodeURIComponent(cleanRunId)}`} className="btn btn-secondary">
                                         <Eye size={14} />
-                                        Watch Replay
+                                        Watch Map
                                     </Link>
                                 )}
                                 <Link to={getStoryReplayHref(cleanRunId)} className="btn btn-secondary">

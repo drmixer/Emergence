@@ -95,7 +95,7 @@ export default function FirstTimeOnboarding() {
 
                 <h3 id="onboarding-title">How to read Emergence in under a minute</h3>
                 <p className="onboarding-copy">
-                    Runs are live simulations. Start with the operations state, then move into replay and source evidence.
+                    Runs are live simulations. Start with the brief or recap, then use the map, replay, and source evidence.
                 </p>
 
                 <ul className="onboarding-steps">
@@ -105,7 +105,7 @@ export default function FirstTimeOnboarding() {
                     </li>
                     <li>
                         <Eye size={14} />
-                        <span><strong>Watch and Replay:</strong> timeline map first, then selected moment walkthroughs.</span>
+                        <span><strong>Watch Map and Replay:</strong> timeline map first, then selected moment walkthroughs.</span>
                     </li>
                     <li>
                         <FileSearch size={14} />

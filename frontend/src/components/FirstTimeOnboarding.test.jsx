@@ -41,7 +41,7 @@ describe('FirstTimeOnboarding', () => {
 
         expect(screen.getByRole('dialog', { name: /How to read Emergence/i })).toBeInTheDocument()
         expect(screen.getByText(/Run Console:/i)).toBeInTheDocument()
-        expect(screen.getByText(/Watch and Replay:/i)).toBeInTheDocument()
+        expect(screen.getByText(/Watch Map and Replay:/i)).toBeInTheDocument()
         expect(screen.getByText(/Archive and Evidence:/i)).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Open Run Console/i })).toBeInTheDocument()
         expect(screen.queryByText(/Current Run:/i)).not.toBeInTheDocument()
