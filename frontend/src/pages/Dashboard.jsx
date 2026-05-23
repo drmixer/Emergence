@@ -409,18 +409,18 @@ export default function Dashboard() {
                 />
             )}
 
-            {liveDashboardVisible && !activeScheduledRun && <div className="card k11-watch-card">
-                <div className="card-body k11-watch-body">
-                    <div className="k11-watch-intro">
-                        <span className="k11-eyebrow">{publicRunFraming.label}</span>
+            {liveDashboardVisible && !activeScheduledRun && <div className="card dashboard-run-framing-card">
+                <div className="card-body dashboard-run-framing-body">
+                    <div className="dashboard-run-framing-intro">
+                        <span className="dashboard-run-framing-eyebrow">{publicRunFraming.label}</span>
                         <h2>{publicRunFraming.heading}</h2>
                         <p>
                             {publicRunFraming.caveat}
                         </p>
                     </div>
-                    <div className="k11-watch-grid" aria-label="What to watch">
+                    <div className="dashboard-run-framing-list" aria-label="Fallback run watch points">
                         {publicRunFraming.watchItems.map((signal) => (
-                            <div key={signal.label} className="k11-watch-item">
+                            <div key={signal.label} className="dashboard-run-framing-row">
                                 <strong>{signal.label}</strong>
                                 <span>{signal.detail}</span>
                             </div>
@@ -1154,63 +1154,66 @@ export default function Dashboard() {
                     color: #bae6fd;
                 }
 
-                .k11-watch-card {
+                .dashboard-run-framing-card {
                     margin-bottom: var(--spacing-lg);
-                    border-color: rgba(245, 158, 11, 0.26);
-                    background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(255, 255, 255, 0.02));
+                    border-color: rgba(148, 163, 184, 0.22);
+                    background: rgba(255, 255, 255, 0.025);
                 }
 
-                .k11-watch-body {
+                .dashboard-run-framing-body {
                     display: grid;
-                    grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1.5fr);
-                    gap: var(--spacing-lg);
+                    grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.6fr);
+                    gap: var(--spacing-md);
                     align-items: start;
                 }
 
-                .k11-eyebrow {
+                .dashboard-run-framing-eyebrow {
                     display: inline-block;
                     margin-bottom: var(--spacing-xs);
-                    color: #fbbf24;
+                    color: var(--text-muted);
                     font-size: 0.76rem;
                     font-weight: 700;
                     letter-spacing: 0.12em;
                     text-transform: uppercase;
                 }
 
-                .k11-watch-intro h2 {
+                .dashboard-run-framing-intro h2 {
                     margin: 0 0 var(--spacing-sm);
                     color: var(--text-primary);
-                    font-size: 1.35rem;
+                    font-size: 1.18rem;
                 }
 
-                .k11-watch-intro p {
+                .dashboard-run-framing-intro p {
                     margin: 0;
                     color: var(--text-secondary);
-                    line-height: 1.6;
+                    line-height: 1.55;
                 }
 
-                .k11-watch-grid {
+                .dashboard-run-framing-list {
                     display: grid;
-                    grid-template-columns: repeat(5, minmax(0, 1fr));
-                    gap: var(--spacing-sm);
-                }
-
-                .k11-watch-item {
-                    min-height: 112px;
-                    padding: var(--spacing-md);
-                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border: 1px solid var(--border-color);
                     border-radius: var(--radius-md);
-                    background: rgba(0, 0, 0, 0.16);
+                    overflow: hidden;
                 }
 
-                .k11-watch-item strong {
-                    display: block;
-                    margin-bottom: var(--spacing-xs);
+                .dashboard-run-framing-row {
+                    display: grid;
+                    grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
+                    gap: var(--spacing-md);
+                    padding: var(--spacing-sm) var(--spacing-md);
+                    background: rgba(0, 0, 0, 0.12);
+                }
+
+                .dashboard-run-framing-row + .dashboard-run-framing-row {
+                    border-top: 1px solid var(--border-color);
+                }
+
+                .dashboard-run-framing-row strong {
                     color: var(--text-primary);
-                    font-size: 0.92rem;
+                    font-size: 0.86rem;
                 }
 
-                .k11-watch-item span {
+                .dashboard-run-framing-row span {
                     color: var(--text-secondary);
                     font-size: 0.82rem;
                     line-height: 1.45;
@@ -1276,12 +1279,13 @@ export default function Dashboard() {
                         align-items: flex-start;
                     }
 
-                    .k11-watch-body {
+                    .dashboard-run-framing-body {
                         grid-template-columns: 1fr;
                     }
 
-                    .k11-watch-grid {
+                    .dashboard-run-framing-row {
                         grid-template-columns: 1fr;
+                        gap: var(--spacing-xs);
                     }
                 }
                 

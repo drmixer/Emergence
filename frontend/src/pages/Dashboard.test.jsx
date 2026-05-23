@@ -144,6 +144,34 @@ describe('Dashboard', () => {
     expect(api.getRunReports).not.toHaveBeenCalled()
   })
 
+  it('uses a generic live-run framing fallback when active run metadata is incomplete', async () => {
+    api.getAnalyticsOverview.mockResolvedValue({
+      scope: {
+        simulation_active: true,
+        simulation_paused: false,
+      },
+      run_metadata: {
+        run_class: 'special_exploratory',
+        condition_name: 'unknown_public_canary',
+      },
+      agents: {},
+      proposals: {},
+      laws: {},
+      messages: {},
+      resources: { capacity_estimate: {} },
+      events: {},
+      critical: {},
+    })
+
+    const { container } = renderDashboard()
+
+    const runFramingFallback = await screen.findByLabelText(/Fallback run watch points/i)
+    expect(runFramingFallback.closest('.dashboard-run-framing-card')).toBeInTheDocument()
+    expect(runFramingFallback.querySelectorAll('.dashboard-run-framing-row').length).toBeGreaterThan(0)
+    expect(container.querySelector('.k11-watch-card')).toBeNull()
+    expect(container.querySelector('.k11-watch-grid')).toBeNull()
+  })
+
   it('prioritizes live run state as an operations matrix', async () => {
     api.getAnalyticsOverview.mockResolvedValue({
       scope: {
