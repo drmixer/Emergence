@@ -446,6 +446,12 @@ export default function Landing() {
                     </span>
                 </button>
 
+                <div className="hero-secondary-actions" aria-label="Public reading links">
+                    <a className="hero-secondary-link" href="/articles">
+                        Articles
+                    </a>
+                </div>
+
                 {/* Rotating Quote */}
                 <div className="quote-container">
                     <div className={`quote-content ${runPhase !== 'live' ? 'prelaunch' : ''}`} key={currentQuoteIndex}>
@@ -616,6 +622,8 @@ export default function Landing() {
                         <a href="https://github.com/drmixer/Emergence" target="_blank" rel="noopener noreferrer">GitHub</a>
                         <span>•</span>
                         <a href="https://x.com/emergencequest" target="_blank" rel="noopener noreferrer">X (Twitter)</a>
+                        <span>•</span>
+                        <a href="/articles">Articles</a>
                         <span>•</span>
                         <a onClick={() => navigate('/about')}>About</a>
                         <span>•</span>

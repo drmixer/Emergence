@@ -315,6 +315,31 @@
     pointer-events: none;
 }
 
+.hero-secondary-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    opacity: 0;
+    animation: fadeInUp 0.6s ease forwards;
+    animation-delay: 1.2s;
+}
+
+.hero-secondary-link {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.hero-secondary-link:hover {
+    color: var(--text-primary);
+}
+
 @keyframes ctaPulse {
     0% {
         transform: translate(-50%, -50%) scale(0.8);

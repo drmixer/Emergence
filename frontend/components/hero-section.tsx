@@ -320,6 +320,12 @@ export function HeroSection() {
             <ScrambleTextOnHover text="Run Archive" as="span" duration={0.6} />
             <BitmapChevron className="transition-transform duration-[400ms] ease-in-out group-hover:rotate-45" />
           </Link>
+          <Link
+            href="/articles"
+            className="font-mono text-xs uppercase tracking-widest text-muted-foreground transition-colors duration-200 hover:text-foreground"
+          >
+            Articles
+          </Link>
           {lastCompletedRunId && (
             <Link
               href={`/runs/${encodeURIComponent(lastCompletedRunId)}`}

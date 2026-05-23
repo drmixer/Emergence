@@ -134,6 +134,14 @@ export function ColophonSection() {
             </li>
             <li>
               <a
+                href="/articles"
+                className="font-mono text-xs text-foreground/80 hover:text-foreground transition-colors duration-200"
+              >
+                Articles
+              </a>
+            </li>
+            <li>
+              <a
                 href="https://x.com/emergencequest"
                 className="font-mono text-xs text-foreground/80 hover:text-foreground transition-colors duration-200"
               >
