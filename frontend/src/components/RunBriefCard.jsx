@@ -123,7 +123,7 @@ function RunBriefActions({ run, mode, analyticsSurface }) {
     <div className="run-brief-actions">
       <ScheduleLink to={run.links?.live} run={run} surface={analyticsSurface} target="current_run" primary={run.status === 'Live'}>
         <RadioTower size={14} />
-        Current Run
+        Run Console
       </ScheduleLink>
       <ScheduleLink to="/calendar" run={run} surface={analyticsSurface} target="calendar" primary={run.status !== 'Live'}>
         <CalendarDays size={14} />

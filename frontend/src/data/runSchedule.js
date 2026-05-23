@@ -7,9 +7,9 @@ const PUBLIC_CANARY_VIEWER_PATH = [
   },
   {
     label: 'During live run',
-    detail: 'Use Current Run for live status, then check Governance, Messages, Resources, and Agents for pressure signals.',
+    detail: 'Use Run Console for live operations state, then check Governance, Messages, Resources, and Agents for pressure signals.',
     href: '/dashboard',
-    linkLabel: 'Current Run',
+    linkLabel: 'Run Console',
   },
   {
     label: 'After closeout',
@@ -28,9 +28,9 @@ const RESEARCH_VIEWER_PATH = [
   },
   {
     label: 'During live run',
-    detail: 'Follow Current Run, Resources, Governance, and model-attribution evidence without treating one run as a conclusion.',
+    detail: 'Follow Run Console, Resources, Governance, and model-attribution evidence without treating one run as a conclusion.',
     href: '/dashboard',
-    linkLabel: 'Current Run',
+    linkLabel: 'Run Console',
   },
   {
     label: 'After closeout',
@@ -285,7 +285,7 @@ function inferRunLabel(metadata = {}) {
   if (kMatch) return kMatch[1].toUpperCase()
 
   const runId = cleanString(metadata?.run_id)
-  return runId ? `Run ${runId}` : 'Current Run'
+  return runId ? `Run ${runId}` : 'Live Run'
 }
 
 function inferTrack(runClass) {

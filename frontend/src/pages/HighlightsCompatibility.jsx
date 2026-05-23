@@ -30,7 +30,7 @@ export default function HighlightsCompatibility() {
           Highlights moved into Run Replay
         </h1>
         <p className="page-description">
-          Current Run owns live story state. Archive and Run Replay own completed-run review.
+          Run Console owns live and idle operations state. Archive and Run Replay own completed-run review.
         </p>
       </div>
 
@@ -40,11 +40,11 @@ export default function HighlightsCompatibility() {
           <div>
             <strong>This route is kept for old links.</strong>
             <p>
-              Pick Current Run for live state, or Archive to open a completed run replay with evidence and reports.
+              Pick Run Console for live state, or Archive to open a completed run replay with evidence and reports.
             </p>
           </div>
           <div className="legacy-route-actions">
-            <Link to="/dashboard" className="btn btn-primary">Current Run</Link>
+            <Link to="/dashboard" className="btn btn-primary">Run Console</Link>
             <Link to="/archive" className="btn btn-secondary">Archive</Link>
           </div>
         </div>

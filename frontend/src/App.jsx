@@ -112,7 +112,7 @@ function App() {
   }, [])
 
   const navItems = [
-    { path: '/dashboard', icon: Activity, label: 'Current Run' },
+    { path: '/dashboard', icon: Activity, label: 'Run Console' },
     { path: '/agents', icon: Users, label: 'Agents' },
     { path: '/messages', icon: MessageSquare, label: 'Messages' },
     { path: '/network', icon: Share2, label: 'Network' },

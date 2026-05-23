@@ -33,6 +33,8 @@ describe('RunBriefCard', () => {
     expect(screen.getByText(/Before launch/i)).toBeInTheDocument()
     expect(screen.getByText(/During live run/i)).toBeInTheDocument()
     expect(screen.getByText(/After closeout/i)).toBeInTheDocument()
+    expect(screen.getByText(/Use Run Console for live operations state/i)).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /Run Console/i }).some((link) => link.getAttribute('href') === '/dashboard')).toBe(true)
     expect(screen.getAllByRole('link', { name: /Run Calendar/i }).some((link) => link.getAttribute('href') === '/calendar')).toBe(true)
   })
 

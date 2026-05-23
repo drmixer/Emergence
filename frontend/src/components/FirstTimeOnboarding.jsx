@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, BookOpen, ChevronRight, FileSearch, Sparkles, X } from 'lucide-react'
+import { Activity, BookOpen, ChevronRight, Eye, FileSearch, Sparkles, X } from 'lucide-react'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 import './FirstTimeOnboarding.css'
 
@@ -95,17 +95,21 @@ export default function FirstTimeOnboarding() {
 
                 <h3 id="onboarding-title">How to read Emergence in under a minute</h3>
                 <p className="onboarding-copy">
-                    Runs are live simulations. Use these surfaces first so the story and evidence are immediately clear.
+                    Runs are live simulations. Start with the operations state, then move into replay and source evidence.
                 </p>
 
                 <ul className="onboarding-steps">
                     <li>
                         <Activity size={14} />
-                        <span><strong>Current Run:</strong> live state, crises, momentum, and open prediction hooks.</span>
+                        <span><strong>Run Console:</strong> live or idle operations state, latest closeout, and the next declared run.</span>
+                    </li>
+                    <li>
+                        <Eye size={14} />
+                        <span><strong>Watch and Replay:</strong> timeline map first, then selected moment walkthroughs.</span>
                     </li>
                     <li>
                         <FileSearch size={14} />
-                        <span><strong>Archive:</strong> completed runs with replay, evidence, and reports.</span>
+                        <span><strong>Archive and Evidence:</strong> completed run chooser, reports, and source audit trail.</span>
                     </li>
                     <li>
                         <BookOpen size={14} />
@@ -118,7 +122,7 @@ export default function FirstTimeOnboarding() {
                         Skip
                     </button>
                     <button type="button" className="btn btn-primary" onClick={handleStart}>
-                        Open Current Run
+                        Open Run Console
                         <ChevronRight size={14} />
                     </button>
                 </div>
