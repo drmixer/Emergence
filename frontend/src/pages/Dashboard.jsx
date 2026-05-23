@@ -368,7 +368,7 @@ export default function Dashboard() {
                 </h1>
                 <p className="page-description">
                     {idleDashboard
-                        ? 'Run console is idle. Latest completed run paths and the next declared run are below.'
+                        ? 'Run console is idle. The latest completed run and next declared run are shown below.'
                         : scopeResolving
                         ? 'Loading current run state before showing live or archived context.'
                         : scopeUnavailable
@@ -502,13 +502,13 @@ export default function Dashboard() {
                 <CriticalAgentsBanner count={stats.criticalEnergyAgents} type="energy" href="/resources?focus=critical-energy" />
             )}
 
-            {/* Crisis Strip */}
+            {/* Active Crises */}
             {liveDashboardVisible && !loading && (
                 <div className="card crisis-strip-card">
                     <div className="card-header">
                         <h3>
                             <AlertTriangle size={18} />
-                            Crisis Strip
+                            Active Crises
                         </h3>
                         <span className="strip-meta">{secondaryLoading ? 'Loading...' : `${crises.length} active`}</span>
                     </div>
@@ -735,7 +735,7 @@ export default function Dashboard() {
                     <div className="dashboard-signal-panel" aria-label="Supporting run signals">
                         <div className="dashboard-signal-panel-head">
                             <div>
-                                <span className="dashboard-section-label">Supporting signals</span>
+                                <span className="dashboard-section-label">Run observation signals</span>
                                 <p>Lower-priority telemetry stays visible here, with dedicated pages for deeper inspection.</p>
                             </div>
                         </div>
@@ -766,7 +766,7 @@ export default function Dashboard() {
                             <Link to="/predictions" className="dashboard-signal-row">
                                 <span>
                                     <TrendingUp size={16} />
-                                    Prediction hooks
+                                    Open predictions
                                 </span>
                                 {loading || secondaryLoading ? (
                                     <strong>Loading</strong>
