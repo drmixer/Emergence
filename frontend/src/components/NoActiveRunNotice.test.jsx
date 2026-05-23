@@ -126,4 +126,41 @@ describe('NoActiveRunNotice', () => {
         expect(api.getReplayStory).not.toHaveBeenCalled()
         expect(api.getRunReports).not.toHaveBeenCalled()
     })
+
+    it('can render an ops handoff without recap details', () => {
+        render(
+            <MemoryRouter>
+                <NoActiveRunNotice
+                    title="Console idle"
+                    message="Open the latest completed run in Watch, Replay, Evidence, or the full Archive."
+                    lastCompletedRunId="real-20260517T220144Z"
+                    handoffMode="ops"
+                />
+            </MemoryRouter>
+        )
+
+        expect(screen.getByText(/Console idle/i)).toBeInTheDocument()
+        expect(screen.getByText(/Latest completed run: real-20260517T220144Z/i)).toBeInTheDocument()
+        expect(screen.queryByText(/11,204 logged events/i)).not.toBeInTheDocument()
+        expect(screen.queryByLabelText(/Latest completed run snapshot/i)).not.toBeInTheDocument()
+        expect(screen.queryByLabelText(/Latest completed run moments/i)).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: /Latest Emergence Brief/i })).not.toBeInTheDocument()
+        expect(screen.getByRole('link', { name: /^Watch$/i })).toHaveAttribute(
+            'href',
+            '/watch?run=real-20260517T220144Z'
+        )
+        expect(screen.getByRole('link', { name: /^Replay$/i })).toHaveAttribute(
+            'href',
+            '/runs/real-20260517T220144Z/replay?mode=story60'
+        )
+        expect(screen.getByRole('link', { name: /^Evidence$/i })).toHaveAttribute(
+            'href',
+            '/runs/real-20260517T220144Z'
+        )
+        expect(screen.getByRole('link', { name: /^Archive$/i })).toHaveAttribute('href', '/archive')
+        expect(screen.getByRole('link', { name: /Run Calendar/i })).toHaveAttribute('href', '/calendar')
+        expect(api.getRunDetail).not.toHaveBeenCalled()
+        expect(api.getReplayStory).not.toHaveBeenCalled()
+        expect(api.getRunReports).not.toHaveBeenCalled()
+    })
 })

@@ -73,9 +73,11 @@ export default function NoActiveRunNotice({
     message = 'No simulation is live right now. Open the latest completed run for the recap, replay, metrics, and source evidence.',
     lastCompletedRunId = '',
     showCompletedRunHandoff = true,
+    handoffMode = 'rich',
     chrome = 'card',
 }) {
     const cleanRunId = String(lastCompletedRunId || '').trim()
+    const richHandoff = handoffMode !== 'ops'
     const [latestRunState, setLatestRunState] = useState({
         runId: '',
         runDetail: null,
@@ -86,7 +88,7 @@ export default function NoActiveRunNotice({
     useEffect(() => {
         let cancelled = false
 
-        if (!cleanRunId || !showCompletedRunHandoff) return () => {
+        if (!cleanRunId || !showCompletedRunHandoff || !richHandoff) return () => {
             cancelled = true
         }
 
@@ -122,7 +124,7 @@ export default function NoActiveRunNotice({
         return () => {
             cancelled = true
         }
-    }, [cleanRunId, showCompletedRunHandoff])
+    }, [cleanRunId, showCompletedRunHandoff, richHandoff])
 
     const runDetail = latestRunState.runId === cleanRunId ? latestRunState.runDetail : null
     const storyMoments = latestRunState.runId === cleanRunId ? latestRunState.storyMoments : []
@@ -132,9 +134,9 @@ export default function NoActiveRunNotice({
     const viewerBriefHref = cleanRunId
         ? `/runs/${encodeURIComponent(cleanRunId)}/reports/viewer_brief?format=markdown`
         : ''
-    const rootClassName = chrome === 'inline'
+    const rootClassName = `${chrome === 'inline'
         ? 'no-active-run-card no-active-run-inline'
-        : 'card no-active-run-card'
+        : 'card no-active-run-card'} ${richHandoff ? 'no-active-run-rich' : 'no-active-run-ops'}`
 
     return (
         <div className={rootClassName}>
@@ -146,8 +148,8 @@ export default function NoActiveRunNotice({
                         {showCompletedRunHandoff && cleanRunId && <span>Latest completed run: {cleanRunId}</span>}
                     </div>
                     <p>{message}</p>
-                    {showCompletedRunHandoff && runSummary && <p className="no-active-run-summary">{runSummary}</p>}
-                    {showCompletedRunHandoff && hasViewerBrief && (
+                    {showCompletedRunHandoff && richHandoff && runSummary && <p className="no-active-run-summary">{runSummary}</p>}
+                    {showCompletedRunHandoff && richHandoff && hasViewerBrief && (
                         <Link className="no-active-run-brief-link" to={viewerBriefHref}>
                             <span>
                                 <FileText size={15} />
@@ -156,7 +158,7 @@ export default function NoActiveRunNotice({
                             <strong>Read the news-style recap before the next run starts.</strong>
                         </Link>
                     )}
-                    {showCompletedRunHandoff && snapshotRows.length > 0 && (
+                    {showCompletedRunHandoff && richHandoff && snapshotRows.length > 0 && (
                         <div className="no-active-run-snapshot" aria-label="Latest completed run snapshot">
                             {snapshotRows.map((row) => (
                                 <div key={row.label}>
@@ -167,7 +169,7 @@ export default function NoActiveRunNotice({
                             ))}
                         </div>
                     )}
-                    {showCompletedRunHandoff && storyMoments.length > 0 && (
+                    {showCompletedRunHandoff && richHandoff && storyMoments.length > 0 && (
                         <div className="no-active-run-moments" aria-label="Latest completed run moments">
                             {storyMoments.map((moment) => (
                                 <Link
@@ -183,31 +185,43 @@ export default function NoActiveRunNotice({
                     <div className="no-active-run-actions">
                         {showCompletedRunHandoff && cleanRunId && (
                             <>
-                                <Link to={hasViewerBrief ? viewerBriefHref : `/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-primary">
-                                    {hasViewerBrief ? <FileText size={14} /> : <TimerReset size={14} />}
-                                    {hasViewerBrief ? 'Read The Brief' : 'Run Recap'}
-                                </Link>
-                                {hasViewerBrief && (
-                                    <Link to={`/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-secondary">
-                                        <TimerReset size={14} />
-                                        Run Recap
+                                {richHandoff ? (
+                                    <>
+                                        <Link to={hasViewerBrief ? viewerBriefHref : `/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-primary">
+                                            {hasViewerBrief ? <FileText size={14} /> : <TimerReset size={14} />}
+                                            {hasViewerBrief ? 'Read The Brief' : 'Run Recap'}
+                                        </Link>
+                                        {hasViewerBrief && (
+                                            <Link to={`/runs/${encodeURIComponent(cleanRunId)}/replay?tab=overview`} className="btn btn-secondary">
+                                                <TimerReset size={14} />
+                                                Run Recap
+                                            </Link>
+                                        )}
+                                    </>
+                                ) : (
+                                    <Link to={`/watch?run=${encodeURIComponent(cleanRunId)}`} className="btn btn-primary">
+                                        <Eye size={14} />
+                                        Watch
                                     </Link>
                                 )}
-                                <Link to={`/watch?run=${encodeURIComponent(cleanRunId)}`} className="btn btn-secondary">
-                                    <Eye size={14} />
-                                    Watch Replay
+                                {richHandoff && (
+                                    <Link to={`/watch?run=${encodeURIComponent(cleanRunId)}`} className="btn btn-secondary">
+                                        <Eye size={14} />
+                                        Watch Replay
+                                    </Link>
+                                )}
+                                <Link to={getStoryReplayHref(cleanRunId)} className="btn btn-secondary">
+                                    <TimerReset size={14} />
+                                    Replay
                                 </Link>
                                 <Link to={`/runs/${encodeURIComponent(cleanRunId)}`} className="btn btn-secondary">
                                     <FileSearch size={14} />
                                     Evidence
                                 </Link>
-                                <Link to={getStoryReplayHref(cleanRunId)} className="btn btn-secondary">
-                                    <TimerReset size={14} />
-                                    Replay
-                                </Link>
                             </>
                         )}
                         <Link to="/archive" className="btn btn-secondary">
+                            <FileSearch size={14} />
                             Archive
                         </Link>
                         <Link to="/calendar" className="btn btn-secondary">

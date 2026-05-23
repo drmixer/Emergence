@@ -117,6 +117,21 @@ describe('Dashboard', () => {
     const idleConsole = screen.getByLabelText(/Idle run console/i)
     expect(idleConsole).toBeInTheDocument()
     expect(within(idleConsole).getByText(/^Latest closeout$/i)).toBeInTheDocument()
+    expect(within(idleConsole).getByText(/Console idle/i)).toBeInTheDocument()
+    expect(within(idleConsole).queryByText(/logged events/i)).not.toBeInTheDocument()
+    expect(within(idleConsole).queryByLabelText(/Latest completed run snapshot/i)).not.toBeInTheDocument()
+    expect(within(idleConsole).getByRole('link', { name: /^Watch$/i })).toHaveAttribute(
+      'href',
+      '/watch?run=real-20260522T014909Z',
+    )
+    expect(within(idleConsole).getByRole('link', { name: /^Replay$/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260522T014909Z/replay?mode=story60',
+    )
+    expect(within(idleConsole).getByRole('link', { name: /^Evidence$/i })).toHaveAttribute(
+      'href',
+      '/runs/real-20260522T014909Z',
+    )
     expect(screen.getByLabelText(/Next declared run/i)).toBeInTheDocument()
 
     const nextRunCard = screen.getByRole('heading', { name: 'K14' }).closest('article')
@@ -124,5 +139,136 @@ describe('Dashboard', () => {
     expect(within(nextRunCard).getAllByText(/Tentative/i).length).toBeGreaterThan(0)
     expect(screen.queryByRole('heading', { name: 'K13' })).not.toBeInTheDocument()
     expect(screen.queryByText(/Can proposal discussion, voting, and passed laws stay readable/i)).not.toBeInTheDocument()
+    expect(api.getRunDetail).not.toHaveBeenCalled()
+    expect(api.getReplayStory).not.toHaveBeenCalled()
+    expect(api.getRunReports).not.toHaveBeenCalled()
+  })
+
+  it('prioritizes live run state as an operations matrix', async () => {
+    api.getAnalyticsOverview.mockResolvedValue({
+      scope: {
+        simulation_active: true,
+        simulation_paused: false,
+        active_run_id: 'real-live-run',
+      },
+      run_metadata: {
+        run_id: 'real-live-run',
+        run_class: 'special_exploratory',
+        condition_name: 'live_readability_canary',
+      },
+      agents: {
+        active: 12,
+        dormant: 3,
+        dead: 1,
+      },
+      proposals: {
+        active: 2,
+      },
+      laws: {
+        total: 4,
+      },
+      messages: {
+        total: 40,
+      },
+      resources: {
+        capacity_estimate: {
+          food: 2000,
+          energy: 1200,
+          materials: 900,
+        },
+      },
+      events: {},
+      critical: {},
+      day_number: 2,
+    })
+    api.getResources.mockResolvedValue({
+      totals: {
+        food: 1000,
+        energy: 400,
+        materials: 300,
+      },
+      common_pool: {
+        food: 250,
+        energy: 50,
+        materials: 25,
+      },
+    })
+    api.fetch.mockImplementation((endpoint) => {
+      if (String(endpoint).includes('/api/proposals')) {
+        return Promise.resolve([
+          {
+            id: 'proposal-1',
+            title: 'Reserve share vote',
+            author: { agent_number: 7, codename: 'Marble', tier: 2 },
+            votes_for: 5,
+            votes_against: 2,
+            status: 'active',
+          },
+        ])
+      }
+      if (String(endpoint).includes('/api/analytics/leaderboards/activity')) {
+        return Promise.resolve([
+          {
+            agent_id: 'agent-7',
+            agent_number: 7,
+            codename: 'Marble',
+            tier: 2,
+            action_count: 18,
+          },
+        ])
+      }
+      return Promise.resolve([])
+    })
+    api.getCrisisStrip.mockResolvedValue({ items: [] })
+    api.getPlotTurns.mockResolvedValue({
+      items: [{ title: 'Resource refusal cluster', created_at: '2026-05-22T08:00:00Z' }],
+    })
+    api.getPredictionMarkets.mockResolvedValue([{ title: 'Will a law pass?', id: 'market-1' }])
+    api.getSocialDynamics.mockResolvedValue({
+      series: [{ public_order_events: 6 }],
+      deltas_vs_prev_day: {
+        public_order_events_delta: 2,
+        conflict_events_delta: 1,
+        alliance_signals_delta: 0,
+      },
+    })
+    api.getClassMobility.mockResolvedValue({
+      mobility: {
+        upward_signals: 1,
+        downward_signals: 2,
+        signal_flux_rate: 0.25,
+      },
+      inequality: {
+        gini: 0.42,
+      },
+    })
+
+    const { container } = renderDashboard()
+
+    const liveConsole = await screen.findByLabelText(/Live operations console/i)
+    expect(within(liveConsole).getByText(/Live state ledger/i)).toBeInTheDocument()
+    expect(within(liveConsole).getByText(/^Active$/i)).toBeInTheDocument()
+    expect(within(liveConsole).getByText('12')).toBeInTheDocument()
+    expect(within(liveConsole).getByText(/^Dormant$/i)).toBeInTheDocument()
+    expect(within(liveConsole).getByText('3')).toBeInTheDocument()
+    expect(within(liveConsole).getByText(/Resource pressure/i)).toBeInTheDocument()
+    expect(within(liveConsole).getByText('1,250 / 2,000')).toBeInTheDocument()
+    expect(within(liveConsole).getByText(/Open proposals/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Reserve share vote/i)).toBeInTheDocument()
+    const proposalsPanel = within(liveConsole).getByLabelText(/Open proposals/i)
+    expect(within(proposalsPanel).getByRole('link', { name: /^Governance$/i })).toHaveAttribute(
+      'href',
+      '/governance?tab=proposals',
+    )
+
+    const secondaryTelemetry = screen.getByLabelText(/Secondary live telemetry/i)
+    expect(within(secondaryTelemetry).getByText(/Activity leaders/i)).toBeInTheDocument()
+    expect(within(secondaryTelemetry).getByText(/Agent #07/i)).toBeInTheDocument()
+    expect(within(secondaryTelemetry).getByText(/Supporting signals/i)).toBeInTheDocument()
+    expect(within(secondaryTelemetry).getByText(/Resource refusal cluster/i)).toBeInTheDocument()
+
+    expect(container.querySelector('.stats-grid')).toBeNull()
+    expect(container.querySelector('.resource-grid')).toBeNull()
+    expect(container.querySelector('.content-grid')).toBeNull()
   })
 })

@@ -1679,6 +1679,20 @@ tr:last-child td {
   line-height: 1.6;
 }
 
+.no-active-run-ops .no-active-run-state {
+  gap: var(--spacing-md);
+}
+
+.no-active-run-ops .no-active-run-state p {
+  max-width: none;
+}
+
+.no-active-run-ops .no-active-run-actions {
+  width: 100%;
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+}
+
 .no-active-run-summary {
   color: var(--text-primary);
 }

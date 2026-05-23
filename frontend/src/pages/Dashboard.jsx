@@ -16,7 +16,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import { api, subscribeToEvents } from '../services/api'
 import ActivityPulse from '../components/ActivityPulse'
-import { ResourceBar, CriticalAgentsBanner } from '../components/ResourceBar'
+import { CriticalAgentsBanner } from '../components/ResourceBar'
 import { SkeletonEventCard, SkeletonStatCard, SkeletonTable } from '../components/Skeleton'
 import NoActiveRunNotice from '../components/NoActiveRunNotice'
 import RunBriefCard from '../components/RunBriefCard'
@@ -51,6 +51,23 @@ function formatRemaining(seconds) {
 
 function formatPct(value) {
     return `${(Number(value || 0) * 100).toFixed(1)}%`
+}
+
+function formatNumber(value) {
+    return Number(value || 0).toLocaleString()
+}
+
+function resourcePercent(current, max) {
+    const safeMax = Number(max || 0)
+    if (safeMax <= 0) return 0
+    return Math.max(0, Math.min(100, (Number(current || 0) / safeMax) * 100))
+}
+
+function resourceLevel(percent) {
+    if (percent < 20) return 'critical'
+    if (percent < 40) return 'low'
+    if (percent < 60) return 'watch'
+    return 'stable'
 }
 
 export default function Dashboard() {
@@ -307,6 +324,39 @@ export default function Dashboard() {
         completedRuns: runArchiveResolved ? completedRuns : [],
     })
     const nextScheduledRun = runArchiveResolved ? calendarSummary.nextPlanned : null
+    const resourceRows = stats ? [
+        {
+            label: 'Food',
+            icon: Apple,
+            current: stats.totalFood,
+            max: stats.maxFood,
+            href: '/resources?focus=food',
+            type: 'food',
+        },
+        {
+            label: 'Energy',
+            icon: Battery,
+            current: stats.totalEnergy,
+            max: stats.maxEnergy,
+            href: '/resources?focus=energy',
+            type: 'energy',
+        },
+        {
+            label: 'Materials',
+            icon: Box,
+            current: stats.totalMaterials,
+            max: stats.maxMaterials,
+            href: '/resources?focus=materials',
+            type: 'materials',
+        },
+    ].map((resource) => {
+        const percent = resourcePercent(resource.current, resource.max)
+        return {
+            ...resource,
+            percent,
+            level: resourceLevel(percent),
+        }
+    }) : []
 
     return (
         <div className="dashboard">
@@ -314,11 +364,11 @@ export default function Dashboard() {
             <div className="page-header">
                 <h1>
                     <Activity size={32} />
-                    Current Run
+                    Run Console
                 </h1>
                 <p className="page-description">
                     {idleDashboard
-                        ? 'Run console is idle. Latest closeout context and the next declared run are below.'
+                        ? 'Run console is idle. Latest completed run paths and the next declared run are below.'
                         : scopeResolving
                         ? 'Loading current run state before showing live or archived context.'
                         : scopeUnavailable
@@ -404,9 +454,10 @@ export default function Dashboard() {
                     <div className="dashboard-idle-current">
                         <span className="dashboard-section-label">Latest closeout</span>
                         <NoActiveRunNotice
-                            title="No active run"
-                            message="No simulation is live. Use the latest run paths for recap, watch replay, and source evidence."
+                            title="Console idle"
+                            message="No simulation is live. Open the latest completed run in Watch, Replay, Evidence, or the full Archive."
                             lastCompletedRunId={lastCompletedRunId}
+                            handoffMode="ops"
                             chrome="inline"
                         />
                     </div>
@@ -492,132 +543,109 @@ export default function Dashboard() {
                 </div>
             )}
 
-            {/* Stats Grid */}
-            {liveDashboardVisible && <div className="stats-grid">
-                {loading ? (
-                    <>
-                        <SkeletonStatCard />
-                        <SkeletonStatCard />
-                        <SkeletonStatCard />
-                        <SkeletonStatCard />
-                        <SkeletonStatCard />
-                    </>
-                ) : (
-                    <>
-                        <Link to="/agents?status=active" className="stat-card stat-card-link">
-                            <div className="stat-header">
-                                <span className="stat-label">Active Agents</span>
-                                <div className="stat-icon green">
-                                    <Users size={18} />
+            {liveDashboardVisible && (
+                <section className="dashboard-live-console" aria-label="Live operations console">
+                    <div className="dashboard-live-main">
+                        <div className="dashboard-live-head">
+                            <span className="dashboard-section-label">Live state ledger</span>
+                            <p>Current run health, pressure, and governance state. Use deeper pages for full lists.</p>
+                        </div>
+
+                        {loading ? (
+                            <div className="dashboard-live-skeletons">
+                                <SkeletonStatCard />
+                                <SkeletonStatCard />
+                            </div>
+                        ) : (
+                            <div className="dashboard-live-vitals" aria-label="Live run vital signs">
+                                <Link to="/agents?status=active" className="dashboard-live-vital">
+                                    <span>
+                                        <Users size={16} />
+                                        Active
+                                    </span>
+                                    <strong>{formatNumber(stats?.activeAgents)}</strong>
+                                    <em>Agents in the live world</em>
+                                </Link>
+                                <Link to="/agents?status=dormant" className="dashboard-live-vital attention">
+                                    <span>
+                                        <AlertTriangle size={16} />
+                                        Dormant
+                                    </span>
+                                    <strong>{formatNumber(stats?.dormantAgents)}</strong>
+                                    <em>Agents currently out of play</em>
+                                </Link>
+                                <Link to="/governance?tab=proposals&status=active" className="dashboard-live-vital">
+                                    <span>
+                                        <FileText size={16} />
+                                        Proposals
+                                    </span>
+                                    <strong>{formatNumber(stats?.activeProposals)}</strong>
+                                    <em>Open governance work</em>
+                                </Link>
+                                <Link to="/governance?tab=laws" className="dashboard-live-vital">
+                                    <span>
+                                        <Scale size={16} />
+                                        Laws
+                                    </span>
+                                    <strong>{formatNumber(stats?.passedLaws)}</strong>
+                                    <em>Passed in loaded history</em>
+                                </Link>
+                                <Link to="/timeline" className="dashboard-live-vital">
+                                    <span>
+                                        <ShieldCheck size={16} />
+                                        Public order
+                                    </span>
+                                    <strong>{formatNumber(publicOrderLatest)}</strong>
+                                    <em>Signals in the latest window</em>
+                                </Link>
+                            </div>
+                        )}
+
+                        <div className="dashboard-resource-ledger" aria-label="Resource pressure">
+                            <div className="dashboard-ledger-head">
+                                <span>Resource pressure</span>
+                                <Link to="/resources">Resources</Link>
+                            </div>
+                            {loading ? (
+                                <SkeletonTable rows={3} cols={3} />
+                            ) : (
+                                <div className="dashboard-resource-list">
+                                    {resourceRows.map((resource) => {
+                                        const Icon = resource.icon
+                                        return (
+                                            <Link key={resource.label} to={resource.href} className={`dashboard-resource-row ${resource.level}`}>
+                                                <span>
+                                                    <Icon size={15} />
+                                                    {resource.label}
+                                                </span>
+                                                <strong>{formatNumber(resource.current)} / {formatNumber(resource.max)}</strong>
+                                                <em>{resource.percent.toFixed(0)}%</em>
+                                                <div className="dashboard-resource-track" aria-hidden="true">
+                                                    <div
+                                                        className={`dashboard-resource-fill ${resource.type}`}
+                                                        style={{ width: `${resource.percent}%` }}
+                                                    />
+                                                </div>
+                                            </Link>
+                                        )
+                                    })}
                                 </div>
-                            </div>
-                            <div className="stat-value">{stats?.activeAgents || 0}</div>
-                            <div className="stat-change">
-                                <span>Live world state</span>
-                            </div>
-                        </Link>
-
-                        <Link to="/agents?status=dormant" className="stat-card stat-card-link">
-                            <div className="stat-header">
-                                <span className="stat-label">Dormant Agents</span>
-                                <div className="stat-icon orange">
-                                    <AlertTriangle size={18} />
-                                </div>
-                            </div>
-                            <div className="stat-value">{stats?.dormantAgents || 0}</div>
-                            <div className="stat-change">
-                                <span>Live world state</span>
-                            </div>
-                        </Link>
-
-                        <Link to="/governance?tab=proposals&status=active" className="stat-card stat-card-link">
-                            <div className="stat-header">
-                                <span className="stat-label">Active Proposals</span>
-                                <div className="stat-icon blue">
-                                    <FileText size={18} />
-                                </div>
-                            </div>
-                            <div className="stat-value">{stats?.activeProposals || 0}</div>
-                            <div className="stat-change">
-                                <span>Open right now</span>
-                            </div>
-                        </Link>
-
-                        <Link to="/governance?tab=laws" className="stat-card stat-card-link">
-                            <div className="stat-header">
-                                <span className="stat-label">Passed Laws</span>
-                                <div className="stat-icon purple">
-                                    <Scale size={18} />
-                                </div>
-                            </div>
-                            <div className="stat-value">{stats?.passedLaws || 0}</div>
-                            <div className="stat-change">
-                                <span>Cumulative in loaded history</span>
-                            </div>
-                        </Link>
-
-                        <Link to="/timeline" className="stat-card stat-card-link">
-                            <div className="stat-header">
-                                <span className="stat-label">Public Order</span>
-                                <div className="stat-icon orange">
-                                    <ShieldCheck size={18} />
-                                </div>
-                            </div>
-                            <div className="stat-value">{publicOrderLatest}</div>
-                            <div className="stat-change">
-                                <span>Accusations, enforcement, invalid actions, conflict</span>
-                            </div>
-                        </Link>
-                    </>
-                )}
-            </div>}
-
-            {/* Resource Summary with Anxiety Indicators */}
-            {liveDashboardVisible && <div className="resource-grid">
-                {loading ? (
-                    <>
-                        <SkeletonStatCard />
-                        <SkeletonStatCard />
-                        <SkeletonStatCard />
-                    </>
-                ) : (
-                    <>
-                        <ResourceBar
-                            label="Total Food"
-                            icon={Apple}
-                            current={stats?.totalFood || 0}
-                            max={stats?.maxFood || 5000}
-                            type="food"
-                        />
-                        <ResourceBar
-                            label="Total Energy"
-                            icon={Battery}
-                            current={stats?.totalEnergy || 0}
-                            max={stats?.maxEnergy || 4000}
-                            type="energy"
-                        />
-                        <ResourceBar
-                            label="Total Materials"
-                            icon={Box}
-                            current={stats?.totalMaterials || 0}
-                            max={stats?.maxMaterials || 2000}
-                            type="materials"
-                        />
-                    </>
-                )}
-            </div>}
-
-            {/* Content Grid */}
-            {liveDashboardVisible && <div className="content-grid">
-                {/* Active Proposals */}
-                <div className="card">
-                    <div className="card-header">
-                        <h3>Active Proposals</h3>
-                        <Link to="/governance?tab=proposals" className="btn btn-secondary">View All</Link>
+                            )}
+                        </div>
                     </div>
-                    <div className="card-body">
+
+                    <div className="dashboard-live-panel" aria-label="Open proposals">
+                        <div className="dashboard-panel-head">
+                            <div>
+                                <span className="dashboard-section-label">Open proposals</span>
+                                <p>Governance items still requiring attention.</p>
+                            </div>
+                            <Link to="/governance?tab=proposals" className="btn btn-secondary">Governance</Link>
+                        </div>
                         {loading || secondaryLoading ? (
                             <SkeletonTable rows={3} cols={4} />
+                        ) : proposals.length === 0 ? (
+                            <div className="empty-state compact">No active proposals right now.</div>
                         ) : (
                             <div className="table-container compact-table-container" tabIndex={0}>
                                 <table>
@@ -655,17 +683,23 @@ export default function Dashboard() {
                             </div>
                         )}
                     </div>
-                </div>
+                </section>
+            )}
 
-                {/* Agent leaderboard snapshot */}
-                <div className="card">
-                    <div className="card-header">
-                        <h3>Agent Leaderboard Snapshot</h3>
-                        <Link to="/leaderboards" className="btn btn-secondary">Full Rankings</Link>
-                    </div>
-                    <div className="card-body">
+            {liveDashboardVisible && (
+                <section className="dashboard-secondary-ledger" aria-label="Secondary live telemetry">
+                    <div className="dashboard-live-panel" aria-label="Activity leaders">
+                        <div className="dashboard-panel-head">
+                            <div>
+                                <span className="dashboard-section-label">Activity leaders</span>
+                                <p>Highest action volume in the latest 24 hours.</p>
+                            </div>
+                            <Link to="/leaderboards" className="btn btn-secondary">Rankings</Link>
+                        </div>
                         {loading || secondaryLoading ? (
-                            <SkeletonTable rows={5} cols={4} />
+                            <SkeletonTable rows={5} cols={3} />
+                        ) : topAgents.length === 0 ? (
+                            <div className="empty-state compact">No activity leaders available yet.</div>
                         ) : (
                             <div className="table-container compact-table-container" tabIndex={0}>
                                 <table>
@@ -697,91 +731,89 @@ export default function Dashboard() {
                             </div>
                         )}
                     </div>
-                </div>
-            </div>}
 
-            {liveDashboardVisible && (
-                <section className="dashboard-signal-panel" aria-label="Supporting run signals">
-                    <div className="dashboard-signal-panel-head">
-                        <div>
-                            <span className="dashboard-section-label">Supporting signals</span>
-                            <p>Lower-priority telemetry stays visible here, with dedicated pages for deeper inspection.</p>
+                    <div className="dashboard-signal-panel" aria-label="Supporting run signals">
+                        <div className="dashboard-signal-panel-head">
+                            <div>
+                                <span className="dashboard-section-label">Supporting signals</span>
+                                <p>Lower-priority telemetry stays visible here, with dedicated pages for deeper inspection.</p>
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="dashboard-signal-grid">
-                        <Link to="/archive" className="dashboard-signal-row">
-                            <span>
-                                <Flame size={16} />
-                                Plot turns
-                            </span>
-                            {loading || secondaryLoading ? (
-                                <strong>Loading</strong>
-                            ) : plotTurns.length > 0 ? (
-                                <>
-                                    <strong>{plotTurns[0].title || 'Latest notable turn'}</strong>
-                                    <em>
-                                        {plotTurns.length} in 48h
-                                        {plotTurns[0].created_at
-                                            ? ` · ${formatDistanceToNow(new Date(plotTurns[0].created_at), { addSuffix: true })}`
-                                            : ''}
-                                    </em>
-                                </>
-                            ) : (
-                                <strong>No high-salience turns in 48h</strong>
-                            )}
-                        </Link>
+                        <div className="dashboard-signal-grid">
+                            <Link to="/archive" className="dashboard-signal-row">
+                                <span>
+                                    <Flame size={16} />
+                                    Plot turns
+                                </span>
+                                {loading || secondaryLoading ? (
+                                    <strong>Loading</strong>
+                                ) : plotTurns.length > 0 ? (
+                                    <>
+                                        <strong>{plotTurns[0].title || 'Latest notable turn'}</strong>
+                                        <em>
+                                            {plotTurns.length} in 48h
+                                            {plotTurns[0].created_at
+                                                ? ` · ${formatDistanceToNow(new Date(plotTurns[0].created_at), { addSuffix: true })}`
+                                                : ''}
+                                        </em>
+                                    </>
+                                ) : (
+                                    <strong>No high-salience turns in 48h</strong>
+                                )}
+                            </Link>
 
-                        <Link to="/predictions" className="dashboard-signal-row">
-                            <span>
-                                <TrendingUp size={16} />
-                                Prediction hooks
-                            </span>
-                            {loading || secondaryLoading ? (
-                                <strong>Loading</strong>
-                            ) : predictionMarkets.length > 0 ? (
-                                <>
-                                    <strong>{predictionMarkets.length} open</strong>
-                                    <em>{predictionMarkets[0].title}</em>
-                                </>
-                            ) : (
-                                <strong>No open prediction hooks</strong>
-                            )}
-                        </Link>
+                            <Link to="/predictions" className="dashboard-signal-row">
+                                <span>
+                                    <TrendingUp size={16} />
+                                    Prediction hooks
+                                </span>
+                                {loading || secondaryLoading ? (
+                                    <strong>Loading</strong>
+                                ) : predictionMarkets.length > 0 ? (
+                                    <>
+                                        <strong>{predictionMarkets.length} open</strong>
+                                        <em>{predictionMarkets[0].title}</em>
+                                    </>
+                                ) : (
+                                    <strong>No open prediction hooks</strong>
+                                )}
+                            </Link>
 
-                        <Link to="/timeline" className="dashboard-signal-row">
-                            <span>Social dynamics</span>
-                            {loading || secondaryLoading ? (
-                                <strong>Loading</strong>
-                            ) : (
-                                <>
-                                    <strong>{publicOrderLatest} public-order signals</strong>
-                                    <em>
-                                        Public order {publicOrderDelta > 0 ? '+' : ''}{publicOrderDelta}
-                                        {' · '}Conflict {conflictDelta > 0 ? '+' : ''}{conflictDelta}
-                                        {' · '}Alliances {allianceDelta > 0 ? '+' : ''}{allianceDelta}
-                                    </em>
-                                </>
-                            )}
-                        </Link>
+                            <Link to="/timeline" className="dashboard-signal-row">
+                                <span>Social dynamics</span>
+                                {loading || secondaryLoading ? (
+                                    <strong>Loading</strong>
+                                ) : (
+                                    <>
+                                        <strong>{publicOrderLatest} public-order signals</strong>
+                                        <em>
+                                            Public order {publicOrderDelta > 0 ? '+' : ''}{publicOrderDelta}
+                                            {' · '}Conflict {conflictDelta > 0 ? '+' : ''}{conflictDelta}
+                                            {' · '}Alliances {allianceDelta > 0 ? '+' : ''}{allianceDelta}
+                                        </em>
+                                    </>
+                                )}
+                            </Link>
 
-                        <Link to="/agents" className="dashboard-signal-row">
-                            <span>Class pressure</span>
-                            {loading || secondaryLoading ? (
-                                <strong>Loading</strong>
-                            ) : !classMobility ? (
-                                <strong>No mobility data yet</strong>
-                            ) : (
-                                <>
-                                    <strong>Gini {Number(inequality.gini || 0).toFixed(3)}</strong>
-                                    <em>
-                                        Upward {mobility.upward_signals || 0}
-                                        {' · '}Downward {mobility.downward_signals || 0}
-                                        {' · '}Flux {formatPct(mobility.signal_flux_rate || 0)}
-                                    </em>
-                                </>
-                            )}
-                        </Link>
+                            <Link to="/agents" className="dashboard-signal-row">
+                                <span>Class pressure</span>
+                                {loading || secondaryLoading ? (
+                                    <strong>Loading</strong>
+                                ) : !classMobility ? (
+                                    <strong>No mobility data yet</strong>
+                                ) : (
+                                    <>
+                                        <strong>Gini {Number(inequality.gini || 0).toFixed(3)}</strong>
+                                        <em>
+                                            Upward {mobility.upward_signals || 0}
+                                            {' · '}Downward {mobility.downward_signals || 0}
+                                            {' · '}Flux {formatPct(mobility.signal_flux_rate || 0)}
+                                        </em>
+                                    </>
+                                )}
+                            </Link>
+                        </div>
                     </div>
                 </section>
             )}
@@ -796,6 +828,223 @@ export default function Dashboard() {
 
                 .crisis-strip-card {
                     margin-bottom: var(--spacing-xl);
+                }
+
+                .dashboard-live-console {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+                    gap: var(--spacing-xl);
+                    margin-bottom: var(--spacing-2xl);
+                    padding: var(--spacing-xl) 0;
+                    border-top: 1px solid var(--border-color);
+                    border-bottom: 1px solid var(--border-color);
+                }
+
+                .dashboard-live-main,
+                .dashboard-live-panel,
+                .dashboard-signal-panel {
+                    min-width: 0;
+                }
+
+                .dashboard-live-head,
+                .dashboard-panel-head {
+                    display: flex;
+                    justify-content: space-between;
+                    gap: var(--spacing-md);
+                    align-items: flex-start;
+                    margin-bottom: var(--spacing-lg);
+                }
+
+                .dashboard-live-head p,
+                .dashboard-panel-head p {
+                    margin: 0;
+                    color: var(--text-secondary);
+                    font-size: 0.88rem;
+                    line-height: 1.5;
+                }
+
+                .dashboard-live-skeletons {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: var(--spacing-md);
+                    margin-bottom: var(--spacing-lg);
+                }
+
+                .dashboard-live-vitals {
+                    display: grid;
+                    grid-template-columns: repeat(5, minmax(0, 1fr));
+                    margin-bottom: var(--spacing-xl);
+                    border-top: 1px solid var(--border-color);
+                    border-bottom: 1px solid var(--border-color);
+                }
+
+                .dashboard-live-vital {
+                    min-width: 0;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.35rem;
+                    padding: var(--spacing-md);
+                    border-right: 1px solid var(--border-color);
+                    color: inherit;
+                    text-decoration: none;
+                }
+
+                .dashboard-live-vital:last-child {
+                    border-right: 0;
+                }
+
+                .dashboard-live-vital:hover {
+                    background: var(--bg-card-hover);
+                }
+
+                .dashboard-live-vital span,
+                .dashboard-resource-row span {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    color: var(--text-muted);
+                    font-size: 0.72rem;
+                    font-weight: 600;
+                    letter-spacing: 0.06em;
+                    line-height: 1.35;
+                    text-transform: uppercase;
+                }
+
+                .dashboard-live-vital strong {
+                    color: var(--text-primary);
+                    font-size: 1.65rem;
+                    line-height: 1.05;
+                }
+
+                .dashboard-live-vital em {
+                    color: var(--text-secondary);
+                    font-size: 0.8rem;
+                    font-style: normal;
+                    line-height: 1.35;
+                }
+
+                .dashboard-live-vital.attention strong {
+                    color: var(--accent-orange);
+                }
+
+                .dashboard-resource-ledger {
+                    min-width: 0;
+                }
+
+                .dashboard-ledger-head {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    gap: var(--spacing-md);
+                    margin-bottom: var(--spacing-sm);
+                }
+
+                .dashboard-ledger-head span {
+                    color: var(--text-muted);
+                    font-size: 0.76rem;
+                    font-weight: 600;
+                    letter-spacing: 0.07em;
+                    text-transform: uppercase;
+                }
+
+                .dashboard-ledger-head a {
+                    color: var(--text-secondary);
+                    font-size: 0.82rem;
+                    font-weight: 600;
+                }
+
+                .dashboard-resource-list {
+                    border-top: 1px solid var(--border-color);
+                    border-bottom: 1px solid var(--border-color);
+                }
+
+                .dashboard-resource-row {
+                    min-width: 0;
+                    display: grid;
+                    grid-template-columns: minmax(120px, 0.8fr) minmax(120px, 0.8fr) 4rem minmax(140px, 1fr);
+                    align-items: center;
+                    gap: var(--spacing-md);
+                    padding: var(--spacing-md) 0;
+                    border-bottom: 1px solid var(--border-color);
+                    color: inherit;
+                    text-decoration: none;
+                }
+
+                .dashboard-resource-row:last-child {
+                    border-bottom: 0;
+                }
+
+                .dashboard-resource-row:hover {
+                    background: rgba(255, 255, 255, 0.025);
+                }
+
+                .dashboard-resource-row strong {
+                    color: var(--text-primary);
+                    font-size: 0.94rem;
+                }
+
+                .dashboard-resource-row em {
+                    color: var(--text-secondary);
+                    font-size: 0.82rem;
+                    font-style: normal;
+                    text-align: right;
+                }
+
+                .dashboard-resource-row.critical em,
+                .dashboard-resource-row.low em {
+                    color: var(--accent-orange);
+                }
+
+                .dashboard-resource-track {
+                    height: 0.45rem;
+                    overflow: hidden;
+                    border-radius: var(--radius-full);
+                    background: rgba(255, 255, 255, 0.08);
+                }
+
+                .dashboard-resource-fill {
+                    height: 100%;
+                    border-radius: inherit;
+                    background: var(--text-muted);
+                }
+
+                .dashboard-resource-fill.food {
+                    background: var(--accent-green);
+                }
+
+                .dashboard-resource-fill.energy {
+                    background: #60a5fa;
+                }
+
+                .dashboard-resource-fill.materials {
+                    background: #c084fc;
+                }
+
+                .dashboard-secondary-ledger {
+                    display: grid;
+                    grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.2fr);
+                    gap: var(--spacing-xl);
+                    margin-bottom: var(--spacing-2xl);
+                    padding-top: var(--spacing-xl);
+                    border-top: 1px solid var(--border-color);
+                }
+
+                .dashboard-secondary-ledger .dashboard-signal-panel {
+                    margin-bottom: 0;
+                    padding-top: 0;
+                    border-top: 0;
+                }
+
+                .dashboard-secondary-ledger .dashboard-signal-grid {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }
+
+                .dashboard-secondary-ledger .dashboard-signal-row:nth-child(2n) {
+                    border-right: 0;
+                }
+
+                .dashboard-secondary-ledger .dashboard-signal-row:nth-child(n + 3) {
+                    border-top: 1px solid var(--border-color);
                 }
 
                 .strip-meta {
@@ -990,6 +1239,36 @@ export default function Dashboard() {
                 @media (max-width: 768px) {
                     .resource-grid {
                         grid-template-columns: 1fr;
+                    }
+
+                    .dashboard-live-console,
+                    .dashboard-secondary-ledger {
+                        grid-template-columns: 1fr;
+                    }
+
+                    .dashboard-live-vitals {
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                    }
+
+                    .dashboard-live-vital:nth-child(2n) {
+                        border-right: 0;
+                    }
+
+                    .dashboard-live-vital:nth-child(n + 3) {
+                        border-top: 1px solid var(--border-color);
+                    }
+
+                    .dashboard-resource-row {
+                        grid-template-columns: minmax(0, 1fr) auto;
+                        gap: var(--spacing-sm);
+                    }
+
+                    .dashboard-resource-row em {
+                        text-align: left;
+                    }
+
+                    .dashboard-resource-track {
+                        grid-column: 1 / -1;
                     }
 
                     .dashboard-scope-note {
