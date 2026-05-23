@@ -540,6 +540,8 @@ export default function WatchReplay() {
   const activity = watchData?.activity || {}
   const runSelectionLoading = archiveLoading || overviewLoading
   const unavailableError = cleanRunId || runSelectionLoading ? '' : 'No active or completed public run is available for the watch board.'
+  const runStateLabel = selectedRunIsLive ? 'Active run' : 'Completed run'
+  const runContextLabel = selectedRunIsLive ? 'Live now' : (runSchedule?.label || 'Completed run')
 
   useEffect(() => {
     if (!cleanRunId || loading || error) return
@@ -725,9 +727,9 @@ export default function WatchReplay() {
 
       {cleanRunId && !loading && !error && watchData && (
         <>
-          <section className="watch-hero" aria-label="Watch replay run summary">
-            <div className="watch-hero-copy">
-              <span>{selectedRunIsLive ? 'Live now' : (runSchedule?.label || 'Completed run')} · {runSchedule?.track || 'Public run'}</span>
+          <section className="watch-instrument-header" aria-label="Watch replay run summary">
+            <div className="watch-instrument-copy">
+              <span>{runStateLabel} · {runSchedule?.track || 'Public run'}</span>
               <h2>{runSchedule?.declaredQuestion || 'Completed run map'}</h2>
               <p>
                 {selectedRunIsLive
@@ -735,11 +737,21 @@ export default function WatchReplay() {
                   : (runSchedule?.claimBoundary || 'Review this board as a navigation surface before drawing conclusions.')}
               </p>
             </div>
-            <div className="watch-window">
-              <MapIcon size={18} />
-              <div>
-                <span>{formatDurationLabel(window.start, window.end)}</span>
-                <strong>{formatTimestamp(window.start)} to {formatTimestamp(window.end)}</strong>
+            <div className="watch-instrument-facts">
+              <div className="watch-run-state">
+                <span>{runContextLabel}</span>
+                <strong>{cleanRunId}</strong>
+              </div>
+              <div className="watch-window">
+                <MapIcon size={18} />
+                <div>
+                  <span>{formatDurationLabel(window.start, window.end)}</span>
+                  <strong>{formatTimestamp(window.start)} to {formatTimestamp(window.end)}</strong>
+                </div>
+              </div>
+              <div className="watch-run-state">
+                <span>Board signal</span>
+                <strong>{formatNumber(visibleMoments.length)} linked moments · {spikeBuckets.length} spikes</strong>
               </div>
             </div>
           </section>
@@ -818,124 +830,146 @@ export default function WatchReplay() {
                   )
                 })}
             </div>
-            <div
-              className="watch-density-bars"
-              style={{ gridTemplateColumns: `repeat(${Math.max(1, displayBuckets.length)}, minmax(10px, 1fr))` }}
-            >
-              {displayBuckets.map((bucket) => {
-                const count = getBucketMomentCount(bucket)
-                const representative = bucket.display_representative || bucket.representative
-                const lane = bucket.display_lane || (representative
-                  ? getEventLane(representative)
-                  : normalizeLaneKey(bucket.dominant_category))
-                const height = count > 0 ? Math.max(16, Math.round((count / maxBucketCount) * 110)) : 4
-                return (
-                  <button
-                    key={`${bucket.index}-${bucket.bucket_start}`}
-                    type="button"
-                    className={`watch-density-bar lane-${lane} ${selectedWindow?.key === getBucketKey(bucket) ? 'active' : ''}`}
-                    onClick={() => handleBucketSelect(bucket)}
-                    aria-pressed={selectedWindow?.key === getBucketKey(bucket)}
-                    title={`${count} ${selectedLaneFilter ? `${LANE_META[selectedLaneFilter]?.label || 'focused'} ` : ''}moment${count === 1 ? '' : 's'} near ${formatTimeOnly(bucket.bucket_start)}`}
-                    aria-label={`Select ${count} ${selectedLaneFilter ? `${LANE_META[selectedLaneFilter]?.label || 'focused'} ` : ''}event timeline bucket near ${formatTimeOnly(bucket.bucket_start)}`}
-                    disabled={count <= 0}
-                  >
-                    <span style={{ height: `${height}px` }} />
-                    <em>{count > 0 ? count : ''}</em>
-                  </button>
-                )
-              })}
-            </div>
-            <div className="watch-density-axis">
-              <span>{formatTimeOnly(window.start)}</span>
-              <span>{formatTimeOnly(window.end)}</span>
+            <div className="watch-timeline-workbench">
+              <div className="watch-timeline-main">
+                <div
+                  className="watch-density-bars"
+                  style={{ gridTemplateColumns: `repeat(${Math.max(1, displayBuckets.length)}, minmax(10px, 1fr))` }}
+                >
+                  {displayBuckets.map((bucket) => {
+                    const count = getBucketMomentCount(bucket)
+                    const representative = bucket.display_representative || bucket.representative
+                    const lane = bucket.display_lane || (representative
+                      ? getEventLane(representative)
+                      : normalizeLaneKey(bucket.dominant_category))
+                    const height = count > 0 ? Math.max(16, Math.round((count / maxBucketCount) * 110)) : 4
+                    return (
+                      <button
+                        key={`${bucket.index}-${bucket.bucket_start}`}
+                        type="button"
+                        className={`watch-density-bar lane-${lane} ${selectedWindow?.key === getBucketKey(bucket) ? 'active' : ''}`}
+                        onClick={() => handleBucketSelect(bucket)}
+                        aria-pressed={selectedWindow?.key === getBucketKey(bucket)}
+                        title={`${count} ${selectedLaneFilter ? `${LANE_META[selectedLaneFilter]?.label || 'focused'} ` : ''}moment${count === 1 ? '' : 's'} near ${formatTimeOnly(bucket.bucket_start)}`}
+                        aria-label={`Select ${count} ${selectedLaneFilter ? `${LANE_META[selectedLaneFilter]?.label || 'focused'} ` : ''}event timeline bucket near ${formatTimeOnly(bucket.bucket_start)}`}
+                        disabled={count <= 0}
+                      >
+                        <span style={{ height: `${height}px` }} />
+                        <em>{count > 0 ? count : ''}</em>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="watch-density-axis">
+                  <span>{formatTimeOnly(window.start)}</span>
+                  <span>{formatTimeOnly(window.end)}</span>
+                </div>
+              </div>
+
+              {selectedWindow ? (
+                <aside className="watch-selected-window" aria-label="Selected window">
+                  <div className="watch-selected-window-head">
+                    <div>
+                      <span>Selected window</span>
+                      <strong>{formatTimestamp(selectedWindow.start)} to {formatTimestamp(selectedWindow.end)}</strong>
+                      <em>
+                        Spike {selectedSpikeIndex >= 0 ? selectedSpikeIndex + 1 : '?'} of {spikeBuckets.length}
+                        {selectedLaneFilter ? ` · ${LANE_META[selectedLaneFilter]?.label || 'Focused lane'}` : ''}
+                      </em>
+                    </div>
+                    <div className="watch-window-controls" role="group" aria-label="Selected spike navigation">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => selectAdjacentSpike(-1)}
+                        disabled={selectedSpikeIndex <= 0}
+                      >
+                        <ArrowLeft size={14} />
+                        Previous spike
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => selectAdjacentSpike(1)}
+                        disabled={selectedSpikeIndex < 0 || selectedSpikeIndex >= spikeBuckets.length - 1}
+                      >
+                        <ArrowRight size={14} />
+                        Next spike
+                      </button>
+                      <button type="button" className="btn btn-secondary" onClick={clearSelectedWindow}>
+                        <CircleX size={14} />
+                        Clear selection
+                      </button>
+                    </div>
+                  </div>
+                  <div className="watch-selected-window-meta">
+                    <div>
+                      <span>Dominant lane</span>
+                      <strong>{LANE_META[selectedWindow.dominantLane]?.label || 'Other Signals'}</strong>
+                    </div>
+                    <div>
+                      <span>Linked moments</span>
+                      <strong>{formatNumber(selectedWindow.count)}</strong>
+                    </div>
+                    <div>
+                      <span>Replay target</span>
+                      <strong>{selectedWindow.topMoments[0] ? formatEventTitle(selectedWindow.topMoments[0]) : 'Window overview'}</strong>
+                    </div>
+                  </div>
+                  <div className="watch-selected-moments">
+                    {selectedWindow.topMoments.length === 0 && (
+                      <p>No linked non-routine moments in this selected window.</p>
+                    )}
+                    {selectedWindow.topMoments.map((moment) => {
+                      const eventId = getEventId(moment)
+                      return (
+                        <div key={eventId} className="watch-selected-moment">
+                          <span>{LANE_META[getEventLane(moment)]?.label || 'Other Signals'} · {formatTimestamp(getEventTime(moment))}</span>
+                          <strong>{formatEventTitle(moment)}</strong>
+                          <div>
+                            <Link
+                              className="btn btn-secondary"
+                              to={getReplayHref(cleanRunId, eventId)}
+                              onClick={() => trackSelectedMomentClick('replay', moment)}
+                            >
+                              <TimerReset size={14} />
+                              Replay
+                            </Link>
+                            <Link
+                              className="btn btn-secondary"
+                              to={getEvidenceHref(cleanRunId, eventId)}
+                              onClick={() => trackSelectedMomentClick('evidence', moment)}
+                            >
+                              <FileSearch size={14} />
+                              Evidence
+                            </Link>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </aside>
+              ) : (
+                <aside className="watch-selection-prompt" aria-label="Window selection prompt">
+                  <span>Selection</span>
+                  <strong>Choose a spike to inspect the source trail.</strong>
+                  <p>
+                    Use the timeline bars or jump to the largest spike. This panel will show the selected window, nearby moments, and Replay/Evidence exits.
+                  </p>
+                  {largestSpikeBucket && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={jumpToLargestSpike}
+                    >
+                      <BarChart3 size={14} />
+                      Largest spike: {largestSpikeCount}
+                    </button>
+                  )}
+                </aside>
+              )}
             </div>
           </section>
-
-          {selectedWindow && (
-            <section className="watch-selected-window" aria-label="Selected window">
-              <div className="watch-selected-window-head">
-                <div>
-                  <span>Selected window</span>
-                  <strong>{formatTimestamp(selectedWindow.start)} to {formatTimestamp(selectedWindow.end)}</strong>
-                  <em>
-                    Spike {selectedSpikeIndex >= 0 ? selectedSpikeIndex + 1 : '?'} of {spikeBuckets.length}
-                    {selectedLaneFilter ? ` · ${LANE_META[selectedLaneFilter]?.label || 'Focused lane'}` : ''}
-                  </em>
-                </div>
-                <div className="watch-window-controls" role="group" aria-label="Selected spike navigation">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => selectAdjacentSpike(-1)}
-                    disabled={selectedSpikeIndex <= 0}
-                  >
-                    <ArrowLeft size={14} />
-                    Previous spike
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => selectAdjacentSpike(1)}
-                    disabled={selectedSpikeIndex < 0 || selectedSpikeIndex >= spikeBuckets.length - 1}
-                  >
-                    <ArrowRight size={14} />
-                    Next spike
-                  </button>
-                  <button type="button" className="btn btn-secondary" onClick={clearSelectedWindow}>
-                    <CircleX size={14} />
-                    Clear selection
-                  </button>
-                </div>
-              </div>
-              <div className="watch-selected-window-meta">
-                <div>
-                  <span>Dominant lane</span>
-                  <strong>{LANE_META[selectedWindow.dominantLane]?.label || 'Other Signals'}</strong>
-                </div>
-                <div>
-                  <span>Linked moments</span>
-                  <strong>{formatNumber(selectedWindow.count)}</strong>
-                </div>
-                <div>
-                  <span>Replay target</span>
-                  <strong>{selectedWindow.topMoments[0] ? formatEventTitle(selectedWindow.topMoments[0]) : 'Window overview'}</strong>
-                </div>
-              </div>
-              <div className="watch-selected-moments">
-                {selectedWindow.topMoments.length === 0 && (
-                  <p>No linked non-routine moments in this selected window.</p>
-                )}
-                {selectedWindow.topMoments.map((moment) => {
-                  const eventId = getEventId(moment)
-                  return (
-                    <div key={eventId} className="watch-selected-moment">
-                      <span>{LANE_META[getEventLane(moment)]?.label || 'Other Signals'} · {formatTimestamp(getEventTime(moment))}</span>
-                      <strong>{formatEventTitle(moment)}</strong>
-                      <div>
-                        <Link
-                          className="btn btn-secondary"
-                          to={getReplayHref(cleanRunId, eventId)}
-                          onClick={() => trackSelectedMomentClick('replay', moment)}
-                        >
-                          <TimerReset size={14} />
-                          Replay
-                        </Link>
-                        <Link
-                          className="btn btn-secondary"
-                          to={getEvidenceHref(cleanRunId, eventId)}
-                          onClick={() => trackSelectedMomentClick('evidence', moment)}
-                        >
-                          <FileSearch size={14} />
-                          Evidence
-                        </Link>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
-          )}
 
           <section className="watch-lanes" aria-label="Major category lanes">
             <div className="watch-section-head">

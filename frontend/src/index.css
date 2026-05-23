@@ -15,15 +15,15 @@
   --bg-primary: #05050a;
   --bg-secondary: #0a0a10;
   --bg-tertiary: #0f0f16;
-  --bg-card: rgba(255, 255, 255, 0.02);
-  --bg-card-hover: rgba(255, 255, 255, 0.05);
-  --bg-glass: rgba(255, 255, 255, 0.03);
-  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-card: rgba(255, 255, 255, 0.012);
+  --bg-card-hover: rgba(255, 255, 255, 0.028);
+  --bg-glass: rgba(255, 255, 255, 0.022);
+  --bg-hover: rgba(255, 255, 255, 0.035);
 
   /* Borders - Subtle glass-like edges */
   --border-color: rgba(255, 255, 255, 0.06);
   --border-light: rgba(255, 255, 255, 0.10);
-  --border-glow: rgba(255, 255, 255, 0.15);
+  --border-glow: rgba(255, 255, 255, 0.10);
 
   /* Text - High contrast whites and soft grays */
   --text-primary: #f5f5f7;
@@ -34,7 +34,7 @@
   /* Accent Colors - Monochrome with subtle distinction */
   --accent-primary: #ffffff;
   --accent-secondary: #c8c8d0;
-  --accent-glow: rgba(255, 255, 255, 0.15);
+  --accent-glow: rgba(255, 255, 255, 0.10);
   --accent-blue: #93c5fd;
   --accent-green: #86efac;
   --accent-orange: #fbbf24;
@@ -66,16 +66,16 @@
   --personality-neutral: #a0a0a8;
 
   /* Gradients - Elegant silver tones */
-  --gradient-primary: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 100%);
-  --gradient-glow: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, transparent 100%);
-  --gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
+  --gradient-primary: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.012) 100%);
+  --gradient-glow: linear-gradient(135deg, rgba(255, 255, 255, 0.028) 0%, transparent 100%);
+  --gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, rgba(255, 255, 255, 0.004) 100%);
 
   /* Shadows - Soft glows */
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.6);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.7);
-  --shadow-glow: 0 0 30px rgba(255, 255, 255, 0.08);
-  --shadow-glow-strong: 0 0 40px rgba(255, 255, 255, 0.12);
+  --shadow-glow: 0 0 12px rgba(255, 255, 255, 0.018);
+  --shadow-glow-strong: 0 0 18px rgba(255, 255, 255, 0.025);
 
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -272,23 +272,28 @@ a:hover {
   padding: 0.625rem 1.25rem;
   font-size: 0.875rem;
   font-weight: 500;
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .btn-primary {
-  background: var(--accent-primary);
-  color: var(--bg-primary);
+  background: rgba(255, 255, 255, 0.095);
+  border-color: var(--border-light);
+  color: var(--text-primary);
 }
 
 .btn-primary:hover {
-  background: var(--accent-secondary);
+  background: rgba(255, 255, 255, 0.13);
+  border-color: var(--border-glow);
 }
 
 .btn-secondary {
-  background: var(--bg-tertiary);
+  background: transparent;
   color: var(--text-primary);
   border: 1px solid var(--border-color);
 }
