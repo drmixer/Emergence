@@ -32,7 +32,7 @@ describe('FirstTimeOnboarding', () => {
         expect(shouldAutoOpenOnboarding('/glossary')).toBe(false)
     })
 
-    it('frames Dashboard as the Run Console and separates replay from evidence', () => {
+    it('starts viewers with Archive and separates replay from evidence', () => {
         render(
             <MemoryRouter initialEntries={['/dashboard']}>
                 <FirstTimeOnboarding />
@@ -40,10 +40,11 @@ describe('FirstTimeOnboarding', () => {
         )
 
         expect(screen.getByRole('dialog', { name: /How to read Emergence/i })).toBeInTheDocument()
-        expect(screen.getByText(/Run Console:/i)).toBeInTheDocument()
+        expect(screen.getByText(/Archive:/i)).toBeInTheDocument()
         expect(screen.getByText(/Watch Map and Replay:/i)).toBeInTheDocument()
-        expect(screen.getByText(/Archive and Evidence:/i)).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /Open Run Console/i })).toBeInTheDocument()
+        expect(screen.getByText(/Evidence:/i)).toBeInTheDocument()
+        expect(screen.getByText(/Calendar and Field Notes:/i)).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Start with Archive/i })).toBeInTheDocument()
         expect(screen.queryByText(/Current Run:/i)).not.toBeInTheDocument()
     })
 })

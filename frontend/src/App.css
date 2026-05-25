@@ -77,7 +77,22 @@
   padding: var(--spacing-lg);
   display: flex;
   flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
   gap: var(--spacing-xs);
+}
+
+.nav-section-label {
+  padding: 0 var(--spacing-lg) var(--spacing-xs);
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .nav-item {
@@ -598,7 +613,7 @@ tr:last-child td {
   padding: var(--spacing-md);
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-lg);
 }
 
 .mobile-nav-divider {

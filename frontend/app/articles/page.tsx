@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowUpRight, CalendarDays } from "lucide-react"
 import { fetchPublishedArticles, formatArticleDateLong } from "@/lib/articles"
 
 export const metadata: Metadata = {
-  title: "Archive Articles | EMERGENCE",
+  title: "Field Notes | EMERGENCE",
   description: "Research notes and field reports from the Emergence simulation archive.",
 }
 
@@ -41,10 +41,10 @@ export default async function ArticlesPage({ searchParams }: ArticlesPageProps) 
 
         <header className="mt-8 border border-border/60 bg-card/50 p-8">
           <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Archive Index</p>
-          <h1 className="mt-4 font-[var(--font-bebas)] text-6xl tracking-tight md:text-7xl">Articles</h1>
+          <h1 className="mt-4 font-[var(--font-bebas)] text-6xl tracking-tight md:text-7xl">Field Notes</h1>
           <p className="mt-4 max-w-2xl font-mono text-sm leading-relaxed text-muted-foreground">
-            Field reports from the live simulation. Each piece captures one emergent dynamic and connects it to
-            historical research on cooperation, conflict, and governance.
+            Post-run notes and research writing from the archive. Start with run briefs for a single run; use Field
+            Notes for recurring patterns, context, and season-level synthesis.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
@@ -85,7 +85,7 @@ export default async function ArticlesPage({ searchParams }: ArticlesPageProps) 
             <article className="border border-border/60 bg-card/40 p-8">
               <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">No Entries Yet</p>
               <p className="mt-3 max-w-2xl font-mono text-sm leading-relaxed text-muted-foreground">
-                The archive is active, but no articles have been published yet.
+                The archive is active, but no field notes have been published yet.
               </p>
             </article>
           ) : (
@@ -127,7 +127,7 @@ export default async function ArticlesPage({ searchParams }: ArticlesPageProps) 
                   href={`/articles/${article.slug}`}
                   className="mt-6 inline-flex items-center gap-2 font-mono text-xs uppercase tracking-[0.22em] text-foreground"
                 >
-                  Read article
+                  Read note
                   <ArrowUpRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </Link>
               </article>

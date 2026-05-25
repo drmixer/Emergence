@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, BookOpen, ChevronRight, Eye, FileSearch, Sparkles, X } from 'lucide-react'
+import { CalendarDays, ChevronRight, Eye, FileSearch, Sparkles, X } from 'lucide-react'
 import { trackKpiEvent, trackKpiEventOnce } from '../services/kpiAnalytics'
 import './FirstTimeOnboarding.css'
 
@@ -48,7 +48,7 @@ export default function FirstTimeOnboarding() {
         if (reason === 'completed') {
             trackKpiEvent('onboarding_completed', {
                 surface: 'onboarding_modal',
-                target: 'open_dashboard',
+                target: 'open_archive',
                 metadata: { version: 'v1' },
             })
         } else if (reason === 'glossary') {
@@ -70,7 +70,7 @@ export default function FirstTimeOnboarding() {
 
     const handleStart = () => {
         close('completed')
-        navigate('/dashboard')
+        navigate('/archive')
     }
 
     if (!open) return null
@@ -95,13 +95,13 @@ export default function FirstTimeOnboarding() {
 
                 <h3 id="onboarding-title">How to read Emergence in under a minute</h3>
                 <p className="onboarding-copy">
-                    Runs are live simulations. Start with the brief or recap, then use the map, replay, and source evidence.
+                    Runs are live simulations. Start with the latest brief, then use the map, replay, and source evidence.
                 </p>
 
                 <ul className="onboarding-steps">
                     <li>
-                        <Activity size={14} />
-                        <span><strong>Run Console:</strong> live or idle operations state, latest closeout, and the next declared run.</span>
+                        <FileSearch size={14} />
+                        <span><strong>Archive:</strong> choose a completed run and read the brief first.</span>
                     </li>
                     <li>
                         <Eye size={14} />
@@ -109,11 +109,11 @@ export default function FirstTimeOnboarding() {
                     </li>
                     <li>
                         <FileSearch size={14} />
-                        <span><strong>Archive and Evidence:</strong> completed run chooser, reports, and source audit trail.</span>
+                        <span><strong>Evidence:</strong> source audit trail for claims, not the normal first stop.</span>
                     </li>
                     <li>
-                        <BookOpen size={14} />
-                        <span><strong>Glossary:</strong> quick definitions for run/season/epoch terms.</span>
+                        <CalendarDays size={14} />
+                        <span><strong>Calendar and Field Notes:</strong> run context, schedule, and post-run writing.</span>
                     </li>
                 </ul>
 
@@ -122,7 +122,7 @@ export default function FirstTimeOnboarding() {
                         Skip
                     </button>
                     <button type="button" className="btn btn-primary" onClick={handleStart}>
-                        Open Run Console
+                        Start with Archive
                         <ChevronRight size={14} />
                     </button>
                 </div>

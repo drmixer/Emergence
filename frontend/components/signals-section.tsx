@@ -147,7 +147,7 @@ export function SignalsSection() {
 
       {/* Section header */}
       <div ref={headerRef} className="mb-16 pr-6 md:pr-12">
-        <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">01 / Articles</span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">01 / Field Notes</span>
         <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">FROM THE ARCHIVE</h2>
       </div>
 
@@ -164,7 +164,7 @@ export function SignalsSection() {
           <article data-signal-card className="w-80 flex-shrink-0 border border-border/60 bg-card/50 p-8">
             <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">No Entries Yet</p>
             <p className="mt-4 font-mono text-xs leading-relaxed text-muted-foreground">
-              The archive is active, but no articles have been published yet.
+              The archive is active, but no field notes have been published yet.
             </p>
           </article>
         ) : (

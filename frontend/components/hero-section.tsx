@@ -196,6 +196,14 @@ export function HeroSection() {
   }, [quoteIndex, quotes, simulationActive])
 
   const isIdle = !simulationActive
+  const hasCompletedRun = Boolean(lastCompletedRunId)
+  const heroCtaHref = !isIdle
+    ? "/watch"
+    : hasCompletedRun
+      ? `/runs/${encodeURIComponent(lastCompletedRunId)}/replay?mode=story60`
+      : "/calendar"
+  const heroCtaLabel = !isIdle ? "Open Watch Map" : hasCompletedRun ? "Read Latest Brief" : "Run Calendar"
+  const heroCtaTarget = !isIdle ? "watch_map" : hasCompletedRun ? "latest_brief" : "calendar"
 
   return (
     <section
@@ -276,7 +284,7 @@ export function HeroSection() {
 
         <div className="mt-6 grid max-w-4xl gap-4 border border-foreground/30 bg-foreground/5 p-4 md:grid-cols-[1fr_auto] md:items-center">
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Watch Live</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Start Here</p>
             <h3 className="mt-2 font-[var(--font-bebas)] text-5xl leading-none tracking-tight">
               {isIdle ? "Simulation Idle" : "Simulation Active"}
             </h3>
@@ -297,17 +305,17 @@ export function HeroSection() {
             </p>
           </div>
           <Link
-            href={isIdle ? "/calendar" : "/dashboard"}
+            href={heroCtaHref}
             onClick={() =>
               trackKpiEvent("landing_run_click", {
                 surface: "next_hero_cta",
-                target: isIdle ? "calendar" : "dashboard",
+                target: heroCtaTarget,
               })
             }
             className="inline-flex items-center gap-3 border border-foreground bg-foreground px-6 py-3 font-mono text-xs uppercase tracking-widest text-background transition-all duration-200 hover:translate-x-0.5"
           >
-            {isIdle ? <CalendarDays className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            {isIdle ? "Run Calendar" : "Watch Live"}
+            {isIdle && !hasCompletedRun ? <CalendarDays className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {heroCtaLabel}
             <ArrowUpRight className="h-4 w-4" />
           </Link>
         </div>
@@ -324,22 +332,14 @@ export function HeroSection() {
             href="/articles"
             className="font-mono text-xs uppercase tracking-widest text-muted-foreground transition-colors duration-200 hover:text-foreground"
           >
-            Articles
+            Field Notes
           </Link>
-          {lastCompletedRunId && (
-            <Link
-              href={`/runs/${encodeURIComponent(lastCompletedRunId)}`}
-              className="font-mono text-xs uppercase tracking-widest text-muted-foreground transition-colors duration-200 hover:text-foreground"
-            >
-              Latest Run Evidence
-            </Link>
-          )}
-          <a
-            href="#work"
+          <Link
+            href="/calendar"
             className="font-mono text-xs uppercase tracking-widest text-muted-foreground transition-colors duration-200 hover:text-foreground"
           >
-            Explore Pillars
-          </a>
+            Calendar
+          </Link>
         </div>
       </div>
 

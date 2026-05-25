@@ -280,9 +280,11 @@ export default function Landing() {
             ? IDLE_QUOTES
             : TEASER_QUOTES
     const currentQuote = activeQuotes[currentQuoteIndex % activeQuotes.length]
-    const ctaHref = isIdle && lastCompletedRunId
-        ? getStoryReplayHref(lastCompletedRunId)
-        : '/dashboard'
+    const ctaHref = runPhase === 'live'
+        ? '/watch'
+        : isIdle && lastCompletedRunId
+            ? getStoryReplayHref(lastCompletedRunId)
+            : '/calendar'
     const latestReplayHref = isIdle && lastCompletedRunId
         ? getStoryReplayHref(lastCompletedRunId)
         : getStoryReplayHref()
@@ -430,7 +432,11 @@ export default function Landing() {
                     onClick={() => {
                         trackKpiEvent('landing_run_click', {
                             surface: 'vite_landing_cta',
-                            target: isIdle && lastCompletedRunId ? 'latest_run' : 'dashboard',
+                            target: runPhase === 'live'
+                                ? 'watch_map'
+                                : isIdle && lastCompletedRunId
+                                    ? 'latest_brief'
+                                    : 'calendar',
                         })
                         navigate(ctaHref)
                     }}
@@ -439,16 +445,22 @@ export default function Landing() {
                     <Play size={20} />
                     <span>
                         {isPreLaunch
-                            ? 'Preview Dashboard'
+                            ? 'Run Calendar'
                             : isIdle
-                                ? 'Review Latest Run'
-                                : 'Watch Live'}
+                                ? 'Read Latest Brief'
+                                : 'Open Watch Map'}
                     </span>
                 </button>
 
                 <div className="hero-secondary-actions" aria-label="Public reading links">
+                    <a className="hero-secondary-link" href="/watch">
+                        Watch Map
+                    </a>
                     <a className="hero-secondary-link" href="/articles">
-                        Articles
+                        Field Notes
+                    </a>
+                    <a className="hero-secondary-link" href="/calendar">
+                        Calendar
                     </a>
                 </div>
 
@@ -623,7 +635,7 @@ export default function Landing() {
                         <span>•</span>
                         <a href="https://x.com/emergencequest" target="_blank" rel="noopener noreferrer">X (Twitter)</a>
                         <span>•</span>
-                        <a href="/articles">Articles</a>
+                        <a href="/articles">Field Notes</a>
                         <span>•</span>
                         <a onClick={() => navigate('/about')}>About</a>
                         <span>•</span>

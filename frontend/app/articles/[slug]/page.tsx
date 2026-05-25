@@ -16,7 +16,7 @@ export async function generateMetadata({ params }: ArticlePageProps): Promise<Me
 
   if (!article) {
     return {
-      title: "Article Not Found | EMERGENCE",
+      title: "Field Note Not Found | EMERGENCE",
     }
   }
 
@@ -43,11 +43,11 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
           className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Archive
+          Back to Field Notes
         </Link>
 
         <header className="mt-8 border-t border-border/50 pt-8">
-          <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Archive Field Report</p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Archive Field Note</p>
           <h1 className="mt-4 font-[var(--font-bebas)] text-5xl leading-none tracking-tight md:text-6xl">{article.title}</h1>
           <div className="mt-6 inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
             <CalendarDays className="h-3.5 w-3.5" />

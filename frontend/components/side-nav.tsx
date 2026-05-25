@@ -9,7 +9,7 @@ const navItems = [
   { id: "canary", label: "Watch" },
   { id: "work", label: "Dimensions" },
   { id: "principles", label: "Axioms" },
-  { id: "signals", label: "Articles" },
+  { id: "signals", label: "Field Notes" },
   { id: "colophon", label: "Colophon" },
 ]
 

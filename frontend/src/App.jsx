@@ -18,6 +18,7 @@ import {
   TrendingUp,
   BookOpen,
   CalendarDays,
+  Newspaper,
 } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 
@@ -102,6 +103,43 @@ function syncAppIcons() {
   })
 }
 
+function NavigationItem({ item, onClick }) {
+  const { path, href, icon, label } = item
+  if (href) {
+    return (
+      <a href={href} className="nav-item" onClick={onClick}>
+        {createElement(icon, { size: 20 })}
+        <span>{label}</span>
+      </a>
+    )
+  }
+
+  return (
+    <NavLink
+      to={path}
+      className={({ isActive }) =>
+        `nav-item ${isActive ? 'active' : ''}`
+      }
+      end={path === '/dashboard'}
+      onClick={onClick}
+    >
+      {createElement(icon, { size: 20 })}
+      <span>{label}</span>
+    </NavLink>
+  )
+}
+
+function NavigationSection({ label, items, onClick }) {
+  return (
+    <div className="nav-section">
+      <div className="nav-section-label">{label}</div>
+      {items.map((item) => (
+        <NavigationItem key={item.path || item.href} item={item} onClick={onClick} />
+      ))}
+    </div>
+  )
+}
+
 function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const location = useLocation()
@@ -111,18 +149,34 @@ function App() {
     syncAppIcons()
   }, [])
 
-  const navItems = [
-    { path: '/dashboard', icon: Activity, label: 'Run Console' },
-    { path: '/agents', icon: Users, label: 'Agents' },
-    { path: '/messages', icon: MessageSquare, label: 'Messages' },
-    { path: '/network', icon: Share2, label: 'Network' },
-    { path: '/governance', icon: Scale, label: 'Governance' },
-    { path: '/resources', icon: Package, label: 'Resources' },
-    { path: '/calendar', icon: CalendarDays, label: 'Calendar' },
-    { path: '/watch', icon: Eye, label: 'Watch Map' },
-    { path: '/archive', icon: FileSearch, label: 'Archive' },
-    { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
-    { path: '/glossary', icon: BookOpen, label: 'Glossary' },
+  const navSections = [
+    {
+      label: 'Start Here',
+      items: [
+        { path: '/archive', icon: FileSearch, label: 'Archive' },
+        { path: '/watch', icon: Eye, label: 'Watch Map' },
+        { href: '/articles', icon: Newspaper, label: 'Field Notes' },
+        { path: '/calendar', icon: CalendarDays, label: 'Calendar' },
+      ],
+    },
+    {
+      label: 'Operations',
+      items: [
+        { path: '/dashboard', icon: Activity, label: 'Run Console' },
+      ],
+    },
+    {
+      label: 'Advanced',
+      items: [
+        { path: '/agents', icon: Users, label: 'Agents' },
+        { path: '/messages', icon: MessageSquare, label: 'Messages' },
+        { path: '/governance', icon: Scale, label: 'Governance' },
+        { path: '/resources', icon: Package, label: 'Resources' },
+        { path: '/network', icon: Share2, label: 'Network' },
+        { path: '/predictions', icon: TrendingUp, label: 'Predictions' },
+        { path: '/glossary', icon: BookOpen, label: 'Glossary' },
+      ],
+    },
   ]
 
   const handleNavClick = () => {
@@ -177,19 +231,13 @@ function App() {
             </a>
           </div>
           <div className="mobile-nav-items">
-            {navItems.map(({ path, icon, label }) => (
-              <NavLink
-                key={path}
-                to={path}
-                className={({ isActive }) =>
-                  `nav-item ${isActive ? 'active' : ''}`
-                }
-                end={path === '/dashboard'}
+            {navSections.map((section) => (
+              <NavigationSection
+                key={section.label}
+                label={section.label}
+                items={section.items}
                 onClick={handleNavClick}
-              >
-                {createElement(icon, { size: 20 })}
-                <span>{label}</span>
-              </NavLink>
+              />
             ))}
             <div className="mobile-nav-divider" />
             <a href="https://github.com/drmixer/Emergence" target="_blank" rel="noopener noreferrer" className="nav-item" onClick={handleNavClick}>
@@ -227,18 +275,12 @@ function App() {
             </div>
 
             <nav className="sidebar-nav">
-              {navItems.map(({ path, icon, label }) => (
-                <NavLink
-                  key={path}
-                  to={path}
-                  className={({ isActive }) =>
-                    `nav-item ${isActive ? 'active' : ''}`
-                  }
-                  end={path === '/dashboard'}
-                >
-                  {createElement(icon, { size: 20 })}
-                  <span>{label}</span>
-                </NavLink>
+              {navSections.map((section) => (
+                <NavigationSection
+                  key={section.label}
+                  label={section.label}
+                  items={section.items}
+                />
               ))}
             </nav>
 

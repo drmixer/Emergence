@@ -137,7 +137,7 @@ export function ColophonSection() {
                 href="/articles"
                 className="font-mono text-xs text-foreground/80 hover:text-foreground transition-colors duration-200"
               >
-                Articles
+                Field Notes
               </a>
             </li>
             <li>
