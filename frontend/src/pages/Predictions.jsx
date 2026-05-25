@@ -162,7 +162,7 @@ export default function Predictions() {
             })
 
             if (response.ok) {
-                setBetSuccess(`Bet placed! ${betAmount} EP on ${betPrediction.toUpperCase()}`)
+                setBetSuccess(`Pick placed: ${betAmount} EP on ${betPrediction.toUpperCase()}`)
                 // Refresh data
                 setTimeout(() => {
                     closeBetModal()
@@ -197,7 +197,7 @@ export default function Predictions() {
                     Prediction Market
                 </h1>
                 <p className="page-description">
-                    Audience-side prediction hooks over live run outcomes. Picks do not influence the simulation.
+                    Audience-side picks about what named agents will do next. Picks do not influence the simulation.
                 </p>
             </div>
 
@@ -214,7 +214,7 @@ export default function Predictions() {
                     <p>
                         {inactiveRun
                             ? 'Resolved markets remain available for review. New prediction hooks open when the next simulation starts.'
-                            : <>Each live hook resolves from public run evidence after the clock runs out: law passes, reserve shortfalls, deaths, and <GlossaryTooltip termKey="at-risk">at-risk</GlossaryTooltip> agent survival.</>}
+                            : <>Each live hook follows a named agent under visible pressure: aid requests, trades, proposal votes, and <GlossaryTooltip termKey="at-risk">at-risk</GlossaryTooltip> agent decisions.</>}
                     </p>
                 </div>
                 <span className="prediction-intro-note">Virtual EP only. No effect on agent incentives.</span>
@@ -233,7 +233,7 @@ export default function Predictions() {
                     <BarChart3 size={20} className="stat-icon" />
                     <div className="stat-content">
                         <span className="stat-value">{userStats.bets_made}</span>
-                        <span className="stat-label">Bets Made</span>
+                        <span className="stat-label">Picks Made</span>
                     </div>
                 </div>
                 <div className="stat-item">
@@ -273,7 +273,7 @@ export default function Predictions() {
                             title={inactiveRun ? 'Open markets return when a run is active' : undefined}
                         >
                             <Sparkles size={16} />
-                            Open Markets
+                            Open Predictions
                             <span className="count">{markets.filter(m => m.status === 'open').length}</span>
                         </button>
                         <button
@@ -300,7 +300,7 @@ export default function Predictions() {
                                     {activeTab === 'open' && inactiveRun
                                         ? 'Open markets return when a run is active.'
                                         : activeTab === 'open'
-                                            ? 'No high-quality live hooks are available yet. Markets open only when there is a concrete proposal, reserve risk, or survival risk to resolve.'
+                                            ? 'No high-quality live hooks are available yet. Predictions open only when there is a concrete agent decision, vote, aid request, or trade to resolve.'
                                             : 'No resolved markets found.'}
                                 </p>
                             </div>
@@ -310,6 +310,7 @@ export default function Predictions() {
                                 const isOpen = market.status === 'open'
                                 const yesPercent = (market.yes_probability * 100).toFixed(0)
                                 const noPercent = (100 - market.yes_probability * 100).toFixed(0)
+                                const contextText = market.description || market.why_this_matters || market.stake || 'This prediction is tied to a visible agent action in the current run.'
 
                                 return (
                                     <div
@@ -346,28 +347,45 @@ export default function Predictions() {
                                         </div>
 
                                         <div className="market-context">
+                                            {market.related_agent_label && (
+                                                <div className="market-context-row">
+                                                    <span>Agent</span>
+                                                    <p>{market.related_agent_label}</p>
+                                                </div>
+                                            )}
                                             <div className="market-context-row question">
-                                                <span>Question</span>
+                                                <span>Prediction</span>
                                                 <div>
                                                     <h3 className="market-title">{market.title}</h3>
-                                                    {market.description && (
-                                                        <p className="market-description">{market.description}</p>
-                                                    )}
                                                 </div>
                                             </div>
                                             <div className="market-context-row">
-                                                <span>Why watch</span>
-                                                <p>{market.why_this_matters || market.stake || 'This market tracks a visible run outcome that can change how viewers read the simulation.'}</p>
+                                                <span>Context</span>
+                                                <p>{contextText}</p>
                                             </div>
                                             <div className="market-context-row">
-                                                <span>How it resolves</span>
+                                                <span>Resolves from</span>
                                                 <p>{market.resolution_basis || 'Resolved after the run from public evidence and archived event data.'}</p>
                                             </div>
+                                            {!isOpen && market.resolution_summary && (
+                                                <div className="market-context-row">
+                                                    <span>Settled by</span>
+                                                    <p>{market.resolution_summary}</p>
+                                                </div>
+                                            )}
                                             <div className="market-context-row">
                                                 <span>Evidence</span>
-                                                {Array.isArray(market.evidence_links) && market.evidence_links.length > 0 ? (
+                                                {(market.resolution_evidence_href || (Array.isArray(market.evidence_links) && market.evidence_links.length > 0)) ? (
                                                     <div className="market-evidence">
-                                                        {market.evidence_links.map((link) => (
+                                                        {market.resolution_evidence_href && (
+                                                            <a
+                                                                href={market.resolution_evidence_href}
+                                                                onClick={(event) => event.stopPropagation()}
+                                                            >
+                                                                Resolution event
+                                                            </a>
+                                                        )}
+                                                        {(Array.isArray(market.evidence_links) ? market.evidence_links : []).map((link) => (
                                                             <a
                                                                 key={`${market.id}-${link.href}`}
                                                                 href={link.href}
@@ -399,11 +417,11 @@ export default function Predictions() {
                                             </div>
                                             <div className="bet-count">
                                                 <Users size={14} />
-                                                <span>{market.bet_count} bets</span>
+                                                <span>{market.bet_count} picks</span>
                                             </div>
                                             {isOpen && !inactiveRun && (
                                                 <button className="bet-btn">
-                                                    Place Bet <ChevronRight size={16} />
+                                                    Make Pick <ChevronRight size={16} />
                                                 </button>
                                             )}
                                         </div>
@@ -463,7 +481,7 @@ export default function Predictions() {
                         <button className="modal-close" onClick={closeBetModal}>&times;</button>
 
                         <div className="modal-header">
-                            <h2>Place Your Bet</h2>
+                            <h2>Make Your Pick</h2>
                             <p className="modal-subtitle">{selectedMarket.title}</p>
                             {selectedMarket.resolution_basis && (
                                 <p className="modal-resolution">{selectedMarket.resolution_basis}</p>
@@ -491,7 +509,7 @@ export default function Predictions() {
                         </div>
 
                         <div className="bet-amount-section">
-                            <label>Bet Amount</label>
+                            <label>Pick Amount</label>
                             <div className="amount-controls">
                                 <button onClick={() => setBetAmount(Math.max(1, betAmount - 5))}>-5</button>
                                 <input
@@ -514,7 +532,7 @@ export default function Predictions() {
                         {betPrediction && (
                             <div className="payout-preview">
                                 <div className="payout-row">
-                                    <span>Your bet:</span>
+                                    <span>Your pick:</span>
                                     <span>{betAmount} EP on {betPrediction.toUpperCase()}</span>
                                 </div>
                                 <div className="payout-row highlight">
@@ -553,7 +571,7 @@ export default function Predictions() {
                             ) : (
                                 <>
                                     <Coins size={18} />
-                                    Place Bet ({betAmount} EP)
+                                    Make Pick ({betAmount} EP)
                                 </>
                             )}
                         </button>

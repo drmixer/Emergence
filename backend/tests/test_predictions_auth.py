@@ -14,7 +14,16 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from decimal import Decimal
 
-from app.models.models import Agent, AgentInventory, Event, GlobalResources, Proposal
+from app.models.models import (
+    Agent,
+    AgentRelationshipMemory,
+    AgentInventory,
+    Event,
+    GlobalResources,
+    Proposal,
+    Transaction,
+    Vote,
+)
 from app.models.predictions import PredictionBet, PredictionMarket, UserPoints
 
 predictions_api = importlib.import_module("app.api.predictions")
@@ -31,7 +40,9 @@ def predictions_client(monkeypatch):
     Base.metadata.create_all(bind=engine)
     db_session = sessionmaker(bind=engine, future=True)()
 
-    monkeypatch.setattr(predictions_api.settings, "SECRET_KEY", "test-secret", raising=False)
+    monkeypatch.setattr(
+        predictions_api.settings, "SECRET_KEY", "test-secret", raising=False
+    )
     monkeypatch.setattr(predictions_api.settings, "ENVIRONMENT", "test", raising=False)
     monkeypatch.setattr(
         predictions_api.runtime_config_service,
@@ -110,13 +121,26 @@ def test_list_markets_auto_generates_live_audience_hooks(predictions_client):
         created_at=now - timedelta(days=1),
         last_active_at=now,
     )
-    db_session.add(agent)
+    voter = Agent(
+        agent_number=8,
+        display_name="Vector-08",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="equality",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    db_session.add_all([agent, voter])
     db_session.flush()
 
     db_session.add_all(
         [
             AgentInventory(agent_id=agent.id, resource_type="food", quantity=0.5),
             AgentInventory(agent_id=agent.id, resource_type="energy", quantity=0.25),
+            AgentInventory(agent_id=voter.id, resource_type="food", quantity=5),
+            AgentInventory(agent_id=voter.id, resource_type="energy", quantity=5),
             GlobalResources(resource_type="food", total_amount=100, in_common_pool=12),
             GlobalResources(resource_type="energy", total_amount=100, in_common_pool=8),
             Proposal(
@@ -138,19 +162,141 @@ def test_list_markets_auto_generates_live_audience_hooks(predictions_client):
 
     items = response.json()
     titles = {item["title"] for item in items}
-    assert "Will any new law pass in the next 24 hours?" in titles
-    assert "Will the shared reserve avoid a shortfall in the next 24 hours?" in titles
-    assert "Will any agent die in the next 24 hours?" in titles
-    assert "Will Beacon-07 stay active in the next 24 hours?" in titles
+    assert "Will Beacon-07 ask another agent for aid in the next 24 hours?" in titles
+    assert "Will Beacon-07 receive a trade in the next 24 hours?" in titles
+    assert 'Will Vector-08 vote on "Emergency Reserve Rule" before it closes?' in titles
+    assert "Will any new law pass in the next 24 hours?" not in titles
+    assert (
+        "Will the shared reserve avoid a shortfall in the next 24 hours?" not in titles
+    )
+    assert "Will any agent die in the next 24 hours?" not in titles
 
-    reserve_market = next(item for item in items if item["title"] == "Will the shared reserve avoid a shortfall in the next 24 hours?")
-    assert reserve_market["auto_generated"] is True
-    assert reserve_market["stake"]
-    assert reserve_market["resolution_basis"]
-    assert reserve_market["evidence_links"]
+    aid_market = next(
+        item
+        for item in items
+        if item["title"]
+        == "Will Beacon-07 ask another agent for aid in the next 24 hours?"
+    )
+    assert aid_market["auto_generated"] is True
+    assert aid_market["related_agent_label"] == "Beacon-07"
+    assert aid_market["stake"]
+    assert aid_market["resolution_basis"]
+    assert aid_market["evidence_links"]
 
 
-def test_prediction_markets_hide_open_markets_and_reject_bets_when_inactive(predictions_client, monkeypatch):
+def test_auto_generation_prefers_agents_with_narrative_tension(
+    predictions_client, monkeypatch
+):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        predictions_api,
+        "get_live_run_window",
+        lambda _db: SimpleNamespace(
+            run_id="test-run",
+            started_at=now - timedelta(hours=1),
+            ended_at=None,
+        ),
+    )
+    monkeypatch.setattr(predictions_api, "active_food_cost", lambda: Decimal("1.00"))
+    monkeypatch.setattr(predictions_api, "active_energy_cost", lambda: Decimal("1.00"))
+    monkeypatch.setattr(
+        predictions_api,
+        "low_resource_warning_threshold",
+        lambda _cost: Decimal("2.00"),
+    )
+
+    quiet = Agent(
+        agent_number=7,
+        display_name="Beacon-07",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="stability",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    tense = Agent(
+        agent_number=31,
+        display_name="Morrow-31",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    other = Agent(
+        agent_number=32,
+        display_name="Vale-32",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    db_session.add_all([quiet, tense, other])
+    db_session.flush()
+    db_session.add_all(
+        [
+            AgentInventory(agent_id=quiet.id, resource_type="food", quantity=0.25),
+            AgentInventory(agent_id=quiet.id, resource_type="energy", quantity=0.25),
+            AgentInventory(agent_id=tense.id, resource_type="food", quantity=0.95),
+            AgentInventory(agent_id=tense.id, resource_type="energy", quantity=0.95),
+            AgentInventory(agent_id=other.id, resource_type="food", quantity=5),
+            AgentInventory(agent_id=other.id, resource_type="energy", quantity=5),
+            Event(
+                agent_id=tense.id,
+                event_type="aid_refusal_received",
+                description="Morrow-31 was refused aid by Vale-32.",
+                created_at=now - timedelta(minutes=20),
+            ),
+            Event(
+                agent_id=tense.id,
+                event_type="public_accusation",
+                description="Morrow-31 accused Vale-32 of hoarding.",
+                created_at=now - timedelta(minutes=15),
+            ),
+            AgentRelationshipMemory(
+                agent_id=tense.id,
+                other_agent_id=other.id,
+                aid_refusals_received_from_other_count=2,
+                accusations_made_against_other_count=1,
+                last_negative_contact_at=now - timedelta(minutes=15),
+                last_interaction_at=now - timedelta(minutes=15),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/predictions/markets?status=open&limit=20")
+    assert response.status_code == 200
+
+    items = response.json()
+    titles = {item["title"] for item in items}
+    assert "Will Morrow-31 ask another agent for aid in the next 24 hours?" in titles
+    assert "Will Morrow-31 receive a trade in the next 24 hours?" in titles
+    assert (
+        "Will Beacon-07 ask another agent for aid in the next 24 hours?" not in titles
+    )
+
+    aid_market = next(
+        item
+        for item in items
+        if item["title"]
+        == "Will Morrow-31 ask another agent for aid in the next 24 hours?"
+    )
+    assert "Watch reason:" in aid_market["description"]
+    assert "incoming conflict" in aid_market["description"]
+
+
+def test_prediction_markets_hide_open_markets_and_reject_bets_when_inactive(
+    predictions_client, monkeypatch
+):
     client, db_session = predictions_client
     market = db_session.query(PredictionMarket).first()
     monkeypatch.setattr(
@@ -171,7 +317,9 @@ def test_prediction_markets_hide_open_markets_and_reject_bets_when_inactive(pred
     assert "no simulation run is active" in bet.json()["detail"]
 
 
-def test_list_markets_hides_stale_open_hooks_from_prior_run(predictions_client, monkeypatch):
+def test_list_markets_hides_stale_open_hooks_from_prior_run(
+    predictions_client, monkeypatch
+):
     client, db_session = predictions_client
     now = datetime.now(timezone.utc)
     run_started_at = now - timedelta(hours=1)
@@ -249,7 +397,11 @@ def test_agent_market_description_reflects_current_resources(predictions_client)
     response = client.get("/api/predictions/markets?status=open&limit=20")
     assert response.status_code == 200
 
-    market = next(item for item in response.json() if item["title"] == "Will Fractal-18 stay active in the next 24 hours?")
+    market = next(
+        item
+        for item in response.json()
+        if item["title"] == "Will Fractal-18 stay active in the next 24 hours?"
+    )
     assert "2.40 food" in market["description"]
     assert "7.80 energy" in market["description"]
     assert "9.00 food" not in market["description"]
@@ -294,12 +446,261 @@ def test_agent_market_resolves_as_soon_as_dropout_event_exists(predictions_clien
 
     open_response = client.get("/api/predictions/markets?status=open&limit=20")
     assert open_response.status_code == 200
-    assert "Will Arc-25 stay active in the next 24 hours?" not in {item["title"] for item in open_response.json()}
+    assert "Will Arc-25 stay active in the next 24 hours?" not in {
+        item["title"] for item in open_response.json()
+    }
 
     resolved_response = client.get("/api/predictions/markets?status=resolved&limit=20")
     assert resolved_response.status_code == 200
-    resolved = next(item for item in resolved_response.json() if item["title"] == "Will Arc-25 stay active in the next 24 hours?")
+    resolved = next(
+        item
+        for item in resolved_response.json()
+        if item["title"] == "Will Arc-25 stay active in the next 24 hours?"
+    )
     assert resolved["outcome"] == "no"
+
+
+def test_agent_action_market_resolves_when_agent_requests_aid(predictions_client):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+    agent = Agent(
+        agent_number=31,
+        display_name="Morrow-31",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    db_session.add(agent)
+    db_session.flush()
+    db_session.add_all(
+        [
+            AgentInventory(agent_id=agent.id, resource_type="food", quantity=5),
+            AgentInventory(agent_id=agent.id, resource_type="energy", quantity=5),
+        ]
+    )
+    market = PredictionMarket(
+        title="Will Morrow-31 ask another agent for aid in the next 24 hours?",
+        description="Morrow-31 currently has 0.50 food and 0.25 energy.",
+        market_type="custom",
+        status="open",
+        related_agent_id=agent.id,
+        created_at=now - timedelta(hours=1),
+        closes_at=now + timedelta(hours=23),
+    )
+    db_session.add(market)
+    db_session.flush()
+    request_event = Event(
+        agent_id=agent.id,
+        event_type="request_aid",
+        description="Morrow-31 requested food aid from another agent.",
+        event_metadata={
+            "action": {
+                "action": "request_aid",
+                "target_agent_id": 12,
+                "resource_type": "food",
+                "amount": 2,
+            }
+        },
+        created_at=now - timedelta(minutes=5),
+    )
+    db_session.add(request_event)
+    db_session.commit()
+
+    open_response = client.get("/api/predictions/markets?status=open&limit=20")
+    assert open_response.status_code == 200
+    assert "Will Morrow-31 ask another agent for aid in the next 24 hours?" not in {
+        item["title"] for item in open_response.json()
+    }
+
+    resolved_response = client.get("/api/predictions/markets?status=resolved&limit=20")
+    assert resolved_response.status_code == 200
+    resolved = next(
+        item
+        for item in resolved_response.json()
+        if item["title"]
+        == "Will Morrow-31 ask another agent for aid in the next 24 hours?"
+    )
+    assert resolved["outcome"] == "yes"
+    assert (
+        resolved["resolution_summary"]
+        == "Resolved YES: Morrow-31 requested food aid from another agent."
+    )
+    assert resolved["resolution_event_id"] == request_event.id
+    assert resolved["resolution_evidence_href"] == f"/timeline?event={request_event.id}"
+
+
+def test_agent_trade_market_resolves_when_agent_receives_trade(predictions_client):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+    sender = Agent(
+        agent_number=32,
+        display_name="Sender-32",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    recipient = Agent(
+        agent_number=33,
+        display_name="Vale-33",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    db_session.add_all([sender, recipient])
+    db_session.flush()
+    market = PredictionMarket(
+        title="Will Vale-33 receive a trade in the next 24 hours?",
+        description="Vale-33 currently has 0.50 food and 0.25 energy.",
+        market_type="custom",
+        status="open",
+        related_agent_id=recipient.id,
+        created_at=now - timedelta(hours=1),
+        closes_at=now + timedelta(hours=23),
+    )
+    db_session.add(market)
+    db_session.flush()
+    trade_event = Event(
+        agent_id=sender.id,
+        event_type="trade",
+        description="Sender-32 traded 2 food to Vale-33.",
+        event_metadata={
+            "action": {
+                "action": "trade",
+                "recipient_agent_id": 33,
+                "resource_type": "food",
+                "amount": 2,
+            }
+        },
+        created_at=now - timedelta(minutes=3),
+    )
+    db_session.add_all(
+        [
+            Transaction(
+                from_agent_id=sender.id,
+                to_agent_id=recipient.id,
+                resource_type="food",
+                amount=Decimal("2.00"),
+                transaction_type="trade",
+                created_at=now - timedelta(minutes=3),
+            ),
+            trade_event,
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/predictions/markets?status=resolved&limit=20")
+    assert response.status_code == 200
+    resolved = next(
+        item
+        for item in response.json()
+        if item["title"] == "Will Vale-33 receive a trade in the next 24 hours?"
+    )
+    assert resolved["outcome"] == "yes"
+    assert (
+        resolved["resolution_summary"]
+        == "Resolved YES: Sender-32 traded 2 food to Vale-33."
+    )
+    assert resolved["resolution_event_id"] == trade_event.id
+
+
+def test_agent_vote_market_resolves_when_agent_votes(predictions_client):
+    client, db_session = predictions_client
+    now = datetime.now(timezone.utc)
+    author = Agent(
+        agent_number=34,
+        display_name="Author-34",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    voter = Agent(
+        agent_number=35,
+        display_name="Iris-35",
+        model_type="gpt-4o-mini",
+        tier=2,
+        personality_type="neutral",
+        status="active",
+        system_prompt="test",
+        created_at=now - timedelta(days=1),
+        last_active_at=now,
+    )
+    db_session.add_all([author, voter])
+    db_session.flush()
+    proposal = Proposal(
+        author_agent_id=author.id,
+        title="Emergency Food Floor",
+        description="Keep active agents above the food floor.",
+        proposal_type="law",
+        status="active",
+        voting_closes_at=now + timedelta(hours=6),
+    )
+    db_session.add(proposal)
+    db_session.flush()
+    market = PredictionMarket(
+        title='Will Iris-35 vote on "Emergency Food Floor" before it closes?',
+        description="Iris-35 has not voted yet.",
+        market_type="proposal_pass",
+        status="open",
+        related_agent_id=voter.id,
+        related_proposal_id=proposal.id,
+        created_at=now - timedelta(hours=1),
+        closes_at=now + timedelta(hours=6),
+    )
+    db_session.add(market)
+    db_session.flush()
+    vote_event = Event(
+        agent_id=voter.id,
+        event_type="vote",
+        description="Iris-35 voted yes on Proposal #1: Emergency Food Floor",
+        event_metadata={
+            "action": {"action": "vote", "proposal_id": proposal.id, "vote": "yes"}
+        },
+        created_at=now - timedelta(minutes=2),
+    )
+    db_session.add_all(
+        [
+            Vote(
+                proposal_id=proposal.id,
+                agent_id=voter.id,
+                vote="yes",
+                reasoning="Support the floor.",
+                created_at=now - timedelta(minutes=2),
+            ),
+            vote_event,
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/api/predictions/markets?status=resolved&limit=20")
+    assert response.status_code == 200
+    resolved = next(
+        item
+        for item in response.json()
+        if item["title"]
+        == 'Will Iris-35 vote on "Emergency Food Floor" before it closes?'
+    )
+    assert resolved["outcome"] == "yes"
+    assert (
+        resolved["resolution_summary"]
+        == 'Resolved YES when Iris-35 voted YES on "Emergency Food Floor".'
+    )
+    assert resolved["resolution_event_id"] == vote_event.id
 
 
 def test_list_markets_resolves_expired_auto_hook_and_pays_winner(predictions_client):
@@ -344,8 +745,18 @@ def test_list_markets_resolves_expired_auto_hook_and_pays_winner(predictions_cli
     db_session.flush()
     db_session.add_all(
         [
-            PredictionBet(market_id=market.id, user_id="pred_yes", prediction="yes", amount=Decimal("5.00")),
-            PredictionBet(market_id=market.id, user_id="pred_no", prediction="no", amount=Decimal("3.00")),
+            PredictionBet(
+                market_id=market.id,
+                user_id="pred_yes",
+                prediction="yes",
+                amount=Decimal("5.00"),
+            ),
+            PredictionBet(
+                market_id=market.id,
+                user_id="pred_no",
+                prediction="no",
+                amount=Decimal("3.00"),
+            ),
             Event(
                 agent_id=agent.id,
                 event_type="agent_died",
