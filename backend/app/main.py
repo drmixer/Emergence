@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import JSONResponse
 import logging
 from urllib.parse import urlparse
 
@@ -144,32 +143,16 @@ async def health_check():
 
 @app.get("/ready")
 async def readiness_check():
-    """Readiness check (verifies critical dependencies like the database)."""
-    try:
-        from sqlalchemy import text
+    """Readiness check for the web process, not downstream services.
 
-        from app.core.database import SessionLocal
-        import redis
-
-        # DB
-        db = SessionLocal()
-        try:
-            db.execute(text("SELECT 1"))
-        finally:
-            db.close()
-
-        # Redis
-        r = redis.Redis.from_url(
-            settings.REDIS_URL,
-            socket_connect_timeout=3,
-            socket_timeout=3,
-        )
-        r.ping()
-
-        return {"status": "ready", "db": "ok", "redis": "ok"}
-    except Exception:
-        logger.exception("Readiness check failed")
-        return JSONResponse(status_code=503, content={"status": "not_ready"})
+    Railway probes this endpoint continuously. Keep it dependency-free so an
+    idle public API does not keep Neon compute awake just by being healthy.
+    """
+    return {
+        "status": "ready",
+        "service": "emergence-backend",
+        "environment": settings.ENVIRONMENT,
+    }
 
 
 @app.get("/")

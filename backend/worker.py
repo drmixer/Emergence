@@ -31,6 +31,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 DB_RETRY_SECONDS = max(5, int(os.environ.get("WORKER_DB_RETRY_SECONDS", "20")))
 CONTROL_LOOP_SLEEP_SECONDS = max(2, int(os.environ.get("WORKER_CONTROL_LOOP_SLEEP_SECONDS", "5")))
+IDLE_CONTROL_LOOP_SLEEP_SECONDS = max(
+    CONTROL_LOOP_SLEEP_SECONDS,
+    int(os.environ.get("WORKER_IDLE_CONTROL_LOOP_SLEEP_SECONDS", "900")),
+)
 STATUS_LOG_INTERVAL_SECONDS = max(10, int(os.environ.get("WORKER_STATUS_LOG_INTERVAL_SECONDS", "60")))
 
 
@@ -240,7 +244,7 @@ async def main():
                     if not idle_logged:
                         logger.info("SIMULATION_ACTIVE is false, worker will idle")
                         idle_logged = True
-                    await asyncio.sleep(CONTROL_LOOP_SLEEP_SECONDS)
+                    await asyncio.sleep(IDLE_CONTROL_LOOP_SLEEP_SECONDS)
                     continue
 
                 stop_decision = run_guardrail_service.evaluate_and_enforce()

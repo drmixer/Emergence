@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 
 import worker
+from app import main as app_main
+from app.services import sse
 from app.services.run_guardrails import StopDecision
 
 
@@ -55,3 +57,36 @@ def test_worker_idles_after_scheduled_stop_instead_of_exiting(monkeypatch):
     assert start_calls == ["started"]
     assert stop_calls == [("event-task", "summary-task")]
     assert guardrail_calls["count"] == 1
+
+
+def test_readiness_check_does_not_probe_downstream_services():
+    payload = asyncio.run(app_main.readiness_check())
+
+    assert payload["status"] == "ready"
+    assert "db" not in payload
+    assert "redis" not in payload
+
+
+def test_sse_poller_skips_database_when_no_clients(monkeypatch):
+    class StopPolling(Exception):
+        pass
+
+    session_calls = {"count": 0}
+
+    def fake_session_local():
+        session_calls["count"] += 1
+        raise AssertionError("SessionLocal should not be called without SSE clients")
+
+    async def fake_sleep(_seconds: float):
+        raise StopPolling()
+
+    monkeypatch.setattr(sse, "SessionLocal", fake_session_local)
+    monkeypatch.setattr(sse.asyncio, "sleep", fake_sleep)
+    sse.broadcaster.connections.clear()
+
+    try:
+        asyncio.run(sse.event_polling_task())
+    except StopPolling:
+        pass
+
+    assert session_calls["count"] == 0

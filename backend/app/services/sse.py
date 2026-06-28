@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
+from app.services.runtime_config import runtime_config_service
 from app.models.models import Event
 from app.services.lineage import (
     agent_number_map,
@@ -54,6 +55,10 @@ class EventBroadcaster:
                 await queue.put(message)
             except Exception as e:
                 logger.error(f"Error broadcasting to client: {e}")
+
+    def has_connections(self) -> bool:
+        """Return whether at least one client is listening for live events."""
+        return bool(self.connections)
 
 
 # Global broadcaster instance
@@ -150,24 +155,30 @@ async def broadcast_agent_status(agent_id: int, status: str):
 # Background task to poll for new events and broadcast them
 async def event_polling_task():
     """Poll database for new events and broadcast them."""
-    last_id = 0
+    last_id: int | None = None
+    poll_delay_seconds = 30
 
-    # On (re)start, avoid replaying the entire event history over SSE.
-    db: Session | None = None
-    try:
-        db = SessionLocal()
-        last_id = int(db.query(func.max(Event.id)).scalar() or 0)
-    except Exception as e:
-        logger.error(f"Error initializing event polling cursor: {e}")
-        last_id = 0
-    finally:
-        if db is not None:
-            db.close()
-    
     while True:
+        if not broadcaster.has_connections():
+            last_id = None
+            await asyncio.sleep(30)
+            continue
+
         db: Session | None = None
         try:
+            poll_delay_seconds = 1
             db = SessionLocal()
+
+            if last_id is None:
+                last_id = int(db.query(func.max(Event.id)).scalar() or 0)
+
+            simulation_active = bool(
+                runtime_config_service.get_effective_value_cached("SIMULATION_ACTIVE")
+            )
+            if not simulation_active:
+                last_id = int(db.query(func.max(Event.id)).scalar() or last_id or 0)
+                poll_delay_seconds = 30
+                continue
 
             new_events = (
                 db.query(Event)
@@ -195,4 +206,4 @@ async def event_polling_task():
             if db is not None:
                 db.close()
         
-        await asyncio.sleep(1)  # Poll every second
+        await asyncio.sleep(poll_delay_seconds)
